@@ -387,6 +387,136 @@ Triage tables for narrowing down *which* symptom you're looking at belong to
 `osi-debugging-playbook`; this recipe is specifically the "declared helper module
 missing from package.json" root cause.
 
+### Native sqlite3 rollback folders block deploy or the seed
+
+`deploy.sh` and the first-boot seed (`/etc/uci-defaults/98_osi_node_red_seed`)
+both replace the Node.js `sqlite3` module (not the `sqlite3` CLI) at
+`/srv/node-red/node_modules/sqlite3` by moving the old entry into a rollback
+folder first. Each tool recovers only its own folder, and only in states it can
+prove. Anything else is kept and refused on every run until an operator clears
+it:
+
+- `deploy.sh` stops before its first write with `ERROR: seed sqlite3 rollback
+  present`, `ERROR: unowned sqlite3 rollback entry`, `ERROR: ambiguous sqlite3
+  rollback entry`, `ERROR: sqlite3 rollback owner metadata is incomplete beside
+  an owned final`, or a message ending in `preserving both` or `preserving both
+  for inspection`.
+- The seed exits 1 at boot. OpenWrt deletes a uci-defaults script only when
+  it exits 0, so `/etc/uci-defaults/98_osi_node_red_seed` still present after
+  boot means the seed refused or asked for a retry. A retry clears on the next
+  boot; a refusal repeats. The seed copies the image's `osi-*` helpers,
+  codecs, `edge-channels.json` and `node_modules` once per image install, at
+  its first boot, and records that in `/etc/osi-node-red-seed.copied`; while
+  that file exists, the later runs copy nothing, so a deploy made between two
+  refusing boots keeps what it installed.
+
+Both tools print `STATE: <kind> <path>` lines for the paths involved, where
+`<kind>` is `symlink`, `directory`, `file`, `fifo`, `other` or `absent`.
+
+| Path under `/srv/node-red/node_modules/` | Written by | Holds |
+|---|---|---|
+| `sqlite3` | both | The module Node-RED loads |
+| `.osi-sqlite3-rollback.XXXXXX/` | deploy | `.owner` (`osi-sqlite3-deploy-v2`), `original` (the entry that was at `sqlite3`) |
+| `.osi-sqlite3-seed-rollback.XXXXXX/` | seed | `.owner` (`osi-sqlite3-seed-v2`), `.candidate-id`, `original` |
+| `.osi-sqlite3-stage.XXXXXX/`, `.osi-sqlite3-seed-stage.XXXXXX/` | deploy, seed | A staged copy; the tool's next run removes it |
+| `sqlite3/.osi-sqlite3-candidate-owner` | both | The rollback folder path this candidate belongs to |
+| `sqlite3/original` | both | The old module, nested here when a restore found `sqlite3` occupied |
+
+Back up every entry before removing any of them. `cp -a` keeps symlinks as
+symlinks:
+
+```sh
+NM=/srv/node-red/node_modules
+BK=/data/db/backups/osi-os-$(date +%Y%m%d-%H%M%S)/sqlite3-modules
+mkdir -p "$BK"
+for e in "$NM/sqlite3" "$NM"/.osi-sqlite3-*; do
+  [ -e "$e" ] || [ -L "$e" ] || continue
+  cp -a "$e" "$BK"/ || { echo "FATAL: backup of $e failed; stop here"; break; }
+done
+ls -la "$BK"; ls -la "$NM"/.osi-sqlite3-*/ "$NM/sqlite3/"
+```
+
+Then check each candidate module: the final path, every `<rollback>/original`,
+`sqlite3/original` when present, and the firmware module at
+`/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3`.
+A candidate is healthy when its version equals the pin and it opens `:memory:`:
+
+```sh
+node -p 'require("/usr/share/node-red/package-lock.json").packages["node_modules/sqlite3"].version'  # image pin (seed)
+node -p 'require("/srv/node-red/package-lock.json").packages["node_modules/sqlite3"].version'        # last deployed pin
+check() { node -p 'require(process.argv[1] + "/package.json").version' "$1" &&
+  node -e 'const s = require(process.argv[1]); new s.Database(":memory:", e => { if (e) { console.error(e.message); process.exit(1); } console.log("opens :memory:"); });' "$1"; }
+check "$NM/sqlite3"
+```
+
+Two power-loss windows end in a refusal even when nothing else went wrong.
+Recognise them on disk:
+
+- Deploy cleanup cut after it removed `.owner` and before it removed the
+  folder. Deploy stops with `ERROR: sqlite3 rollback owner metadata is
+  incomplete beside an owned final`. An empty `.osi-sqlite3-rollback.XXXXXX/`
+  sits beside a `sqlite3/` whose marker names that folder. Deploy verified that
+  `sqlite3` before the cleanup started; if `check "$NM/sqlite3"` passes, follow
+  step 1 below. The seed clears its own form of this state without help.
+
+  ```sh
+  ls -A "$NM"/.osi-sqlite3-rollback.*/            # prints nothing
+  cat "$NM/sqlite3/.osi-sqlite3-candidate-owner"  # prints that folder's path
+  ```
+
+- Removal of a failed candidate cut short. `sqlite3/` is a partial copy
+  without its marker, beside a rollback folder that still holds `.owner` and
+  `original` (the seed's also `.candidate-id`). Deploy stops with `ERROR:
+  sqlite3 final path is not owned by rollback <folder>; preserving both`; the
+  seed with `ERROR: unowned final sqlite3 beside retained seed original`.
+  `check "$NM/sqlite3"` fails; run `check` on `<folder>/original` and on the
+  firmware module to choose between steps 2 and 3.
+
+  ```sh
+  ls -A "$NM/sqlite3"                    # no .osi-sqlite3-candidate-owner
+  ls -A "$NM"/.osi-sqlite3-*rollback.*/  # .owner and original
+  ```
+
+Pick exactly one of these, in this order:
+
+1. The final path is healthy and has no `original` entry. Keep it. Remove the
+   rollback and stage folders and the marker:
+   `rm -rf "$NM"/.osi-sqlite3-rollback.* "$NM"/.osi-sqlite3-seed-rollback.* "$NM"/.osi-sqlite3-stage.* "$NM"/.osi-sqlite3-seed-stage.*; rm -f "$NM/sqlite3/.osi-sqlite3-candidate-owner"`.
+2. The final path is not healthy, or holds `original`, and the firmware module
+   is healthy. Remove the same folders and `"$NM/sqlite3"`, then run the
+   deploy straight away: its materialisation copies the firmware module into
+   place before npm runs. Until then a Node-RED restart has no database
+   driver.
+3. The firmware module is missing or broken. Put a healthy retained original
+   at the final path with `mv` inside `node_modules`, so the checked directory
+   moves intact. First move the final path aside to a dot name that neither
+   tool scans and npm ignores, then move the original in from where it is:
+
+   ```sh
+   [ -e "$NM/sqlite3" ] || [ -L "$NM/sqlite3" ] && mv "$NM/sqlite3" "$NM/.osi-hold-sqlite3"
+   mv "$NM/.osi-hold-sqlite3/original" "$NM/sqlite3"      # original was nested in the final path
+   # or: mv "$NM/.osi-sqlite3-rollback.XXXXXX/original" "$NM/sqlite3"       # deploy rollback
+   # or: mv "$NM/.osi-sqlite3-seed-rollback.XXXXXX/original" "$NM/sqlite3"  # seed rollback
+   ```
+
+   Then remove the remaining folders as in step 1 and run the deploy. Remove
+   `$NM/.osi-hold-sqlite3` after the deploy prints `OK: require('sqlite3')
+   resolves`. If no candidate is healthy, stop: the gateway needs an image
+   whose firmware module loads.
+
+Never leave `sqlite3` as a symlink to a retained copy, and never put a version
+other than the pin there: npm retires a symlinked `sqlite3` and reinstalls an
+off-pin one, which fails on 32-bit ARM with musl where no prebuilt exists.
+
+After clearing, run the deploy. If the seed was refusing, it runs again at the
+next boot, finishes its `sqlite3` step, removes `/etc/osi-node-red-seed.copied`
+and leaves the deployed helpers, codecs and `edge-channels.json` alone. Do not
+delete that file while the seed is still refusing: the next boot would copy
+the image over the deployed files. The seed accepts a `sqlite3` that matches
+the image pin and opens `:memory:` before it reads the firmware module, so
+after step 3 it stops refusing even on an image whose firmware module is
+broken.
+
 ### Live valve testing (STREGA)
 
 STREGA valves accept `OPEN_FOR_DURATION` only in normal operation; the valve closes
