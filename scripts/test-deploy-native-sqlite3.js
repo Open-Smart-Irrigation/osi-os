@@ -2268,6 +2268,9 @@ test('R10 deploy flushes owner, marker and staged copy before the swap renames',
 });
 
 test('R10 seed flushes the stage owner before its copy and all metadata before the swap renames', () => {
+  // The rollback owner line is flushed on its own before the candidate
+  // identity is written: the scan refuses an identity beside a truncated
+  // owner (R4), and without the flush power loss can leave both files empty.
   const gw = makeGateway('real-without-binary');
   r2OldBytes(gw);
   const log = path.join(gw.root, 'durability.log');
@@ -2278,16 +2281,17 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   const b = String.raw`\S*/\.osi-sqlite3-seed-rollback\.[^/ ]+`;
   const s = String.raw`\S*/\.osi-sqlite3-seed-stage\.[^/ ]+`;
   const lines = r9Lines(log);
-  assert.equal(lines.length, 5, lines.join('\n'));
+  assert.equal(lines.length, 6, lines.join('\n'));
   assert.equal(lines[0], 'sync .owner=osi-sqlite3-seed-stage-v2');
   assert.match(lines[1], new RegExp(`^cp -a \\S+ ${s}/candidate$`));
-  assert.match(lines[2], /^sync /);
-  assert.match(lines[2], / \.owner=osi-sqlite3-seed-v2 /);
-  assert.match(lines[2], / \.owner=osi-sqlite3-seed-stage-v2( |$)/);
-  assert.match(lines[2], / \.candidate-id=[0-9]+:[0-9]+:[0-9]+( |$)/);
-  assert.match(lines[2], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
-  assert.match(lines[3], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
-  assert.match(lines[4], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
+  assert.equal(lines[2], 'sync .owner=osi-sqlite3-seed-v2 .owner=osi-sqlite3-seed-stage-v2');
+  assert.match(lines[3], /^sync /);
+  assert.match(lines[3], / \.owner=osi-sqlite3-seed-v2 /);
+  assert.match(lines[3], / \.owner=osi-sqlite3-seed-stage-v2( |$)/);
+  assert.match(lines[3], / \.candidate-id=[0-9]+:[0-9]+:[0-9]+( |$)/);
+  assert.match(lines[3], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
+  assert.match(lines[4], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
+  assert.match(lines[5], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
 });
 
 // R11: the whole seed script, booted the way OpenWrt runs a uci-defaults

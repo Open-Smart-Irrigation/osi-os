@@ -536,8 +536,16 @@ seed_native_sqlite3() {
         echo "ERROR: could not allocate seed rollback; stage retained at $seed_s" >&2
         return 1
     fi
-    if ! printf '%s\n' 'osi-sqlite3-seed-v2' > "$seed_b/.owner" ||
-       ! seed_sqlite3_id "$seed_candidate" > "$seed_b/.candidate-id"; then
+    if ! printf '%s\n' 'osi-sqlite3-seed-v2' > "$seed_b/.owner"; then
+        echo "ERROR: seed ownership metadata failed; inspect $seed_b and $seed_s" >&2
+        return 1
+    fi
+    # The rollback scan refuses a candidate identity beside an incomplete
+    # owner line, so the line must be on disk before the identity is written.
+    if ! sync; then
+        echo 'WARN: sync failed; the seed rollback owner may not survive a power loss' >&2
+    fi
+    if ! seed_sqlite3_id "$seed_candidate" > "$seed_b/.candidate-id"; then
         echo "ERROR: seed ownership metadata failed; inspect $seed_b and $seed_s" >&2
         return 1
     fi
