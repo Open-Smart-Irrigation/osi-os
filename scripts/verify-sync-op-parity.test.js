@@ -60,19 +60,29 @@ function copyFixtureTree() {
   );
   fs.copyFileSync(SERVER_SOURCE, path.join(serverDir, 'EdgeSyncService.java'));
   // EdgeSyncService.applyEvent() dispatches some ops via a pluggable
-  // per-op registry (sibling classes that `implements SyncEventApplier`,
-  // e.g. GatewayLocationApplier) before it ever reaches the switch. Mirror
-  // the real package directory alongside EdgeSyncService.java so
-  // extractServerOps() sees those ops the same way it does against the
-  // real osi-server checkout.
+  // per-op registry (classes that `implements SyncEventApplier`, e.g.
+  // GatewayLocationApplier in the sync package or JournalEntryApplier in the
+  // journal package) before it ever reaches the switch. Mirror every applier
+  // under the real application package, keeping its relative path, so
+  // extractServerOps() sees those ops the same way it does against the real
+  // osi-server checkout.
   const serverSourceDir = path.dirname(SERVER_SOURCE);
-  for (const entry of fs.readdirSync(serverSourceDir)) {
-    if (!entry.endsWith('.java') || entry === path.basename(SERVER_SOURCE)) continue;
-    const entryPath = path.join(serverSourceDir, entry);
-    if (fs.statSync(entryPath).isFile()) {
-      fs.copyFileSync(entryPath, path.join(serverDir, entry));
+  const applierScanRoot = path.basename(serverSourceDir) === 'sync' ? path.dirname(serverSourceDir) : serverSourceDir;
+  const copyAppliers = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        copyAppliers(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.java') || entryPath === SERVER_SOURCE) continue;
+      if (!fs.readFileSync(entryPath, 'utf8').includes('SyncEventApplier')) continue;
+      const target = path.join(serverDir, path.relative(applierScanRoot, entryPath));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(entryPath, target);
     }
-  }
+  };
+  copyAppliers(applierScanRoot);
   // Declare the staged set explicitly instead of copying the repo's live
   // scripts/fixtures/sync-contract-staging.json: this fixture tree is also given the real,
   // current osi-server checkout (see SERVER_SOURCE above), and inheriting the repo's own
@@ -110,9 +120,9 @@ const JOURNAL_EVENT_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
-// Scoped-access admin commands and outbox events (port/wave3-edge-scope), staged pending
-// osi-server PR #83 -- see the long-form rationale next to the matching EXACT_ constants in
-// verify-sync-op-parity.js.
+// Scoped-access admin commands stay cloud-deferred; their outbox events are active since
+// osi-server e0f114cf added the scoped-access appliers -- see the long-form rationale
+// next to the matching EXACT_ constants in verify-sync-op-parity.js.
 const SCOPED_ACCESS_COMMANDS = [
   'DELETE_USER_PLOT_ASSIGNMENT',
   'DELETE_USER_ZONE_ASSIGNMENT',
@@ -120,13 +130,6 @@ const SCOPED_ACCESS_COMMANDS = [
   'UPSERT_SCOPED_USER',
   'UPSERT_USER_PLOT_ASSIGNMENT',
   'UPSERT_USER_ZONE_ASSIGNMENT',
-];
-const SCOPED_ACCESS_EVENT_OPS = [
-  'USER_PLOT_ASSIGNMENT_DELETED',
-  'USER_PLOT_ASSIGNMENT_UPSERTED',
-  'USER_UPSERTED',
-  'USER_ZONE_ASSIGNMENT_DELETED',
-  'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
 // Conditional irrigation (owner, feat/conditional-irrigation): edge-staged policy ops with a
 // cloud applier on osi-server feat/conditional-irrigation (IrrigationPolicyApplier,
@@ -172,7 +175,7 @@ function exactJournalStaging() {
       // osi-server feat/conditional-irrigation (ad506b008) implements them, so they are staged,
       // not cloud-deferred.
       edgeStaged: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED', ...POLICY_EVENT_OPS],
-      cloudDeferred: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED', ...SCOPED_ACCESS_EVENT_OPS],
+      cloudDeferred: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED'],
     },
   };
 }
@@ -426,6 +429,7 @@ class EdgeSyncService {
 }
 `);
   fs.writeFileSync(path.join(path.dirname(serverSource), 'GatewayLocationApplier.java'), `
+@Component
 class GatewayLocationApplier implements SyncEventApplier {
   public Set<String> supportedOps() {
     return Set.of("GATEWAY_LOCATION_UPSERTED");
@@ -437,6 +441,156 @@ class GatewayLocationApplier implements SyncEventApplier {
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'GATEWAY_LOCATION_UPSERTED']);
+});
+
+function writeServerPackageFixture(files) {
+  const packageRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-package-')), 'org', 'osi', 'server');
+  for (const [relative, source] of Object.entries(files)) {
+    const target = path.join(packageRoot, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, source);
+  }
+  return path.join(packageRoot, 'sync', 'EdgeSyncService.java');
+}
+
+const PACKAGE_FIXTURE_SERVICE = `
+package org.osi.server.sync;
+class EdgeSyncService {
+  private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
+    switch (event.op()) {
+      case "DEVICE_DATA_APPENDED" -> { return true; }
+      default -> { return false; }
+    }
+  }
+}
+`;
+
+test('server extractor counts SyncEventApplier classes in other application packages', () => {
+  const serverSource = writeServerPackageFixture({
+    'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
+    'journal/JournalEntryApplier.java': `
+package org.osi.server.journal;
+import org.osi.server.sync.SyncEventApplier;
+@Component
+public class JournalEntryApplier implements SyncEventApplier {
+  @Override
+  public Set<String> supportedOps() {
+    return Set.of("JOURNAL_ENTRY_UPSERTED", "JOURNAL_ENTRY_VOIDED");
+  }
+}
+`,
+    'journal/JournalEntryService.java': `
+package org.osi.server.journal;
+class JournalEntryService {
+  Set<String> supportedOps() { return Set.of("NOT_AN_APPLIER_OP"); }
+}
+`,
+  });
+
+  const result = extractServerOps(serverSource);
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED', 'JOURNAL_ENTRY_UPSERTED', 'JOURNAL_ENTRY_VOIDED']);
+  assert.deepEqual(result.switchOps, ['DEVICE_DATA_APPENDED']);
+  assert.deepEqual(result.applierOps, ['JOURNAL_ENTRY_UPSERTED', 'JOURNAL_ENTRY_VOIDED']);
+  assert.deepEqual(result.applierFiles, [path.join('journal', 'JournalEntryApplier.java')]);
+});
+
+test('server extractor skips abstract appliers and Javadoc mentions, rejects unregistered ones', () => {
+  const serverSource = writeServerPackageFixture({
+    'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
+    'sync/BaseApplier.java': `
+package org.osi.server.sync;
+/** Shared helper; @Component on subclasses only. */
+public abstract class BaseApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("ABSTRACT_ONLY_OP"); }
+}
+`,
+    'sync/ApplierRegistryNotes.java': `
+package org.osi.server.sync;
+/**
+ * Every bean that implements SyncEventApplier is folded into appliersByOp.
+ */
+final class ApplierRegistryNotes {
+  Set<String> supportedOps() { return Set.of("DOC_ONLY_OP"); }
+}
+`,
+    'zone/UnregisteredApplier.java': `
+package org.osi.server.zone;
+// @Component is missing on purpose.
+public class UnregisteredApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("UNREGISTERED_OP"); }
+}
+`,
+  });
+
+  const result = extractServerOps(serverSource);
+
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED']);
+  assert.deepEqual(result.applierFiles, []);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /^zone[\\/]UnregisteredApplier\.java: .*no @Component or @Service annotation/);
+});
+
+test('parity counts switch and applier ops and still fails an op with neither', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
+  const schemaPath = path.join(fixtureRoot, 'events.schema.json');
+  const flowPath = path.join(fixtureRoot, 'flows.json');
+  const serverSource = writeServerPackageFixture({
+    'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
+    'zone/ZoneConfigApplier.java': `
+package org.osi.server.zone;
+@Component
+public class ZoneConfigApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("ZONE_CONFIG_UPSERTED"); }
+}
+`,
+  });
+  const ops = ['DEVICE_DATA_APPENDED', 'ZONE_CONFIG_UPSERTED', 'ZONE_DELETED'];
+  fs.writeFileSync(schemaPath, JSON.stringify({
+    type: 'object',
+    properties: {
+      op: { enum: ops },
+      payload: {
+        type: 'object',
+        required: ['contract_version'],
+        properties: { contract_version: { type: 'integer', const: 1 } },
+      },
+    },
+  }));
+  fs.writeFileSync(flowPath, JSON.stringify([{
+    id: 'fixture',
+    name: 'Fixture sync inserts',
+    type: 'function',
+    func: ops.map((op, index) => `msg.topic = "INSERT INTO sync_outbox(event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('evt-${index}', 'FIXTURE', 'key-${index}', '${op}', json_object('contract_version', 1), 1, '2026-07-05T00:00:00Z')";\nnode.send(msg);`).join('\n') + '\nreturn null;',
+  }]));
+  const options = {
+    root: fixtureRoot,
+    schemaPath,
+    serverSource,
+    flowSources: [{ name: 'fixture', path: 'flows.json' }],
+    sqlSources: [],
+    databaseSources: [],
+    stagingManifest: false,
+  };
+
+  const result = checkSyncOpParity(options);
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /server missing from union: ZONE_DELETED$/m);
+  assert.equal(result.serverSummary, '2 server ops; 1 via EdgeSyncService switch, 1 via SyncEventApplier classes in 1 file');
+  assert.match(result.message, /^ {2}2 server ops; 1 via EdgeSyncService switch, 1 via SyncEventApplier classes in 1 file$/m);
+
+  fs.writeFileSync(path.join(path.dirname(serverSource), '..', 'zone', 'ZoneDeleteApplier.java'), `
+@Component
+public class ZoneDeleteApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("ZONE_DELETED"); }
+}
+`);
+  const fixed = checkSyncOpParity(options);
+
+  assert.equal(fixed.ok, true, fixed.message);
+  assert.equal(fixed.serverSummary, '3 server ops; 1 via EdgeSyncService switch, 2 via SyncEventApplier classes in 2 files');
 });
 
 test('default server lookup reaches a sibling repo from a nested worktree', () => {

@@ -41,15 +41,6 @@ const EDGE_DEFERRED_COMMANDS = [];
 // UPSERT_ZONE_NAME and conditional policy commands join the journal and scoped-access
 // commands as device_eui exemptions: their typed zone/schedule/valve targets carry identity.
 const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS, 'UPSERT_ZONE_NAME', ...CONDITIONAL_COMMANDS];
-// Scoped-access outbox events, cloud-deferred pending osi-server PR #83 (see the long-form
-// rationale in scripts/verify-sync-op-parity.js next to EXACT_SCOPED_ACCESS_EVENT_OPS).
-const SCOPED_ACCESS_EVENT_OPS = [
-    'USER_PLOT_ASSIGNMENT_DELETED',
-    'USER_PLOT_ASSIGNMENT_UPSERTED',
-    'USER_UPSERTED',
-    'USER_ZONE_ASSIGNMENT_DELETED',
-    'USER_ZONE_ASSIGNMENT_UPSERTED',
-];
 const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_ENTRY_UPSERTED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
     JOURNAL_ENTRY_VOIDED: ['JOURNAL_ENTRY', 'JournalEntry', 'entry_uuid'],
@@ -1187,7 +1178,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_CROP_CYCLE_UPSERTED',
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
+        JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS));
     reportCheck(exactStaging, 'staging manifest pins the exact deferred journal and scoped-access sets', 'staging manifest drifted from the exact deferred journal and scoped-access sets');
 }
 
