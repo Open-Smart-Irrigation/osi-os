@@ -406,6 +406,14 @@ On a base where the standing delta no longer covers the head (for example after 
 - de-CH, es, fr, it and pt texts are author translations without native review; `lg` carries English by policy and is tracked.
 - An older GUI keeps showing the reset form for linked rows and closes it after the 409.
 
+## 14. Addendum 2026-11-09: the reset moved into a module
+
+After #565 retired the allowance file, the size ratchet refused the router's growth of 3579 characters. The maintainer chose extraction over a growth exception. The reset branch now lives in `osi-local-password-reset/index.js` (both profiles), which the router loads with `osiLib.require('local-password-reset')` and calls as `resetLocalPassword({ db, scope, bcrypt, auth, actor, userUuid, body, now, node })`. The router is back to 10508 characters and the total equals main's, so no exception is needed.
+
+The module holds the password length check, the preflight, the transaction with the actor, role and target recheck, the conditional UPDATE and its `changes()` check, the rollback precedence and the refusal mapping. SQL text and response bodies are unchanged. It returns `{ statusCode, payload }` and throws only the 400 length error and an in-transaction 401 or 403, which the router's outer catch answers as before. If the module cannot load, the route answers 503 and changes nothing.
+
+This supersedes section 11 and the router candidate, editor and custody payloads in the support directory. Those files record the reviewed state before the move; nothing executes them. For section 10, #520's generation recheck now goes into the module's transaction, and the sentinel test reads the module source instead of the router.
+
 ## Appendix A. Materialization (already done when this file is read in the repository)
 
 On a worktree created from fresh `origin/main`, before any product change, through the wrapper of section 7.1 with `PKT` the campaign packet's `proposed/plan` directory and `PLAN_SHA256` this document's digest as recorded in the campaign report:
