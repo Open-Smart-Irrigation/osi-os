@@ -158,7 +158,7 @@ Comment in `src/ui-core/primitives.css`: "Glass is chrome-only: primary/danger s
 
 ### Contrast, computed for this document
 
-These WCAG 2 ratios were computed from the hex values for this document. The source does not publish them.
+These WCAG 2 ratios were computed from the hex values for this document. Two figures also appear in the source. A comment in `tests/primaryTextContrast.test.ts` states the last row, 1.86:1 for white on dark `--primary`. The `src/ui-core/tokens.css` comment states 5.57 to 8.53 for the dark `--cal-*-solid` tokens against `--card`; that range is quoted under History calendar states and is not recomputed here.
 
 | Pair | Ratio |
 |---|---|
