@@ -2223,7 +2223,9 @@ expectIncludesById('4f4a765f36cee6f3', 'function stageStartedOnRuleSql(', 'clear
 expectIncludesById('4f4a765f36cee6f3', 'carried an invalid stage_started_on for', 'warns once, naming the zone, instead of storing an invalid start date');
 expectWireById('sync-pending-split', 'reject-indefinite-open', 'routes pending cloud commands through the indefinite-open guard before the replay ledger');
 expectWireById('sync-force-build', 'reject-indefinite-open', 'routes force-sync replayed commands through the indefinite-open guard before the replay ledger');
-expectWireById('reject-indefinite-open', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
+expectWireById('reject-indefinite-open', 's2120-unclaim-gate', 'routes guarded cloud commands through the issue #233 S2120 unclaim gate');
+expectWireById('s2120-unclaim-gate', 'command-dedupe-dispatch', 'routes guarded cloud commands through the replay ledger');
+expectWireById('s2120-unclaim-gate', 'journal-command-apply-fn', 'sends an S2120 unclaim to the appliers, where its irrigation-policy owner keeps the bound replay decision');
 expectWireById('command-dedupe-dispatch', 'journal-command-apply-fn', 'routes non-duplicates through the journal-aware command applier');
 expectWireById('command-dedupe-dispatch', '9d5e3035c3d069c4', 'publishes already-persisted exact replay ACKs without reclassification');
 expectWireById('journal-command-apply-fn', 'terra-zone-config-command-apply-fn', 'routes recognized non-journal commands through the protected Terra zone-config applier');

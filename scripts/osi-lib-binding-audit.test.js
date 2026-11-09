@@ -23,11 +23,13 @@ const bindings = {
     module: 'installation-location',
   },
   entityName: { variable: 'entityName', module: 'entity-name' },
+  irrigationPolicy: { variable: 'osiIrrigationPolicy', module: 'osi-irrigation-policy' },
   chirpstack: { variable: 'chirpstack', module: 'chirpstack' },
 };
 const expectedById = {
   'journal-api-router-fn': [bindings.db, bindings.journal, bindings.scope],
   'command-dedupe-dispatch': [bindings.db, bindings.journal, bindings.ledger],
+  's2120-unclaim-gate': [bindings.irrigationPolicy],
   'journal-command-apply-fn': [bindings.db, bindings.journal],
   'terra-zone-config-command-apply-fn': [bindings.db, bindings.zoneCommands],
   'scoped-access-command-apply-fn': [
