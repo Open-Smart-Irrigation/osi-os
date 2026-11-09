@@ -70,12 +70,12 @@ const EXACT_JOURNAL_EVENT_OPS = [
 // trg_dp_user_plot_assign_outbox_*). These are SQL-owned (see SQL_OWNED_EVENT_OPS below),
 // not edgeModuleOwned/edgeDeferred -- the triggers are structurally present in schema
 // unconditionally, gated at the data layer by the scoped_access_emit.enabled row (default
-// 0) rather than by absence from a source. osi-server PR #83 (EdgeSyncService appliers for
-// these ops) is open, not merged, as of this port -- so these stay cloudDeferred until #83
-// merges and this repo's server-source snapshot is updated to match. Flip by moving this
-// list (or the relevant entries) out of EXACT_CLOUD_DEFERRED_EVENT_OPS in the same commit
-// that updates SERVER_RELATIVE_SOURCE handling, per this file's own staged/deferred
-// contract -- never silently.
+// 0) rather than by absence from a source. ACTIVATED: osi-server 28d7ef3c ("decouple
+// mirror-write appliers") added ScopedAccessUserApplier,
+// ScopedAccessZoneAssignmentApplier and ScopedAccessPlotAssignmentApplier in
+// org.osi.server.scopedaccessmirror, all implementing SyncEventApplier. They became
+// visible here when the applier scan widened from the sync package to the whole
+// application package, so this list left EXACT_CLOUD_DEFERRED_EVENT_OPS in that commit.
 const EXACT_SCOPED_ACCESS_EVENT_OPS = [
   'USER_PLOT_ASSIGNMENT_DELETED',
   'USER_PLOT_ASSIGNMENT_UPSERTED',
@@ -98,7 +98,6 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
-  ...EXACT_SCOPED_ACCESS_EVENT_OPS,
 ];
 // The axes are intentionally independent. This fixture is the transition that
 // cloud-first rollout permits: the edge still defers production while cloud has
@@ -226,8 +225,7 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0025__valve_settings_sync_triggers.sql, not by flows.json.
   'VALVE_SETTINGS_UPSERTED',
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_users_outbox_* triggers, not by
-  // flows.json. Cloud handling is staged (see EXACT_SCOPED_ACCESS_EVENT_OPS) pending
-  // osi-server PR #83.
+  // flows.json. Cloud handling is active (see EXACT_SCOPED_ACCESS_EVENT_OPS).
   'USER_UPSERTED',
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_zone_assign_outbox_* triggers.
   'USER_ZONE_ASSIGNMENT_UPSERTED',
@@ -1435,10 +1433,13 @@ function findJavaMethodBody(source, methodName) {
 // switch(event.op()) block: see foldSyncEventAppliers()/appliersByOp, which
 // is consulted before the switch and, when it claims an op, the switch is
 // never reached for that op (DD12, first case: GatewayLocationApplier /
-// GATEWAY_LOCATION_UPSERTED). Sibling files in the same package directory
-// that `implements SyncEventApplier` declare their ops via supportedOps();
-// those must count as server-supported ops too, or parity checks report a
-// false gap for correctly-dispatched, fully-implemented ops.
+// GATEWAY_LOCATION_UPSERTED). The registry is the Spring-injected
+// List<SyncEventApplier>, so every @Component that `implements
+// SyncEventApplier` anywhere under the application package counts, not only
+// the classes next to EdgeSyncService.java (the journal and scoped-access
+// appliers live in org.osi.server.journal and org.osi.server.scopedaccessmirror).
+// Each declares its ops via supportedOps(); those must count as server-supported
+// ops too, or parity checks report a false gap for dispatched ops.
 function extractSyncEventApplierOps(source) {
   if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
   const body = findJavaMethodBody(source, 'supportedOps');
@@ -1446,58 +1447,86 @@ function extractSyncEventApplierOps(source) {
   return { ops: [...new Set(extractQuotedConstants(body))], error: null };
 }
 
-function collectSyncEventApplierOps(serverSource) {
+// The scan root is the application package: the parent of the `sync` package
+// directory that holds EdgeSyncService.java (org/osi/server under src/main/java,
+// so test sources are never reached). A flat fixture directory not named `sync`
+// is scanned as its own root.
+function syncEventApplierScanRoot(serverSource) {
   const dir = path.dirname(serverSource);
-  const ops = new Set();
-  const errors = [];
+  return path.basename(dir) === 'sync' ? path.dirname(dir) : dir;
+}
+
+function listJavaFilesRecursive(dir) {
+  const files = [];
   let entries = [];
   try {
-    entries = fs.readdirSync(dir);
+    entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (error) {
-    return { ops: [], errors: [] };
+    return files;
   }
-  for (const entry of entries) {
-    if (!entry.endsWith('.java')) continue;
-    const filePath = path.join(dir, entry);
-    if (path.resolve(filePath) === path.resolve(serverSource)) continue;
-    let stat;
-    try {
-      stat = fs.statSync(filePath);
-    } catch (error) {
-      continue;
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listJavaFilesRecursive(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith('.java')) {
+      files.push(entryPath);
     }
-    if (!stat.isFile()) continue;
+  }
+  return files;
+}
+
+function collectSyncEventApplierOps(serverSource) {
+  const scanRoot = syncEventApplierScanRoot(serverSource);
+  const ops = new Set();
+  const files = [];
+  const errors = [];
+  for (const filePath of listJavaFilesRecursive(scanRoot)) {
+    if (path.resolve(filePath) === path.resolve(serverSource)) continue;
     const result = extractSyncEventApplierOps(readUtf8(filePath));
     if (!result) continue;
+    const relative = path.relative(scanRoot, filePath);
     if (result.error) {
-      errors.push(`${entry}: ${result.error}`);
+      errors.push(`${relative}: ${result.error}`);
       continue;
     }
+    files.push(relative);
     for (const op of result.ops) ops.add(op);
   }
-  return { ops: [...ops], errors };
+  return { ops: [...ops].sort(), files, errors };
 }
 
 function extractServerOps(serverSource) {
+  const empty = { switchOps: [], applierOps: [], applierFiles: [] };
   if (!fs.existsSync(serverSource)) {
-    return { ops: [], errors: [`EdgeSyncService.java not found at ${serverSource}`] };
+    return { ops: [], ...empty, errors: [`EdgeSyncService.java not found at ${serverSource}`] };
   }
   const source = readUtf8(serverSource);
   const switches = findJavaEventOpSwitches(source);
   if (switches.length === 0) {
-    return { ops: [], errors: ['EdgeSyncService canonical switch(event.op()) not found'] };
+    return { ops: [], ...empty, errors: ['EdgeSyncService canonical switch(event.op()) not found'] };
   }
   if (switches.length > 1) {
-    return { ops: [], errors: [`EdgeSyncService must have exactly one switch(event.op()); found ${switches.length}`] };
+    return { ops: [], ...empty, errors: [`EdgeSyncService must have exactly one switch(event.op()); found ${switches.length}`] };
   }
   const switchBody = switches[0].body;
-  const ops = [];
+  const switchOps = [];
   for (const label of extractJavaSwitchCaseLabels(switchBody)) {
-    ops.push(...extractQuotedConstants(label));
+    switchOps.push(...extractQuotedConstants(label));
   }
   const applierResult = collectSyncEventApplierOps(serverSource);
-  ops.push(...applierResult.ops);
-  return { ops: [...new Set(ops)].sort(), errors: applierResult.errors };
+  return {
+    ops: [...new Set(switchOps.concat(applierResult.ops))].sort(),
+    switchOps: [...new Set(switchOps)].sort(),
+    applierOps: applierResult.ops,
+    applierFiles: applierResult.files,
+    errors: applierResult.errors,
+  };
+}
+
+function formatServerSourceSummary(serverResult) {
+  const files = serverResult.applierFiles.length;
+  return `${serverResult.ops.length} server ops; ${serverResult.switchOps.length} via EdgeSyncService switch, `
+    + `${serverResult.applierOps.length} via SyncEventApplier classes in ${files} file${files === 1 ? '' : 's'}`;
 }
 
 function diffSets(expected, actual) {
@@ -1617,6 +1646,7 @@ function checkSyncOpParity(options = {}) {
 
   for (const source of sources) {
     lines.push(formatSet(source.name, source.ops));
+    if (source === serverResult) lines.push(`  ${formatServerSourceSummary(serverResult)}`);
     for (const error of source.errors || []) {
       ok = false;
       lines.push(`  ERROR ${source.name}: ${error}`);
@@ -1713,6 +1743,7 @@ function checkSyncOpParity(options = {}) {
     ok,
     sources,
     union: expectedSchemaOps,
+    serverSummary: formatServerSourceSummary(serverResult),
     message: lines.join('\n'),
   };
 }
@@ -1725,10 +1756,10 @@ function main() {
   const result = checkSyncOpParity({ serverSource });
   console.log(result.message);
   if (!result.ok) {
-    console.error('verify-sync-op-parity: FAIL');
+    console.error(`verify-sync-op-parity: FAIL (${result.serverSummary})`);
     process.exit(1);
   }
-  console.log('verify-sync-op-parity: OK');
+  console.log(`verify-sync-op-parity: OK (${result.serverSummary})`);
 }
 
 if (require.main === module) {
