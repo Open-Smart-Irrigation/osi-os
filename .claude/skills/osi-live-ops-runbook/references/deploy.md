@@ -77,7 +77,7 @@ dev workstation unless noted.
 4. **Open a reverse tunnel and run the deploy script on the Pi**, downloading first
    instead of piping into `sh`:
    ```bash
-   ssh -o ExitOnForwardFailure=yes -R 9876:localhost:9876 root@<pi-ip> \
+   ssh -o ExitOnForwardFailure=yes -R 9876:127.0.0.1:9876 root@<pi-ip> \
      'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
    ```
    **Why download-then-run instead of `curl ... | sh`:** in a pipe, the shell's exit
@@ -88,6 +88,18 @@ dev workstation unless noted.
    push behind `tail`'s exit code (engineering playbook §1). Download-then-run makes
    `curl`'s failure set `$rc`, so a 404'd deploy fails loudly over the SSH exit code.
    `deploy.sh`'s own header comment shows the same download-then-run form.
+
+   **Where each loopback name resolves.** The forward destination
+   `127.0.0.1:9876` is connected to by `ssh` on your workstation, so it names
+   the same IPv4 listener step 3 bound, whatever your workstation resolves
+   `localhost` to. The `-R 9876` listener on the Pi is opened by the Pi's SSH
+   server; which loopback addresses it binds is that server's behaviour and is
+   not qualified here. The first download names `127.0.0.1`, but `deploy.sh`
+   then fetches every other file from `BASE="http://localhost:$PORT"`, which
+   the Pi's `curl` resolves. If `localhost` resolves to `::1` there and the
+   listener holds only IPv4, those fetches depend on `curl` trying the IPv4
+   address next; no current image has been qualified for that, and changing
+   `BASE` is a `deploy.sh` change outside this runbook.
 
 5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
    restarts Node-RED itself, up to twice: once around the schema-migration step
@@ -371,6 +383,7 @@ deviation as a signal to stop and investigate before telling the operator it's d
 | ChirpStack profile env vars present | `grep -e 'CHIRPSTACK_PROFILE_RAK10701' -e 'CHIRPSTACK_PROFILE_S2120' /srv/node-red/.chirpstack.env` (path/semantics; pipe-free form keeps this table row rendering) | Both present. Flag semantics and full variable list: `osi-config-and-flags`. |
 | Gateway health samples fresh | `sqlite3 /data/db/farming.db "SELECT gateway_device_eui, sampled_at FROM gateway_health_samples ORDER BY sampled_at DESC LIMIT 3;"` | Rows within the last ~60 s (the 60 s heartbeat inject also persists this table; schema at `database/migrations/ordered/0002__gateway_health.sql`) |
 
-Use `127.0.0.1`, not `localhost`, for every on-Pi curl (see BusyBox traps below).
+Use `127.0.0.1`, not `localhost`, for every on-Pi curl (see `busybox-traps.md`
+in this directory).
 
 ---

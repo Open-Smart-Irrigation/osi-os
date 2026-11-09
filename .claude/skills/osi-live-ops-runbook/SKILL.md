@@ -88,15 +88,11 @@ descriptive label prefix instead of the literal `osi-os-` if it helps you find t
 right backup later; what matters is the timestamp, the `.backup` method and the
 integrity check.
 
-ChirpStack's SQLite, from `references/repair.md` ("ChirpStack v4 has no plain REST API"):
-
-- **Write:** stop ChirpStack first (the DB is locked while it runs), modify via
-  `sqlite3`, then start it again:
-  ```bash
-  /etc/init.d/chirpstack stop
-  sqlite3 /srv/chirpstack/chirpstack.sqlite "UPDATE ... ;"
-  /etc/init.d/chirpstack start
-  ```
+The pre-repair script supplies no consistent rollback copy for a direct
+`chirpstack.sqlite` edit and refuses with `NEED_CHIRPSTACK=1`. Its optional raw
+copy cannot authorize that write. See `references/repair.md`, "ChirpStack v4 has
+no plain REST API"; this runbook supplies no reviewed ChirpStack rollback
+procedure.
 
 ### 3. Host access gate
 
@@ -121,12 +117,14 @@ a hard stop before any cross-system live-ops session.
 If a login, verifier, or API token is blocking you on a live system, **ask the
 operator** rather than resetting or overwriting the credential. Resetting a password
 or regenerating a secret to get past a block destroys the original credential and
-has caused real incidents. The one sanctioned exception is the DEVICE_EUI-linked
-offline verifier repair in "Live-repair recipes" below — that regenerates a verifier
-that is *supposed* to change because the EUI itself was wrong, not a shortcut around
-an unknown credential.
+has caused real incidents. The linked-login offline verifier has no exception:
+account link and cloud auth sync are its supported writers, and this runbook has
+no manual procedure for it, even when the EUI itself was wrong.
 
-That recipe is in `references/repair.md`, "Changing DEVICE_EUI breaks linked login".
+When an EUI change may affect linked login, read `references/repair.md`,
+"Changing DEVICE_EUI and linked offline login". It explains how the stored
+version selects the subject, gives a read-only inspection and stops for the
+operator instead of rewriting a verifier. It is not an EUI transition procedure.
 
 ### 5. Deploy prerequisites and stop conditions
 
@@ -287,6 +285,6 @@ in runbooks, docs, or scripts.
 ## References
 
 - `references/deploy.md`: Read before pushing a build to a gateway, when reading a deploy verdict, or when `deploy.sh` refuses to proceed. Sections: "How `seed_db_if_missing()` guards the live database"; "Quick reference"; "Deploy runbook (reverse-tunnel flow)"; "What `deploy.sh` actually does end-to-end"; "Private branch deployments"; "Post-deploy verification checklist".
-- `references/repair.md`: Read before any repair on a live gateway: the backup script, fingerprint and ledger recovery, and the repair recipes. Sections: "Pre-repair backup script"; "Stale-fingerprint recovery"; "Foreign-numbered ledger recovery"; "Rehearsing that cutover on a copy"; "Live-repair recipes"; "Stale `.chirpstack.env` overriding runtime identity"; "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`"; "Changing DEVICE_EUI breaks linked login"; "ChirpStack v4 has no plain REST API"; "Flows fail to load / all routes 404"; "Live valve testing (STREGA)".
+- `references/repair.md`: Read before any repair on a live gateway: the backup script, fingerprint and ledger recovery, and the repair recipes. Sections: "Pre-repair backup script"; "Stale-fingerprint recovery"; "Foreign-numbered ledger recovery"; "Rehearsing that cutover on a copy"; "Live-repair recipes"; "Stale `.chirpstack.env` overriding runtime identity"; "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`"; "Changing DEVICE_EUI and linked offline login"; "ChirpStack v4 has no plain REST API"; "Flows fail to load / all routes 404"; "Live valve testing (STREGA)".
 - `references/busybox-traps.md`: Read before pasting any command onto a Pi. Sections: "BusyBox / ash traps on the Pi".
 - `references/pitfalls-and-maintenance.md`: Read when something looks wrong after a deploy, or to re-verify this skill against the repo. Sections: "Common mistakes"; "Provenance and maintenance".

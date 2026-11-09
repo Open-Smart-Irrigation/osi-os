@@ -23,24 +23,29 @@ that live without also reading `osi-live-ops-runbook`.
    database created from the seed ends up schema-identical to one built by
    replaying all ordered migrations. `verify-seed-replay.js` is the automatic
    check for this; don't skip manual review just because the verifier exists.
-3. **Regenerate all 7 bundled `farming.db` copies.** Apply your new migration
-   file to each of the six non-mirrored copies with the `sqlite3` CLI, then copy
-   the `bcm2712` full profile's DB over the `bcm2709` mirror so profile parity
-   stays byte-for-byte (this is the exact pattern used for `0002`):
+3. **Regenerate all 7 bundled `farming.db` copies with the seed builder.**
+   Never apply a migration to a bundled `.db` with `sqlite3` (`AGENTS.md`
+   "Live-deploy safety rules"), and do not copy one image over another by
+   hand: the builder writes all seven. A raw apply runs the DDL without the
+   runner's ledger row and fingerprint stamp, so the image's
+   `schema_migrations` head stays behind the corpus and
+   `verify-seed-db-ledger.js` rejects it. The builder loads the corpus through
+   `CHECKSUMS.json`, which must already list the new file with its SHA-256;
+   a missing or wrong entry stops it with `ERR_MIGRATION_CORPUS` before any
+   bundled image is written.
    ```bash
-   MIGRATION=database/migrations/ordered/NNNN__your_slug.sql
-   cd "$(git rev-parse --show-toplevel)" && for db in \
-     conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
-     conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
-     conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db \
-     conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
-     database/farming.db \
-     web/react-gui/farming.db
-   do sqlite3 -bail "$db" < "$MIGRATION" && echo "OK $db"; done \
-     && cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
-           conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
-     && echo "OK mirror copy"
+   node scripts/build-seed-db.js
+   node scripts/verify-seed-db-ledger.js
    ```
+   `build-seed-db.js` applies `0001`..head to an empty scratch database with
+   `bootstrapFresh`, refuses an image that fails `verifyHead`, then copies that
+   one image to every path in `scripts/seed-db-paths.js`
+   (`SEED_DB_RELATIVE_PATHS`), so the seven copies stay byte-identical. Pass
+   signals: `build-seed-db: OK (7 image(s), <seconds>s)`, then
+   `verify-seed-db-ledger: OK (7 images stamped at migration head <head>)`. On
+   release lines that ship the Chameleon calibration snapshot, reapply it
+   after the rebuild with `node scripts/apply-chameleon-calibration-seed.js`
+   and rerun the ledger check; the builder does not add calibration rows.
 4. **Extend `scripts/verify-db-schema-consistency.js`'s hand-maintained
    `schemaContract`** (and `requiredIndexes`/`requiredTriggerSqlFragments` if
    applicable) with the new column/table/index so this widest verifier actually

@@ -20,8 +20,9 @@ editing is the evidence.
 ## Complete script skeleton
 
 Save this in your scratchpad (e.g. `flows-edit.js`), read it fully, adapt the
-`MUTATE` section, then run it with plain `node`. It includes the mandatory
-roundtrip guard and writes both profile copies.
+`MUTATE` section, then run it with plain `node`. Before writing anything it
+runs the mandatory roundtrip guard on both profile copies and refuses when the
+two copies differ; then it writes both.
 
 ```js
 #!/usr/bin/env node
@@ -58,9 +59,19 @@ function assertRoundtripByteIdentical(filePath) {
   return parsed;
 }
 
-// --- Step 1: guard, then load canonical ---
+// --- Step 1: guard BOTH profiles, then load canonical (nothing is written yet) ---
 const flows = assertRoundtripByteIdentical(CANONICAL);
-console.log('Roundtrip guard OK. Node count:', flows.length);
+assertRoundtripByteIdentical(MIRROR);
+// Step 3 overwrites the mirror with the canonical result, so a mirror that
+// differs now would lose its own bytes. The roundtrip guard cannot catch this:
+// two different, correctly formatted files each pass it.
+if (Buffer.compare(fs.readFileSync(CANONICAL), fs.readFileSync(MIRROR)) !== 0) {
+  throw new Error(
+    'Profile copies differ before mutation. STOP: reconcile them ' +
+    '(node scripts/verify-profile-parity.js) before running this edit.'
+  );
+}
+console.log('Pre-write guards OK on both profiles. Node count:', flows.length);
 
 // --- Step 2: MUTATE (edit this section for your change) ---
 // Example: add a new, fully self-contained inject + function node pair.
