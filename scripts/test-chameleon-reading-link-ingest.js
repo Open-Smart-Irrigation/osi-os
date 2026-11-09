@@ -142,6 +142,7 @@ function runtime(profile, dbPath) {
     return (msg) => fn(msg, node, { get() {}, set() {} }, globalApi, ...names.map((v) => libs[v]));
   };
   const write = compile('460e0bfd95f89e67');
+  const aggregate = compile('lsn50-zone-agg-fn');
   const insert = compile('chameleon-readings-insert-fn');
   const persist = compile('51c0ae3799c97131');
   const backfill = compile('d20948dd9120a3d2');
@@ -149,7 +150,8 @@ function runtime(profile, dbPath) {
     const msg = { formattedData: chameleonUplink(fields) };
     const written = await write(msg);
     if (written === null) return null;
-    return insert(written);
+    // The shipped wiring: Normalize + Write -> Aggregate Zone Rain/Flow -> Insert.
+    return insert(await aggregate(written));
   }
   // Calibration arrives the way the sync worker delivers it: persist, then backfill.
   async function calibrate() {
@@ -463,8 +465,22 @@ for (const profile of PROFILES) {
   });
 }
 
+// The link needs d.deviceDataId from Normalize + Write on the same message. A
+// parallel or reordered wire would leave every diagnostic unlinked, and the
+// scheduler would then ignore every Chameleon row.
+test('both profiles wire Normalize + Write to Insert Chameleon Reading in series', () => {
+  for (const profile of PROFILES) {
+    const flows = JSON.parse(fs.readFileSync(profilePaths(profile).flows, 'utf8'));
+    const byId = new Map(flows.map((n) => [n.id, n]));
+    assert.deepEqual(byId.get('460e0bfd95f89e67').wires, [['lsn50-zone-agg-fn']], profile + ': Normalize + Write output');
+    assert.deepEqual(byId.get('lsn50-zone-agg-fn').wires, [['chameleon-readings-insert-fn']], profile + ': Aggregate Zone Rain/Flow output');
+    const feeders = flows.filter((n) => (n.wires || []).some((out) => out.includes('chameleon-readings-insert-fn'))).map((n) => n.id);
+    assert.deepEqual(feeders, ['lsn50-zone-agg-fn'], profile + ': only one node feeds Insert Chameleon Reading');
+  }
+});
+
 test('both profiles ship the same ingest and calibration bodies', () => {
-  for (const id of ['460e0bfd95f89e67', 'chameleon-readings-insert-fn', '51c0ae3799c97131', 'd20948dd9120a3d2']) {
+  for (const id of ['460e0bfd95f89e67', 'lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', '51c0ae3799c97131', 'd20948dd9120a3d2']) {
     assert.equal(loadNode(id, profilePaths('bcm2709').flows).func, loadNode(id, profilePaths('bcm2712').flows).func, id);
   }
 });
