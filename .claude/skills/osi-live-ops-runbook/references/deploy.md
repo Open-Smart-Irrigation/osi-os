@@ -398,9 +398,12 @@ stopped:
   with its digest in that payload's `modules.json`
   (`OK: captured <module> into payloads/<prev>/modules/<module>`). On the
   first deploy with this layout every live module is a real directory, so
-  this is where the rollback copy of the running modules comes from. A
-  retry checks the live directory against the recorded digest and refuses
-  with `refusing to recapture changed live module <module>` if it changed,
+  this is where the rollback copy of the running modules comes from. After
+  a sysupgrade the GUI link is gone, so the previous payload is a new
+  `<stamp>-previous` capture with no module set, and the linked modules its
+  flows run are copied the same way. A retry checks the live directory
+  against the recorded digest and refuses with
+  `refusing to recapture changed live module <module>` if it changed,
   for example after an older `deploy.sh` wrote into it. Stop there and
   escalate; do not edit `payloads/` by hand;
 - links each module the gateway does not have yet into the staged payload

@@ -315,7 +315,7 @@ Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`
 | Node-RED flows | `/srv/node-red/flows.json` (symlink into `payloads/<stamp>/`; copy with `cp -L`) |
 | SQLite database | `/data/db/farming.db` |
 | React GUI | `/usr/lib/node-red/gui/` (symlink into `payloads/<stamp>/gui`) |
-| Helper modules | `/srv/node-red/osi-*` (symlinks into `payloads/<stamp>/modules/`, switched with flows; the command-ledger pair stays a real directory) |
+| Helper modules | `/srv/node-red/osi-*` (after the first deploy, symlinks into `payloads/<stamp>/modules/`, switched with flows; the command-ledger pair stays a real directory) |
 | Node-RED settings | `/srv/node-red/settings.js` |
 | MQTT credentials | `/srv/node-red/flows_cred.json` |
 | UCI identity | `osi-server.cloud.*` (`uci show osi-server`) |
