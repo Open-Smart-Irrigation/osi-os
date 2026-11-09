@@ -24,8 +24,8 @@ function fixtures(overrides = {}) {
     } },
     seedSource: 'for module in osi-db-helper osi-history-sync-helper osi-lib; do\n',
     deploySource: [
-      '"/srv/node-red/osi-history-sync-helper/package.json"',
-      '"/srv/node-red/osi-history-sync-helper/index.js"',
+      '"$MODULE_STAGE/osi-history-sync-helper/package.json"',
+      '"$MODULE_STAGE/osi-history-sync-helper/index.js"',
     ].join('\n'),
     moduleDir: { hasDir: true, hasPackageJson: true, hasMain: true, mainName: 'index.js' },
     ...overrides,
@@ -54,6 +54,10 @@ test('checkSurfaces: each missing surface is reported', () => {
   assert.match(checkSurfaces(fixtures({ packageLock: { packages: { '': { dependencies: {} } } } })).join(' '), /package-lock\.json/);
   assert.match(checkSurfaces(fixtures({ seedSource: 'for module in osi-db-helper; do\n' })).join(' '), /98_osi_node_red_seed/);
   assert.match(checkSurfaces(fixtures({ deploySource: '' })).join(' '), /deploy\.sh/);
+  assert.match(checkSurfaces(fixtures({ deploySource: [
+    '"/srv/node-red/osi-history-sync-helper/package.json"',
+    '"/srv/node-red/osi-history-sync-helper/index.js"',
+  ].join('\n') })).join(' '), /into \$MODULE_STAGE/, 'a fetch straight into /srv/node-red/<module> is not a staged delivery');
   assert.match(checkSurfaces(fixtures({ moduleDir: { hasDir: false } })).join(' '), /directory missing/);
   assert.match(checkSurfaces(fixtures({ moduleDir: { hasDir: true, hasPackageJson: false, hasMain: true, mainName: 'index.js' } })).join(' '), /package\.json missing/);
   assert.match(checkSurfaces(fixtures({ moduleDir: { hasDir: true, hasPackageJson: true, hasMain: false, mainName: 'index.js' } })).join(' '), /main file/);

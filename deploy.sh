@@ -45,6 +45,11 @@ SEED_DB_REL="$(detect_seed_db_rel)"
 TMP_DIR="/tmp/osi-os-deploy.$$"
 PAYLOADS_ROOT="/srv/node-red/payloads"
 DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+# The osi-* helper modules are fetched into this deploy's payload, not into
+# /srv/node-red: /srv/node-red/<module> is a link into the active payload, and
+# flipTo() switches it together with flows.json and the GUI, so every switch
+# back to the previous payload also restores the previous modules (#603).
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
 GUI_ROOT="/usr/lib/node-red/gui"
 NODE_RED_INIT="/etc/init.d/node-red"
@@ -2333,11 +2338,6 @@ same_fs_or_die
 echo "OK"
 
 echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
-# The command receiver is a dependency of the capabilities advertised by the
-# staged flows. Fetch and verify it before the payload can be activated.
-fetch_required "osi-watermark-helper commands.js" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js" \
-    "/srv/node-red/osi-watermark-helper/commands.js"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
 STAGED_GUI_ARCHIVE="$TMP_DIR/react_gui.tar.gz"
@@ -2389,223 +2389,223 @@ fetch_required "Node-RED runtime package-lock.json" \
 
 fetch_required "osi-chirpstack-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json" \
-    "/srv/node-red/osi-chirpstack-helper/package.json"
+    "$MODULE_STAGE/osi-chirpstack-helper/package.json"
 
 fetch_required "osi-chirpstack-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js" \
-    "/srv/node-red/osi-chirpstack-helper/index.js"
+    "$MODULE_STAGE/osi-chirpstack-helper/index.js"
 
 fetch_required "osi-db-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json" \
-    "/srv/node-red/osi-db-helper/package.json"
+    "$MODULE_STAGE/osi-db-helper/package.json"
 
 fetch_required "osi-db-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js" \
-    "/srv/node-red/osi-db-helper/index.js"
+    "$MODULE_STAGE/osi-db-helper/index.js"
 
 fetch_required "osi-health-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper/package.json" \
-    "/srv/node-red/osi-health-helper/package.json"
+    "$MODULE_STAGE/osi-health-helper/package.json"
 
 fetch_required "osi-health-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper/index.js" \
-    "/srv/node-red/osi-health-helper/index.js"
+    "$MODULE_STAGE/osi-health-helper/index.js"
 
 fetch_required "osi-dendro-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json" \
-    "/srv/node-red/osi-dendro-helper/package.json"
+    "$MODULE_STAGE/osi-dendro-helper/package.json"
 
 fetch_required "osi-dendro-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js" \
-    "/srv/node-red/osi-dendro-helper/index.js"
+    "$MODULE_STAGE/osi-dendro-helper/index.js"
 
 fetch_required "osi-local-password-reset package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-local-password-reset/package.json" \
-    "/srv/node-red/osi-local-password-reset/package.json"
+    "$MODULE_STAGE/osi-local-password-reset/package.json"
 
 fetch_required "osi-local-password-reset index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-local-password-reset/index.js" \
-    "/srv/node-red/osi-local-password-reset/index.js"
+    "$MODULE_STAGE/osi-local-password-reset/index.js"
 
 fetch_required "osi-scheduler-mean-query package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query/package.json" \
-    "/srv/node-red/osi-scheduler-mean-query/package.json"
+    "$MODULE_STAGE/osi-scheduler-mean-query/package.json"
 
 fetch_required "osi-scheduler-mean-query index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query/index.js" \
-    "/srv/node-red/osi-scheduler-mean-query/index.js"
+    "$MODULE_STAGE/osi-scheduler-mean-query/index.js"
 
 fetch_required "osi-scope-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json" \
-    "/srv/node-red/osi-scope-helper/package.json"
+    "$MODULE_STAGE/osi-scope-helper/package.json"
 
 fetch_required "osi-scope-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js" \
-    "/srv/node-red/osi-scope-helper/index.js"
+    "$MODULE_STAGE/osi-scope-helper/index.js"
 
 fetch_required "osi-rejection-recovery package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery/package.json" \
-    "/srv/node-red/osi-rejection-recovery/package.json"
+    "$MODULE_STAGE/osi-rejection-recovery/package.json"
 
 fetch_required "osi-rejection-recovery index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery/index.js" \
-    "/srv/node-red/osi-rejection-recovery/index.js"
+    "$MODULE_STAGE/osi-rejection-recovery/index.js"
 
 fetch_required "osi-scoped-access-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/package.json" \
-    "/srv/node-red/osi-scoped-access-commands/package.json"
+    "$MODULE_STAGE/osi-scoped-access-commands/package.json"
 
 fetch_required "osi-scoped-access-commands index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.js" \
-    "/srv/node-red/osi-scoped-access-commands/index.js"
+    "$MODULE_STAGE/osi-scoped-access-commands/index.js"
 
 fetch_required "osi-dendro-analytics package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/package.json" \
-    "/srv/node-red/osi-dendro-analytics/package.json"
+    "$MODULE_STAGE/osi-dendro-analytics/package.json"
 
 fetch_required "osi-dendro-analytics index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.js" \
-    "/srv/node-red/osi-dendro-analytics/index.js"
+    "$MODULE_STAGE/osi-dendro-analytics/index.js"
 
 fetch_required "osi-zone-env package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/package.json" \
-    "/srv/node-red/osi-zone-env/package.json"
+    "$MODULE_STAGE/osi-zone-env/package.json"
 
 fetch_required "osi-zone-env index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.js" \
-    "/srv/node-red/osi-zone-env/index.js"
+    "$MODULE_STAGE/osi-zone-env/index.js"
 
 fetch_required "osi-weather-provider package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/package.json" \
-    "/srv/node-red/osi-weather-provider/package.json"
+    "$MODULE_STAGE/osi-weather-provider/package.json"
 
 fetch_required "osi-weather-provider index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/index.js" \
-    "/srv/node-red/osi-weather-provider/index.js"
+    "$MODULE_STAGE/osi-weather-provider/index.js"
 
 fetch_required "osi-crop-kc package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/package.json" \
-    "/srv/node-red/osi-crop-kc/package.json"
+    "$MODULE_STAGE/osi-crop-kc/package.json"
 
 fetch_required "osi-crop-kc index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/index.js" \
-    "/srv/node-red/osi-crop-kc/index.js"
+    "$MODULE_STAGE/osi-crop-kc/index.js"
 
 fetch_required "osi-crop-kc crop-kc.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc/crop-kc.json" \
-    "/srv/node-red/osi-crop-kc/crop-kc.json"
+    "$MODULE_STAGE/osi-crop-kc/crop-kc.json"
 
 fetch_required "osi-station-hours package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-station-hours/package.json" \
-    "/srv/node-red/osi-station-hours/package.json"
+    "$MODULE_STAGE/osi-station-hours/package.json"
 
 fetch_required "osi-station-hours index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-station-hours/index.js" \
-    "/srv/node-red/osi-station-hours/index.js"
+    "$MODULE_STAGE/osi-station-hours/index.js"
 
 fetch_required "osi-rain package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/package.json" \
-    "/srv/node-red/osi-rain/package.json"
+    "$MODULE_STAGE/osi-rain/package.json"
 
 fetch_required "osi-rain index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/index.js" \
-    "/srv/node-red/osi-rain/index.js"
+    "$MODULE_STAGE/osi-rain/index.js"
 
 fetch_required "osi-agronomy-daily package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/package.json" \
-    "/srv/node-red/osi-agronomy-daily/package.json"
+    "$MODULE_STAGE/osi-agronomy-daily/package.json"
 
 fetch_required "osi-agronomy-daily index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/index.js" \
-    "/srv/node-red/osi-agronomy-daily/index.js"
+    "$MODULE_STAGE/osi-agronomy-daily/index.js"
 
 fetch_required "osi-agronomy-daily et0.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/et0.js" \
-    "/srv/node-red/osi-agronomy-daily/et0.js"
+    "$MODULE_STAGE/osi-agronomy-daily/et0.js"
 
 fetch_required "osi-history-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json" \
-    "/srv/node-red/osi-history-helper/package.json"
+    "$MODULE_STAGE/osi-history-helper/package.json"
 
 fetch_required "osi-matric-potential package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/package.json" \
-    "/srv/node-red/osi-matric-potential/package.json"
+    "$MODULE_STAGE/osi-matric-potential/package.json"
 
 fetch_required "osi-matric-potential index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.js" \
-    "/srv/node-red/osi-matric-potential/index.js"
+    "$MODULE_STAGE/osi-matric-potential/index.js"
 
 fetch_required "osi-history-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js" \
-    "/srv/node-red/osi-history-helper/index.js"
+    "$MODULE_STAGE/osi-history-helper/index.js"
 
 fetch_required "osi-history-helper analysis.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js" \
-    "/srv/node-red/osi-history-helper/analysis.js"
+    "$MODULE_STAGE/osi-history-helper/analysis.js"
 
 fetch_required "osi-history-helper analysis-sources.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis-sources.js" \
-    "/srv/node-red/osi-history-helper/analysis-sources.js"
+    "$MODULE_STAGE/osi-history-helper/analysis-sources.js"
 
 fetch_required "osi-history-helper device-sources.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.js" \
-    "/srv/node-red/osi-history-helper/device-sources.js"
+    "$MODULE_STAGE/osi-history-helper/device-sources.js"
 
 fetch_required "osi-history-router package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/package.json" \
-    "/srv/node-red/osi-history-router/package.json"
+    "$MODULE_STAGE/osi-history-router/package.json"
 
 fetch_required "osi-history-router index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js" \
-    "/srv/node-red/osi-history-router/index.js"
+    "$MODULE_STAGE/osi-history-router/index.js"
 
 fetch_required "osi-journal package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/package.json" \
-    "/srv/node-red/osi-journal/package.json"
+    "$MODULE_STAGE/osi-journal/package.json"
 
 fetch_required "osi-journal index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.js" \
-    "/srv/node-red/osi-journal/index.js"
+    "$MODULE_STAGE/osi-journal/index.js"
 
 fetch_required "osi-journal catalog.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js" \
-    "/srv/node-red/osi-journal/catalog.js"
+    "$MODULE_STAGE/osi-journal/catalog.js"
 
 fetch_required "osi-journal definition.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/definition.js" \
-    "/srv/node-red/osi-journal/definition.js"
+    "$MODULE_STAGE/osi-journal/definition.js"
 
 fetch_required "osi-journal units.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/units.js" \
-    "/srv/node-red/osi-journal/units.js"
+    "$MODULE_STAGE/osi-journal/units.js"
 
 fetch_required "osi-journal unit-family.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/unit-family.js" \
-    "/srv/node-red/osi-journal/unit-family.js"
+    "$MODULE_STAGE/osi-journal/unit-family.js"
 
 fetch_required "osi-journal cascade.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/cascade.js" \
-    "/srv/node-red/osi-journal/cascade.js"
+    "$MODULE_STAGE/osi-journal/cascade.js"
 
 fetch_required "osi-journal aggregate.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate.js" \
-    "/srv/node-red/osi-journal/aggregate.js"
+    "$MODULE_STAGE/osi-journal/aggregate.js"
 
 fetch_required "osi-journal context.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/context.js" \
-    "/srv/node-red/osi-journal/context.js"
+    "$MODULE_STAGE/osi-journal/context.js"
 
 fetch_required "osi-journal lifecycle.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js" \
-    "/srv/node-red/osi-journal/lifecycle.js"
+    "$MODULE_STAGE/osi-journal/lifecycle.js"
 
 fetch_required "osi-journal api.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js" \
-    "/srv/node-red/osi-journal/api.js"
+    "$MODULE_STAGE/osi-journal/api.js"
 
 fetch_required "osi-journal commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js" \
-    "/srv/node-red/osi-journal/commands.js"
+    "$MODULE_STAGE/osi-journal/commands.js"
 
 # osi-module-defaults declares the four switchable gateway modules (key, GUI
 # field, shipped default) that both osi-journal-replication and
@@ -2613,353 +2613,360 @@ fetch_required "osi-journal commands.js" \
 # cannot leave a consumer requiring a file that is not there yet.
 fetch_required "osi-module-defaults package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/package.json" \
-    "/srv/node-red/osi-module-defaults/package.json"
+    "$MODULE_STAGE/osi-module-defaults/package.json"
 
 fetch_required "osi-module-defaults index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/index.js" \
-    "/srv/node-red/osi-module-defaults/index.js"
+    "$MODULE_STAGE/osi-module-defaults/index.js"
 
 fetch_required "osi-journal-replication package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/package.json" \
-    "/srv/node-red/osi-journal-replication/package.json"
+    "$MODULE_STAGE/osi-journal-replication/package.json"
 
 fetch_required "osi-journal-replication index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/index.js" \
-    "/srv/node-red/osi-journal-replication/index.js"
+    "$MODULE_STAGE/osi-journal-replication/index.js"
 
 fetch_required "osi-journal-replication canonicalization.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js" \
-    "/srv/node-red/osi-journal-replication/canonicalization.js"
+    "$MODULE_STAGE/osi-journal-replication/canonicalization.js"
 
 stage_command_ledger_dependency
 
 fetch_required "osi-zone-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/package.json" \
-    "/srv/node-red/osi-zone-commands/package.json"
+    "$MODULE_STAGE/osi-zone-commands/package.json"
 
 fetch_required "osi-zone-commands index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/index.js" \
-    "/srv/node-red/osi-zone-commands/index.js"
+    "$MODULE_STAGE/osi-zone-commands/index.js"
 
 fetch_required "osi-device-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/package.json" \
-    "/srv/node-red/osi-device-commands/package.json"
+    "$MODULE_STAGE/osi-device-commands/package.json"
 
 fetch_required "osi-device-commands index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/index.js" \
-    "/srv/node-red/osi-device-commands/index.js"
+    "$MODULE_STAGE/osi-device-commands/index.js"
 
 fetch_required "osi-device-commands weather.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.js" \
-    "/srv/node-red/osi-device-commands/weather.js"
+    "$MODULE_STAGE/osi-device-commands/weather.js"
 
 fetch_required "osi-entity-name package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/package.json" \
-    "/srv/node-red/osi-entity-name/package.json"
+    "$MODULE_STAGE/osi-entity-name/package.json"
 
 fetch_required "osi-entity-name index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js" \
-    "/srv/node-red/osi-entity-name/index.js"
+    "$MODULE_STAGE/osi-entity-name/index.js"
 
 fetch_required "osi-entity-name commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/commands.js" \
-    "/srv/node-red/osi-entity-name/commands.js"
+    "$MODULE_STAGE/osi-entity-name/commands.js"
 
 fetch_required "osi-radio-helper chirpstack.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack.js" \
-    "/srv/node-red/osi-radio-helper/chirpstack.js"
+    "$MODULE_STAGE/osi-radio-helper/chirpstack.js"
 
 fetch_required "osi-radio-helper fieldtester.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester.js" \
-    "/srv/node-red/osi-radio-helper/fieldtester.js"
+    "$MODULE_STAGE/osi-radio-helper/fieldtester.js"
 
 fetch_required "osi-radio-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.js" \
-    "/srv/node-red/osi-radio-helper/index.js"
+    "$MODULE_STAGE/osi-radio-helper/index.js"
 
 fetch_required "osi-radio-helper migrations/0001__radio_store.sql" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/migrations/0001__radio_store.sql" \
-    "/srv/node-red/osi-radio-helper/migrations/0001__radio_store.sql"
+    "$MODULE_STAGE/osi-radio-helper/migrations/0001__radio_store.sql"
 
 fetch_required "osi-radio-helper migrations/0002__radio_store_ledger.sql" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/migrations/0002__radio_store_ledger.sql" \
-    "/srv/node-red/osi-radio-helper/migrations/0002__radio_store_ledger.sql"
+    "$MODULE_STAGE/osi-radio-helper/migrations/0002__radio_store_ledger.sql"
 
 fetch_required "osi-radio-helper normalize.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/normalize.js" \
-    "/srv/node-red/osi-radio-helper/normalize.js"
+    "$MODULE_STAGE/osi-radio-helper/normalize.js"
 
 fetch_required "osi-network-api package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/package.json" \
-    "/srv/node-red/osi-network-api/package.json"
+    "$MODULE_STAGE/osi-network-api/package.json"
 
 fetch_required "osi-network-api index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.js" \
-    "/srv/node-red/osi-network-api/index.js"
+    "$MODULE_STAGE/osi-network-api/index.js"
 
 fetch_required "osi-radio-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/package.json" \
-    "/srv/node-red/osi-radio-helper/package.json"
+    "$MODULE_STAGE/osi-radio-helper/package.json"
 
 fetch_required "osi-radio-helper store.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/store.js" \
-    "/srv/node-red/osi-radio-helper/store.js"
+    "$MODULE_STAGE/osi-radio-helper/store.js"
 
 fetch_required "osi-installation-location-helper commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/commands.js" \
-    "/srv/node-red/osi-installation-location-helper/commands.js"
+    "$MODULE_STAGE/osi-installation-location-helper/commands.js"
 
 fetch_required "osi-installation-location-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/package.json" \
-    "/srv/node-red/osi-installation-location-helper/package.json"
+    "$MODULE_STAGE/osi-installation-location-helper/package.json"
 
 fetch_required "osi-installation-location-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/index.js" \
-    "/srv/node-red/osi-installation-location-helper/index.js"
+    "$MODULE_STAGE/osi-installation-location-helper/index.js"
 
 fetch_required "osi-history-sync-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/package.json" \
-    "/srv/node-red/osi-history-sync-helper/package.json"
+    "$MODULE_STAGE/osi-history-sync-helper/package.json"
 
 fetch_required "osi-history-sync-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/index.js" \
-    "/srv/node-red/osi-history-sync-helper/index.js"
+    "$MODULE_STAGE/osi-history-sync-helper/index.js"
 
 fetch_required "osi-installation-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/package.json" \
-    "/srv/node-red/osi-installation-helper/package.json"
+    "$MODULE_STAGE/osi-installation-helper/package.json"
 
 fetch_required "osi-installation-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js" \
-    "/srv/node-red/osi-installation-helper/index.js"
+    "$MODULE_STAGE/osi-installation-helper/index.js"
 
 fetch_required "osi-chameleon-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/package.json" \
-    "/srv/node-red/osi-chameleon-helper/package.json"
+    "$MODULE_STAGE/osi-chameleon-helper/package.json"
 
 fetch_required "osi-chameleon-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper/index.js" \
-    "/srv/node-red/osi-chameleon-helper/index.js"
+    "$MODULE_STAGE/osi-chameleon-helper/index.js"
 
 fetch_required "osi-cloud-http package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-cloud-http/package.json" \
-    "/srv/node-red/osi-cloud-http/package.json"
+    "$MODULE_STAGE/osi-cloud-http/package.json"
 
 fetch_required "osi-cloud-http index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-cloud-http/index.js" \
-    "/srv/node-red/osi-cloud-http/index.js"
+    "$MODULE_STAGE/osi-cloud-http/index.js"
 
 fetch_required "osi-lib package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/package.json" \
-    "/srv/node-red/osi-lib/package.json"
+    "$MODULE_STAGE/osi-lib/package.json"
 
 fetch_required "osi-lib index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js" \
-    "/srv/node-red/osi-lib/index.js"
+    "$MODULE_STAGE/osi-lib/index.js"
 
 fetch_required "osi-device-writer package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/package.json" \
-    "/srv/node-red/osi-device-writer/package.json"
+    "$MODULE_STAGE/osi-device-writer/package.json"
 
 fetch_required "osi-device-writer index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/index.js" \
-    "/srv/node-red/osi-device-writer/index.js"
+    "$MODULE_STAGE/osi-device-writer/index.js"
 
 fetch_required "osi-lsn50-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/package.json" \
-    "/srv/node-red/osi-lsn50-normalize/package.json"
+    "$MODULE_STAGE/osi-lsn50-normalize/package.json"
 
 fetch_required "osi-lsn50-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.js" \
-    "/srv/node-red/osi-lsn50-normalize/index.js"
+    "$MODULE_STAGE/osi-lsn50-normalize/index.js"
 
 fetch_required "osi-watermark-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/package.json" \
-    "/srv/node-red/osi-watermark-helper/package.json"
+    "$MODULE_STAGE/osi-watermark-helper/package.json"
 
 fetch_required "osi-watermark-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/index.js" \
-    "/srv/node-red/osi-watermark-helper/index.js"
+    "$MODULE_STAGE/osi-watermark-helper/index.js"
+
+# The command receiver is a dependency of the capabilities the staged flows
+# advertise. It is part of the payload's module set, so the flip that
+# activates those flows activates it with them.
+fetch_required "osi-watermark-helper commands.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js" \
+    "$MODULE_STAGE/osi-watermark-helper/commands.js"
 
 fetch_required "osi-watermark-helper conversion.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/conversion.js" \
-    "/srv/node-red/osi-watermark-helper/conversion.js"
+    "$MODULE_STAGE/osi-watermark-helper/conversion.js"
 
 fetch_required "osi-watermark-helper calibration.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/calibration.js" \
-    "/srv/node-red/osi-watermark-helper/calibration.js"
+    "$MODULE_STAGE/osi-watermark-helper/calibration.js"
 
 fetch_required "osi-watermark-helper ingest.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/ingest.js" \
-    "/srv/node-red/osi-watermark-helper/ingest.js"
+    "$MODULE_STAGE/osi-watermark-helper/ingest.js"
 
 fetch_required "osi-uc512-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/package.json" \
-    "/srv/node-red/osi-uc512-normalize/package.json"
+    "$MODULE_STAGE/osi-uc512-normalize/package.json"
 
 fetch_required "osi-uc512-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/index.js" \
-    "/srv/node-red/osi-uc512-normalize/index.js"
+    "$MODULE_STAGE/osi-uc512-normalize/index.js"
 
 fetch_required "osi-uplink-dedup-guard package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/package.json" \
-    "/srv/node-red/osi-uplink-dedup-guard/package.json"
+    "$MODULE_STAGE/osi-uplink-dedup-guard/package.json"
 
 fetch_required "osi-uplink-dedup-guard index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/index.js" \
-    "/srv/node-red/osi-uplink-dedup-guard/index.js"
+    "$MODULE_STAGE/osi-uplink-dedup-guard/index.js"
 
 fetch_required "osi-sdi12-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json" \
-    "/srv/node-red/osi-sdi12-normalize/package.json"
+    "$MODULE_STAGE/osi-sdi12-normalize/package.json"
 
 fetch_required "osi-sdi12-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js" \
-    "/srv/node-red/osi-sdi12-normalize/index.js"
+    "$MODULE_STAGE/osi-sdi12-normalize/index.js"
 
 fetch_required "osi-sdi12-normalize configuration.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.js" \
-    "/srv/node-red/osi-sdi12-normalize/configuration.js"
+    "$MODULE_STAGE/osi-sdi12-normalize/configuration.js"
 
 fetch_required "osi-sdi12-recipe package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/package.json" \
-    "/srv/node-red/osi-sdi12-recipe/package.json"
+    "$MODULE_STAGE/osi-sdi12-recipe/package.json"
 
 fetch_required "osi-sdi12-recipe index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.js" \
-    "/srv/node-red/osi-sdi12-recipe/index.js"
+    "$MODULE_STAGE/osi-sdi12-recipe/index.js"
 
 fetch_required "osi-sdi12-normalize tensiomark-live.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js" \
-    "/srv/node-red/osi-sdi12-normalize/tensiomark-live.js"
+    "$MODULE_STAGE/osi-sdi12-normalize/tensiomark-live.js"
 
 fetch_required "osi-sdi12-commissioning tensiomark.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/tensiomark.js" \
-    "/srv/node-red/osi-sdi12-commissioning/tensiomark.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/tensiomark.js"
 
 fetch_required "osi-sdi12-commissioning config-handler.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/config-handler.js" \
-    "/srv/node-red/osi-sdi12-commissioning/config-handler.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/config-handler.js"
 
 fetch_required "osi-sdi12-commissioning write-handler.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/write-handler.js" \
-    "/srv/node-red/osi-sdi12-commissioning/write-handler.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/write-handler.js"
 
 fetch_required "osi-sdi12-commissioning gate-handler.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/gate-handler.js" \
-    "/srv/node-red/osi-sdi12-commissioning/gate-handler.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/gate-handler.js"
 
 fetch_required "osi-sdi12-commissioning identify-handler.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/identify-handler.js" \
-    "/srv/node-red/osi-sdi12-commissioning/identify-handler.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/identify-handler.js"
 
 fetch_required "osi-sdi12-commissioning package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/package.json" \
-    "/srv/node-red/osi-sdi12-commissioning/package.json"
+    "$MODULE_STAGE/osi-sdi12-commissioning/package.json"
 
 fetch_required "osi-sdi12-commissioning index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.js" \
-    "/srv/node-red/osi-sdi12-commissioning/index.js"
+    "$MODULE_STAGE/osi-sdi12-commissioning/index.js"
 
 fetch_required "osi-sdi12-reassemble package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/package.json" \
-    "/srv/node-red/osi-sdi12-reassemble/package.json"
+    "$MODULE_STAGE/osi-sdi12-reassemble/package.json"
 
 fetch_required "osi-sdi12-reassemble index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.js" \
-    "/srv/node-red/osi-sdi12-reassemble/index.js"
+    "$MODULE_STAGE/osi-sdi12-reassemble/index.js"
 
 fetch_required "osi-irrigation-policy package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/package.json" \
-    "/srv/node-red/osi-irrigation-policy/package.json"
+    "$MODULE_STAGE/osi-irrigation-policy/package.json"
 
 fetch_required "osi-irrigation-policy index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/index.js" \
-    "/srv/node-red/osi-irrigation-policy/index.js"
+    "$MODULE_STAGE/osi-irrigation-policy/index.js"
 
 fetch_required "osi-irrigation-policy api.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.js" \
-    "/srv/node-red/osi-irrigation-policy/api.js"
+    "$MODULE_STAGE/osi-irrigation-policy/api.js"
 
 fetch_required "osi-irrigation-policy lifecycle.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js" \
-    "/srv/node-red/osi-irrigation-policy/lifecycle.js"
+    "$MODULE_STAGE/osi-irrigation-policy/lifecycle.js"
 
 fetch_required "osi-irrigation-policy routes.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/routes.js" \
-    "/srv/node-red/osi-irrigation-policy/routes.js"
+    "$MODULE_STAGE/osi-irrigation-policy/routes.js"
 
 fetch_required "osi-irrigation-policy worker.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/worker.js" \
-    "/srv/node-red/osi-irrigation-policy/worker.js"
+    "$MODULE_STAGE/osi-irrigation-policy/worker.js"
 
 fetch_required "osi-irrigation-policy clock.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock.js" \
-    "/srv/node-red/osi-irrigation-policy/clock.js"
+    "$MODULE_STAGE/osi-irrigation-policy/clock.js"
 
 fetch_required "osi-irrigation-policy clock-bounds.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js" \
-    "/srv/node-red/osi-irrigation-policy/clock-bounds.js"
+    "$MODULE_STAGE/osi-irrigation-policy/clock-bounds.js"
 
 fetch_required "osi-irrigation-policy evaluate.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/evaluate.js" \
-    "/srv/node-red/osi-irrigation-policy/evaluate.js"
+    "$MODULE_STAGE/osi-irrigation-policy/evaluate.js"
 
 fetch_required "osi-irrigation-policy model.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/model.js" \
-    "/srv/node-red/osi-irrigation-policy/model.js"
+    "$MODULE_STAGE/osi-irrigation-policy/model.js"
 
 fetch_required "osi-irrigation-policy observations.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/observations.js" \
-    "/srv/node-red/osi-irrigation-policy/observations.js"
+    "$MODULE_STAGE/osi-irrigation-policy/observations.js"
 
 fetch_required "osi-irrigation-policy occurrences.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/occurrences.js" \
-    "/srv/node-red/osi-irrigation-policy/occurrences.js"
+    "$MODULE_STAGE/osi-irrigation-policy/occurrences.js"
 
 fetch_required "osi-irrigation-policy replication.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js" \
-    "/srv/node-red/osi-irrigation-policy/replication.js"
+    "$MODULE_STAGE/osi-irrigation-policy/replication.js"
 
 fetch_required "osi-irrigation-policy store.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/store.js" \
-    "/srv/node-red/osi-irrigation-policy/store.js"
+    "$MODULE_STAGE/osi-irrigation-policy/store.js"
 
 fetch_required "osi-irrigation-policy timestamps.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/timestamps.js" \
-    "/srv/node-red/osi-irrigation-policy/timestamps.js"
+    "$MODULE_STAGE/osi-irrigation-policy/timestamps.js"
 
 fetch_required "osi-valve-control package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json" \
-    "/srv/node-red/osi-valve-control/package.json"
+    "$MODULE_STAGE/osi-valve-control/package.json"
 
 fetch_required "osi-valve-control index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js" \
-    "/srv/node-red/osi-valve-control/index.js"
+    "$MODULE_STAGE/osi-valve-control/index.js"
 
 fetch_required "osi-valve-control plan.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.js" \
-    "/srv/node-red/osi-valve-control/plan.js"
+    "$MODULE_STAGE/osi-valve-control/plan.js"
 
 fetch_required "osi-valve-control ack.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.js" \
-    "/srv/node-red/osi-valve-control/ack.js"
+    "$MODULE_STAGE/osi-valve-control/ack.js"
 
 fetch_required "osi-valve-control store.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/store.js" \
-    "/srv/node-red/osi-valve-control/store.js"
+    "$MODULE_STAGE/osi-valve-control/store.js"
 
 fetch_required "osi-valve-control push.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.js" \
-    "/srv/node-red/osi-valve-control/push.js"
+    "$MODULE_STAGE/osi-valve-control/push.js"
 
 fetch_required "osi-valve-control api.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.js" \
-    "/srv/node-red/osi-valve-control/api.js"
+    "$MODULE_STAGE/osi-valve-control/api.js"
 
 fetch_required "osi-valve-control workers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js" \
-    "/srv/node-red/osi-valve-control/workers.js"
+    "$MODULE_STAGE/osi-valve-control/workers.js"
 
 # index.js require()s this at module load, so a gateway without it fails to load
 # osi-valve-control ENTIRELY -- schedules, pushes and ACKs, not just the cloud
@@ -2967,21 +2974,21 @@ fetch_required "osi-valve-control workers.js" \
 # files, only whole modules.
 fetch_required "osi-valve-control cloud-commands.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.js" \
-    "/srv/node-red/osi-valve-control/cloud-commands.js"
+    "$MODULE_STAGE/osi-valve-control/cloud-commands.js"
 
 # cloud-commands.js require()s this at module load (CANCEL_VALVE_ACTUATION applier), and
 # the "Cancel STREGA Actuation" HTTP route delegates to it too -- same missing-file failure
 # mode as cloud-commands.js above.
 fetch_required "osi-valve-control cancel.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js" \
-    "/srv/node-red/osi-valve-control/cancel.js"
+    "$MODULE_STAGE/osi-valve-control/cancel.js"
 
 # index.js require()s this at module load too -- same missing-file failure mode as
 # cloud-commands.js and cancel.js above: a gateway without it fails to load
 # osi-valve-control ENTIRELY.
 fetch_required "osi-valve-control runtime.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.js" \
-    "/srv/node-red/osi-valve-control/runtime.js"
+    "$MODULE_STAGE/osi-valve-control/runtime.js"
 
 # index.js require()s this at module load as well (the device-unclaim plan clearing, F104)
 # -- same missing-file failure mode again. Without it a gateway keeps the old behaviour of
@@ -2989,50 +2996,50 @@ fetch_required "osi-valve-control runtime.js" \
 # to load osi-valve-control at all.
 fetch_required "osi-valve-control unclaim.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.js" \
-    "/srv/node-red/osi-valve-control/unclaim.js"
+    "$MODULE_STAGE/osi-valve-control/unclaim.js"
 
 fetch_required "osi-valve-control dispatch.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/dispatch.js" \
-    "/srv/node-red/osi-valve-control/dispatch.js"
+    "$MODULE_STAGE/osi-valve-control/dispatch.js"
 
 # index.js exposes the shared STREGA claim transaction seam used by both local
 # and cloud REGISTER_DEVICE adapters. Without this module the helper package
 # fails to load at startup, leaving both registration paths unavailable.
 fetch_required "osi-valve-control claim.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/claim.js" \
-    "/srv/node-red/osi-valve-control/claim.js"
+    "$MODULE_STAGE/osi-valve-control/claim.js"
 
 fetch_required "osi-valve-control effects.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects.js" \
-    "/srv/node-red/osi-valve-control/effects.js"
+    "$MODULE_STAGE/osi-valve-control/effects.js"
 
 fetch_required "osi-valve-control live-authorize.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-authorize.js" \
-    "/srv/node-red/osi-valve-control/live-authorize.js"
+    "$MODULE_STAGE/osi-valve-control/live-authorize.js"
 
 fetch_required "osi-valve-control live-telemetry.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-telemetry.js" \
-    "/srv/node-red/osi-valve-control/live-telemetry.js"
+    "$MODULE_STAGE/osi-valve-control/live-telemetry.js"
 
 fetch_required "osi-valve-control live-transport.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-transport.js" \
-    "/srv/node-red/osi-valve-control/live-transport.js"
+    "$MODULE_STAGE/osi-valve-control/live-transport.js"
 
 fetch_required "osi-valve-control live-wrappers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js" \
-    "/srv/node-red/osi-valve-control/live-wrappers.js"
+    "$MODULE_STAGE/osi-valve-control/live-wrappers.js"
 
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
-    "/srv/node-red/osi-system-settings/package.json"
+    "$MODULE_STAGE/osi-system-settings/package.json"
 
 fetch_required "osi-system-settings index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/index.js" \
-    "/srv/node-red/osi-system-settings/index.js"
+    "$MODULE_STAGE/osi-system-settings/index.js"
 
 fetch_required "osi-system-settings api.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/api.js" \
-    "/srv/node-red/osi-system-settings/api.js"
+    "$MODULE_STAGE/osi-system-settings/api.js"
 
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
@@ -3074,6 +3081,35 @@ fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
+# module payload staging begin
+# The helper modules above went into payloads/$DEPLOY_STAMP/modules/; the
+# runtime package files, edge-channels.json and the codecs stay in place.
+# Seal the module set, keep a copy of each live module it replaces with the
+# previous payload (on the first deploy with this layout the live modules are
+# real directories), and link modules this gateway does not have yet into the
+# staged payload, because npm install needs every file: dependency on disk.
+# No module the running flows use changes here: flipTo() switches them with
+# flows.json and the GUI while Node-RED is stopped.
+echo "--- Helper modules (staged in payloads/$DEPLOY_STAMP/modules; activation deferred) ---"
+if ! swap_call sealModules "$DEPLOY_STAMP" >/dev/null; then
+    echo "ERROR: the staged helper modules are incomplete; refusing the deploy before anything is stopped" >&2
+    exit 1
+fi
+if [ -n "${PREV_STAMP:-}" ]; then
+    if ! module_capture_report="$(swap_call captureModules "$PREV_STAMP" "$DEPLOY_STAMP")"; then
+        echo "ERROR: could not keep the live helper modules with payloads/$PREV_STAMP; refusing the deploy before anything is stopped" >&2
+        exit 1
+    fi
+    [ -z "$module_capture_report" ] || printf '%s\n' "$module_capture_report"
+fi
+if ! module_link_report="$(swap_call linkNewModules "$DEPLOY_STAMP" "${PREV_STAMP:-}")"; then
+    echo "ERROR: could not link the helper modules new in this release; refusing the deploy before anything is stopped" >&2
+    exit 1
+fi
+[ -z "$module_link_report" ] || printf '%s\n' "$module_link_report"
+echo "OK: helper modules staged with payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
+# module payload staging end
+
 # issue-183 Gen2 begin
 if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
    ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
@@ -3087,7 +3123,7 @@ if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
         exit "$cs_env_rc"
     fi
     cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' "$CHIRPSTACK_ENV_FILE" | head -1 | tr -d '\r')"
-    if ENV_FILE="$CHIRPSTACK_ENV_FILE" CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" CHIRPSTACK_API_KEY="$cs_api_key" OSI_CHIRPSTACK_HELPER="$MODULE_STAGE/osi-chirpstack-helper" node /srv/node-red/chirpstack-bootstrap.js; then
         echo "OK: Gen2 profile provisioned"
     else
         cs_bootstrap_rc=$?
@@ -3129,7 +3165,7 @@ fi
 soil_profile_repair_failed=0
 if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
     echo "--- Kiwi and Clover device profiles (codec and Clover profile id) ---"
-    if ENV_FILE="$CHIRPSTACK_ENV_FILE" OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 OSI_CHIRPSTACK_HELPER="$MODULE_STAGE/osi-chirpstack-helper" node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
         echo "OK: Kiwi and Clover device profiles checked"
     else
         cs_soil_rc=$?

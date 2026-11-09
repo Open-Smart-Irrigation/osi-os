@@ -36,6 +36,7 @@ The actual guard, in `seed_db_if_missing()`:
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
 | Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
 | Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
+| Show active helper modules | `ls -l /srv/node-red/osi-lib` (symlink into `payloads/<stamp>/modules/`; every staged `osi-*` module follows the same stamp as `flows.json`) |
 | Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
@@ -111,8 +112,8 @@ dev workstation unless noted.
    migration step SKIPs, so this restart does not happen), and once in the
    health block (`--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---`):
    it flips the pair if the migration step has not already, and restarts
-   Node-RED unless it already did. The flip always switches flows.json and the
-   GUI directory together.
+   Node-RED unless it already did. The flip always switches flows.json, the
+   GUI directory and the helper-module links together.
    There is nothing left for you to restart on a normal deploy.
 
    On a passing post-flip self-check the script prints, in order:
@@ -245,13 +246,17 @@ Reading straight through the script, in order:
    a failed flip can be rolled back to it.
 5. Runs `seed_db_if_missing` — the guarded, non-destructive DB step above.
 6. Deploys the Node-RED runtime `package.json`/`package-lock.json`,
-   the full helper-module set (every `fetch_required "<name> package.json"` in
-   `deploy.sh`; list them with
-   `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `edge-channels.json`,
-   the `chirpstack-bootstrap.js` bootstrap script, every file under `codecs/`
-   that `deploy.sh` names (list them with `grep -o 'codecs/[a-z0-9_]*\.js' deploy.sh | sort -u`),
-   and the partner-institute uplink transform (`agroscope_uplink_transform.js`, an
-   edge→cloud forwarding transform, not a device decoder).
+   `edge-channels.json`, the `chirpstack-bootstrap.js` bootstrap script, every
+   file under `codecs/` that `deploy.sh` names (list them with
+   `grep -o 'codecs/[a-z0-9_]*\.js' deploy.sh | sort -u`), and the
+   partner-institute uplink transform (`agroscope_uplink_transform.js`, an
+   edge→cloud forwarding transform, not a device decoder). These are written in
+   place. The helper-module set (every `fetch_required "<name> package.json"`
+   in `deploy.sh`; list them with
+   `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`) is not: it goes
+   into `payloads/<stamp>/modules/`, and the running flows keep their modules
+   until the flip (see "Helper modules in the payload" below,
+   `--- Helper modules (staged in payloads/<stamp>/modules; activation deferred) ---`).
 7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting
    non-zero on failure.
 8. Runs `run_schema_migration()`: **SKIPs entirely** if `/data/db/farming.db`
@@ -278,8 +283,9 @@ Reading straight through the script, in order:
    territory; this section only covers what `deploy.sh` does mechanically to
    fetch and invoke them.
 9. Fixes mosquitto file ownership/permissions if mosquitto is installed.
-10. Flips the payload live (`flipTo(<new stamp>)`: flows.json and the GUI
-    directory together; skipped when the migration step already activated it),
+10. Flips the payload live (`flipTo(<new stamp>)`: flows.json, the GUI
+    directory and the helper-module links together; skipped when the
+    migration step already activated it),
     writes the new `firmware_version` to UCI (every switch back to the previous
     payload puts the old value back first), restarts Node-RED unless the
     migration step did, then probes `http://127.0.0.1:1880/gui` with
@@ -289,7 +295,7 @@ Reading straight through the script, in order:
     `OK: committing payload <stamp>` and prunes old payload directories to
     `PAYLOAD_KEEP_N` (default 5). On fail: prints
     `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
-    flips back to the previous stamp (flows and GUI together), restarts
+    flips back to the previous stamp (flows, GUI and modules together), restarts
     Node-RED on the last-known-good pair, prints
     `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
     notes that a committed DB migration is **not** auto-undone (DD10 — see
@@ -325,7 +331,10 @@ download or verification of the migration runner, an uncreatable migration
 backup directory, or an unreadable database size (refused before Node-RED is
 stopped); a failed ledger-reconciliation download or probe (the previous
 payload is restarted); a failed command-ledger staging run (before anything is
-stopped); a failed command-ledger activation after the migration (see below);
+stopped); a staged helper-module set that cannot be sealed, or a live helper
+module that changed after an earlier attempt captured it (both before anything
+is stopped, see "Helper modules in the payload"); a failed command-ledger
+activation after the migration (see below);
 and a failed post-flip self-check, which either auto-rolls back the flows+GUI
 pair and exits 1, or — when there is no previous payload — removes the
 first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
@@ -358,6 +367,67 @@ Every later deploy reads the marker before its first fetch:
 
 Way out: re-run the deploy. If it fails again, the load error printed by the
 installer or the probe names the cause.
+
+### Helper modules in the payload
+
+Since #603 each `osi-*` helper module that `deploy.sh` fetches lands in
+`/srv/node-red/payloads/<stamp>/modules/<module>/`, and
+`/srv/node-red/<module>` is a symlink into the active payload.
+`payloads/<stamp>/modules.json` lists the payload's module set. Every switch
+of `flows.json` and the GUI switches these links in the same `flipTo()` call,
+while Node-RED is stopped, so the self-check rollback, the restart of the
+previous payload after a failed migration step and the first-deploy cleanup
+all restore (or remove) the modules with the flows. `node_modules/<module>`
+stays `../<module>`, so function-node `libs` follow the link.
+
+Not in the payload: `osi-command-ledger` and `osi-watermark-binding` keep
+their own staged activation after the migration commit (above), and
+`package.json`, `package-lock.json`, `edge-channels.json`, the codecs and
+`chirpstack-bootstrap.js` are still written in place. Each payload's
+`modules/` links back to the ledger pair, `codecs/` and `edge-channels.json`,
+because payload modules reach them through `../` paths (for example
+`osi-sdi12-normalize` requires `../edge-channels.json`). The Gen2 provisioning and the Kiwi/Clover repair that
+`deploy.sh` runs before the flip load the staged `osi-chirpstack-helper`
+(`OSI_CHIRPSTACK_HELPER`).
+
+The block after the module fetches does three things, all before Node-RED is
+stopped:
+
+- seals the staged set (a module without `package.json` refuses the deploy);
+- copies each live module the new set replaces into the previous payload,
+  with its digest in that payload's `modules.json`
+  (`OK: captured <module> into payloads/<prev>/modules/<module>`). On the
+  first deploy with this layout every live module is a real directory, so
+  this is where the rollback copy of the running modules comes from. After
+  a sysupgrade the GUI link is gone, so the previous payload is a new
+  `<stamp>-previous` capture with no module set, and the linked modules its
+  flows run are copied the same way. A retry checks the live directory
+  against the recorded digest and refuses with
+  `refusing to recapture changed live module <module>` if it changed,
+  for example after an older `deploy.sh` wrote into it. Stop there and
+  escalate; do not edit `payloads/` by hand;
+- links each module the gateway does not have yet into the staged payload
+  (`OK: linked <module> -> payloads/<stamp>/modules/<module>`), because
+  `npm install` needs every `file:` dependency on disk. A switch back to the
+  previous payload removes that link again.
+
+The image seed (`98_osi_node_red_seed`) copies a module from the image only
+where `/srv/node-red/<module>` is not a symlink, so a sysupgrade keeps the
+deployed flows and modules together. Each retained payload carries its module
+copy: about 3 MB staged, up to about 5 MB for a capture of seed-installed
+modules (they include test files), times `PAYLOAD_KEEP_N`.
+
+**Deploying with an older `deploy.sh`.** A `deploy.sh` from before #603
+writes the modules in place before the stop and never puts them back. On a
+v0.8.1 gateway, if such a deploy exits 1 after
+`OK: rollback Node-RED readiness confirmed`, or exits 1 anywhere before
+`--- Stop Node-RED for schema migration ---`, re-run the deploy before you
+leave the site. In the first case Node-RED already runs the v0.8.1 flows on
+the new modules at migration head 70; valve plan pushes, ACKs, one-time opens
+and zone-plot journal entries fail until the deploy completes. In the second
+case the next restart (reboot, power loss) produces the same state. The
+readiness check passes in both, because it only looks at the service and
+`/gui`.
 
 ### Private branch deployments
 

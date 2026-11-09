@@ -76,6 +76,13 @@ const path = require('path');
 const { execSync, execFileSync } = require('child_process');
 
 function loadChirpStackHelper() {
+  // deploy.sh stages the helper modules in the new payload and switches
+  // /srv/node-red/<module> only after the schema migration. It names the
+  // staged copy here so the provisioning it runs before that switch uses the
+  // helper this deploy ships; no other candidate is tried then.
+  if (process.env.OSI_CHIRPSTACK_HELPER) {
+    return require(path.resolve(process.env.OSI_CHIRPSTACK_HELPER));
+  }
   const candidates = [
     '/srv/node-red/node_modules/osi-chirpstack-helper',
     '/srv/node-red/osi-chirpstack-helper',

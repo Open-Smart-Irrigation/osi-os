@@ -1055,11 +1055,14 @@ if (process.geteuid() !== 0) {
       const script = [
         'set -eu',
         'CHIRPSTACK_ENV_FILE=' + JSON.stringify(canonical),
+        // deploy.sh sets this at the top; the bootstrap loads the staged helper (#603).
+        'MODULE_STAGE=' + JSON.stringify(path.join(fx.dir, 'payloads', 'stage', 'modules')),
         'MIGRATION_MARKER=' + JSON.stringify(path.join(fx.dir, 'migration')),
         'export CHIRPSTACK_ENV_FILE MIGRATION_MARKER',
         'SECURE_COUNT=0',
         'node() {',
         '  printf "%s|%s\\n" "$ENV_FILE" "$*" >> "$COMMAND_LOG"',
+        '  [ -z "${OSI_CHIRPSTACK_HELPER:-}" ] || printf "%s|%s\\n" "$*" "$OSI_CHIRPSTACK_HELPER" >> "$COMMAND_LOG.helper"',
         '  case "$*" in',
         '    *--secure-env-file*) SECURE_COUNT=$((SECURE_COUNT + 1)); if [ "$SECURE_FAIL_AT" -eq "$SECURE_COUNT" ]; then return "$SECURE_STATUS"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE" --secure-env-file ;;',
         '    *--repair-soil-profiles*) if [ "$REMOVE_TARGET_BEFORE_BOOTSTRAP" = 1 ]; then rm -f "$CHIRPSTACK_ENV_FILE"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE" --repair-soil-profiles $SOIL_EXTRA_ARGS ;;',
@@ -1136,6 +1139,11 @@ if (process.geteuid() !== 0) {
           const backup = run.canonical + '.pre-gen2';
           assert.deepEqual(fs.readFileSync(backup), Buffer.from(initial));
           assert.equal(mode(backup), 0o600);
+          const staged = path.join(fx.dir, 'payloads', 'stage', 'modules', 'osi-chirpstack-helper');
+          assert.deepEqual(fs.readFileSync(run.log + '.helper', 'utf8').trim().split('\n'), [
+            '/srv/node-red/chirpstack-bootstrap.js|' + staged,
+            '/srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles|' + staged
+          ], 'Gen2 provisioning and the soil repair load the staged helper');
         }
       } finally { clean(fx); }
     }

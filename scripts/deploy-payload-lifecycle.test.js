@@ -47,9 +47,11 @@ export BASE SWAP_ROOT SWAP_JS
 ${fetchFunctions}
 ${swapCallFunction()}
 ${setup}
+swap_call stagePayload incoming ${JSON.stringify(incomingFlows)} ${JSON.stringify(incomingGui)} >/dev/null
+fetch_required "osi-watermark-helper package.json" "package.json" ${JSON.stringify(path.join(path.dirname(receiverTarget), 'package.json'))}
 fetch_required "osi-watermark-helper commands.js" "commands.js" ${JSON.stringify(receiverTarget)}
 cmp ${JSON.stringify(receiverSource)} ${JSON.stringify(receiverTarget)}
-swap_call stagePayload incoming ${JSON.stringify(incomingFlows)} ${JSON.stringify(incomingGui)} >/dev/null
+swap_call sealModules incoming >/dev/null
 swap_call flipTo incoming ${JSON.stringify(path.join(root, 'gui'))} >/dev/null
 printf '%s\\n' activated > ${JSON.stringify(path.join(root, 'activation-marker'))}
 `;
@@ -62,9 +64,12 @@ test('the same receiver fetch/stage/flip harness handles present and missing inp
     const sourceGui = path.join(root, 'source-gui');
     const guiRoot = path.join(root, 'gui');
     const receiverSource = path.join(source, 'commands.js');
-    const receiverTarget = path.join(root, 'osi-watermark-helper', 'commands.js');
+    // deploy.sh fetches the receiver with the other helper-module files into
+    // the staged payload ($MODULE_STAGE); the flip activates it with the flows.
+    const receiverTarget = path.join(root, 'payloads', 'incoming', 'modules', 'osi-watermark-helper', 'commands.js');
     const incomingFlows = path.join(root, 'incoming-flows.json');
     fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(source, 'package.json'), '{"name":"osi-watermark-helper","main":"index.js"}\n');
     fs.mkdirSync(sourceGui, { recursive: true });
     fs.writeFileSync(path.join(sourceGui, 'index.html'), `<title>${present ? 'incoming' : 'unused'}</title>\n`);
     fs.writeFileSync(incomingFlows, JSON.stringify([{ id: 'incoming-activation' }]) + '\n');
@@ -87,6 +92,8 @@ cp ${JSON.stringify(path.join(guiRoot, 'index.html'))} ${JSON.stringify(path.joi
         assert.equal(result.status, 0, result.stderr || result.stdout);
         assert.equal(fs.readFileSync(path.join(root, 'activation-marker'), 'utf8'), 'activated\n');
         assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'flows.json'), 'utf8')), [{ id: 'incoming-activation' }]);
+        assert.equal(fs.readFileSync(path.join(root, 'osi-watermark-helper', 'commands.js'), 'utf8'), 'required receiver bytes\n',
+          'the receiver is live through the module link once the flows are');
       } else {
         assert.notEqual(result.status, 0, 'missing receiver must stop the identical harness before activation');
         assert.equal(fs.existsSync(path.join(root, 'activation-marker')), false);
@@ -527,6 +534,380 @@ test('failure after a no-op migration restores and restarts the previous compati
   try {
     assert.equal(result.status, 0, `no-op fallback failed: stdout=${result.stdout}\nstderr=${result.stderr}`);
     assert.match(result.stdout, /no-op-fallback-proven/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Issue #603: the helper modules ride in the payload. These fixtures model a
+// v0.8.1 gateway (flows+GUI already a payload with recorded compatibility,
+// helper modules as real directories under /srv/node-red, node_modules links
+// from npm) and run deploy.sh's own module staging block, exit handler and
+// rollback helpers against it.
+function moduleDeployScript(root, dbPath, guiRoot, scenario) {
+  const identity = fragment('# identityd deploy lifecycle begin\n', '# identityd deploy lifecycle end');
+  const payload = fragment('# deploy payload lifecycle begin\n', '# deploy payload lifecycle end');
+  const staging = fragment('# module payload staging begin\n', '# module payload staging end');
+  const nodeInit = path.join(root, 'node-init');
+  return `set -eu
+SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+PAYLOADS_ROOT="$SWAP_ROOT/payloads"
+DB_PATH=${JSON.stringify(dbPath)}
+GUI_ROOT=${JSON.stringify(guiRoot)}
+TMP_DIR=${JSON.stringify(root)}
+migrations_dir=${JSON.stringify(path.join(REPO, 'database/migrations/ordered'))}
+NODE_RED_INIT=${JSON.stringify(nodeInit)}
+IDENTITYD_LOCK_PATH=${JSON.stringify(path.join(root, 'identityd.lock'))}
+SERVICE_STATE_FILE=${JSON.stringify(path.join(root, 'identityd.state'))}
+NODE_RED_STATE_FILE=${JSON.stringify(path.join(root, 'node-red.state'))}
+NODE_RED_LOG=${JSON.stringify(path.join(root, 'node-red.log'))}
+NODE_RED_HEALTH_TIMEOUT=1
+export SWAP_ROOT SWAP_JS NODE_RED_STATE_FILE NODE_RED_LOG
+${swapCallFunction()}
+${identity}
+${payload}
+wait_for_node_red_health() { echo 'OK: rollback Node-RED readiness confirmed' >&2; return 0; }
+cleanup() { :; }
+restart_node_red() {
+  [ "$node_red_restart_needed" = 1 ] || return 0
+  "$NODE_RED_INIT" start; node_red_restart_needed=0
+}
+node_red_service_state() { [ "$(cat "$NODE_RED_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] && echo running || echo stopped; }
+wait_for_node_red_stop() { [ "$(cat "$NODE_RED_STATE_FILE")" = 0 ]; }
+identityd_service() {
+  case "$1" in
+    running) [ "$(cat "$SERVICE_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] ;;
+    stop) echo 0 > "$SERVICE_STATE_FILE"; rm -f "$IDENTITYD_LOCK_PATH" ;;
+    start) echo 1 > "$SERVICE_STATE_FILE" ;;
+    ready) [ "$(cat "$SERVICE_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] ;;
+    *) return 0 ;;
+  esac
+}
+identityd_sleep() { :; }
+cat > "$NODE_RED_INIT" <<'NODEINIT'
+#!/bin/sh
+echo "$1" >> "$NODE_RED_LOG"
+case "$1" in stop) echo 0 > "$NODE_RED_STATE_FILE" ;; restart|start) echo 1 > "$NODE_RED_STATE_FILE" ;; esac
+NODEINIT
+chmod 755 "$NODE_RED_INIT"
+echo 1 > "$SERVICE_STATE_FILE"
+echo 1 > "$NODE_RED_STATE_FILE"
+write_module() {
+  mkdir -p "$1"
+  printf '{"name":"%s","version":"1.0.0","main":"index.js"}\\n' "$(basename "$1")" > "$1/package.json"
+  printf 'exports.marker = "%s";\\n' "$2" > "$1/index.js"
+}
+# The v0.8.1 gateway.
+sqlite3 "$DB_PATH" "CREATE TABLE schema_migrations(version INTEGER, checksum TEXT, status TEXT); INSERT INTO schema_migrations VALUES (70, 'v081', 'applied');"
+mkdir -p "$SWAP_ROOT/src-old-gui" "$SWAP_ROOT/osi-command-ledger" "$SWAP_ROOT/node_modules"
+printf '%s\\n' old > "$SWAP_ROOT/old-flows.json"
+printf '%s\\n' old > "$SWAP_ROOT/src-old-gui/index.html"
+swap_call stagePayload old "$SWAP_ROOT/old-flows.json" "$SWAP_ROOT/src-old-gui" >/dev/null
+swap_call writeCompatibility old 70 70:v081 >/dev/null
+swap_call flipTo old "$GUI_ROOT" >/dev/null
+write_module "$SWAP_ROOT/osi-a" a@v081
+write_module "$SWAP_ROOT/osi-b" b@v081
+for module in osi-a osi-b; do ln -s "../$module" "$SWAP_ROOT/node_modules/$module"; done
+stage_new_deploy() {
+  DEPLOY_STAMP="$1"
+  MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+  PREV_STAMP="$(swap_call currentStamp || true)"
+  mkdir -p "$SWAP_ROOT/src-new-gui"
+  printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+  printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+  # What the fetch_required block writes.
+  write_module "$MODULE_STAGE/osi-a" "a@$DEPLOY_STAMP"
+  write_module "$MODULE_STAGE/osi-b" "b@$DEPLOY_STAMP"
+  write_module "$MODULE_STAGE/osi-c" "c@$DEPLOY_STAMP"
+${staging}
+  # npm install links the new file: dependency.
+  [ -L "$SWAP_ROOT/node_modules/osi-c" ] || ln -s ../osi-c "$SWAP_ROOT/node_modules/osi-c"
+  PAYLOAD_FLIPPED=0
+  DB_MIGRATION_COMMITTED=0
+  ROLLBACK_RESTORED=0
+  node_red_restart_needed=0
+}
+# Node-RED stopped for the migration, as run_schema_migration does.
+stop_for_migration() { node_red_restart_needed=1; "$NODE_RED_INIT" stop; }
+commit_migration() { sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (78, 'main', 'applied');"; DB_MIGRATION_COMMITTED=1; }
+flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; PAYLOAD_FLIPPED=1; }
+quiesce_identityd_for_deploy
+${scenario}
+`;
+}
+
+function runModuleDeploy(scenario) {
+  const root = fakeRoot();
+  const dbPath = path.join(root, 'farming.db');
+  const guiRoot = path.join(root, 'gui');
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh
+case "$1" in
+  *verify-head-cli.js) exit 0 ;;
+  *) exec ${nodePathForShell()} "$@" ;;
+esac
+`, { mode: 0o755 });
+  const result = spawnSync('sh', ['-c', moduleDeployScript(root, dbPath, guiRoot, scenario)], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  const markers = (via = '') => {
+    const out = spawnSync(process.execPath, ['-e', `
+      const path = require('path'); const out = {};
+      for (const name of ['osi-a', 'osi-b', 'osi-c']) {
+        try { out[name] = require(path.join(process.argv[1], process.argv[2], name)).marker; }
+        catch (error) { out[name] = error.code; }
+      }
+      process.stdout.write(JSON.stringify(out));
+    `, root, via], { encoding: 'utf8' });
+    assert.equal(out.status, 0, out.stderr);
+    return JSON.parse(out.stdout);
+  };
+  const state = (file) => fs.readFileSync(path.join(root, file), 'utf8').trim();
+  const nodeRedLog = () => (fs.existsSync(path.join(root, 'node-red.log')) ? state('node-red.log').split('\n') : []);
+  return { root, guiRoot, result, markers, state, nodeRedLog, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+test('module staging leaves the running modules alone; a successful deploy switches them with flows', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy new
+[ -d "$SWAP_ROOT/osi-a" ] && [ ! -L "$SWAP_ROOT/osi-a" ]
+cp "$SWAP_ROOT/osi-a/index.js" "$SWAP_ROOT/a-before-flip.js"
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+swap_call verifyPair new "$GUI_ROOT"
+printf '%s\\n' deployed
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /OK: captured osi-a into payloads\/old\/modules\/osi-a/);
+    assert.match(run.result.stdout, /OK: linked osi-c -> payloads\/new\/modules\/osi-c \(absent before this deploy\)/);
+    assert.match(run.result.stdout, /deployed/);
+    assert.equal(run.state('a-before-flip.js'), 'exports.marker = "a@v081";', 'the running flows keep their modules until the flip');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' });
+    assert.deepEqual(run.markers('node_modules'), { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' });
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'new', gui: 'new', compatible: true });
+    assert.deepEqual(run.nodeRedLog(), ['stop', 'start'], 'the switch happens while Node-RED is stopped');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a failure after the stop and before the migration commit restores flows and modules', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy new
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+swap_call verifyPair old "$GUI_ROOT"
+printf '%s\\n' rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stderr, /OK: rollback Node-RED readiness confirmed/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' },
+      'v0.8.1 flows restart on the v0.8.1 modules; the module new in this release is gone');
+    assert.deepEqual(run.markers('node_modules'), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(fs.existsSync(path.join(run.root, 'payloads', 'new')), false, 'the failed payload is discarded');
+    assert.equal(run.state('node-red.state'), '1');
+    assert.deepEqual(run.nodeRedLog(), ['stop', 'restart']);
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a failure after the migration commit still refuses the old payload and keeps Node-RED stopped', () => {
+  for (const flipped of [true, false]) {
+    const run = runModuleDeploy(`
+stage_new_deploy new
+stop_for_migration
+commit_migration
+${flipped ? 'flip_new' : ': failure between the commit and the flip'}
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' held
+`);
+    try {
+      assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.match(run.result.stderr, /recorded for a different schema head\/ledger/);
+      assert.match(run.result.stderr, /keeping Node-RED stopped/);
+      assert.equal(run.state('node-red.state'), '0');
+      assert.doesNotMatch(run.result.stderr, /rollback Node-RED readiness confirmed/);
+      const expected = flipped
+        ? { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' }
+        : { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' };
+      assert.deepEqual(run.markers(), expected, 'flows and modules stay one set while held');
+      assert.equal(swap.currentStamp(run.root), flipped ? 'new' : 'old');
+    } finally {
+      run.cleanup();
+    }
+  }
+});
+
+test('the post-flip self-check rollback restores the captured modules', () => {
+  const rollback = fragment('    # payload rollback begin\n', '    # payload rollback end');
+  const run = runModuleDeploy(`
+stage_new_deploy new
+stop_for_migration
+flip_new
+restart_node_red
+MIGRATION_RUNNER_AVAILABLE=1
+trap 'deploy_exit_handler $?' EXIT
+${rollback}
+`);
+  try {
+    assert.equal(run.result.status, 1, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stderr, /ROLLED BACK: flows\+GUI -> payloads\/old/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('reruns after an early failure reuse the capture, repair stale links and refuse changed modules', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy first
+# Failure before the stop: the exit handler discards the staged payload.
+if (deploy_exit_handler 1); then exit 41; fi
+[ ! -e "$SWAP_ROOT/osi-c" ] && [ ! -L "$SWAP_ROOT/osi-c" ]
+[ ! -L "$SWAP_ROOT/osi-a" ]
+stage_new_deploy second
+# Exit before the exit handler was installed: the payload and its link stay.
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/second/modules/osi-c ]
+stage_new_deploy third
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/third/modules/osi-c ]
+printf '// changed in place\\n' >> "$SWAP_ROOT/osi-b/index.js"
+if (stage_new_deploy fourth); then exit 42; fi
+printf '%s\\n' reruns-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /reruns-ok/);
+    const captures = run.result.stdout.match(/OK: captured osi-a/g) || [];
+    assert.equal(captures.length, 1, 'later attempts reuse the first capture');
+    assert.match(run.result.stdout, /OK: relinked osi-c -> payloads\/third\/modules\/osi-c/);
+    assert.match(run.result.stderr, /refusing to recapture changed live module osi-b/);
+    assert.match(run.result.stderr, /refusing the deploy before anything is stopped/);
+    assert.equal(run.state('node-red.state'), '1', 'nothing was stopped');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'c@third' });
+  } finally {
+    run.cleanup();
+  }
+});
+
+// A sysupgrade keeps /srv (flows.json and the module links) but not the GUI
+// link under /usr/lib, so the next deploy takes the legacy capture path and
+// its previous payload has no module set of its own.
+test('after a sysupgrade the legacy capture keeps the linked modules for a rollback', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/first/modules/osi-a ]
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/first/modules/osi-c ]
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' sysupgrade-rollback-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /sysupgrade-rollback-ok/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/second-previous/);
+    assert.match(run.result.stdout, /OK: captured osi-a into payloads\/second-previous\/modules\/osi-a/);
+    assert.doesNotMatch(run.result.stdout, /relinked/, 'no live module moves to the new payload before the stop');
+    assert.match(run.result.stderr, /OK: rollback Node-RED readiness confirmed/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@first', 'osi-b': 'b@first', 'osi-c': 'c@first' },
+      'the rollback restarts the deployed flows on the modules they ran with');
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'second-previous', gui: 'second-previous', compatible: true });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// Stages the real module files the way deploy.sh fetches them, flips, and
+// requires every staged entry point and file through /srv/node-red/<module>
+// and node_modules/<module>. Each must load exactly as it does from the repo
+// tree; a '../<name>' that misses inside payloads/<stamp>/modules/ shows up
+// here as MODULE_NOT_FOUND.
+test('every shipped helper module loads through the payload links as it does from the repo', () => {
+  const NODE_RED = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red';
+  const root = fakeRoot();
+  try {
+    const fetch = new RegExp(String.raw`"${NODE_RED}/([^"]+)" \\\n\s+"([^"]+)"`, 'g');
+    for (const [, rel, destination] of DEPLOY.matchAll(fetch)) {
+      let target = null;
+      if (destination.startsWith('$MODULE_STAGE/')) target = path.join(root, 'payloads', 'S', 'modules', destination.slice('$MODULE_STAGE/'.length));
+      else if (destination.startsWith('$COMMAND_LEDGER_STAGE/')) target = path.join(root, destination.slice('$COMMAND_LEDGER_STAGE/'.length));
+      else if (destination.startsWith('/srv/node-red/')) target = path.join(root, destination.slice('/srv/node-red/'.length));
+      if (!target) continue;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(REPO, NODE_RED, rel), target);
+    }
+    swap.stagePayload(root, 'S', flows(root, 'S'));
+    const names = swap.sealModules(root, 'S');
+    swap.flipTo(root, 'S');
+    fs.mkdirSync(path.join(root, 'node_modules'));
+    for (const entry of fs.readdirSync(path.join(REPO, NODE_RED, 'node_modules'))) {
+      if (!entry.startsWith('osi-')) fs.symlinkSync(fs.realpathSync(path.join(REPO, NODE_RED, 'node_modules', entry)), path.join(root, 'node_modules', entry));
+    }
+    for (const name of names) fs.symlinkSync(path.join('..', name), path.join(root, 'node_modules', name));
+    const entries = [];
+    for (const name of names) {
+      entries.push(name);
+      for (const file of fs.readdirSync(path.join(root, 'payloads', 'S', 'modules', name))) {
+        if (file.endsWith('.js') || file.endsWith('.json')) entries.push(path.join(name, file));
+      }
+    }
+    const loadAll = (base, list = entries) => {
+      const result = spawnSync(process.execPath, ['-e', `
+        const path = require('path'); const out = {};
+        for (const entry of JSON.parse(process.argv[2])) {
+          try { require(path.join(process.argv[1], entry)); out[entry] = 'ok'; }
+          catch (error) { out[entry] = (error.code || 'error') + ': ' + String(error.message).split('\\n')[0]; }
+        }
+        process.stdout.write(JSON.stringify(out));
+        process.exit(0);
+      `, base, JSON.stringify(list)], { encoding: 'utf8', env: { ...process.env, OSI_LIB_BASE: base } });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    const staged = loadAll(root);
+    const viaNodeModules = loadAll(path.join(root, 'node_modules'), names);
+    const repo = loadAll(path.join(REPO, NODE_RED));
+    assert.ok(names.length >= 44 && entries.length > 150, `staged ${names.length} modules, ${entries.length} entries`);
+    assert.ok(names.includes('osi-journal') && names.includes('osi-sdi12-normalize'));
+    const differ = entries.filter((entry) => staged[entry] !== repo[entry]).map((entry) => `${entry}: ${staged[entry]} (repo: ${repo[entry]})`)
+      .concat(names.filter((name) => viaNodeModules[name] !== repo[name]).map((name) => `node_modules/${name}: ${viaNodeModules[name]} (repo: ${repo[name]})`));
+    assert.deepEqual(differ, []);
+    assert.ok(Object.values(repo).filter((value) => value === 'ok').length > 150, 'the comparison must exercise loadable modules');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
