@@ -43,6 +43,9 @@ const NAME_TO_PATH = {
   // #521: the admin password reset, called only by scoped-admin-account-router.
   'local-password-reset': 'osi-local-password-reset',
   'rejection-recovery': 'osi-rejection-recovery',
+  // #356: the SWT query of the legacy threshold scheduler, called only by
+  // "Build mean query (last hour, all datapoints)".
+  'scheduler-mean-query': 'osi-scheduler-mean-query',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'weather-provider': 'osi-weather-provider',

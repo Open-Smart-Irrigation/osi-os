@@ -48,6 +48,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'radio',
     'rain',
     'rejection-recovery',
+    'scheduler-mean-query',
     'scope',
     'scoped-access-commands',
     'sdi12-commissioning',
@@ -77,6 +78,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['rejection-recovery'], 'osi-rejection-recovery');
   assert.equal(osiLib.NAME_TO_PATH['scope'], 'osi-scope-helper');
   assert.equal(osiLib.NAME_TO_PATH['local-password-reset'], 'osi-local-password-reset');
+  assert.equal(osiLib.NAME_TO_PATH['scheduler-mean-query'], 'osi-scheduler-mean-query');
   assert.equal(osiLib.NAME_TO_PATH['scoped-access-commands'], 'osi-scoped-access-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
