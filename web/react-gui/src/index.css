@@ -3,6 +3,12 @@
 @import "./ui-core/primitives.css";
 @config "../tailwind.config.js";
 
+/* Tailwind v4 also scans Markdown files for class candidates, so prose edits
+   to DESIGN.md must not add or drop rules in the shipped build. Keep this
+   after the @import lines: an at-rule before them makes CSS parsers drop the
+   following @imports. */
+@source not "../DESIGN.md";
+
 /* Edge-only palette: this branch's header keeps its own blue brand identity
    (AppHeader/DashboardHeader and the sensor-monitor drawers all read these
    directly), which diverges from ui-core's canonical white/glass header —
