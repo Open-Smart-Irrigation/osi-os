@@ -26,6 +26,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rejected mutation they stay queued and unsent until an operator resolves it
   (#612). 401, 403, 408, 429 and 5xx answers keep stopping the tick, and so
   does any 4xx refusal of a cutover barrier (#447).
+- `deploy.sh` no longer refuses every deploy on a legacy-capture marker whose
+  capture was pruned. It moves the marker aside and captures the live flows,
+  GUI and helper modules afresh. Before any capture it now checks that they
+  are one set, and refuses a set left half switched by a deploy cut off during
+  its switch, with or without a marker; without a marker, earlier releases
+  captured such a set as the rollback target. The same refusal follows a
+  sysupgrade with a v0.8.1 or older image on a gateway deployed with helper
+  modules in the payload, because those images copy their helpers over the
+  module links. Both checks run before any live file is replaced (#466).
 
 ---
 

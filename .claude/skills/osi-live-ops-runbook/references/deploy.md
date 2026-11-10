@@ -234,11 +234,15 @@ Reading straight through the script, in order:
    `osi-bootstrap` and enables it when it is not enabled (this also re-enables a
    service an operator disabled, and is not undone on rollback; when this deploy
    enables it on a gateway whose env file is already provisioned, it writes
-   `/etc/osi-bootstrap.done`), removes a legacy GPS sidecar service if
-   present, then fetches the deploy-payload-swap helper
-   (`scripts/deploy-payload-swap.js`) and hard-aborts if `/srv/node-red/payloads`
-   is on a different filesystem than `/srv/node-red` — the symlink flip in step
-   10 must be atomic, and a cross-filesystem rename can't guarantee that.
+   `/etc/osi-bootstrap.done`), and removes a legacy GPS sidecar service if
+   present. Before all of that, right after the native sqlite3 preflight, it
+   fetches the deploy-payload-swap helper (`scripts/deploy-payload-swap.js`),
+   hard-aborts if `/srv/node-red/payloads` is on a different filesystem than
+   `/srv/node-red` (the symlink flip in step 10 must be atomic, and a
+   cross-filesystem rename can't guarantee that), and checks that the live
+   flows, GUI and helper modules can be kept as the rollback target (see
+   "Rollback capture check"), so those refusals come before any live file
+   changes.
 4. Stages `flows.json` as a new payload directory,
    `/srv/node-red/payloads/<stamp>` (a UTC timestamp like `20260719T120000Z`),
    via `stagePayload`. The flip that makes this payload live is deferred until
@@ -331,9 +335,12 @@ download or verification of the migration runner, an uncreatable migration
 backup directory, or an unreadable database size (refused before Node-RED is
 stopped); a failed ledger-reconciliation download or probe (the previous
 payload is restarted); a failed command-ledger staging run (before anything is
-stopped); a staged helper-module set that cannot be sealed, or a live helper
-module that changed after an earlier attempt captured it (both before anything
-is stopped, see "Helper modules in the payload"); a failed command-ledger
+stopped); live flows, GUI and helper modules that cannot be kept as the
+rollback target, such as a set left half switched by a deploy cut off during
+its switch (before any live file is replaced, see "Rollback capture check"); a
+staged helper-module set that cannot be sealed, or
+a live helper module that changed after an earlier attempt captured it (both
+before anything is stopped, see "Helper modules in the payload"); a failed command-ledger
 activation after the migration (see below);
 and a failed post-flip self-check, which either auto-rolls back the flows+GUI
 pair and exits 1, or — when there is no previous payload — removes the
@@ -367,6 +374,85 @@ Every later deploy reads the marker before its first fetch:
 
 Way out: re-run the deploy. If it fails again, the load error printed by the
 installer or the probe names the cause.
+
+### Rollback capture check
+
+A deploy keeps the set it replaces as its rollback target. When the live
+`flows.json` and GUI point into one `payloads/<stamp>`, that payload is the
+target. Otherwise (a gateway the payload layout has not reached, or after a
+sysupgrade reset the GUI link) the deploy copies the live flows, GUI and
+helper modules into `payloads/<stamp>-previous` and records the flows and GUI
+digests in `payloads/.legacy-capture.json`. A retry reuses that capture. A
+committed deploy removes the marker.
+
+`deploy.sh` keeps no record of which payload committed. Right after the
+native sqlite3 preflight, before the first live file is replaced, it checks
+the live links against the payload `flows.json` points into, and then the
+marker. Each state below is a named case (`state table S1` to `S35`) in
+`scripts/deploy-payload-swap.test.js`:
+
+- not checked, as before: `flows.json` or the GUI is missing or a dangling
+  link (for example a GUI payload pruned by a v0.7.0 `deploy.sh`). The
+  capture block does not run and the deploy has no rollback target;
+- not captured: `flows.json` and the GUI point into one payload, which is
+  the rollback target. This includes a deploy cut off after its GUI switch
+  and a deploy that switched everything and lost power before its
+  self-check. A marker is left alone;
+- reused: a marker whose capture exists while the live flows and GUI match
+  it (a retry, also after a sysupgrade with the same image);
+- captured, when there is no marker, or a marker whose capture is gone
+  (pruned, or removed by an older `deploy.sh` that did not know the marker),
+  which is first moved aside with
+  `WARN: stale legacy-capture marker (payload <stamp> gone); moved to payloads/.legacy-capture.json.stale-<pid>-<ms>; recapturing`:
+  a regular `flows.json` (a fresh image, a gateway the payload layout has
+  not reached, or flows replaced by hand); `flows.json` linked into the
+  flows-only payload of a v0.7.0 `deploy.sh`, beside a GUI directory or a
+  GUI link into an older payload; `flows.json` linked into a payload without
+  `modules.json` (from before #603) beside a GUI directory; or, after a
+  sysupgrade, `flows.json` linked into a payload beside the image GUI while
+  every module in that payload's `modules.json` is a link into it or a
+  directory for which `modules.json` records a digest. A digest is recorded
+  when a deploy copies a live helper directory into the previous payload,
+  for example on a v0.8.1 gateway whose deploy failed before the stop; the
+  directory may hold the image's copy of the helper since the sysupgrade.
+  If power is lost after the marker was moved, the rerun finds no marker
+  and captures;
+- refused with `refusing to capture a half-switched state`: `flows.json`
+  and the GUI point into different payloads and the flows payload has a
+  GUI (a deploy cut off between its flows and GUI switch); `flows.json`
+  points into a payload beside a GUI directory while a module in that
+  payload's `modules.json` points into another payload, dangles, is
+  missing, or is a directory without a recorded digest (a deploy cut off
+  during its switch, seen after a sysupgrade); or a stale marker while
+  `flows.json` or the GUI points into the payload of the deploy that wrote
+  it. A sysupgrade with a v0.8.1 or older image leaves the same state on a
+  gateway deployed with helper modules in the payload, because those images
+  copy their helpers over the module links; it is refused too. Releases
+  before #466 captured these sets when no marker was present;
+- refused for other reasons: a marker whose capture exists while the live
+  flows or GUI changed
+  (`refusing to recapture changed legacy files after a prior attempt`),
+  for example after a sysupgrade with another image between a failed deploy
+  and its retry, as #466 asks; an unreadable marker; a marker that names no
+  `-previous` capture; or an unreadable `modules.json` in the payload
+  `flows.json` points into.
+
+Every refusal ends with
+`ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced`.
+No runtime file has been replaced at that point: `flows.json`, the GUI, the
+helper modules, `settings.js`, the init scripts and the identity and
+bootstrap files are as they were. The steps before the check may already
+have cleared a command-ledger hold whose pair loads again and removed a
+verified orphan sqlite3 ownership marker.
+
+On a refusal, leave the gateway as it is. Do not move the marker, relink
+`flows.json`, the GUI or a module, or restart Node-RED on an older set by
+hand: the deploy that was cut off may already have committed its schema
+migration, and old flows on a migrated schema is the failure that
+cascade-deleted `device_data` in Uganda (#222). Collect
+`ls -l /srv/node-red/flows.json /usr/lib/node-red/gui /srv/node-red/osi-*`,
+`ls -la /srv/node-red/payloads/` and, if present,
+`cat /srv/node-red/payloads/.legacy-capture.json`, then escalate.
 
 ### Helper modules in the payload
 
@@ -413,7 +499,9 @@ stopped:
 
 The image seed (`98_osi_node_red_seed`) copies a module from the image only
 where `/srv/node-red/<module>` is not a symlink, so a sysupgrade keeps the
-deployed flows and modules together. Each retained payload carries its module
+deployed flows and modules together. Images up to v0.8.1 copy their helpers
+over the links too; the next deploy then refuses (see "Rollback capture
+check"). Each retained payload carries its module
 copy: about 3 MB staged, up to about 5 MB for a capture of seed-installed
 modules (they include test files), times `PAYLOAD_KEEP_N`.
 

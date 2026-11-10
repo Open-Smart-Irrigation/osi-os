@@ -624,6 +624,95 @@ function legacyCaptureStamp(root, flowsPath, guiRoot) {
   return existing.stamp;
 }
 
+// Why the live flows, GUI and helper modules are not one set, or null.
+// deploy.sh records no committed payload, so the live links are checked
+// against the payload the flows point into. flipTo() switches flows first,
+// then the GUI, then each module in that payload's modules.json, and
+// restoreSwitched() puts them back in reverse order, so an interrupted switch
+// leaves flows linked into a payload that the GUI or one of those modules
+// does not point into. What no switch leaves behind is one set:
+// - a regular flows file: no switch is under way;
+// - a regular GUI directory: a sysupgrade keeps /srv but replaces the GUI
+//   link with the image GUI, and an older deploy.sh wrote the GUI in place;
+// - a GUI link into another payload while the flows payload has no gui/:
+//   flipTo() never switches flows into a payload without a GUI, only the
+//   flows-only switch of a v0.7.0 deploy.sh does;
+// - a payload without modules.json (from before #603): its flows run the live
+//   module directories;
+// - a module that is a directory, not a link into a payload, with a digest in
+//   modules.json: captureModules() copied it from the live directory these
+//   flows were already running on, and no switch turns a link back into a
+//   directory. A sysupgrade may have copied the image's helper over it since;
+//   the capture block copies it as it is now.
+// A module modules.json lists without a digest was sealed with the payload,
+// and a switch into the payload links it there.
+function halfSwitchedReason(root, flows, gui) {
+  if (!flows) return null;
+  if (gui && gui !== flows && isDirectory(guiPayloadDir(root, flows))) {
+    return `the live flows point into payloads/${flows} but the GUI into payloads/${gui}`;
+  }
+  const manifest = readModuleManifest(root, flows);
+  if (!manifest) return null;
+  const stray = manifest.modules.filter((name) => {
+    const present = isDirectory(moduleLink(root, name));
+    const linked = moduleLinkStamp(root, name);
+    if (linked !== null) return linked !== flows || !present;
+    return manifest.captured[name] === undefined || !present;
+  });
+  if (!stray.length) return null;
+  return `the live flows point into payloads/${flows}, but its helper modules ${stray.join(', ')} are not linked into it`;
+}
+
+// deploy.sh calls this before it replaces any live file. When the live flows
+// and GUI are not one payload, the capture block further down keeps them, and
+// the live helper modules, as the rollback target. This decides first:
+// - a legacy-capture marker whose capture exists is reused when the live files
+//   match and refused when they changed;
+// - a marker whose capture directory is gone (pruned, or removed by a
+//   deploy.sh that did not know the marker) guards nothing and is moved aside,
+//   so the capture block starts fresh;
+// - a fresh capture is refused when the live set is half switched
+//   (halfSwitchedReason), whichever deploy attempt switched it.
+// Returns the line deploy.sh prints, or null.
+const PREVIOUS_SUFFIX = '-previous';
+
+function legacyCapturePreflight(root, flowsPath, guiRoot) {
+  // The condition under which deploy.sh's capture block runs.
+  if (!isFile(flowsPath) || !isDirectory(guiRoot)) return null;
+  const flows = currentStamp(root);
+  const gui = guiStamp(root, guiRoot);
+  if (flows && flows === gui) return null;
+  const marker = legacyCapturePath(root);
+  let stamp = null;
+  if (fs.existsSync(marker)) {
+    let existing;
+    try { existing = JSON.parse(fs.readFileSync(marker, 'utf8')); }
+    catch (error) { throw new Error(`legacyCapturePreflight: legacy evidence is unreadable: ${error.message}`); }
+    stamp = existing ? existing.stamp : undefined;
+    if (!existing || existing.format !== 1 || typeof stamp !== 'string' || !stamp ||
+        stamp.includes('/') || stamp.startsWith('.')) {
+      throw new Error('legacyCapturePreflight: refusing to recapture changed legacy files after a prior attempt');
+    }
+    if (isDirectory(payloadDir(root, stamp))) {
+      legacyCaptureStamp(root, flowsPath, guiRoot);
+      return null;
+    }
+    const attempt = stamp.endsWith(PREVIOUS_SUFFIX) ? stamp.slice(0, -PREVIOUS_SUFFIX.length) : '';
+    if (!attempt) {
+      throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and no deploy attempt can be read from it; refusing recapture`);
+    }
+    if (flows === attempt || gui === attempt) {
+      throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and the live ${flows === attempt ? 'flows' : 'GUI'} point into payloads/${attempt} from the deploy that wrote it; refusing to capture a half-switched state`);
+    }
+  }
+  const reason = halfSwitchedReason(root, flows, gui);
+  if (reason) throw new Error(`legacyCapturePreflight: ${reason}; refusing to capture a half-switched state`);
+  if (stamp === null) return null;
+  const aside = `${marker}.stale-${process.pid}-${Date.now()}`;
+  fs.renameSync(marker, aside);
+  return `WARN: stale legacy-capture marker (payload ${stamp} gone); moved to payloads/${path.basename(aside)}; recapturing`;
+}
+
 function clearLegacyCapture(root) {
   fs.rmSync(legacyCapturePath(root), { force: true });
 }
@@ -752,6 +841,7 @@ module.exports = {
   captureGui,
   captureExisting,
   legacyCaptureStamp,
+  legacyCapturePreflight,
   clearLegacyCapture,
   verifyPair,
   writeCompatibility,

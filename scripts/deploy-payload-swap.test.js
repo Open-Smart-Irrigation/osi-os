@@ -13,6 +13,7 @@ const {
   captureGui,
   captureExisting,
   legacyCaptureStamp,
+  legacyCapturePreflight,
   clearLegacyCapture,
   verifyPair,
   writeCompatibility,
@@ -120,6 +121,103 @@ test('legacy capture evidence is reused and refuses changed regular files', () =
   captureExisting(root, 'legacy-second', flowsPath, guiRoot);
   fs.appendFileSync(flowsPath, 'changed\n');
   assert.throws(() => legacyCaptureStamp(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+});
+
+// A regular flows file and GUI directory, as on a gateway the payload layout
+// has not reached yet or after a sysupgrade reset the GUI link.
+function legacyRoot(t) {
+  const root = fakeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const flowsPath = path.join(root, 'flows.json');
+  const guiRoot = path.join(root, 'gui');
+  fs.writeFileSync(flowsPath, JSON.stringify([{ id: 'legacy' }]) + '\n');
+  fs.mkdirSync(guiRoot);
+  fs.writeFileSync(path.join(guiRoot, 'index.html'), '<title>legacy</title>\n');
+  const marker = path.join(root, 'payloads', '.legacy-capture.json');
+  return { root, flowsPath, guiRoot, marker };
+}
+
+test('legacyCapturePreflight moves a marker whose capture is gone aside, and the capture starts fresh', (t) => {
+  for (const changedSince of [false, true]) {
+    const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+    captureExisting(root, 'pruned-previous', flowsPath, guiRoot);
+    fs.rmSync(path.join(root, 'payloads', 'pruned-previous'), { recursive: true, force: true });
+    if (changedSince) fs.appendFileSync(flowsPath, 'deployed later\n');
+    assert.throws(() => legacyCaptureStamp(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/,
+      'the capture block alone still refuses a stale marker');
+
+    const report = legacyCapturePreflight(root, flowsPath, guiRoot);
+    assert.match(report, /^WARN: stale legacy-capture marker \(payload pruned-previous gone\); moved to payloads\/\.legacy-capture\.json\.stale-\d+-\d+; recapturing$/);
+    assert.equal(fs.existsSync(marker), false);
+    const aside = fs.readdirSync(path.join(root, 'payloads')).filter((entry) => entry.startsWith('.legacy-capture.json.stale-'));
+    assert.equal(aside.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'payloads', aside[0]), 'utf8')).stamp, 'pruned-previous');
+
+    assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), null);
+    captureExisting(root, 'new-previous', flowsPath, guiRoot);
+    assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'new-previous');
+    assert.equal(fs.readFileSync(path.join(root, 'payloads', 'new-previous', 'flows.json'), 'utf8'),
+      fs.readFileSync(flowsPath, 'utf8'), 'the fresh capture holds the live flows');
+    assert.deepEqual(prunePayloads(root, 5), { removed: [] }, 'the moved marker is not a payload');
+  }
+});
+
+test('legacyCapturePreflight reuses an existing capture and refuses when the live files changed', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'kept-previous', flowsPath, guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null);
+  assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'kept-previous');
+  fs.appendFileSync(flowsPath, 'changed\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+  assert.equal(fs.existsSync(marker), true, 'a refusal leaves the marker in place');
+});
+
+test('legacyCapturePreflight refuses a stale marker while flows point into the payload of the attempt that wrote it', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'cut-previous', flowsPath, guiRoot);
+  stagePayload(root, 'cut', fakeFlowsSrc(root, 'cut'), fakeGuiSrc(root, 'cut'));
+  // Power lost inside flipTo('cut'): flows switched, the GUI not yet.
+  fs.rmSync(flowsPath);
+  fs.symlinkSync(path.join('payloads', 'cut', 'flows.json'), flowsPath);
+  fs.rmSync(path.join(root, 'payloads', 'cut-previous'), { recursive: true, force: true });
+  const before = fs.readFileSync(marker, 'utf8');
+
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot),
+    /live flows point into payloads\/cut from the deploy that wrote it; refusing to capture a half-switched state/);
+  assert.equal(fs.readFileSync(marker, 'utf8'), before, 'the marker stays for the operator');
+});
+
+test('legacyCapturePreflight refuses a stale marker it cannot attribute and a malformed one', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'handmade', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'handmade'), { recursive: true, force: true });
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /no deploy attempt can be read from it/);
+  assert.equal(fs.existsSync(marker), true);
+
+  const evidence = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  fs.writeFileSync(marker, JSON.stringify({ ...evidence, stamp: '../outside-previous' }) + '\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+  fs.writeFileSync(marker, 'not json\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /legacy evidence is unreadable/);
+  assert.equal(fs.existsSync(marker), true);
+});
+
+test('legacyCapturePreflight leaves the marker alone when the capture block would not read it', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'no marker');
+
+  captureExisting(root, 'gone-previous', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'gone-previous'), { recursive: true, force: true });
+  const before = fs.readFileSync(marker, 'utf8');
+  // Flows and GUI already one payload: deploy.sh never consults the marker.
+  stagePayload(root, 'live', fakeFlowsSrc(root, 'live'), fakeGuiSrc(root, 'live'));
+  flipTo(root, 'live', guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'paired payload');
+  assert.equal(fs.readFileSync(marker, 'utf8'), before);
+  // No GUI directory: deploy.sh skips the retained-pair capture.
+  fs.rmSync(guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'GUI missing');
+  assert.equal(fs.readFileSync(marker, 'utf8'), before);
 });
 
 test('failed first activation explicitly removes both live links and the staged payload', () => {
@@ -670,3 +768,595 @@ test('discardPayload and deactivate remove module links into the payload; prune 
   deactivate(root, '20260501', guiRoot);
   assert.throws(() => fs.lstatSync(path.join(root, 'osi-a')), /ENOENT/);
 });
+
+// Issue #466, PR #618 review: before a fresh capture the live flows, GUI and
+// helper modules must be one set, whichever deploy attempt switched them.
+// coherentRoot() is a gateway after a committed deploy with module payloads.
+function coherentRoot(t, stamp) {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, stamp, { 'osi-a': '', 'osi-b': '' });
+  flipTo(root, stamp, guiRoot);
+  return { root, guiRoot, flowsPath: path.join(root, 'flows.json'), marker: path.join(root, 'payloads', '.legacy-capture.json') };
+}
+
+// A sysupgrade keeps /srv but replaces the GUI link with the image GUI.
+function imageGui(guiRoot) {
+  fs.rmSync(guiRoot, { recursive: true, force: true });
+  writeModule(guiRoot, 'image-gui');
+}
+
+function relink(root, name, target) {
+  fs.rmSync(path.join(root, name), { recursive: true, force: true });
+  fs.symlinkSync(target, path.join(root, name));
+}
+
+function staleMarker(marker, stamp) {
+  fs.writeFileSync(marker, JSON.stringify({ format: 1, stamp, flows_path: 'x', gui_path: 'y', flows_sha256: '0', gui_sha256: '0' }) + '\n');
+}
+
+test('legacyCapturePreflight accepts a sysupgrade beside a committed payload, a pre-#603 payload and regular flows', (t) => {
+  const committed = coherentRoot(t, 'deployed');
+  imageGui(committed.guiRoot);
+  assert.equal(legacyCapturePreflight(committed.root, committed.flowsPath, committed.guiRoot), null, 'sysupgrade, no marker');
+  staleMarker(committed.marker, 'gone-previous');
+  assert.match(legacyCapturePreflight(committed.root, committed.flowsPath, committed.guiRoot),
+    /^WARN: stale legacy-capture marker \(payload gone-previous gone\)/, 'sysupgrade, stale marker');
+
+  const older = moduleRoot(t);
+  const olderGui = path.join(older, 'gui');
+  stagePayload(older, 'older', fakeFlowsSrcAt(older, 'older'), fakeGuiSrcAt(older, 'older'));
+  fs.symlinkSync(path.join('payloads', 'older', 'flows.json'), path.join(older, 'flows.json'));
+  writeModule(olderGui, 'image-gui');
+  writeModule(path.join(older, 'osi-a'), 'osi-a@older');
+  assert.equal(legacyCapturePreflight(older, path.join(older, 'flows.json'), olderGui), null,
+    'a payload without modules.json runs the live module directories');
+
+  // Regular flows: no switch is under way, whatever the GUI links to.
+  const edited = coherentRoot(t, 'deployed');
+  fs.rmSync(edited.flowsPath);
+  fs.writeFileSync(edited.flowsPath, JSON.stringify([{ id: 'edited' }]) + '\n');
+  assert.equal(legacyCapturePreflight(edited.root, edited.flowsPath, edited.guiRoot), null, 'regular flows file');
+});
+
+test('legacyCapturePreflight refuses flows and GUI linked into different payloads', (t) => {
+  for (const marker of ['none', 'stale']) {
+    const live = coherentRoot(t, 'old');
+    stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    // Power lost inside flipTo('cut'): flows switched, the GUI and modules not.
+    relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+    if (marker === 'stale') staleMarker(live.marker, 'gone-previous');
+    const before = marker === 'stale' ? fs.readFileSync(live.marker, 'utf8') : null;
+
+    assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot),
+      /the live flows point into payloads\/cut but the GUI into payloads\/old; refusing to capture a half-switched state/, marker);
+    if (marker === 'stale') assert.equal(fs.readFileSync(live.marker, 'utf8'), before, 'the stale marker stays for the operator');
+    else assert.equal(fs.existsSync(live.marker), false, 'no marker is written');
+  }
+});
+
+test('legacyCapturePreflight refuses linked flows whose payload modules are not linked into it', (t) => {
+  const cases = {
+    'modules still in the older payload': () => {},
+    'a module is a real directory': (root) => {
+      for (const name of ['osi-a', 'osi-b']) relink(root, name, path.join('payloads', 'cut', 'modules', name));
+      fs.rmSync(path.join(root, 'osi-a'));
+      writeModule(path.join(root, 'osi-a'), 'osi-a@real');
+    },
+    'a module link dangles': (root) => {
+      for (const name of ['osi-a', 'osi-b']) relink(root, name, path.join('payloads', 'cut', 'modules', name));
+      fs.rmSync(path.join(root, 'payloads', 'cut', 'modules', 'osi-a'), { recursive: true, force: true });
+    },
+  };
+  const stray = { 'modules still in the older payload': 'osi-a, osi-b', 'a module is a real directory': 'osi-a', 'a module link dangles': 'osi-a' };
+  for (const [label, damage] of Object.entries(cases)) {
+    for (const marker of ['none', 'stale']) {
+      const live = coherentRoot(t, 'old');
+      stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+      swap.linkNewModules(live.root, 'cut', 'old');
+      imageGui(live.guiRoot);
+      // Power lost inside flipTo('cut') after a sysupgrade: flows switched.
+      relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+      damage(live.root);
+      if (marker === 'stale') staleMarker(live.marker, 'attempt-a-previous');
+
+      assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot),
+        new RegExp(`the live flows point into payloads/cut, but its helper modules ${stray[label]} are not linked into it; refusing to capture a half-switched state`),
+        `${label}, ${marker} marker`);
+      assert.equal(fs.existsSync(live.marker), marker === 'stale', `${label}, ${marker} marker: nothing moved aside`);
+      assert.equal(fs.readdirSync(path.join(live.root, 'payloads')).some((entry) => entry.startsWith('.legacy-capture.json.stale-')), false);
+    }
+  }
+});
+
+test('legacyCapturePreflight refuses a malformed module manifest in the payload the flows point into', (t) => {
+  const live = coherentRoot(t, 'old');
+  stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+  imageGui(live.guiRoot);
+  relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+  fs.writeFileSync(path.join(live.root, 'payloads', 'cut', 'modules.json'), 'not json\n');
+  assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot), /module manifest unreadable/);
+});
+
+test('legacyCapturePreflight lets a rerun capture after power loss between moving the marker aside and the capture', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'pruned-previous', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'pruned-previous'), { recursive: true, force: true });
+  assert.match(legacyCapturePreflight(root, flowsPath, guiRoot), /^WARN: stale legacy-capture marker/);
+  // Power lost here: the rerun finds no marker and the same live files.
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null);
+  assert.equal(fs.existsSync(marker), false);
+  captureExisting(root, 'rerun-previous', flowsPath, guiRoot);
+  assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'rerun-previous');
+});
+
+// Issue #466, PR #618 amendment 2: the state table of legacyCapturePreflight.
+// One named case per row (S1-S35) of the table in the PR description. Each
+// case builds the live state with the swap helper's own functions where a
+// deploy makes it, and with plain file operations where a power loss, a
+// sysupgrade, an older deploy.sh or an operator makes it, then checks the
+// verdict. A change that flips any verdict fails the case named after its row.
+const TABLE_MODULES = ['osi-a', 'osi-b'];
+
+function tableGateway(t) {
+  const root = moduleRoot(t);
+  return {
+    root,
+    guiRoot: path.join(root, 'gui'),
+    flowsPath: path.join(root, 'flows.json'),
+    marker: path.join(root, 'payloads', '.legacy-capture.json'),
+  };
+}
+
+function lstatOrNull(target) {
+  try { return fs.lstatSync(target); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+function treeText(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((entry) => {
+      const child = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) return `${entry.name}->${fs.readlinkSync(child)}`;
+      if (entry.isDirectory()) return `${entry.name}/{${treeText(child)}}`;
+      return `${entry.name}=${fs.readFileSync(child, 'utf8')}`;
+    })
+    .join(',');
+}
+
+// flows.json, the GUI and every /srv/node-red/osi-* entry, as link text or
+// content: the preflight must leave all of them as they are.
+function liveSnapshot(g) {
+  const describe = (file) => {
+    const stat = lstatOrNull(file);
+    if (!stat) return 'absent';
+    if (stat.isSymbolicLink()) return `link:${fs.readlinkSync(file)}`;
+    if (stat.isDirectory()) return `dir:${treeText(file)}`;
+    return `file:${fs.readFileSync(file, 'utf8')}`;
+  };
+  const out = { 'flows.json': describe(g.flowsPath), gui: describe(g.guiRoot) };
+  for (const entry of fs.readdirSync(g.root).sort()) {
+    if (entry.startsWith('osi-')) out[entry] = describe(path.join(g.root, entry));
+  }
+  return out;
+}
+
+function writeFlows(g, marker) {
+  fs.writeFileSync(g.flowsPath, JSON.stringify([{ id: marker }]) + '\n');
+}
+
+// A fresh image, or a gateway the payload layout has not reached: regular
+// flows and GUI, helper modules as real directories with the image's bytes.
+function freshImage(g, image = 'image') {
+  writeFlows(g, `flows@${image}`);
+  writeModule(g.guiRoot, `gui@${image}`);
+  for (const name of TABLE_MODULES) writeModule(path.join(g.root, name), `${name}@${image}`);
+}
+
+// A sysupgrade keeps /srv and puts the image GUI where the GUI link was. The
+// image seed copies its helpers over real directories; the seed from v0.8.2 on
+// leaves module links alone, older seeds replace them too.
+function sysupgrade(g, image, { oldSeed = false } = {}) {
+  fs.rmSync(g.guiRoot, { recursive: true, force: true });
+  writeModule(g.guiRoot, `gui@${image}`);
+  for (const name of TABLE_MODULES) {
+    const live = path.join(g.root, name);
+    const stat = lstatOrNull(live);
+    if (stat && stat.isSymbolicLink() && !oldSeed) continue;
+    fs.rmSync(live, { recursive: true, force: true });
+    writeModule(live, `${name}@${image}`);
+  }
+}
+
+// A v0.8.0 or v0.8.1 deploy: flows and GUI in one payload without
+// modules.json; the helper modules stay real directories.
+function pairDeploy(g, stamp) {
+  stagePayload(g.root, stamp, fakeFlowsSrcAt(g.root, stamp), fakeGuiSrcAt(g.root, stamp));
+  flipTo(g.root, stamp, g.guiRoot);
+}
+
+// A v0.7.0 deploy: a flows-only payload; the GUI and the helper modules are
+// written in place, through a GUI or module link where there is one.
+function flowsOnlyDeploy(g, stamp) {
+  stagePayload(g.root, stamp, fakeFlowsSrcAt(g.root, stamp));
+  relink(g.root, 'flows.json', path.join('payloads', stamp, 'flows.json'));
+  fs.writeFileSync(path.join(g.guiRoot, 'index.html'), `<title>${stamp}</title>\n`);
+  for (const name of TABLE_MODULES) {
+    fs.writeFileSync(path.join(g.root, name, 'index.js'), `exports.marker = ${JSON.stringify(`${name}@${stamp}`)};\n`);
+  }
+}
+
+// A deploy by this deploy.sh that committed: helper modules sealed in the
+// payload, and flows, GUI and modules switched together.
+function moduleDeploy(g, stamp) {
+  stageWithModules(g.root, stamp, { 'osi-a': '', 'osi-b': '' });
+  flipTo(g.root, stamp, g.guiRoot);
+}
+
+// A deploy that failed before Node-RED stopped: what deploy.sh does up to the
+// module staging block, then the exit handler's discardPayload. No live file
+// changes; the bookkeeping stays: a capture and its marker when flows and GUI
+// were not one payload, and captured entries in the previous payload's
+// modules.json. Returns the previous payload.
+function failedBeforeStop(g, stamp) {
+  let prev = currentStamp(g.root);
+  if (!prev || prev !== swap.guiStamp(g.root, g.guiRoot)) {
+    prev = legacyCaptureStamp(g.root, g.flowsPath, g.guiRoot);
+    if (!prev) {
+      prev = `${stamp}-previous`;
+      captureExisting(g.root, prev, g.flowsPath, g.guiRoot);
+    }
+  }
+  stageWithModules(g.root, stamp, { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+  swap.captureModules(g.root, prev, stamp);
+  swap.linkNewModules(g.root, stamp, prev);
+  discardPayload(g.root, stamp);
+  return prev;
+}
+
+function capturedEntries(g, stamp) {
+  return Object.keys(JSON.parse(fs.readFileSync(path.join(g.root, 'payloads', stamp, 'modules.json'), 'utf8')).captured).sort();
+}
+
+// Power lost inside flipTo(stamp) after `steps` links moved: flows first, then
+// the GUI, then each module of the payload's modules.json in order.
+function cutFlip(g, stamp, steps) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(g.root, 'payloads', stamp, 'modules.json'), 'utf8'));
+  const order = [
+    ['flows.json', path.join('payloads', stamp, 'flows.json')],
+    ['gui', path.join('payloads', stamp, 'gui')],
+    ...manifest.modules.map((name) => [name, path.join('payloads', stamp, 'modules', name)]),
+  ];
+  for (const [name, target] of order.slice(0, steps)) relink(g.root, name, target);
+}
+
+function prune(g, stamp) {
+  fs.rmSync(path.join(g.root, 'payloads', stamp), { recursive: true, force: true });
+}
+
+const WARN_STALE = /^WARN: stale legacy-capture marker \(payload \S+ gone\); moved to payloads\/\.legacy-capture\.json\.stale-\d+-\d+; recapturing$/;
+
+// Verdicts: SKIP (the capture block does not run; unchanged since before
+// #466), PAYLOAD (flows and GUI share a payload, which stays the rollback
+// target), REUSE (the marker's capture stays the rollback target), RECAPTURE
+// (the capture block copies the live set; a stale marker is moved aside
+// first), REFUSE (deploy.sh exits before any live file is replaced).
+function assertVerdict(g, verdict, pattern, label) {
+  const payloads = path.join(g.root, 'payloads');
+  const live = liveSnapshot(g);
+  const entriesBefore = fs.readdirSync(payloads).sort();
+  const markerBefore = fs.existsSync(g.marker) ? fs.readFileSync(g.marker, 'utf8') : null;
+  let result;
+  let error = null;
+  try { result = legacyCapturePreflight(g.root, g.flowsPath, g.guiRoot); } catch (caught) { error = caught; }
+  assert.deepEqual(liveSnapshot(g), live, `${label}: the preflight changes no live file`);
+  const entriesAfter = fs.readdirSync(payloads).sort();
+  if (verdict === 'REFUSE') {
+    assert.ok(error, `${label}: expected a refusal, got ${JSON.stringify(result)}`);
+    assert.match(error.message, pattern, label);
+    assert.deepEqual(entriesAfter, entriesBefore, `${label}: a refusal moves nothing`);
+    if (markerBefore !== null) assert.equal(fs.readFileSync(g.marker, 'utf8'), markerBefore, `${label}: marker bytes`);
+    return;
+  }
+  if (error) throw new Error(`${label}: expected ${verdict}, got ${error.message}`);
+  if (verdict === 'RECAPTURE' && markerBefore !== null) {
+    assert.match(result, WARN_STALE, label);
+    const aside = entriesAfter.filter((entry) => !entriesBefore.includes(entry));
+    assert.equal(aside.length, 1, `${label}: one marker moved aside`);
+    assert.equal(fs.readFileSync(path.join(payloads, aside[0]), 'utf8'), markerBefore, label);
+    assert.deepEqual(entriesAfter.filter((entry) => entry !== aside[0]), entriesBefore.filter((entry) => entry !== '.legacy-capture.json'), label);
+  } else {
+    assert.equal(result, null, label);
+    assert.deepEqual(entriesAfter, entriesBefore, `${label}: nothing moved`);
+    if (markerBefore !== null) assert.equal(fs.readFileSync(g.marker, 'utf8'), markerBefore, `${label}: marker bytes`);
+  }
+  const flowsFile = isFileOrDir(g.flowsPath) === 'file';
+  const guiDir = isFileOrDir(g.guiRoot) === 'dir';
+  const flows = currentStamp(g.root);
+  if (verdict === 'SKIP') assert.ok(!flowsFile || !guiDir, `${label}: the capture block does not run`);
+  if (verdict === 'PAYLOAD') assert.ok(flows && flows === swap.guiStamp(g.root, g.guiRoot), `${label}: flows and GUI share a payload`);
+  if (verdict === 'REUSE') assert.equal(legacyCaptureStamp(g.root, g.flowsPath, g.guiRoot), JSON.parse(markerBefore).stamp, label);
+  if (verdict === 'RECAPTURE') {
+    assert.ok(flowsFile && guiDir && !(flows && flows === swap.guiStamp(g.root, g.guiRoot)), `${label}: the capture block runs`);
+    assert.equal(legacyCaptureStamp(g.root, g.flowsPath, g.guiRoot), null, `${label}: no marker is reused`);
+  }
+}
+
+function isFileOrDir(target) {
+  try {
+    const stat = fs.statSync(target);
+    return stat.isFile() ? 'file' : stat.isDirectory() ? 'dir' : 'other';
+  } catch (_) {
+    return 'absent';
+  }
+}
+
+const HALF = (stamp, modules) => new RegExp(`the live flows point into payloads/${stamp}, but its helper modules ${modules} are not linked into it; refusing to capture a half-switched state`);
+
+const STATE_TABLE = [
+  // The capture block does not run, so the preflight leaves everything alone.
+  { row: 'S1', verdict: 'SKIP', name: 'flows.json missing: a restore cut between removing the flows link and renaming the file back', builds: [(g) => {
+    freshImage(g);
+    staleMarker(g.marker, 'gone-previous');
+    fs.renameSync(g.flowsPath, `${g.flowsPath}.osi-old-1-1`);
+  }] },
+  { row: 'S2', verdict: 'SKIP', name: 'flows.json links into a payload that is gone (removed by hand)', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    relink(g.root, 'flows.json', path.join('payloads', 'gone', 'flows.json'));
+  }] },
+  { row: 'S3', verdict: 'SKIP', name: 'the GUI links into a payload a v0.7.0 deploy.sh pruned after a pair deploy', builds: [(g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+    flowsOnlyDeploy(g, 'o070');
+    prune(g, 'p081');
+  }] },
+  // Flows and GUI share a payload: it is the rollback target, no capture.
+  { row: 'S4', verdict: 'PAYLOAD', stale: true, name: 'a committed deploy: flows, GUI and modules in one payload', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+  }] },
+  { row: 'S5', verdict: 'PAYLOAD', name: 'a v0.8.1 gateway meets this deploy.sh: flows and GUI in a payload without modules.json, real helper directories', builds: [(g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+  }] },
+  { row: 'S6', verdict: 'PAYLOAD', name: 'the v0.8.1 gateway after a deploy failed before the stop: its payload has captured entries', builds: [(g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    assert.deepEqual(capturedEntries(g, 'p081'), TABLE_MODULES);
+  }] },
+  { row: 'S7', verdict: 'PAYLOAD', name: 'a switch cut after the GUI: modules partly switched, the new payload is a full set (limit M6)', builds: [(g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+    stageWithModules(g.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    cutFlip(g, 'cut', 3);
+  }] },
+  { row: 'S8', verdict: 'PAYLOAD', name: 'the previous payload restarted into a legacy capture after a failure behind the stop; the marker stays', builds: [(g) => {
+    freshImage(g);
+    flipTo(g.root, failedBeforeStop(g, 'a'), g.guiRoot);
+  }] },
+  // A regular flows.json: no switch is under way.
+  { row: 'S9', verdict: 'RECAPTURE', name: 'a fresh image or a gateway the payload layout has not reached', builds: [(g) => {
+    freshImage(g);
+  }] },
+  { row: 'S10', verdict: 'RECAPTURE', name: 'a regular flows.json beside a GUI link: flows replaced by hand after a committed deploy', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    fs.rmSync(g.flowsPath);
+    writeFlows(g, 'by-hand');
+  }] },
+  { row: 'S11', verdict: 'REUSE', name: 'a deploy failed before the stop on regular files; the retry finds its capture unchanged', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+  }] },
+  { row: 'S12', verdict: 'REUSE', name: 'the same after a sysupgrade with the same image', builds: [(g) => {
+    freshImage(g, 'image');
+    failedBeforeStop(g, 'a');
+    sysupgrade(g, 'image');
+  }] },
+  { row: 'S13', verdict: 'REFUSE', match: /refusing to recapture changed legacy files after a prior attempt/, name: 'the same after a sysupgrade with another image or a hand edit: the capture exists, the live files changed (kept, #466)', builds: [(g) => {
+    freshImage(g, 'image');
+    failedBeforeStop(g, 'a');
+    sysupgrade(g, 'image2');
+  }, (g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    fs.appendFileSync(g.flowsPath, 'edited\n');
+  }] },
+  { row: 'S14', verdict: 'RECAPTURE', name: 'a marker whose capture was pruned by a deploy.sh that does not know it, or removed by hand', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    prune(g, 'a-previous');
+  }] },
+  { row: 'S15', verdict: 'REFUSE', match: /no deploy attempt can be read from it/, name: 'a stale marker that names no -previous capture', builds: [(g) => {
+    freshImage(g);
+    staleMarker(g.marker, 'handmade');
+  }] },
+  { row: 'S16', verdict: 'REFUSE', match: /legacy evidence is unreadable|refusing to recapture changed legacy files after a prior attempt/, name: 'an unreadable or malformed marker', builds: [(g) => {
+    freshImage(g);
+    fs.writeFileSync(g.marker, 'not json\n');
+  }, (g) => {
+    freshImage(g);
+    staleMarker(g.marker, '../outside-previous');
+  }] },
+  { row: 'S17', verdict: 'REFUSE', match: /the live GUI point into payloads\/a from the deploy that wrote it; refusing to capture a half-switched state/, name: 'a stale marker while the GUI links into the payload of the deploy that wrote it', builds: [(g) => {
+    freshImage(g);
+    captureExisting(g.root, 'a-previous', g.flowsPath, g.guiRoot);
+    stageWithModules(g.root, 'a', { 'osi-a': '', 'osi-b': '' });
+    relink(g.root, 'gui', path.join('payloads', 'a', 'gui'));
+    prune(g, 'a-previous');
+  }] },
+  // flows.json links into one payload and the GUI into another.
+  { row: 'S18', verdict: 'REFUSE', stale: true, match: /the live flows point into payloads\/cut but the GUI into payloads\/deployed; refusing to capture a half-switched state/, name: 'flows and GUI in different payloads, the flows payload carries a GUI: a pair switch cut between flows and GUI', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    stageWithModules(g.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    cutFlip(g, 'cut', 1);
+  }] },
+  { row: 'S19', verdict: 'RECAPTURE', stale: true, name: 'flows in a flows-only payload beside a GUI link: a v0.7.0 deploy.sh ran after a pair deploy', builds: [(g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+    flowsOnlyDeploy(g, 'o070');
+  }, (g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    flowsOnlyDeploy(g, 'o070');
+  }] },
+  // flows.json links into a payload beside a GUI directory: the modules decide.
+  { row: 'S20', verdict: 'RECAPTURE', stale: true, name: 'a payload without modules.json: a v0.8.1 gateway after a sysupgrade', builds: [(g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    sysupgrade(g, 'image');
+  }] },
+  { row: 'S21', verdict: 'RECAPTURE', stale: true, name: 'a v0.7.0 gateway: flows-only payload, GUI and helpers written in place, also with the #466 field marker', builds: [(g) => {
+    freshImage(g);
+    flowsOnlyDeploy(g, 'o070');
+  }, (g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    flowsOnlyDeploy(g, 'o070');
+    prune(g, 'a-previous');
+  }] },
+  { row: 'S22', verdict: 'RECAPTURE', stale: true, name: 'every module linked into the sealed flows payload beside the image GUI: a committed deploy, or a full switch before its self-check (M6), then a sysupgrade', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image2');
+  }] },
+  { row: 'S23', verdict: 'RECAPTURE', stale: true, name: 'real helper directories with recorded digests that still match: v0.8.1, a deploy failed before the stop, same-image sysupgrade (re-review)', builds: [(g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    assert.deepEqual(capturedEntries(g, 'p081'), TABLE_MODULES);
+    sysupgrade(g, 'image');
+  }] },
+  { row: 'S24', verdict: 'RECAPTURE', stale: true, name: 'the same with another image or a hand-edited helper: the directories no longer match their digests', builds: [(g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    sysupgrade(g, 'image2');
+  }, (g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    sysupgrade(g, 'image');
+    fs.appendFileSync(path.join(g.root, 'osi-a', 'index.js'), '// edited on the gateway\n');
+  }] },
+  { row: 'S25', verdict: 'RECAPTURE', stale: true, name: 'helpers partly linked into a payload with recorded digests, partly real: its restart cut during the module switch, then a sysupgrade', builds: [(g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    cutFlip(g, 'p081', 3);
+    sysupgrade(g, 'image2');
+  }] },
+  { row: 'S26', verdict: 'REFUSE', stale: true, match: HALF('(?:cut|deployed)', 'osi-a, osi-b'), name: 'a real helper directory where the flows payload sealed its own copy: a switch from real directories cut after the GUI, or a sysupgrade with a v0.8.1 or older image', builds: [(g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    stageWithModules(g.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    cutFlip(g, 'cut', 2);
+    sysupgrade(g, 'image');
+  }, (g) => {
+    freshImage(g, 'image');
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image', { oldSeed: true });
+  }] },
+  { row: 'S27', verdict: 'REFUSE', stale: true, match: /the live flows point into payloads\/(cut|p081), but its helper modules osi-a, osi-b are not linked into it/, name: 'a helper links into another payload: a switch cut after the GUI, or a restart of a payload with recorded digests cut the same way, then a sysupgrade', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    stageWithModules(g.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    cutFlip(g, 'cut', 2);
+    sysupgrade(g, 'image');
+  }, (g) => {
+    freshImage(g);
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    moduleDeploy(g, 'deployed');
+    cutFlip(g, 'p081', 2);
+    sysupgrade(g, 'image');
+  }] },
+  { row: 'S28', verdict: 'REFUSE', stale: true, match: /the live flows point into payloads\/(deployed|p081), but its helper modules osi-a are not linked into it/, name: 'a listed helper is missing or its link dangles (removed by hand)', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image2');
+    prune(g, path.join('deployed', 'modules', 'osi-a'));
+  }, (g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image2');
+    fs.rmSync(path.join(g.root, 'osi-a'));
+  }, (g) => {
+    freshImage(g, 'image');
+    pairDeploy(g, 'p081');
+    failedBeforeStop(g, 'early');
+    sysupgrade(g, 'image');
+    fs.rmSync(path.join(g.root, 'osi-a'), { recursive: true, force: true });
+  }] },
+  { row: 'S29', verdict: 'REFUSE', stale: true, match: /module manifest (unreadable|malformed)/, name: 'the flows payload modules.json is unreadable or malformed', builds: [(g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image');
+    fs.writeFileSync(path.join(g.root, 'payloads', 'deployed', 'modules.json'), 'not json\n');
+  }, (g) => {
+    freshImage(g);
+    moduleDeploy(g, 'deployed');
+    sysupgrade(g, 'image');
+    fs.writeFileSync(path.join(g.root, 'payloads', 'deployed', 'modules.json'), '{"format":1,"modules":"osi-a"}\n');
+  }] },
+  // A marker beside flows.json linked into a payload.
+  { row: 'S30', verdict: 'REFUSE', match: /refusing to recapture changed legacy files after a prior attempt/, name: 'a marker whose capture exists while flows link into a later attempt: a retry cut during its switch', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    stageWithModules(g.root, 'b', { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+    swap.captureModules(g.root, 'a-previous', 'b');
+    swap.linkNewModules(g.root, 'b', 'a-previous');
+    cutFlip(g, 'b', 1);
+  }] },
+  { row: 'S31', verdict: 'REUSE', name: 'a marker whose capture the flows link into: the previous payload restarted into the capture, then a same-image sysupgrade', builds: [(g) => {
+    freshImage(g, 'image');
+    flipTo(g.root, failedBeforeStop(g, 'a'), g.guiRoot);
+    sysupgrade(g, 'image');
+  }] },
+  { row: 'S32', verdict: 'REFUSE', match: /the live flows point into payloads\/a from the deploy that wrote it; refusing to capture a half-switched state/, name: 'a stale marker while flows link into the payload of the deploy that wrote it: switched everything, no commit, sysupgrade, capture pruned', builds: [(g) => {
+    freshImage(g);
+    captureExisting(g.root, 'a-previous', g.flowsPath, g.guiRoot);
+    stageWithModules(g.root, 'a', { 'osi-a': '', 'osi-b': '' });
+    swap.captureModules(g.root, 'a-previous', 'a');
+    flipTo(g.root, 'a', g.guiRoot);
+    sysupgrade(g, 'image2');
+    prune(g, 'a-previous');
+  }] },
+  { row: 'S33', verdict: 'REFUSE', match: HALF('b', 'osi-a, osi-b'), name: 'a stale marker while flows link into a later attempt that switched only flows: the first review sequence', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    stageWithModules(g.root, 'b', { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+    swap.captureModules(g.root, 'a-previous', 'b');
+    swap.linkNewModules(g.root, 'b', 'a-previous');
+    cutFlip(g, 'b', 1);
+    prune(g, 'a-previous');
+  }] },
+  // Operator and power-loss leftovers around the marker.
+  { row: 'S34', verdict: 'RECAPTURE', name: 'power lost after a stale marker was moved aside: the rerun finds no marker', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    prune(g, 'a-previous');
+    fs.renameSync(g.marker, `${g.marker}.stale-1-1`);
+  }] },
+  { row: 'S35', verdict: 'RECAPTURE', name: 'the operator moved the marker by hand while its capture exists: decided as without a marker', builds: [(g) => {
+    freshImage(g);
+    failedBeforeStop(g, 'a');
+    fs.renameSync(g.marker, `${g.marker}.moved-by-hand`);
+  }] },
+];
+
+for (const { row, verdict, name, match, stale, builds } of STATE_TABLE) {
+  test(`state table ${row} -> ${verdict}: ${name}`, (t) => {
+    builds.forEach((build, index) => {
+      for (const marker of stale ? ['as built', 'with a stale marker'] : ['as built']) {
+        const g = tableGateway(t);
+        build(g);
+        if (marker === 'with a stale marker') staleMarker(g.marker, 'gone-previous');
+        assertVerdict(g, verdict, match, `${row} variant ${index + 1}, ${marker}`);
+      }
+    });
+  });
+}

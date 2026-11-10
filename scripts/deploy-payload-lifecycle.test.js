@@ -852,6 +852,334 @@ printf '%s\\n' sysupgrade-rollback-ok
   }
 });
 
+const legacyPreflightFragment = () =>
+  fragment('# legacy capture preflight begin\n', '# legacy capture preflight end')
+    .replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json');
+
+test('after a sysupgrade a stale legacy-capture marker is moved aside and the recapture keeps the linked modules', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+# A marker an earlier failed deploy left behind; its capture was pruned since.
+printf '%s\\n' '{"format":1,"stamp":"gone-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"
+${legacyPreflightFragment()}
+[ ! -e "$PAYLOADS_ROOT/.legacy-capture.json" ]
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' stale-marker-rollback-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /stale-marker-rollback-ok/);
+    assert.match(run.result.stdout, /WARN: stale legacy-capture marker \(payload gone-previous gone\); moved to payloads\/\.legacy-capture\.json\.stale-\d+-\d+; recapturing/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/second-previous/);
+    assert.match(run.result.stdout, /OK: captured osi-a into payloads\/second-previous\/modules\/osi-a/);
+    assert.match(run.result.stdout, /OK: captured osi-b into payloads\/second-previous\/modules\/osi-b/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@first', 'osi-b': 'b@first', 'osi-c': 'c@first' },
+      'the rollback restarts the deployed flows on the modules they ran with');
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'second-previous', gui: 'second-previous', compatible: true });
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a stale marker from a deploy cut off during its switch refuses before any file is replaced', () => {
+  const run = runModuleDeploy(`
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' legacy > "$GUI_ROOT/index.html"
+mkdir -p "$SWAP_ROOT/src-cut-gui"
+printf '%s\\n' cut > "$SWAP_ROOT/cut-flows.json"
+printf '%s\\n' cut > "$SWAP_ROOT/src-cut-gui/index.html"
+swap_call stagePayload cut "$SWAP_ROOT/cut-flows.json" "$SWAP_ROOT/src-cut-gui" >/dev/null
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+printf '%s\\n' '{"format":1,"stamp":"cut-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"
+cp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+if ( ${legacyPreflightFragment()} ); then exit 41; fi
+cmp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+printf '%s\\n' half-switched-refused
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /half-switched-refused/);
+    assert.match(run.result.stderr, /refusing to capture a half-switched state/);
+    assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
+  } finally {
+    run.cleanup();
+  }
+});
+
+// One deploy's preflight, payload staging, capture block and module staging,
+// as deploy.sh runs them, for the sequences below.
+const legacyAttemptFunction = () => `
+legacy_attempt() {
+  DEPLOY_STAMP="$1"
+  MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+  PAYLOAD_FLIPPED=0
+  DB_MIGRATION_COMMITTED=0
+  ROLLBACK_RESTORED=0
+  node_red_restart_needed=0
+${legacyPreflightFragment()}
+  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+  PREV_STAMP="$(swap_call currentStamp || true)"
+  PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+  PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+  for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@$DEPLOY_STAMP"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+}
+`;
+
+// PR #618 review: attempt A captures the live set and fails before the stop,
+// retry B reuses that capture and loses power after switching flows only, and
+// the capture is pruned. The next deploy must not capture B's flows beside the
+// GUI and modules they never ran with.
+test('a retry cut off during its switch refuses once the capture it reused is gone', () => {
+  for (const start of ['regular files', 'sysupgrade']) {
+    const setup = start === 'regular files' ? `
+rm "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+printf '%s\\n' legacy > "$SWAP_ROOT/flows.json"
+` : `
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+`;
+    const run = runModuleDeploy(`
+${setup}
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt attempt-a
+[ "$PREV_STAMP" = attempt-a-previous ] && [ "$PREV_CAPTURED" = 1 ]
+# Attempt A fails before the stop; its exit handler discards payloads/attempt-a.
+if (deploy_exit_handler 1); then exit 41; fi
+legacy_attempt attempt-b
+[ "$PREV_STAMP" = attempt-a-previous ] && [ "$PREV_CAPTURED" = 0 ]
+stop_for_migration
+# Power lost inside flipTo('attempt-b'): flows switched, the GUI and modules not.
+if [ -L "$SWAP_ROOT/flows.json" ]; then rm "$SWAP_ROOT/flows.json"; else mv "$SWAP_ROOT/flows.json" "$SWAP_ROOT/flows.json.osi-old-1-1"; fi
+ln -s payloads/attempt-b/flows.json "$SWAP_ROOT/flows.json"
+# The capture attempt A wrote is pruned, by a deploy.sh that does not know the marker.
+rm -rf "$PAYLOADS_ROOT/attempt-a-previous"
+cp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+if (legacy_attempt attempt-c); then exit 42; fi
+cmp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+[ ! -e "$PAYLOADS_ROOT/attempt-c" ] && [ ! -e "$PAYLOADS_ROOT/attempt-c-previous" ]
+for aside in "$PAYLOADS_ROOT"/.legacy-capture.json.stale-*; do [ ! -e "$aside" ] || exit 43; done
+printf '%s\\n' retry-half-switch-refused
+`);
+    try {
+      assert.equal(run.result.status, 0, `${start}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.match(run.result.stdout, /retry-half-switch-refused/);
+      assert.match(run.result.stdout, /OK: reused immutable legacy flows\+GUI capture payloads\/attempt-a-previous/,
+        `${start}: retry B reused the capture attempt A wrote`);
+      const stray = start === 'regular files' ? 'osi-a, osi-b' : 'osi-a, osi-b, osi-c';
+      assert.match(run.result.stderr, new RegExp(`the live flows point into payloads/attempt-b, but its helper modules ${stray} are not linked into it; refusing to capture a half-switched state`), start);
+      assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
+      assert.doesNotMatch(run.result.stdout, /stale legacy-capture marker/, `${start}: the marker stays for the operator`);
+    } finally {
+      run.cleanup();
+    }
+  }
+});
+
+// No marker is involved when the cut-off deploy started from a paired payload:
+// flows already point into the new payload, the GUI still into the old one.
+test('a paired deploy cut off between its flows and GUI switch refuses without a marker', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy cut
+stop_for_migration
+# Power lost inside flipTo('cut'): flows switched, the GUI and modules not.
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+[ ! -e "$PAYLOADS_ROOT/.legacy-capture.json" ]
+if ( ${legacyPreflightFragment()} ); then exit 41; fi
+printf '%s\\n' paired-half-switch-refused
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /paired-half-switch-refused/);
+    assert.match(run.result.stderr, /the live flows point into payloads\/cut but the GUI into payloads\/old; refusing to capture a half-switched state/);
+    assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
+  } finally {
+    run.cleanup();
+  }
+});
+
+// PR #618 re-review: a deploy that fails before the stop writes captured
+// entries into the previous payload's modules.json (captureModules) and
+// changes no live file. A sysupgrade then replaces the GUI link with the image
+// GUI and copies the image's helpers over the real directories. That
+// bookkeeping must not block the next deploy, whether the image is the same or
+// another one, with or without a stale marker.
+test('a deploy that failed before the stop and a sysupgrade do not block the retry', () => {
+  for (const image of ['v081', 'image2']) {
+    for (const marker of ['none', 'stale']) {
+      const label = `${image === 'v081' ? 'same image' : 'other image'}, ${marker} marker`;
+      const run = runModuleDeploy(`
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt early
+[ "$PREV_STAMP" = old ] && [ "$PREV_CAPTURED" = 0 ]
+# The deploy fails before the stop; its exit handler discards payloads/early.
+if (deploy_exit_handler 1); then exit 41; fi
+[ ! -e "$PAYLOADS_ROOT/early" ] && [ -f "$PAYLOADS_ROOT/old/modules.json" ]
+# Sysupgrade: the image GUI replaces the GUI link, the image seed copies its
+# helpers over the real directories.
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@${image}
+write_module "$SWAP_ROOT/osi-b" b@${image}
+${marker === 'stale' ? `printf '%s\\n' '{"format":1,"stamp":"gone-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"` : ''}
+legacy_attempt retry
+[ "$PREV_STAMP" = retry-previous ] && [ "$PREV_CAPTURED" = 1 ]
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+# The retry fails behind the stop; the exit handler restarts the capture.
+if (deploy_exit_handler 1); then exit 42; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' retry-after-sysupgrade-ok
+`);
+      try {
+        assert.equal(run.result.status, 0, `${label}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+        assert.match(run.result.stdout, /retry-after-sysupgrade-ok/, label);
+        assert.match(run.result.stdout, /OK: captured osi-a into payloads\/old\/modules\/osi-a/, `${label}: the early deploy wrote the bookkeeping`);
+        const manifest = JSON.parse(fs.readFileSync(path.join(run.root, 'payloads', 'old', 'modules.json'), 'utf8'));
+        assert.deepEqual(Object.keys(manifest.captured).sort(), ['osi-a', 'osi-b'], label);
+        if (marker === 'stale') assert.match(run.result.stdout, /WARN: stale legacy-capture marker \(payload gone-previous gone\)/, label);
+        assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/retry-previous/, label);
+        assert.match(run.result.stdout, /OK: captured osi-a into payloads\/retry-previous\/modules\/osi-a/, label);
+        assert.doesNotMatch(run.result.stderr, /refusing/, label);
+        assert.deepEqual(run.markers(), { 'osi-a': `a@${image}`, 'osi-b': `b@${image}`, 'osi-c': 'MODULE_NOT_FOUND' },
+          `${label}: the restart runs the flows on the helpers they ran with before the retry`);
+        assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'retry-previous', gui: 'retry-previous', compatible: true }, label);
+        assert.deepEqual(run.nodeRedLog(), ['stop', 'restart'], `${label}: the early failure stopped nothing`);
+      } finally {
+        run.cleanup();
+      }
+    }
+  }
+});
+
+// A gateway on a v0.8.1 or v0.7.0 layout meets this deploy.sh: the first
+// deploy keeps what ran as its rollback target, and a failure behind the stop
+// restarts exactly that.
+test('a v0.8.1 or v0.7.0 gateway meeting this deploy.sh keeps what ran as the rollback target', () => {
+  const starts = {
+    'v0.8.1': { setup: '', prev: 'old', captured: 0, helpers: 'v081' },
+    'v0.8.1 after a sysupgrade': { setup: `
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+`, prev: 'first-previous', captured: 1, helpers: 'v081' },
+    'v0.7.0': { setup: `
+rm "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+rm -rf "$PAYLOADS_ROOT/old"
+printf '%s\\n' v070 > "$SWAP_ROOT/o070-flows.json"
+swap_call stagePayload o070 "$SWAP_ROOT/o070-flows.json" >/dev/null
+ln -s payloads/o070/flows.json "$SWAP_ROOT/flows.json"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' v070 > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@v070
+write_module "$SWAP_ROOT/osi-b" b@v070
+`, prev: 'first-previous', captured: 1, helpers: 'v070' },
+  };
+  for (const [start, { setup, prev, captured, helpers }] of Object.entries(starts)) {
+    const run = runModuleDeploy(`
+${setup}
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt first
+[ "$PREV_STAMP" = ${prev} ] && [ "$PREV_CAPTURED" = ${captured} ]
+[ "$PREV_CAPTURED" = 0 ] || write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' first-meeting-rollback-ok
+`);
+    try {
+      assert.equal(run.result.status, 0, `${start}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.match(run.result.stdout, /first-meeting-rollback-ok/, start);
+      assert.match(run.result.stdout, new RegExp(`OK: captured osi-a into payloads/${prev}/modules/osi-a`), start);
+      assert.doesNotMatch(run.result.stdout, /stale legacy-capture marker/, start);
+      assert.deepEqual(run.markers(), { 'osi-a': `a@${helpers}`, 'osi-b': `b@${helpers}`, 'osi-c': 'MODULE_NOT_FOUND' }, start);
+      assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: prev, gui: prev, compatible: true }, start);
+    } finally {
+      run.cleanup();
+    }
+  }
+});
+
+// A v0.7.0 deploy.sh after a pair deploy switches flows into a flows-only
+// payload and writes the GUI and the helpers in place, through the GUI link.
+// Flows and GUI then link into different payloads without any switch being
+// cut, and the next deploy keeps that set as its rollback target.
+test('a v0.7.0 deploy.sh run after a pair deploy does not block the next deploy', () => {
+  const run = runModuleDeploy(`
+printf '%s\\n' v070 > "$SWAP_ROOT/o070-flows.json"
+swap_call stagePayload o070 "$SWAP_ROOT/o070-flows.json" >/dev/null
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/o070/flows.json "$SWAP_ROOT/flows.json"
+printf '%s\\n' v070 > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@v070
+write_module "$SWAP_ROOT/osi-b" b@v070
+[ "$(swap_call guiStamp "$GUI_ROOT")" = old ]
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt first
+[ "$PREV_STAMP" = first-previous ] && [ "$PREV_CAPTURED" = 1 ]
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' v070-after-pair-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /v070-after-pair-ok/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/first-previous/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v070', 'osi-b': 'b@v070', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'first-previous', gui: 'first-previous', compatible: true });
+    assert.equal(fs.readFileSync(path.join(run.guiRoot, 'index.html'), 'utf8'), 'v070\n', 'the restart serves the GUI that ran');
+  } finally {
+    run.cleanup();
+  }
+});
+
 // Stages the real module files the way deploy.sh fetches them, flips, and
 // requires every staged entry point and file through /srv/node-red/<module>
 // and node_modules/<module>. Each must load exactly as it does from the repo

@@ -293,6 +293,21 @@ test('missing legacy GUI skips retained capture so the staged pair can activate'
   assert.match(deploy, /\[ -f \/srv\/node-red\/flows\.json \] && \[ -d "\$GUI_ROOT" \]/);
 });
 
+test('the legacy-capture decision runs before deploy.sh replaces any live file', () => {
+  const mainStart = deploy.indexOf('echo "=== OSI OS Deploy ==="');
+  const nativePreflight = deploy.indexOf('run_native_sqlite3_preflight || exit 1', mainStart);
+  const swapFetch = deploy.indexOf('fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"', mainStart);
+  const preflight = deploy.indexOf('swap_call legacyCapturePreflight "/srv/node-red/flows.json" "$GUI_ROOT"', mainStart);
+  const settings = deploy.indexOf('fetch_required "Node-RED settings.js"', mainStart);
+  assert.ok(mainStart !== -1 && nativePreflight > mainStart, 'native sqlite3 preflight runs first');
+  assert.ok(swapFetch > nativePreflight, 'the swap helper is fetched after the native sqlite3 preflight');
+  assert.ok(preflight > swapFetch, 'the legacy-capture preflight needs the swap helper');
+  assert.ok(settings > preflight, 'the legacy-capture preflight runs before settings.js is replaced');
+  assert.equal(deploy.slice(mainStart, preflight).includes('fetch_required "'), false,
+    'no live file is fetched before the legacy-capture preflight');
+  assert.equal(deploy.split('fetch "scripts/deploy-payload-swap.js"').length - 1, 1, 'the swap helper is fetched once');
+});
+
 test('post-flip restart decision uses the pre-activation state', () => {
   assert.match(deploy, /PAYLOAD_WAS_FLIPPED="\$PAYLOAD_FLIPPED"/);
   assert.match(deploy, /if \[ "\$PAYLOAD_WAS_FLIPPED" != "1" \]; then/);

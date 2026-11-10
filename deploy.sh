@@ -2266,6 +2266,24 @@ check_command_ledger_hold
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1
 
+echo "--- Deploy payload swap helper ---"
+fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+same_fs_or_die
+echo "OK"
+
+# legacy capture preflight begin
+# Runs before any live file is replaced, so a refusal leaves the gateway as it
+# was. When the live flows and GUI are not one payload, it refuses a
+# half-switched flows/GUI/module set and a legacy-capture marker whose capture
+# no longer matches, and moves aside a marker whose capture is gone, so the
+# capture block further down starts fresh.
+if ! legacy_preflight_report="$(swap_call legacyCapturePreflight "/srv/node-red/flows.json" "$GUI_ROOT")"; then
+    echo "ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced" >&2
+    exit 1
+fi
+[ -z "$legacy_preflight_report" ] || printf '%s\n' "$legacy_preflight_report"
+# legacy capture preflight end
+
 DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
 capture_previous_firmware_version
 if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
@@ -2330,11 +2348,6 @@ if [ -x /etc/init.d/osi-gateway-gps ]; then
     /etc/init.d/osi-gateway-gps disable || true
 fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
-echo "OK"
-
-echo "--- Deploy payload swap helper ---"
-fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
-same_fs_or_die
 echo "OK"
 
 echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
