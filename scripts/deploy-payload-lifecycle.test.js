@@ -1033,6 +1033,153 @@ printf '%s\\n' paired-half-switch-refused
   }
 });
 
+// PR #618 re-review: a deploy that fails before the stop writes captured
+// entries into the previous payload's modules.json (captureModules) and
+// changes no live file. A sysupgrade then replaces the GUI link with the image
+// GUI and copies the image's helpers over the real directories. That
+// bookkeeping must not block the next deploy, whether the image is the same or
+// another one, with or without a stale marker.
+test('a deploy that failed before the stop and a sysupgrade do not block the retry', () => {
+  for (const image of ['v081', 'image2']) {
+    for (const marker of ['none', 'stale']) {
+      const label = `${image === 'v081' ? 'same image' : 'other image'}, ${marker} marker`;
+      const run = runModuleDeploy(`
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt early
+[ "$PREV_STAMP" = old ] && [ "$PREV_CAPTURED" = 0 ]
+# The deploy fails before the stop; its exit handler discards payloads/early.
+if (deploy_exit_handler 1); then exit 41; fi
+[ ! -e "$PAYLOADS_ROOT/early" ] && [ -f "$PAYLOADS_ROOT/old/modules.json" ]
+# Sysupgrade: the image GUI replaces the GUI link, the image seed copies its
+# helpers over the real directories.
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@${image}
+write_module "$SWAP_ROOT/osi-b" b@${image}
+${marker === 'stale' ? `printf '%s\\n' '{"format":1,"stamp":"gone-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"` : ''}
+legacy_attempt retry
+[ "$PREV_STAMP" = retry-previous ] && [ "$PREV_CAPTURED" = 1 ]
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+# The retry fails behind the stop; the exit handler restarts the capture.
+if (deploy_exit_handler 1); then exit 42; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' retry-after-sysupgrade-ok
+`);
+      try {
+        assert.equal(run.result.status, 0, `${label}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+        assert.match(run.result.stdout, /retry-after-sysupgrade-ok/, label);
+        assert.match(run.result.stdout, /OK: captured osi-a into payloads\/old\/modules\/osi-a/, `${label}: the early deploy wrote the bookkeeping`);
+        const manifest = JSON.parse(fs.readFileSync(path.join(run.root, 'payloads', 'old', 'modules.json'), 'utf8'));
+        assert.deepEqual(Object.keys(manifest.captured).sort(), ['osi-a', 'osi-b'], label);
+        if (marker === 'stale') assert.match(run.result.stdout, /WARN: stale legacy-capture marker \(payload gone-previous gone\)/, label);
+        assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/retry-previous/, label);
+        assert.match(run.result.stdout, /OK: captured osi-a into payloads\/retry-previous\/modules\/osi-a/, label);
+        assert.doesNotMatch(run.result.stderr, /refusing/, label);
+        assert.deepEqual(run.markers(), { 'osi-a': `a@${image}`, 'osi-b': `b@${image}`, 'osi-c': 'MODULE_NOT_FOUND' },
+          `${label}: the restart runs the flows on the helpers they ran with before the retry`);
+        assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'retry-previous', gui: 'retry-previous', compatible: true }, label);
+        assert.deepEqual(run.nodeRedLog(), ['stop', 'restart'], `${label}: the early failure stopped nothing`);
+      } finally {
+        run.cleanup();
+      }
+    }
+  }
+});
+
+// A gateway on a v0.8.1 or v0.7.0 layout meets this deploy.sh: the first
+// deploy keeps what ran as its rollback target, and a failure behind the stop
+// restarts exactly that.
+test('a v0.8.1 or v0.7.0 gateway meeting this deploy.sh keeps what ran as the rollback target', () => {
+  const starts = {
+    'v0.8.1': { setup: '', prev: 'old', captured: 0, helpers: 'v081' },
+    'v0.8.1 after a sysupgrade': { setup: `
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+`, prev: 'first-previous', captured: 1, helpers: 'v081' },
+    'v0.7.0': { setup: `
+rm "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+rm -rf "$PAYLOADS_ROOT/old"
+printf '%s\\n' v070 > "$SWAP_ROOT/o070-flows.json"
+swap_call stagePayload o070 "$SWAP_ROOT/o070-flows.json" >/dev/null
+ln -s payloads/o070/flows.json "$SWAP_ROOT/flows.json"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' v070 > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@v070
+write_module "$SWAP_ROOT/osi-b" b@v070
+`, prev: 'first-previous', captured: 1, helpers: 'v070' },
+  };
+  for (const [start, { setup, prev, captured, helpers }] of Object.entries(starts)) {
+    const run = runModuleDeploy(`
+${setup}
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt first
+[ "$PREV_STAMP" = ${prev} ] && [ "$PREV_CAPTURED" = ${captured} ]
+[ "$PREV_CAPTURED" = 0 ] || write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' first-meeting-rollback-ok
+`);
+    try {
+      assert.equal(run.result.status, 0, `${start}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.match(run.result.stdout, /first-meeting-rollback-ok/, start);
+      assert.match(run.result.stdout, new RegExp(`OK: captured osi-a into payloads/${prev}/modules/osi-a`), start);
+      assert.doesNotMatch(run.result.stdout, /stale legacy-capture marker/, start);
+      assert.deepEqual(run.markers(), { 'osi-a': `a@${helpers}`, 'osi-b': `b@${helpers}`, 'osi-c': 'MODULE_NOT_FOUND' }, start);
+      assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: prev, gui: prev, compatible: true }, start);
+    } finally {
+      run.cleanup();
+    }
+  }
+});
+
+// A v0.7.0 deploy.sh after a pair deploy switches flows into a flows-only
+// payload and writes the GUI and the helpers in place, through the GUI link.
+// Flows and GUI then link into different payloads without any switch being
+// cut, and the next deploy keeps that set as its rollback target.
+test('a v0.7.0 deploy.sh run after a pair deploy does not block the next deploy', () => {
+  const run = runModuleDeploy(`
+printf '%s\\n' v070 > "$SWAP_ROOT/o070-flows.json"
+swap_call stagePayload o070 "$SWAP_ROOT/o070-flows.json" >/dev/null
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/o070/flows.json "$SWAP_ROOT/flows.json"
+printf '%s\\n' v070 > "$GUI_ROOT/index.html"
+write_module "$SWAP_ROOT/osi-a" a@v070
+write_module "$SWAP_ROOT/osi-b" b@v070
+[ "$(swap_call guiStamp "$GUI_ROOT")" = old ]
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt first
+[ "$PREV_STAMP" = first-previous ] && [ "$PREV_CAPTURED" = 1 ]
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' v070-after-pair-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /v070-after-pair-ok/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/first-previous/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v070', 'osi-b': 'b@v070', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'first-previous', gui: 'first-previous', compatible: true });
+    assert.equal(fs.readFileSync(path.join(run.guiRoot, 'index.html'), 'utf8'), 'v070\n', 'the restart serves the GUI that ran');
+  } finally {
+    run.cleanup();
+  }
+});
+
 // Stages the real module files the way deploy.sh fetches them, flips, and
 // requires every staged entry point and file through /srv/node-red/<module>
 // and node_modules/<module>. Each must load exactly as it does from the repo
