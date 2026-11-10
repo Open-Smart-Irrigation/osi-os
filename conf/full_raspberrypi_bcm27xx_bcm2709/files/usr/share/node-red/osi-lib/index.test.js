@@ -52,6 +52,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'scheduler-mean-query',
     'scope',
     'scoped-access-commands',
+    'sdi12-archive',
     'sdi12-commissioning',
     'sdi12-normalize',
     'sdi12-reassemble',

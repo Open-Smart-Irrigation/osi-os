@@ -2881,6 +2881,14 @@ fetch_required "osi-sdi12-commissioning index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.js" \
     "$MODULE_STAGE/osi-sdi12-commissioning/index.js"
 
+fetch_required "osi-sdi12-archive package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-archive/package.json" \
+    "$MODULE_STAGE/osi-sdi12-archive/package.json"
+
+fetch_required "osi-sdi12-archive index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-archive/index.js" \
+    "$MODULE_STAGE/osi-sdi12-archive/index.js"
+
 fetch_required "osi-sdi12-reassemble package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/package.json" \
     "$MODULE_STAGE/osi-sdi12-reassemble/package.json"

@@ -12971,7 +12971,7 @@
     "z": "sdi12-tab",
     "mydb": "734737e846d06893",
     "sqlquery": "prepared",
-    "sql": "SELECT d.sdi12_probe_profile, d.sdi12_probe_status, d.soil_moisture_probe_depths_json,\n  d.chirpstack_app_id, d.sdi12_value_count, d.sdi12_channel_layout_json,\n  r.status AS sdi12_deployment_status,\n  r.queue_drained_at AS sdi12_deployment_queue_drained_at,\n  r.last_observed_at AS sdi12_deployment_last_observed_at\nFROM devices d\nLEFT JOIN sdi12_recipe_deployments r ON r.deveui = d.deveui\nWHERE d.deveui = $deveui",
+    "sql": "SELECT d.sdi12_identity, d.soil_moisture_probe_depths_configured, d.sdi12_probe_profile, d.sdi12_probe_status, d.soil_moisture_probe_depths_json,\n  d.chirpstack_app_id, d.sdi12_value_count, d.sdi12_channel_layout_json,\n  r.status AS sdi12_deployment_status,\n  r.queue_drained_at AS sdi12_deployment_queue_drained_at,\n  r.last_observed_at AS sdi12_deployment_last_observed_at,\n  r.desired_version AS sdi12_deployment_desired_version,\n  r.desired_layout_hash AS sdi12_deployment_desired_layout_hash,\n  r.compatible_layout_json AS sdi12_deployment_compatible_layout_json,\n  r.compatible_recipe_json AS sdi12_deployment_compatible_recipe_json,\n  r.compatible_at AS sdi12_deployment_compatible_at\nFROM devices d\nLEFT JOIN sdi12_recipe_deployments r ON r.deveui = d.deveui\nWHERE d.deveui = $deveui",
     "name": "Read SDI12 Config",
     "x": 900,
     "y": 160,

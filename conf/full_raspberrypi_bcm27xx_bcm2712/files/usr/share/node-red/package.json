@@ -52,6 +52,7 @@
     "osi-scope-helper": "file:osi-scope-helper",
     "osi-installation-location-helper": "file:osi-installation-location-helper",
     "osi-network-api": "file:osi-network-api",
-    "osi-rejection-recovery": "file:osi-rejection-recovery"
+    "osi-rejection-recovery": "file:osi-rejection-recovery",
+    "osi-sdi12-archive": "file:osi-sdi12-archive"
   }
 }

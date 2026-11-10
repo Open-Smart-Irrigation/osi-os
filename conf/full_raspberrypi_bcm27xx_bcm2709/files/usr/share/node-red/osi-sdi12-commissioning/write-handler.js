@@ -25,6 +25,21 @@ function boundedObservationCode(error) {
   return /^[a-z0-9_]{1,64}$/.test(code) ? code : 'unknown';
 }
 return (async () => {
+  // Archive first, on its own connection: a later normalize or write failure
+  // keeps the row, and an archive failure never blocks the canonical write.
+  if (!info.quarantineOnly) {
+    var archRes = osiLib.require('sdi12-archive');
+    try {
+      if (!archRes.ok) throw new Error(archRes.error);
+      var saved = await archRes.value.store(osiDb, info, row, Date.now(),
+        function () { return osiLib.require('sdi12-normalize'); },
+        function (m) { node.warn(m); });
+      archRes.value.report(node, info, saved);
+    } catch (e) {
+      node.error('SDI12 archive failed: ' + (e && e.message ? e.message : e), msg);
+      node.status({ fill: 'red', shape: 'dot', text: 'SDI12 ARCHIVE_FAILED' });
+    }
+  }
   var normRes = osiLib.require('sdi12-normalize');
   if (!normRes.ok) return reportFailure('normalizer_load');
   var writerRes = osiLib.require('device-writer');
