@@ -924,7 +924,110 @@ printf '%s\\n' half-switched-refused
     assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
     assert.match(run.result.stdout, /half-switched-refused/);
     assert.match(run.result.stderr, /refusing to capture a half-switched state/);
-    assert.match(run.result.stderr, /ERROR: legacy flows\+GUI evidence is missing or changed; refusing recapture before any file is replaced/);
+    assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
+  } finally {
+    run.cleanup();
+  }
+});
+
+// One deploy's preflight, payload staging, capture block and module staging,
+// as deploy.sh runs them, for the sequences below.
+const legacyAttemptFunction = () => `
+legacy_attempt() {
+  DEPLOY_STAMP="$1"
+  MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+  PAYLOAD_FLIPPED=0
+  DB_MIGRATION_COMMITTED=0
+  ROLLBACK_RESTORED=0
+  node_red_restart_needed=0
+${legacyPreflightFragment()}
+  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+  PREV_STAMP="$(swap_call currentStamp || true)"
+  PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+  PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+  for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@$DEPLOY_STAMP"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+}
+`;
+
+// PR #618 review: attempt A captures the live set and fails before the stop,
+// retry B reuses that capture and loses power after switching flows only, and
+// the capture is pruned. The next deploy must not capture B's flows beside the
+// GUI and modules they never ran with.
+test('a retry cut off during its switch refuses once the capture it reused is gone', () => {
+  for (const start of ['regular files', 'sysupgrade']) {
+    const setup = start === 'regular files' ? `
+rm "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+printf '%s\\n' legacy > "$SWAP_ROOT/flows.json"
+` : `
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+`;
+    const run = runModuleDeploy(`
+${setup}
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+${legacyAttemptFunction()}
+legacy_attempt attempt-a
+[ "$PREV_STAMP" = attempt-a-previous ] && [ "$PREV_CAPTURED" = 1 ]
+# Attempt A fails before the stop; its exit handler discards payloads/attempt-a.
+if (deploy_exit_handler 1); then exit 41; fi
+legacy_attempt attempt-b
+[ "$PREV_STAMP" = attempt-a-previous ] && [ "$PREV_CAPTURED" = 0 ]
+stop_for_migration
+# Power lost inside flipTo('attempt-b'): flows switched, the GUI and modules not.
+if [ -L "$SWAP_ROOT/flows.json" ]; then rm "$SWAP_ROOT/flows.json"; else mv "$SWAP_ROOT/flows.json" "$SWAP_ROOT/flows.json.osi-old-1-1"; fi
+ln -s payloads/attempt-b/flows.json "$SWAP_ROOT/flows.json"
+# The capture attempt A wrote is pruned, by a deploy.sh that does not know the marker.
+rm -rf "$PAYLOADS_ROOT/attempt-a-previous"
+cp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+if (legacy_attempt attempt-c); then exit 42; fi
+cmp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+[ ! -e "$PAYLOADS_ROOT/attempt-c" ] && [ ! -e "$PAYLOADS_ROOT/attempt-c-previous" ]
+for aside in "$PAYLOADS_ROOT"/.legacy-capture.json.stale-*; do [ ! -e "$aside" ] || exit 43; done
+printf '%s\\n' retry-half-switch-refused
+`);
+    try {
+      assert.equal(run.result.status, 0, `${start}: stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.match(run.result.stdout, /retry-half-switch-refused/);
+      assert.match(run.result.stdout, /OK: reused immutable legacy flows\+GUI capture payloads\/attempt-a-previous/,
+        `${start}: retry B reused the capture attempt A wrote`);
+      const stray = start === 'regular files' ? 'osi-a, osi-b' : 'osi-a, osi-b, osi-c';
+      assert.match(run.result.stderr, new RegExp(`the live flows point into payloads/attempt-b, but its helper modules ${stray} are not linked into it; refusing to capture a half-switched state`), start);
+      assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
+      assert.doesNotMatch(run.result.stdout, /stale legacy-capture marker/, `${start}: the marker stays for the operator`);
+    } finally {
+      run.cleanup();
+    }
+  }
+});
+
+// No marker is involved when the cut-off deploy started from a paired payload:
+// flows already point into the new payload, the GUI still into the old one.
+test('a paired deploy cut off between its flows and GUI switch refuses without a marker', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy cut
+stop_for_migration
+# Power lost inside flipTo('cut'): flows switched, the GUI and modules not.
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+[ ! -e "$PAYLOADS_ROOT/.legacy-capture.json" ]
+if ( ${legacyPreflightFragment()} ); then exit 41; fi
+printf '%s\\n' paired-half-switch-refused
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /paired-half-switch-refused/);
+    assert.match(run.result.stderr, /the live flows point into payloads\/cut but the GUI into payloads\/old; refusing to capture a half-switched state/);
+    assert.match(run.result.stderr, /ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced/);
   } finally {
     run.cleanup();
   }

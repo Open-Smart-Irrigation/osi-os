@@ -768,3 +768,124 @@ test('discardPayload and deactivate remove module links into the payload; prune 
   deactivate(root, '20260501', guiRoot);
   assert.throws(() => fs.lstatSync(path.join(root, 'osi-a')), /ENOENT/);
 });
+
+// Issue #466, PR #618 review: before a fresh capture the live flows, GUI and
+// helper modules must be one set, whichever deploy attempt switched them.
+// coherentRoot() is a gateway after a committed deploy with module payloads.
+function coherentRoot(t, stamp) {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, stamp, { 'osi-a': '', 'osi-b': '' });
+  flipTo(root, stamp, guiRoot);
+  return { root, guiRoot, flowsPath: path.join(root, 'flows.json'), marker: path.join(root, 'payloads', '.legacy-capture.json') };
+}
+
+// A sysupgrade keeps /srv but replaces the GUI link with the image GUI.
+function imageGui(guiRoot) {
+  fs.rmSync(guiRoot, { recursive: true, force: true });
+  writeModule(guiRoot, 'image-gui');
+}
+
+function relink(root, name, target) {
+  fs.rmSync(path.join(root, name), { recursive: true, force: true });
+  fs.symlinkSync(target, path.join(root, name));
+}
+
+function staleMarker(marker, stamp) {
+  fs.writeFileSync(marker, JSON.stringify({ format: 1, stamp, flows_path: 'x', gui_path: 'y', flows_sha256: '0', gui_sha256: '0' }) + '\n');
+}
+
+test('legacyCapturePreflight accepts a sysupgrade beside a committed payload, a pre-#603 payload and regular flows', (t) => {
+  const committed = coherentRoot(t, 'deployed');
+  imageGui(committed.guiRoot);
+  assert.equal(legacyCapturePreflight(committed.root, committed.flowsPath, committed.guiRoot), null, 'sysupgrade, no marker');
+  staleMarker(committed.marker, 'gone-previous');
+  assert.match(legacyCapturePreflight(committed.root, committed.flowsPath, committed.guiRoot),
+    /^WARN: stale legacy-capture marker \(payload gone-previous gone\)/, 'sysupgrade, stale marker');
+
+  const older = moduleRoot(t);
+  const olderGui = path.join(older, 'gui');
+  stagePayload(older, 'older', fakeFlowsSrcAt(older, 'older'), fakeGuiSrcAt(older, 'older'));
+  fs.symlinkSync(path.join('payloads', 'older', 'flows.json'), path.join(older, 'flows.json'));
+  writeModule(olderGui, 'image-gui');
+  writeModule(path.join(older, 'osi-a'), 'osi-a@older');
+  assert.equal(legacyCapturePreflight(older, path.join(older, 'flows.json'), olderGui), null,
+    'a payload without modules.json runs the live module directories');
+
+  // Regular flows: no switch is under way, whatever the GUI links to.
+  const edited = coherentRoot(t, 'deployed');
+  fs.rmSync(edited.flowsPath);
+  fs.writeFileSync(edited.flowsPath, JSON.stringify([{ id: 'edited' }]) + '\n');
+  assert.equal(legacyCapturePreflight(edited.root, edited.flowsPath, edited.guiRoot), null, 'regular flows file');
+});
+
+test('legacyCapturePreflight refuses flows and GUI linked into different payloads', (t) => {
+  for (const marker of ['none', 'stale']) {
+    const live = coherentRoot(t, 'old');
+    stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+    // Power lost inside flipTo('cut'): flows switched, the GUI and modules not.
+    relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+    if (marker === 'stale') staleMarker(live.marker, 'gone-previous');
+    const before = marker === 'stale' ? fs.readFileSync(live.marker, 'utf8') : null;
+
+    assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot),
+      /the live flows point into payloads\/cut but the GUI into payloads\/old; refusing to capture a half-switched state/, marker);
+    if (marker === 'stale') assert.equal(fs.readFileSync(live.marker, 'utf8'), before, 'the stale marker stays for the operator');
+    else assert.equal(fs.existsSync(live.marker), false, 'no marker is written');
+  }
+});
+
+test('legacyCapturePreflight refuses linked flows whose payload modules are not linked into it', (t) => {
+  const cases = {
+    'modules still in the older payload': () => {},
+    'a module is a real directory': (root) => {
+      for (const name of ['osi-a', 'osi-b']) relink(root, name, path.join('payloads', 'cut', 'modules', name));
+      fs.rmSync(path.join(root, 'osi-a'));
+      writeModule(path.join(root, 'osi-a'), 'osi-a@real');
+    },
+    'a module link dangles': (root) => {
+      for (const name of ['osi-a', 'osi-b']) relink(root, name, path.join('payloads', 'cut', 'modules', name));
+      fs.rmSync(path.join(root, 'payloads', 'cut', 'modules', 'osi-a'), { recursive: true, force: true });
+    },
+  };
+  const stray = { 'modules still in the older payload': 'osi-a, osi-b', 'a module is a real directory': 'osi-a', 'a module link dangles': 'osi-a' };
+  for (const [label, damage] of Object.entries(cases)) {
+    for (const marker of ['none', 'stale']) {
+      const live = coherentRoot(t, 'old');
+      stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+      swap.linkNewModules(live.root, 'cut', 'old');
+      imageGui(live.guiRoot);
+      // Power lost inside flipTo('cut') after a sysupgrade: flows switched.
+      relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+      damage(live.root);
+      if (marker === 'stale') staleMarker(live.marker, 'attempt-a-previous');
+
+      assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot),
+        new RegExp(`the live flows point into payloads/cut, but its helper modules ${stray[label]} are not linked into it; refusing to capture a half-switched state`),
+        `${label}, ${marker} marker`);
+      assert.equal(fs.existsSync(live.marker), marker === 'stale', `${label}, ${marker} marker: nothing moved aside`);
+      assert.equal(fs.readdirSync(path.join(live.root, 'payloads')).some((entry) => entry.startsWith('.legacy-capture.json.stale-')), false);
+    }
+  }
+});
+
+test('legacyCapturePreflight refuses a malformed module manifest in the payload the flows point into', (t) => {
+  const live = coherentRoot(t, 'old');
+  stageWithModules(live.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+  imageGui(live.guiRoot);
+  relink(live.root, 'flows.json', path.join('payloads', 'cut', 'flows.json'));
+  fs.writeFileSync(path.join(live.root, 'payloads', 'cut', 'modules.json'), 'not json\n');
+  assert.throws(() => legacyCapturePreflight(live.root, live.flowsPath, live.guiRoot), /module manifest unreadable/);
+});
+
+test('legacyCapturePreflight lets a rerun capture after power loss between moving the marker aside and the capture', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'pruned-previous', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'pruned-previous'), { recursive: true, force: true });
+  assert.match(legacyCapturePreflight(root, flowsPath, guiRoot), /^WARN: stale legacy-capture marker/);
+  // Power lost here: the rerun finds no marker and the same live files.
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null);
+  assert.equal(fs.existsSync(marker), false);
+  captureExisting(root, 'rerun-previous', flowsPath, guiRoot);
+  assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'rerun-previous');
+});
