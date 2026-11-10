@@ -15,6 +15,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   an expired token degraded the gateway until the next restart. Tagged token
   rejections are no longer counted in `errors_total`; they still appear as
   a rate-limited warning in the gateway log. Other errors count as before.
+- The Kiwi/Clover `Process Data` node no longer logs
+  `Unexpected payload structure` for every LSN50 uplink (#466).
 
 ---
 
