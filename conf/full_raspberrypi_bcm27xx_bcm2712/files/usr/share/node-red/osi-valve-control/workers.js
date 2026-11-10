@@ -393,6 +393,13 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
     observation.last_physical_run_id = physicalRunId;
     observation.physical_run_id = null;
   }
+  // #601: the close ends a timed open's commanded intent once no actuation is live. A CLOSED
+  // report that arrives before the open was delivered (Class A) leaves that expectation live, so
+  // a pending command keeps its OPEN target. Resolve before the current_state write so the one
+  // device event that write queues carries target_state CLOSED; when current_state is already
+  // CLOSED that write queues nothing, so the resolver bumps sync_version itself.
+  const prior = await tx.get("SELECT COALESCE(UPPER(current_state), '') AS state FROM devices WHERE UPPER(deveui)=UPPER(?)", [deviceEui]);
+  await store.resolveTimedOpenTargetTx(tx, deviceEui, { bumpSyncVersion: Boolean(prior) && prior.state === state });
   await updateAuthoritativeStateTx(tx, deviceEui, state, reportAt);
   await writeObservationControlTx(tx, deviceEui, controlToWrite, observation);
   return { kind: 'closed', physical_run_id: physicalRunId };
@@ -748,6 +755,16 @@ async function runReconciliationTick({ db, now, warn }) {
       }
     });
     advanced += 1;
+  }
+  // #601: resolve every OPEN target that no live actuation backs any more, with sync_version, so
+  // the cloud mirror stops showing a pending open. This is where an open that was never reported
+  // ends (STALE_NO_OBSERVATION above), and it also catches the paths that end an actuation
+  // without resolving the target: a handed-off cancel, an equal-time duplicate CLOSED report, a
+  // cancel that landed before the encoder's write, a target an older firmware left OPEN.
+  const openTargets = await db.all("SELECT deveui FROM devices WHERE type_id='STREGA_VALVE' AND deleted_at IS NULL AND target_state='OPEN' ORDER BY deveui");
+  for (const valve of openTargets) {
+    try { await store.resolveTimedOpenTargetTx(db, valve.deveui, { bumpSyncVersion: true }); }
+    catch (error) { warn && warn('[valve-control] target_state resolution failed for ' + valve.deveui + ': ' + String(error && error.message ? error.message : error)); }
   }
   return { reconciled: active.length, advanced };
 }
