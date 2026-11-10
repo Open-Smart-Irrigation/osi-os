@@ -59,8 +59,8 @@ current head (on the maintainer workstation: the user-level `sol-loop` skill). R
 classes are reviewed by three models from different providers (`council`, capped at
 five rounds), and they merge only after council approval and sign-off by an
 independent lead architect, both given on the same current head: a new commit voids
-both. A lead architect is independent when their thread neither wrote nor reviewed the
-change in any capacity; when no lead is independent, the owner decides. Severity is impact times reachability, not frequency: retries, offline
+both. A lead architect is independent when their thread did not write, plan, or review
+the change in any capacity; when no lead is independent, the owner decides. Severity is impact times reachability, not frequency: retries, offline
 recovery, restarts and interrupted migrations are ordinary paths on a gateway, so a
 data-loss bug on one of them is a blocker, never a nit. The stages below describe the
 full risk-class loop; the standard loop uses the ones it names.
