@@ -17,10 +17,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a rate-limited warning in the gateway log. Other errors count as before.
 - The Kiwi/Clover `Process Data` node no longer logs
   `Unexpected payload structure` for every LSN50 uplink (#466).
-- Journal V2: a mutation the cloud refuses with a 4xx no longer blocks every
-  later mutation from the gateway. A refusal receipt marks it rejected; any
+- Journal V2: a mutation the cloud refuses with a 4xx no longer blocks the
+  mutations of other journal records. A refusal receipt marks it rejected; any
   other refusal holds it and retries it with a backoff from 15 minutes up to
-  24 hours. 401, 403, 429 and 5xx answers keep stopping the tick (#447).
+  24 hours. Later mutations of the same entry, plot, plot group, product or
+  custom field wait behind a held or rejected one, so they reach the cloud in
+  the order they were made. 401, 403, 408, 429 and 5xx answers keep stopping
+  the tick (#447).
 
 ---
 
