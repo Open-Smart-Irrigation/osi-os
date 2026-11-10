@@ -125,6 +125,7 @@ async function executeFunction(node, options) {
   const errors = [];
   const warnings = [];
   const logs = [];
+  const statuses = [];
   const flowStore = new Map(Object.entries(flowState));
   const globalStore = new Map();
   const databaseFacade = facadeDb(db);
@@ -139,7 +140,7 @@ async function executeFunction(node, options) {
       error: (message) => errors.push(String(message)),
       warn: (message) => warnings.push(String(message)),
       log: (message) => logs.push(String(message)),
-      status: () => {},
+      status: (value) => statuses.push(value),
     },
     flow: {
       get: (key) => flowStore.get(key),
@@ -158,7 +159,10 @@ async function executeFunction(node, options) {
   };
   // Lazy: only the libs a node under test declares are ever resolved.
   const lazyLibs = {
-    osiDb: () => ({ Database: function Database() { return databaseFacade; } }),
+    osiDb: () => ({
+      Database: function Database() { return databaseFacade; },
+      isolatedFarmingTransaction: (fn) => fn(databaseFacade),
+    }),
     osiLib: () => ({
       require(name) {
         const value = osiLibModules[name]
@@ -198,6 +202,7 @@ async function executeFunction(node, options) {
     errors,
     warnings,
     logs,
+    statuses,
     flowState: Object.fromEntries(flowStore),
   };
 }

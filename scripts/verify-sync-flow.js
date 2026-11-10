@@ -360,6 +360,7 @@ function runQuietNodeScript(scriptName, description) {
   }
 }
 
+runQuietNodeScript('test-sdi12-transmission-archive.js', 'SDI-12 transmission archive round trips pass');
 runQuietNodeScript('osi-lib-binding-audit.test.js', 'osi-lib binding audit adversarial fixtures pass');
 runQuietNodeScript('migrate-flows-journal-generators.test.js', 'journal replay generators reject shape drift');
 runQuietNodeScript(

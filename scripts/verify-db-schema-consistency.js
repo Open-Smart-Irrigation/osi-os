@@ -1151,6 +1151,10 @@ const schemaContract = {
     'compatible_at',
     'updated_at',
   ],
+  sdi12_transmissions: [
+    'id', 'deveui', 'recorded_at', 'received_at', 'payload_version',
+    'raw_ascii', 'frames_json', 'context_json',
+  ],
   sdi12_identify_attempts: [
     'deveui',
     'stage',
@@ -1332,6 +1336,7 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
+  sdi12_transmissions: ['idx_sdi12_transmissions_device_time'],
   sdi12_recipe_deployments: ['idx_sdi12_recipe_deployments_status'],
   journal_crop_cycle_plots: [
     'idx_ccp_plot_open',

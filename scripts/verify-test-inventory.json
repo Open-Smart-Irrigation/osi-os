@@ -22,6 +22,10 @@
       "runner": "scripts/verify-live-gateway-identity.js"
     },
     {
+      "path": "scripts/test-sdi12-transmission-archive.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
       "path": "web/react-gui/tests/browser/conditional-irrigation.spec.ts",
       "runner": "web/react-gui/playwright.conditional.config.ts",
       "note": "The existing frontend CI job runs the Playwright config through test:browser:conditional."

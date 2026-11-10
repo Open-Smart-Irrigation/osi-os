@@ -46,7 +46,7 @@ function step(state, deveui, segment) {
   validate(segment);
   if (segment.count === 1) {
     delete state[deveui]; // a device back on single-frame must not keep an orphan buffer
-    return { action: 'passthrough', message: emit(segment, segment.ascii), status: 'passthrough' };
+    return { action: 'passthrough', message: emit(segment, segment.ascii), frames: segment.frame ? [segment.frame] : [], status: 'passthrough' };
   }
   var buf = state[deveui];
   var resetReason = null;
@@ -75,7 +75,7 @@ function step(state, deveui, segment) {
   var ascii = seen.map(function (i) { return buf.segments[i].ascii; }).join('');
   var last = buf.segments[buf.count - 1];
   delete state[deveui];
-  return { action: 'complete', message: emit(last, ascii), status: 'complete ' + buf.count };
+  return { action: 'complete', message: emit(last, ascii), frames: seen.map(function (i) { return buf.segments[i].frame; }).filter(Boolean), status: 'complete ' + buf.count };
 }
 
 module.exports = { step: step, WINDOW_MS: WINDOW_MS, MAX_COUNT: MAX_COUNT };

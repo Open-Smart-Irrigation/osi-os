@@ -667,18 +667,18 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   // agronomy, FAO-56 stage keys, zone weather_source sync, zone stage start
   // date, daily agronomy record sync, WATERMARK cloud parity, journal V2
   // plot-group snapshots, journal catalog v11) are also genuinely new to this
-  // device, so pending is {22,23,24,25,54,...,79}.
+  // device, so pending is {22,23,24,25,54,...,80}.
   // This list is exact on purpose: extend it when a migration lands, never
   // relax it to a prefix or subset check.
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]);
+  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]);
 
   // The real applyPending can now carry the device the rest of the way home.
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]);
+  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
 });
 
@@ -747,7 +747,7 @@ test('non-valve lineage at version 53: exact remaps for main-carried tail, holes
   const appliedRows = await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'");
   const applied = new Set(appliedRows.map((r) => r.version));
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  const expectedPending = [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67, 71, 72, 73, 74, 75, 76, 77, 78, 79];
+  const expectedPending = [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80];
   assert.deepEqual(pending, expectedPending);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
@@ -775,7 +775,73 @@ test('non-valve lineage at version 53: exact remaps for main-carried tail, holes
   // A second pass is a no-op: every row matches, nothing pending.
   const again = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: false });
   assert.equal(again.refused, false);
-  assert.equal(again.summary.match, 79);
+  assert.equal(again.summary.match, 80);
+  assert.equal(again.summary.remapExact + again.summary.remapHeaderStripped, 0);
+  const carryAgain = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile-2', writersStopped: true });
+  assert.deepEqual(carryAgain.applied, []);
+});
+
+// A customer line applied the SDI-12 transmission archive as its own 0076.
+// Main ships those exact bytes as 0080 (header comment untouched), so
+// reconciliation must renumber the row by exact checksum, with no lineage
+// fixture, and the carry-forward must then fill main's holes 0076-0079.
+test('customer line with SDI-12 archive at 76: exact remap to 80, holes 76-79 applied after it', { timeout: 1_800_000 }, async () => {
+  const root = scratch();
+  const deviceDir = path.join(root, 'device-customer-line');
+  fs.mkdirSync(deviceDir);
+  for (const m of loadMigrations(MAIN_MIGRATIONS_DIR)) {
+    if (m.version <= 75) fixtureCopy(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(deviceDir, m.name));
+  }
+  fixtureCopy(path.join(MAIN_MIGRATIONS_DIR, '0080__sdi12_transmissions.sql'), path.join(deviceDir, '0076__sdi12_transmissions.sql'));
+  const db = path.join(root, 'customer-line-device.db');
+  const boot = await bootstrapFresh(cliRunner(db), { migrationsDir: deviceDir, appVersion: 'customer-line-fixture' });
+  assert.deepEqual(boot.applied, Array.from({ length: 76 }, (_, i) => i + 1));
+
+  const runner = cliRunner(db);
+  await runner.exec([
+    "INSERT INTO sdi12_transmissions (deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json)",
+    "  VALUES ('A840410000000001', '2026-10-28T10:00:00Z', '2026-10-28T10:00:01Z', 1, '+0.732840+28.27938', '[]', '{}');",
+  ].join('\n'));
+  const before = await tableDigest(runner, 'sdi12_transmissions', 'id');
+  assert.equal(before.count, 1);
+
+  const reportRes = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: false });
+  assert.equal(reportRes.refused, false, JSON.stringify(reportRes.summary));
+  assert.equal(reportRes.summary.total, 76);
+  assert.equal(reportRes.summary.match, 75);
+  assert.equal(reportRes.summary.remapExact, 1);
+  assert.equal(reportRes.summary.remapHeaderStripped, 0);
+  assert.equal(reportRes.summary.refused, 0);
+  const remaps = reportRes.rows.filter((r) => r.decision === 'remap').map((r) => ({ from: r.version, to: r.target.version }));
+  assert.deepEqual(remaps, [{ from: 76, to: 80 }]);
+  assert.equal(reportRes.rows.find((r) => r.version === 76).matchType, 'exact');
+
+  const backupDir = path.join(root, 'backups');
+  const applyRes = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: true, writersStopped: true, backupDir });
+  assert.equal(applyRes.refused, false, JSON.stringify(applyRes.summary));
+  assert.equal(applyRes.applied, true, JSON.stringify(applyRes.summary));
+  assert.deepEqual(await verifyReconciliationConsistency(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
+  const row80 = await cliRunner(db).all("SELECT version, name, status FROM schema_migrations WHERE version IN (76, 80) ORDER BY version");
+  assert.deepEqual(row80, [{ version: 80, name: '0080__sdi12_transmissions.sql', status: 'applied' }]);
+
+  const applied = new Set((await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version));
+  const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
+  assert.deepEqual(pending, [76, 77, 78, 79]);
+  const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
+  assert.deepEqual(carryRes.applied, [76, 77, 78, 79]);
+  assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
+
+  // Same schema as a fresh database built from main's seed, and the archived row is untouched.
+  const seedDb = path.join(root, 'seed.db');
+  await cliRunner(seedDb).exec(fs.readFileSync(path.join(REPO, 'database/seed-blank.sql'), 'utf8'));
+  const cmp = compareSchemas(await snapshotSchema(cliRunner(db)), await snapshotSchema(cliRunner(seedDb)));
+  assert.deepEqual(cmp.diffs, []);
+  assert.deepEqual(await tableDigest(cliRunner(db), 'sdi12_transmissions', 'id'), before);
+
+  // A second pass is a no-op.
+  const again = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: false });
+  assert.equal(again.refused, false);
+  assert.equal(again.summary.match, 80);
   assert.equal(again.summary.remapExact + again.summary.remapHeaderStripped, 0);
   const carryAgain = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile-2', writersStopped: true });
   assert.deepEqual(carryAgain.applied, []);
@@ -827,7 +893,7 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79]);
+  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
   assert.deepEqual(carryRes.applied, pending);

@@ -380,7 +380,47 @@ async function quickCheck() {
   return result.rows || [];
 }
 
+// A fresh connection per call keeps evidence commits outside legacy manual
+// transactions on the shared farming database connection. No cached init state.
+async function isolatedFarmingTransaction(executor) {
+  if (typeof executor !== 'function') throw new TypeError('isolatedFarmingTransaction requires an executor');
+  let database = null;
+  let began = false;
+  let failed = false;
+  let failure;
+  let result;
+  try {
+    database = await openDatabase(DB_PATH);
+    for (const pragma of PRAGMAS) await runRaw(database, 'all', pragma);
+    await runRaw(database, 'all', 'PRAGMA busy_timeout=15000');
+    await runRaw(database, 'all', 'PRAGMA synchronous=FULL');
+    await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
+    began = true;
+    result = await executor(createTransactionScope(database));
+    await runRaw(database, 'exec', 'COMMIT;');
+    began = false;
+  } catch (error) {
+    failed = true;
+    failure = error;
+    if (database && began) {
+      try { await runRaw(database, 'exec', 'ROLLBACK;'); }
+      catch (rollbackError) { if (failure && typeof failure === 'object') Reflect.set(failure, 'rollbackError', rollbackError); }
+    }
+  } finally {
+    if (database) {
+      try { await closeDatabase(database); }
+      catch (closeError) {
+        if (!failed) { failed = true; failure = closeError; }
+        else if (failure && typeof failure === 'object') Reflect.set(failure, 'closeError', closeError);
+      }
+    }
+  }
+  if (failed) throw failure;
+  return result;
+}
+
 module.exports = {
+  isolatedFarmingTransaction,
   Database: DatabaseFacade,
   open: (filename, options) => new IndependentDatabaseFacade(filename, options),
   approvedPath,

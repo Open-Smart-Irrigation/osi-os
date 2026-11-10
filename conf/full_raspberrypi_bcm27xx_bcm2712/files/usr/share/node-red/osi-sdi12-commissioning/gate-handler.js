@@ -53,6 +53,7 @@ if (fPort !== 2 || decoded.unsupported_fport !== undefined) {
   node.status({ fill: 'grey', shape: 'ring', text: 'dropped fport ' + fPort + ' ' + deveui });
   return null;
 }
+msg.sdi12.frames = [{ event: data, receivedAt: new Date().toISOString() }];
 if (decoded.Payver !== 2 || decoded.SegCount === undefined) {
   return [msg, null]; // payver 1: unchanged single-uplink path
 }
@@ -67,6 +68,7 @@ var r;
 try {
   r = reRes.value.step(state, deveui, {
     count: decoded.SegCount, index: decoded.SegIndex, ascii: String(decoded.data_sum || ''),
+    frame: msg.sdi12.frames[0],
     batV: decoded.BatV, extiTrigger: decoded.EXTI_Trigger, recordedAt: data.time || null, nowMs: Date.now()
   });
 } catch (e) {
@@ -82,6 +84,7 @@ if (r.action === 'reset') {
   return [msg, null]; // write node records the dead-letter, no row
 }
 // complete or passthrough
+msg.sdi12.frames = r.frames;
 var announced = flow.get('sdi12_reassembly_announced') || {};
 if (r.action === 'complete' && !announced[deveui]) {
   announced[deveui] = true; flow.set('sdi12_reassembly_announced', announced);

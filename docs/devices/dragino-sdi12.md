@@ -352,6 +352,140 @@ terminators have been removed.
 
 Check the profile's expected count and the exact `AT+DATACUTx` output first. The writer is intentionally narrow: a malformed fixed-cardinality frame produces battery-only data, while a valid variable-count `GENERIC_VWC` frame maps values in order and leaves unused channels null.
 
+## Full-precision transmission archive
+
+After migration 0080 and the matching runtime are deployed, every complete
+supported periodic SDI-12 transmission is also stored in
+`farming.db.sdi12_transmissions`. Capture runs before normalization. A rejected
+measurement response remains available even if normalizer loading, manifest
+reading, normalization or the canonical telemetry write fails. Archive failures
+are logged as `SDI12 archive failed` on the SDI12 Normalize + Write node;
+normal telemetry continues. Before changing the soil, compare the gateway's UTC clock with a
+trusted time source and confirm that the sampled node already has an archive
+row. Replace the synthetic EUI in these queries with the sampled device:
+
+For configured Tensiomark nodes, the uplink is also written to
+`tensiomark_observations`, linked to its canonical `device_data` row. The
+archive's `raw_ascii` is decoder text and may omit the vendor marker bytes; the
+original received bytes remain in `frames_json[].event.data`. A Tensiomark
+`quarantineOnly` uplink is skipped by the archive, then handled by the existing
+Tensiomark writer and recorded as `rejected_framing` in
+`tensiomark_observations`, not in `ingest_quarantine`.
+
+```sh
+date -u
+sqlite3 -readonly /data/db/farming.db \
+  "SELECT id, recorded_at, received_at FROM sdi12_transmissions WHERE deveui = 'A840410000000001' ORDER BY id DESC LIMIT 5;"
+```
+
+The example identity is synthetic. If there is no row, wait for a complete
+transmission and confirm capture before disturbing the soil.
+
+The archive keeps `raw_ascii` as received, including decimal trailing zeros.
+For PAYVER 2 this is the concatenation of decoded slices in segment-index order.
+`frames_json` contains the original ChirpStack application events and each
+frame's local `receivedAt`, including the original base64 application payload
+when supplied. Decoded-only events do not acquire invented payload bytes.
+This cannot recover digits the probe or the Dragino DATACUT configuration did
+not transmit. Moisture values already converted by the probe remain converted
+values; TriSCAN moisture scaled frequency and VIC retain their separate meanings.
+
+`recorded_at` preserves the source timestamp selected by the existing ingest
+path: the highest-index segment's timestamp, falling back to the completing
+event's timestamp if the former is absent. It can be null or invalid.
+`received_at` is the local time when the archive write starts; every original
+network timestamp remains in `frames_json`. Neither time proves the instant
+when the probe sampled the soil. Match sample times against the frame reception
+window and take a fresh reading before disturbing the soil.
+
+`context_json` snapshots the saved profile, probe identity and layout at ingest,
+including response positions and depths. It also retains the legacy depth-map
+JSON and its configured flag. `profileFamily` names the configured Sentek
+family. `deploymentStatus`, `deploymentDesiredVersion`,
+`deploymentDesiredLayoutHash`, `compatibleLayout`, `compatibleRecipe` and
+`compatibleAt` preserve deployment metadata returned by the local configuration
+query. The JSON strings are kept as stored. These fields are not hardware
+readback. `normalization: "sentek_mixed_v1"` means the saved layout is eligible
+for mixed-layout normalization; it does not prove canonical conversion ran for
+that row. SF is the transmitted TriSCAN moisture value used as the
+scaled-frequency input to OSI's existing default curve. The archive does not
+prove which coefficients or conversion settings were active. Preserve the known
+PConfig backup with the sampling records.
+
+The archive is local-only and has no automatic expiry or cascading device
+foreign key. Ordinary telemetry pruning and deleting a device do not erase it.
+Incomplete PAYVER 2 sequences still use the existing in-memory reassembly window
+and quarantine path; they do not become complete archive rows and can be lost
+on a Node-RED restart. The reassembler keeps a 10-minute lazy window and has no
+acquisition-cycle identifier. A reporting cadence of 10 minutes or less can
+mix segments from separate acquisitions if segments are delayed or missing;
+keep the documented 20-minute sampling cadence. This reduces that risk but does
+not prove every segment belongs to one acquisition. Frame-counter (`fCnt`) gaps
+are diagnostic context only: status and debug traffic can consume counters too.
+
+Duplicate suppression uses an in-memory cache with a 10-minute TTL. It does not
+survive a Node-RED restart, and redelivered uplinks after the TTL can also create
+duplicate rows without a restart. Before counting rows as separate samples,
+compare the available deduplication IDs in `frames_json`.
+
+For a supported FPort 2 event, a string `data_sum` is required to create an
+archive row. If ChirpStack supplies the original base64 `data` but decoded
+`data_sum` is absent, the SDI12 Normalize + Write node logs the warning `SDI12
+decoded payload missing data_sum`; no archive row is created. Without original
+bytes, no row is created and no warning is logged. The existing PAYVER 2
+reassembly path can turn absent segment text into an empty string before the
+archive handler; the warning describes the complete-event path and does not
+change that behavior. FPort 100 identify echoes and unsupported ports are outside this
+archive.
+
+Each row is limited to 1500 JavaScript characters in `raw_ascii`. The serialized
+`frames_json` and `context_json` values each have a 256 KiB UTF-8 limit. These
+are maximum accepted sizes, not typical record sizes.
+
+Export through an operator session on the gateway. The browser database-download
+route remains disabled. Make a consistent SQLite backup on persistent storage
+or removable storage; `/tmp` may be RAM-backed and is not suitable for a full
+database backup. Check free space at the destination first. This example uses a
+unique path and stops if it already exists, so an earlier backup is never
+overwritten. SQLite's `.backup` includes committed WAL contents; copying only the
+live `.db` file can omit them:
+
+```sh
+backup_dir=/data/backups
+mkdir -p "$backup_dir"
+df -h "$backup_dir"
+backup="$backup_dir/sdi12-evidence-$(date -u +%Y%m%dT%H%M%SZ)-$$.db"
+test ! -e "$backup" || { echo "backup already exists: $backup" >&2; exit 1; }
+sqlite3 /data/db/farming.db ".backup $backup"
+sqlite3 -readonly -json "$backup" \
+  "SELECT id, deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json FROM sdi12_transmissions WHERE deveui = 'A840410000000001' ORDER BY id;" \
+  > "$backup_dir/sdi12-transmissions-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
+```
+
+Replace the example identity with the sampled node's identity. Copy the backup
+and export off the gateway and verify their contents before removing local
+copies. Use original `raw_ascii` and the coefficient backup for reconstruction;
+canonical VWC and existing chart/CSV values retain their current rounding.
+One soil sample per depth is a comparison point, not a fitted calibration curve.
+
+The 10 KiB average record size is an illustrative estimate, not a size guarantee.
+At a 20-minute interval there are 72 events per day per node; estimated fleet
+growth is about `0.7 MiB/day × node count` or `260 MiB/year × node count`, before
+SQLite overhead. Count all archiving SDI-12 nodes, including Tensiomark probes.
+Check actual growth with `SELECT count(*),
+sum(length(CAST(frames_json AS BLOB)) + length(CAST(context_json AS BLOB)) +
+length(raw_ascii)) FROM sdi12_transmissions;` and include this table in routine
+database backups.
+
+The archive has no retention rule yet. To keep it from filling the gateway
+disk, it stops inserting when the filesystem that holds the database has less
+than 1 GiB free (`ARCHIVE_MIN_FREE_BYTES` in `osi-sdi12-archive`). The normal
+reading write is not affected. The skip is logged as `SDI12 archive skipped:
+free disk ... bytes is below 1073741824`, at most once an hour per Node-RED
+process, and the rows that were skipped are not archived later. If the free-space
+check itself fails, the archive row is written as usual and `SDI12 archive disk
+probe failed` is logged, at most once an hour. Retention is tracked in #625.
+
 ## References
 
 - [Dragino SDI-12-LB/LS manual](https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/)
