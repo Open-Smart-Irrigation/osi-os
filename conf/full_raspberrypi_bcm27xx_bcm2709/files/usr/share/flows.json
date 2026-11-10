@@ -11134,12 +11134,17 @@
     "type": "function",
     "z": "93b1537a596e0e6d",
     "name": "Record Error",
-    "func": "const now = Date.now();\nconst err = msg.error || msg._error || {};\nconst source = err.source || msg._error?.source || {};\nconst rawMessage = err.message || msg.payload?.message || String(err || 'unknown error');\nconst message = String(rawMessage || 'unknown error').slice(0, 120);\nconst src = String(source.name || source.id || source.type || msg.topic || 'unknown');\n\nconst counts = global.get('error_counts') || {};\nconst previousTotal = Number(counts.total || 0);\ncounts.total = Number.isFinite(previousTotal) ? previousTotal + 1 : 1;\ncounts.last = { at: now, src, message };\nglobal.set('error_counts', counts);\n\nconst limitMs = 60000;\nconst warned = flow.get('record_error_warned') || {};\nfor (const key of Object.keys(warned)) {\n  if (now - Number(warned[key] || 0) > limitMs * 10) {\n    delete warned[key];\n  }\n}\n\nconst lastWarned = Number(warned[message] || 0);\nif (!lastWarned || now - lastWarned >= limitMs) {\n  warned[message] = now;\n  node.warn(src + ': ' + message);\n}\nflow.set('record_error_warned', warned);\n\nreturn null;",
+    "func": "const counts = global.get('error_counts') || {};\nconst helper = osiLib.require('health-helper');\nif (!helper.ok) {\n  counts.total = (Number(counts.total) || 0) + 1;\n  counts.last = { at: Date.now(), src: 'Record Error', message: 'health helper unavailable' };\n  global.set('error_counts', counts);\n  node.warn('Record Error: health helper unavailable (' + helper.error + '): ' + String((msg.error && msg.error.message) || 'unknown error'));\n  return null;\n}\nconst result = helper.value.recordError(msg, {\n  now: Date.now(),\n  counts,\n  warned: flow.get('record_error_warned') || {}\n});\nglobal.set('error_counts', result.counts);\nflow.set('record_error_warned', result.warned);\nif (result.warning) node.warn(result.warning);\nreturn null;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
     "x": 1750,
     "y": 1340,
     "wires": [
