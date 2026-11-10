@@ -42,6 +42,7 @@ const GATEWAY_EUI = '0016C001F1000001';
 const CLOVER_PROFILE = '0b6f3c1e-1d2a-4c5b-8e9f-000000000001';
 const RAK_PROFILE = '0b6f3c1e-1d2a-4c5b-8e9f-000000000002';
 const KIWI_PROFILE = '0b6f3c1e-1d2a-4c5b-8e9f-000000000003';
+const LSN50_PROFILE = '0b6f3c1e-1d2a-4c5b-8e9f-000000000004';
 const SENSORS_APP = '0b6f3c1e-1d2a-4c5b-8e9f-0000000000a1';
 const FIELD_TESTER_APP = '0b6f3c1e-1d2a-4c5b-8e9f-0000000000a2';
 const ENV = Object.freeze({
@@ -193,6 +194,31 @@ CASES.push({
   name: 'the same frame without a decoded object (codec-less field-tester profile) is dropped',
   async run() {
     const processed = await processData(chirpstackEvent({ time: new Date().toISOString(), fCnt: 42 }));
+    assert.equal(processed.result, null);
+    assert.deepEqual(processed.errors, ['Unexpected payload structure']);
+  },
+});
+
+CASES.push({
+  name: 'an LSN50 uplink without a decoded object is skipped without an error',
+  async run() {
+    const event = chirpstackEvent({ time: new Date().toISOString(), fCnt: 44 });
+    event.deviceInfo.deviceProfileId = LSN50_PROFILE;
+    event.deviceInfo.deviceProfileName = 'OSI LSN50';
+    event.deviceInfo.deviceName = 'LSN50 row 1';
+    const processed = await processData(event);
+    assert.equal(processed.result, null);
+    assert.deepEqual(processed.errors, []);
+  },
+});
+
+CASES.push({
+  name: 'a Kiwi uplink without a decoded object still logs Unexpected payload structure',
+  async run() {
+    const event = chirpstackEvent({ time: new Date().toISOString(), fCnt: 45 });
+    event.deviceInfo.deviceProfileId = KIWI_PROFILE;
+    event.deviceInfo.deviceProfileName = 'OSI KIWI Sensor';
+    const processed = await processData(event);
     assert.equal(processed.result, null);
     assert.deepEqual(processed.errors, ['Unexpected payload structure']);
   },
