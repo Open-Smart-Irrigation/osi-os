@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Edge keeps every complete SDI-12 transmission, with the original LoRaWAN
+  application events, in a local archive table before normalization
+  (migration 0080). The archive is local-only and has no retention rule yet
+  (#625); it stops inserting when the database filesystem has less than 1 GiB
+  free, and the normal reading write is never blocked by it.
+
 ### Fixed
 - **A rejected API token no longer marks the gateway `degraded` until
   Node-RED restarts (#462).** Record Error counted every 401 from a token
