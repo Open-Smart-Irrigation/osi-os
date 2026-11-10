@@ -341,6 +341,18 @@ if (!transportResult || transportResult.phase !== 'ACCEPTED') {
 }
 
 if (action && transportResult && transportResult.phase === 'ACCEPTED' && transportResult.replayed !== true) {
+  // #601: record the commanded target state once the transport accepted the frame. The flows
+  // "Build actuator_log INSERT" node used to append this UPDATE to its INSERT topic, where the
+  // SQLite node ran only the first statement. updated_at stays as it is: the valve conflict
+  // check reads it as the time of current_state (dispatch.js reservation path).
+  const targetState = action.indexOf('OPEN') === 0 ? 'OPEN' : (action.indexOf('CLOSE') === 0 ? 'CLOSED' : null);
+  if (targetState && db) {
+    try {
+      await db.run('UPDATE devices SET target_state=? WHERE UPPER(deveui)=UPPER(?)', [targetState, devEui]);
+    } catch (e) {
+      node.warn('STREGA target_state update failed for ' + devEui + ': ' + (e && e.message ? e.message : e));
+    }
+  }
   logMsg = {
     _log_ctx: {
       devEui,
