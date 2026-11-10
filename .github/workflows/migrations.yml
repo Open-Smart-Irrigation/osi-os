@@ -201,6 +201,7 @@ jobs:
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/lifecycle-clear.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-transport-target-state.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.test.js \

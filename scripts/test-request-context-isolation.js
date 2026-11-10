@@ -1355,7 +1355,9 @@ function assertValveAccepted(rt, name, expected) {
     new RegExp("VALUES\\s*\\('" + expected.eui + "', (\\d+|NULL), 'OPEN_FOR_DURATION', " + expected.minutes + ','),
     name + ' actuator_log SQL'
   );
-  assert.match(writes[0].topic, new RegExp("WHERE UPPER\\(deveui\\)=UPPER\\('" + expected.eui + "'\\)"), name + ' device update SQL');
+  assert.doesNotMatch(writes[0].topic, /UPDATE devices/, name + ' log write carries no device update');
+  assert.equal(rt.db.prepare('SELECT target_state FROM devices WHERE deveui = ?').get(expected.eui).target_state, 'OPEN',
+    name + ' accepted open records its target state');
   const logEntry = lane.logRows.find((entry) => entry.node === ID.valveWriteDb);
   assert.ok(logEntry, name + ' captures the request-scoped actuator_log row id');
   assert.ok(logEntry.id > rt.logBaseline, name + ' log row follows the seed baseline');
@@ -2281,8 +2283,8 @@ for (const scoped of [false, true]) {
               'write error does not undo the already emitted actuator command');
             assert.equal(db.prepare('SELECT COUNT(*) AS n FROM actuator_log WHERE deveui = ?').get(VALVE_A).n, 0,
               'synthetic busy executed no A write');
-            assert.notEqual(db.prepare('SELECT target_state FROM devices WHERE deveui = ?').get(VALVE_A).target_state,
-              'OPEN', 'synthetic busy creates no device-row effect');
+            assert.equal(db.prepare('SELECT target_state FROM devices WHERE deveui = ?').get(VALVE_A).target_state,
+              'OPEN', 'target_state follows transport acceptance, not the actuator_log write (#601)');
           } else if (kind === 'synthetic_busy') {
             if (site.chain === 'valve') assertValveRejected(rt, 'A', 500);
             else assertScheduleRejected(rt, 'A', 500);
@@ -2302,8 +2304,8 @@ for (const scoped of [false, true]) {
               actorUuid: scoped ? USERS.admin1.uuid : null });
             if (site.boundary === ID.valveWriteDb && kind === 'execute') {
               const target = db.prepare('SELECT target_state FROM devices WHERE deveui = ?').get(VALVE_A);
-              assert.notEqual(target.target_state, 'OPEN',
-                'known source-faithful discrepancy: one msg.topic all() call inserts the log but not appended target UPDATE');
+              assert.equal(target.target_state, 'OPEN',
+                'the encoder records the target state at transport acceptance (#601)');
               assert.equal(db.prepare('SELECT COUNT(*) AS n FROM actuator_log WHERE deveui = ?').get(VALVE_A).n, 1,
                 'first statement inserted the actuator log row');
             }
@@ -2510,16 +2512,20 @@ test('schedule lifecycle zoneByRef read holds before transaction; disjoint B com
   });
 });
 
-test('known valve product discrepancy: combined topic logs open but target_state remains unchanged', async () => {
+test('valve open writes actuator_log and devices.target_state as separate statements (#601)', async () => {
   await withRuntime({ scoped: false }, async (rt, db) => {
+    const before = db.prepare('SELECT target_state, updated_at, sync_version FROM devices WHERE deveui = ?').get(VALVE_A);
+    assert.notEqual(before.target_state, 'OPEN', 'fixture valve starts without an OPEN target');
     rt.inject('A', ID.valveHttp, valveMsg('A', { user: USERS.res1, eui: VALVE_A, minutes: 12 }));
     await rt.run('A');
     assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12, userId: USERS.res1.userId });
     const topic = rt.lane('A').sql.find((entry) => entry.node === ID.valveWriteDb).topic;
-    assert.match(topic, /^INSERT INTO actuator_log[\s\S]*;\s*UPDATE devices\s+SET target_state/);
-    const row = db.prepare('SELECT target_state FROM devices WHERE deveui = ?').get(VALVE_A);
-    assert.notEqual(row.target_state, 'OPEN',
-      'source-faithful single prepare/all executes the first statement; this is not both-effect acceptance');
+    assert.match(topic, /^INSERT INTO actuator_log/);
+    assert.doesNotMatch(topic, /UPDATE devices/, 'the log topic carries one statement');
+    const row = db.prepare('SELECT target_state, updated_at, sync_version FROM devices WHERE deveui = ?').get(VALVE_A);
+    assert.equal(row.target_state, 'OPEN', 'the accepted open records its commanded target state');
+    assert.equal(row.updated_at, before.updated_at, 'updated_at is the current_state time and does not move');
+    assert.equal(row.sync_version, before.sync_version, 'the target write does not bump sync_version');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM actuator_log WHERE deveui = ?').get(VALVE_A).n, 1);
   });
 });
