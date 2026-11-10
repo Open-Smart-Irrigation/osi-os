@@ -234,11 +234,14 @@ Reading straight through the script, in order:
    `osi-bootstrap` and enables it when it is not enabled (this also re-enables a
    service an operator disabled, and is not undone on rollback; when this deploy
    enables it on a gateway whose env file is already provisioned, it writes
-   `/etc/osi-bootstrap.done`), removes a legacy GPS sidecar service if
-   present, then fetches the deploy-payload-swap helper
-   (`scripts/deploy-payload-swap.js`) and hard-aborts if `/srv/node-red/payloads`
-   is on a different filesystem than `/srv/node-red` — the symlink flip in step
-   10 must be atomic, and a cross-filesystem rename can't guarantee that.
+   `/etc/osi-bootstrap.done`), and removes a legacy GPS sidecar service if
+   present. Before all of that, right after the native sqlite3 preflight, it
+   fetches the deploy-payload-swap helper (`scripts/deploy-payload-swap.js`),
+   hard-aborts if `/srv/node-red/payloads` is on a different filesystem than
+   `/srv/node-red` (the symlink flip in step 10 must be atomic, and a
+   cross-filesystem rename can't guarantee that), and checks the
+   legacy-capture marker (see "Legacy-capture marker"), so those refusals
+   come before any live file changes.
 4. Stages `flows.json` as a new payload directory,
    `/srv/node-red/payloads/<stamp>` (a UTC timestamp like `20260719T120000Z`),
    via `stagePayload`. The flip that makes this payload live is deferred until
@@ -331,9 +334,11 @@ download or verification of the migration runner, an uncreatable migration
 backup directory, or an unreadable database size (refused before Node-RED is
 stopped); a failed ledger-reconciliation download or probe (the previous
 payload is restarted); a failed command-ledger staging run (before anything is
-stopped); a staged helper-module set that cannot be sealed, or a live helper
-module that changed after an earlier attempt captured it (both before anything
-is stopped, see "Helper modules in the payload"); a failed command-ledger
+stopped); a legacy-capture marker whose capture changed, or whose deploy was
+cut off during its switch (before any live file is replaced, see
+"Legacy-capture marker"); a staged helper-module set that cannot be sealed, or
+a live helper module that changed after an earlier attempt captured it (both
+before anything is stopped, see "Helper modules in the payload"); a failed command-ledger
 activation after the migration (see below);
 and a failed post-flip self-check, which either auto-rolls back the flows+GUI
 pair and exits 1, or — when there is no previous payload — removes the
@@ -367,6 +372,32 @@ Every later deploy reads the marker before its first fetch:
 
 Way out: re-run the deploy. If it fails again, the load error printed by the
 installer or the probe names the cause.
+
+### Legacy-capture marker
+
+When the live `flows.json` and GUI are not one payload (a gateway the
+payload layout has not reached, or after a sysupgrade reset the GUI link),
+the deploy captures them as `payloads/<stamp>-previous` and records their
+digests in `payloads/.legacy-capture.json`. A retry reuses that capture. A
+committed deploy removes the marker.
+
+Right after the native sqlite3 preflight, before the first live file is
+replaced, `deploy.sh` checks the marker:
+
+- the capture it names exists and the live files match: it is reused;
+- the capture exists and the live files changed:
+  `ERROR: legacy flows+GUI evidence is missing or changed; refusing recapture before any file is replaced`.
+  Nothing on the gateway has changed. Stop and escalate;
+- the capture is gone (pruned, or removed by an older `deploy.sh` that did
+  not know the marker):
+  `WARN: stale legacy-capture marker (payload <stamp> gone); moved to payloads/.legacy-capture.json.stale-<pid>-<ms>; recapturing`.
+  The deploy captures the live flows, GUI and helper modules afresh;
+- the capture is gone and the live `flows.json` or GUI points into
+  `payloads/<stamp without -previous>`, the payload of the deploy that wrote
+  the marker: that deploy was cut off during its switch and the live pair is
+  half switched. The same `ERROR` follows `refusing to capture a half-switched state`.
+  Do not move the marker by hand; escalate. The same refusal applies to a
+  marker that does not name a `-previous` capture.
 
 ### Helper modules in the payload
 
