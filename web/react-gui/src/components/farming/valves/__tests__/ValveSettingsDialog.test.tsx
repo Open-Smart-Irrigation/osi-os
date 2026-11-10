@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ValveSettingsDialog } from '../ValveSettingsDialog';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
@@ -8,12 +8,13 @@ import type { ValveSummary } from '../../../../types/farming';
 
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
-    'settingsDialog.title': 'Valve settings',
+    'settingsDialog.title': 'Settings for {{name}}',
     'settingsDialog.generation': 'Valve generation',
     'settingsDialog.gen1': 'Gen-1',
     'settingsDialog.gen2': 'Gen-2',
     'settingsDialog.flowRate': 'Flow rate (L/min)',
     'settingsDialog.flowRateHint': 'Enter a rate above 0 L/min.',
+    'settingsDialog.flowFromZone': 'Using the zone calibration: {{rate}} L/min. Enter a rate to override it for this valve.',
     'settingsDialog.flowSource': 'Source',
     'settingsDialog.measured': 'Measured',
     'settingsDialog.estimated': 'Estimated',
@@ -81,6 +82,16 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
 }
 
 describe('ValveSettingsDialog', () => {
+  beforeEach(() => {
+    vi.mocked(valvesAPI.updateSettings).mockClear();
+    vi.mocked(devicesAPI.controlValve).mockClear();
+  });
+
+  async function savedPatch() {
+    await waitFor(() => expect(valvesAPI.updateSettings).toHaveBeenCalledTimes(1));
+    return vi.mocked(valvesAPI.updateSettings).mock.calls[0][1];
+  }
+
   it('disables save and shows a rate-specific hint for an invalid flow rate, not the field label', () => {
     render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Flow rate (L/min)'), { target: { value: '0' } });
@@ -156,5 +167,85 @@ describe('ValveSettingsDialog', () => {
 
     expect(await screen.findByText('Could not send the close command.')).toBeInTheDocument();
     expect(screen.queryByText('Close command sent.')).not.toBeInTheDocument();
+  });
+
+  const ZONE_LINE = 'Using the zone calibration: 12 L/min. Enter a rate to override it for this valve.';
+
+  it('names the valve in the dialog title', () => {
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: 'Settings for North Valve' })).toBeInTheDocument();
+  });
+
+  it('starts a zone-sourced valve with an empty per-valve field and shows the zone rate', () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 12, flowRateSource: 'zone' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    const input = screen.getByLabelText('Flow rate (L/min)');
+    expect(input).toHaveValue(null);
+    expect(screen.getByText(ZONE_LINE)).toBeInTheDocument();
+    expect(input).toHaveAccessibleDescription(ZONE_LINE);
+    expect(screen.queryByLabelText('Estimated')).toBeNull();
+  });
+
+  it('does not turn a zone rate into a per-valve override when only the generation changes', async () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 12, flowRateSource: 'zone' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText('Valve generation'), { target: { value: 'GEN2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const patch = await savedPatch();
+    expect(patch).toHaveProperty('stregaGeneration', 'GEN2');
+    expect(patch).not.toHaveProperty('flowRateLpm');
+    expect(patch).not.toHaveProperty('flowRateSource');
+  });
+
+  it('does not re-send an unchanged per-valve rate', async () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 5, flowRateSource: 'measured' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const patch = await savedPatch();
+    expect(patch).toHaveProperty('stregaGeneration', 'GEN1');
+    expect(patch).not.toHaveProperty('flowRateLpm');
+    expect(patch).not.toHaveProperty('flowRateSource');
+  });
+
+  it('clearing a per-valve rate sends null so the valve falls back to the zone', async () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 5, flowRateSource: 'estimated' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const patch = await savedPatch();
+    expect(patch).toHaveProperty('flowRateLpm', null);
+    expect(patch).not.toHaveProperty('flowRateSource');
+  });
+
+  it('changing only the source re-sends the rate with the new source', async () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 5, flowRateSource: 'estimated' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByLabelText('Measured'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const patch = await savedPatch();
+    expect(patch).toHaveProperty('flowRateLpm', 5);
+    expect(patch).toHaveProperty('flowRateSource', 'measured');
+  });
+
+  it('typing a rate on a zone-sourced valve saves a per-valve override and hides the zone line', async () => {
+    render(
+      <ValveSettingsDialog valve={makeValve({ flowRateLpm: 12, flowRateSource: 'zone' })} open onClose={vi.fn()} onChanged={vi.fn()} />,
+    );
+    fireEvent.change(screen.getByLabelText('Flow rate (L/min)'), { target: { value: '8' } });
+    expect(screen.queryByText(ZONE_LINE)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const patch = await savedPatch();
+    expect(patch).toHaveProperty('flowRateLpm', 8);
+    expect(patch).toHaveProperty('flowRateSource', 'estimated');
   });
 });

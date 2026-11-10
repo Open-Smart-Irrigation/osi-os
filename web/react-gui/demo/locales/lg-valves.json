@@ -65,7 +65,6 @@
   "scheduleDialog.deleteFailed": "Enteekateeka tesobodde kuggyibwawo.",
   "scheduleDialog.push.QUEUED": "tulindirira bbomba",
   "scheduleDialog.push.FAILED": "kiremye",
-  "settingsDialog.title": "Enteekateeka za bbomba",
   "settingsDialog.generation": "Omulembe gwa bbomba",
   "settingsDialog.flowRate": "Obungi bw'amazzi (L/ddakiika)",
   "settingsDialog.flowRateHint": "Teekamu obungi obusukka 0 L/ddakiika.",
