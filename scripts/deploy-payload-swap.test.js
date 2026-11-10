@@ -13,6 +13,7 @@ const {
   captureGui,
   captureExisting,
   legacyCaptureStamp,
+  legacyCapturePreflight,
   clearLegacyCapture,
   verifyPair,
   writeCompatibility,
@@ -120,6 +121,103 @@ test('legacy capture evidence is reused and refuses changed regular files', () =
   captureExisting(root, 'legacy-second', flowsPath, guiRoot);
   fs.appendFileSync(flowsPath, 'changed\n');
   assert.throws(() => legacyCaptureStamp(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+});
+
+// A regular flows file and GUI directory, as on a gateway the payload layout
+// has not reached yet or after a sysupgrade reset the GUI link.
+function legacyRoot(t) {
+  const root = fakeRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const flowsPath = path.join(root, 'flows.json');
+  const guiRoot = path.join(root, 'gui');
+  fs.writeFileSync(flowsPath, JSON.stringify([{ id: 'legacy' }]) + '\n');
+  fs.mkdirSync(guiRoot);
+  fs.writeFileSync(path.join(guiRoot, 'index.html'), '<title>legacy</title>\n');
+  const marker = path.join(root, 'payloads', '.legacy-capture.json');
+  return { root, flowsPath, guiRoot, marker };
+}
+
+test('legacyCapturePreflight moves a marker whose capture is gone aside, and the capture starts fresh', (t) => {
+  for (const changedSince of [false, true]) {
+    const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+    captureExisting(root, 'pruned-previous', flowsPath, guiRoot);
+    fs.rmSync(path.join(root, 'payloads', 'pruned-previous'), { recursive: true, force: true });
+    if (changedSince) fs.appendFileSync(flowsPath, 'deployed later\n');
+    assert.throws(() => legacyCaptureStamp(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/,
+      'the capture block alone still refuses a stale marker');
+
+    const report = legacyCapturePreflight(root, flowsPath, guiRoot);
+    assert.match(report, /^WARN: stale legacy-capture marker \(payload pruned-previous gone\); moved to payloads\/\.legacy-capture\.json\.stale-\d+-\d+; recapturing$/);
+    assert.equal(fs.existsSync(marker), false);
+    const aside = fs.readdirSync(path.join(root, 'payloads')).filter((entry) => entry.startsWith('.legacy-capture.json.stale-'));
+    assert.equal(aside.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'payloads', aside[0]), 'utf8')).stamp, 'pruned-previous');
+
+    assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), null);
+    captureExisting(root, 'new-previous', flowsPath, guiRoot);
+    assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'new-previous');
+    assert.equal(fs.readFileSync(path.join(root, 'payloads', 'new-previous', 'flows.json'), 'utf8'),
+      fs.readFileSync(flowsPath, 'utf8'), 'the fresh capture holds the live flows');
+    assert.deepEqual(prunePayloads(root, 5), { removed: [] }, 'the moved marker is not a payload');
+  }
+});
+
+test('legacyCapturePreflight reuses an existing capture and refuses when the live files changed', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'kept-previous', flowsPath, guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null);
+  assert.equal(legacyCaptureStamp(root, flowsPath, guiRoot), 'kept-previous');
+  fs.appendFileSync(flowsPath, 'changed\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+  assert.equal(fs.existsSync(marker), true, 'a refusal leaves the marker in place');
+});
+
+test('legacyCapturePreflight refuses a stale marker while flows point into the payload of the attempt that wrote it', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'cut-previous', flowsPath, guiRoot);
+  stagePayload(root, 'cut', fakeFlowsSrc(root, 'cut'), fakeGuiSrc(root, 'cut'));
+  // Power lost inside flipTo('cut'): flows switched, the GUI not yet.
+  fs.rmSync(flowsPath);
+  fs.symlinkSync(path.join('payloads', 'cut', 'flows.json'), flowsPath);
+  fs.rmSync(path.join(root, 'payloads', 'cut-previous'), { recursive: true, force: true });
+  const before = fs.readFileSync(marker, 'utf8');
+
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot),
+    /live flows point into payloads\/cut from the deploy that wrote it; refusing to capture a half-switched state/);
+  assert.equal(fs.readFileSync(marker, 'utf8'), before, 'the marker stays for the operator');
+});
+
+test('legacyCapturePreflight refuses a stale marker it cannot attribute and a malformed one', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  captureExisting(root, 'handmade', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'handmade'), { recursive: true, force: true });
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /no deploy attempt can be read from it/);
+  assert.equal(fs.existsSync(marker), true);
+
+  const evidence = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  fs.writeFileSync(marker, JSON.stringify({ ...evidence, stamp: '../outside-previous' }) + '\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /refusing to recapture changed legacy files/);
+  fs.writeFileSync(marker, 'not json\n');
+  assert.throws(() => legacyCapturePreflight(root, flowsPath, guiRoot), /legacy evidence is unreadable/);
+  assert.equal(fs.existsSync(marker), true);
+});
+
+test('legacyCapturePreflight leaves the marker alone when the capture block would not read it', (t) => {
+  const { root, flowsPath, guiRoot, marker } = legacyRoot(t);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'no marker');
+
+  captureExisting(root, 'gone-previous', flowsPath, guiRoot);
+  fs.rmSync(path.join(root, 'payloads', 'gone-previous'), { recursive: true, force: true });
+  const before = fs.readFileSync(marker, 'utf8');
+  // Flows and GUI already one payload: deploy.sh never consults the marker.
+  stagePayload(root, 'live', fakeFlowsSrc(root, 'live'), fakeGuiSrc(root, 'live'));
+  flipTo(root, 'live', guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'paired payload');
+  assert.equal(fs.readFileSync(marker, 'utf8'), before);
+  // No GUI directory: deploy.sh skips the retained-pair capture.
+  fs.rmSync(guiRoot);
+  assert.equal(legacyCapturePreflight(root, flowsPath, guiRoot), null, 'GUI missing');
+  assert.equal(fs.readFileSync(marker, 'utf8'), before);
 });
 
 test('failed first activation explicitly removes both live links and the staged payload', () => {

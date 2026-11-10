@@ -852,6 +852,84 @@ printf '%s\\n' sysupgrade-rollback-ok
   }
 });
 
+const legacyPreflightFragment = () =>
+  fragment('# legacy capture preflight begin\n', '# legacy capture preflight end')
+    .replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json');
+
+test('after a sysupgrade a stale legacy-capture marker is moved aside and the recapture keeps the linked modules', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+# A marker an earlier failed deploy left behind; its capture was pruned since.
+printf '%s\\n' '{"format":1,"stamp":"gone-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"
+${legacyPreflightFragment()}
+[ ! -e "$PAYLOADS_ROOT/.legacy-capture.json" ]
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' stale-marker-rollback-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /stale-marker-rollback-ok/);
+    assert.match(run.result.stdout, /WARN: stale legacy-capture marker \(payload gone-previous gone\); moved to payloads\/\.legacy-capture\.json\.stale-\d+-\d+; recapturing/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/second-previous/);
+    assert.match(run.result.stdout, /OK: captured osi-a into payloads\/second-previous\/modules\/osi-a/);
+    assert.match(run.result.stdout, /OK: captured osi-b into payloads\/second-previous\/modules\/osi-b/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@first', 'osi-b': 'b@first', 'osi-c': 'c@first' },
+      'the rollback restarts the deployed flows on the modules they ran with');
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'second-previous', gui: 'second-previous', compatible: true });
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a stale marker from a deploy cut off during its switch refuses before any file is replaced', () => {
+  const run = runModuleDeploy(`
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' legacy > "$GUI_ROOT/index.html"
+mkdir -p "$SWAP_ROOT/src-cut-gui"
+printf '%s\\n' cut > "$SWAP_ROOT/cut-flows.json"
+printf '%s\\n' cut > "$SWAP_ROOT/src-cut-gui/index.html"
+swap_call stagePayload cut "$SWAP_ROOT/cut-flows.json" "$SWAP_ROOT/src-cut-gui" >/dev/null
+rm "$SWAP_ROOT/flows.json"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+printf '%s\\n' '{"format":1,"stamp":"cut-previous","flows_path":"x","gui_path":"y","flows_sha256":"0","gui_sha256":"0"}' > "$PAYLOADS_ROOT/.legacy-capture.json"
+cp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+if ( ${legacyPreflightFragment()} ); then exit 41; fi
+cmp "$PAYLOADS_ROOT/.legacy-capture.json" "$SWAP_ROOT/marker-before"
+printf '%s\\n' half-switched-refused
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /half-switched-refused/);
+    assert.match(run.result.stderr, /refusing to capture a half-switched state/);
+    assert.match(run.result.stderr, /ERROR: legacy flows\+GUI evidence is missing or changed; refusing recapture before any file is replaced/);
+  } finally {
+    run.cleanup();
+  }
+});
+
 // Stages the real module files the way deploy.sh fetches them, flips, and
 // requires every staged entry point and file through /srv/node-red/<module>
 // and node_modules/<module>. Each must load exactly as it does from the repo
