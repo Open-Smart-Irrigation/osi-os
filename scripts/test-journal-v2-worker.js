@@ -806,3 +806,576 @@ test('a failed entry batch advertisement is reported, backed off and retried wit
   const retried = await replication.runReplicationTick(facade(database), http, fs, config());
   assert.equal(retried.entry_batch_capability, 'advertised');
 });
+
+// ---------------------------------------------------------------------------
+// #447: a mutation the cloud refuses with a 4xx must not block later ones.
+// ---------------------------------------------------------------------------
+
+const REJECTION_GOLDEN = JSON.parse(fs.readFileSync(
+  path.join(ROOT, 'docs/contracts/sync-schema/journal-mutation-rejection-v1-golden.json'),
+  'utf8',
+));
+const REJECTED_UNTIL = '9999-12-31T23:59:59.999Z';
+const HOLD_INITIAL_MS = 15 * 60 * 1000;
+
+function goldenMutation(operation) {
+  return structuredClone(golden.mutation_vectors.find(
+    (vector) => vector.input.operation === operation,
+  ).input);
+}
+
+function goldenResult(mutationUuid) {
+  return structuredClone(golden.result_vectors.find(
+    (vector) => vector.input.mutation_uuid === mutationUuid,
+  ).input);
+}
+
+async function queueInOrder(database, mutations) {
+  for (const [index, mutation] of mutations.entries()) {
+    await replication.enqueueMutation(facade(database), mutation);
+    database.prepare(
+      'UPDATE journal_edge_mutations SET created_at=? WHERE mutation_uuid=?',
+    ).run('2026-08-08T10:00:0' + index + '.000Z', mutation.mutation_uuid);
+  }
+}
+
+function boundReceipt(mutation, overrides = {}) {
+  return Object.assign({
+    kind: 'JOURNAL_MUTATION_REJECTION',
+    version: 1,
+    mutation_uuid: mutation.mutation_uuid,
+    workspace_uuid: mutation.workspace_uuid,
+    operation: mutation.operation,
+    resource_uuid: mutation.resource.entry_uuid,
+    payload_sha256: mutation.payload_sha256,
+    actor_type: 'gateway',
+    actor_identifier: GATEWAY,
+    disposition: 'not_applied',
+    code: 'entry_plot_required_for_final',
+    message: 'plot_uuid is required for non-farm-wide final entries',
+    field_paths: ['/candidate/entry/plot_uuid'],
+  }, overrides);
+}
+
+function refusalRoutes(mutationAnswer, capability = acceptedCapability()) {
+  return [
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 200, payload: capability }),
+    },
+    {
+      match: (request) => request.url.endsWith('/mutations'),
+      respond: (request) => mutationAnswer(request),
+    },
+    {
+      match: (request) => request.url.includes('/replication?'),
+      respond: () => ({ statusCode: 200, payload: [] }),
+    },
+  ];
+}
+
+function queueRow(database, mutationUuid) {
+  return database.prepare(
+    'SELECT status,attempts,next_attempt_at,last_error FROM journal_edge_mutations WHERE mutation_uuid=?',
+  ).get(mutationUuid);
+}
+
+function mutationPosts(calls) {
+  return calls.filter((request) => request.url.endsWith('/mutations'))
+    .map((request) => request.payload.mutation_uuid);
+}
+
+function refusalDetail(row) {
+  const detail = JSON.parse(row.last_error);
+  assert.match(detail.refused_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  delete detail.refused_at;
+  return detail;
+}
+
+function assertHeldFor(row, delayMs, before, after) {
+  const due = Date.parse(row.next_attempt_at);
+  assert.ok(due >= before + delayMs && due <= after + delayMs,
+    'next_attempt_at ' + row.next_attempt_at + ' is not now + ' + delayMs + ' ms');
+}
+
+function resetEach(t) {
+  replication._resetJournalV2BackoffForTests();
+  t.after(() => replication._resetJournalV2BackoffForTests());
+}
+
+test('a generic 400 on one mutation holds it and the next queued mutation is still sent (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'refusal-generic-400');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const product = goldenMutation('PRODUCT_UPSERT');
+  await queueInOrder(database, [create, product]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => (
+    request.payload.mutation_uuid === create.mutation_uuid
+      ? { statusCode: 400, payload: { error: 'invalid_journal_v2_request' } }
+      : { statusCode: 200, payload: goldenResult(product.mutation_uuid) }
+  )), calls);
+  const before = Date.now();
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  const after = Date.now();
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid, product.mutation_uuid]);
+  assert.equal(queueRow(database, product.mutation_uuid).status, 'already-applied');
+  const row = queueRow(database, create.mutation_uuid);
+  assert.equal(row.status, 'pending');
+  assert.equal(row.attempts, 1);
+  assertHeldFor(row, HOLD_INITIAL_MS, before, after);
+  assert.deepEqual(refusalDetail(row), {
+    state: 'held', http_status: 400, code: 'invalid_journal_v2_request',
+    message: 'invalid_journal_v2_request', field_paths: [],
+  });
+  assert.equal(result.sent_mutations, 1);
+  assert.equal(result.held_mutations, 1);
+  assert.equal(result.rejected_mutations, 0);
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 1, rejected: 0, blocked: 0 });
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(mutationPosts(calls).length, 2);
+});
+
+test('a held mutation is retried after its hold, the hold doubles, and a later success clears it (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'refusal-hold-retry');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  await queueInOrder(database, [create]);
+  let answer = () => ({
+    statusCode: 404,
+    payload: {
+      timestamp: '2026-11-10T00:00:00.000Z',
+      status: 404,
+      error: 'Not Found',
+      path: '/api/v2/journal/gateways/AABBCCDDEEFF0003/mutations',
+    },
+  });
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => answer(request)), calls);
+  let before = Date.now();
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  let after = Date.now();
+  let row = queueRow(database, create.mutation_uuid);
+  assert.equal(row.attempts, 1);
+  assertHeldFor(row, HOLD_INITIAL_MS, before, after);
+  assert.deepEqual(refusalDetail(row), {
+    state: 'held', http_status: 404, code: 'http_404', message: 'Not Found', field_paths: [],
+  });
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(mutationPosts(calls).length, 1);
+  const moveDueToPast = () => database.prepare(
+    "UPDATE journal_edge_mutations SET next_attempt_at='2000-01-01T00:00:00.000Z' WHERE mutation_uuid=?",
+  ).run(create.mutation_uuid);
+  moveDueToPast();
+  before = Date.now();
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  after = Date.now();
+  row = queueRow(database, create.mutation_uuid);
+  assert.equal(mutationPosts(calls).length, 2);
+  assert.equal(row.attempts, 2);
+  assertHeldFor(row, 2 * HOLD_INITIAL_MS, before, after);
+  answer = () => ({ statusCode: 201, payload: goldenResult(create.mutation_uuid) });
+  moveDueToPast();
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  row = queueRow(database, create.mutation_uuid);
+  assert.equal(row.status, 'applied');
+  assert.equal(row.last_error, null);
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 0, rejected: 0, blocked: 0 });
+});
+
+test('a rejection receipt bound to the mutation marks it rejected with the cloud code, message and field paths (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'refusal-receipt');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const product = goldenMutation('PRODUCT_UPSERT');
+  await queueInOrder(database, [create, product]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => (
+    request.payload.mutation_uuid === create.mutation_uuid
+      ? { statusCode: 400, payload: boundReceipt(create) }
+      : { statusCode: 200, payload: goldenResult(product.mutation_uuid) }
+  )), calls);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid, product.mutation_uuid]);
+  assert.equal(queueRow(database, product.mutation_uuid).status, 'already-applied');
+  const row = queueRow(database, create.mutation_uuid);
+  assert.equal(row.status, 'pending');
+  assert.equal(row.attempts, 1);
+  assert.equal(row.next_attempt_at, REJECTED_UNTIL);
+  assert.deepEqual(refusalDetail(row), {
+    state: 'rejected', http_status: 400, code: 'entry_plot_required_for_final',
+    message: 'plot_uuid is required for non-farm-wide final entries',
+    field_paths: ['/candidate/entry/plot_uuid'],
+  });
+  assert.equal(result.rejected_mutations, 1);
+  assert.equal(result.held_mutations, 0);
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 0, rejected: 1, blocked: 0 });
+  assert.deepEqual(
+    await replication.mutationQueueHealth(facade(database)),
+    { queued: 0, held: 0, rejected: 1, blocked: 0 },
+  );
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(mutationPosts(calls).length, 2);
+  assert.deepEqual(await replication.nextMutations(facade(database), 10), []);
+});
+
+test('a receipt that does not bind to the mutation, or arrives on another status, is only a hold (#447)', async (t) => {
+  resetEach(t);
+  const create = goldenMutation('ENTRY_CREATE');
+  const variants = [
+    { statusCode: 400, payload: boundReceipt(create, { payload_sha256: 'b'.repeat(64) }) },
+    { statusCode: 400, payload: boundReceipt(create, { actor_identifier: '0016C001F1000001' }) },
+    { statusCode: 400, payload: boundReceipt(create, { mutation_uuid: '10000000-0000-4000-8000-000000000447' }) },
+    { statusCode: 400, payload: boundReceipt(create, { code: 'dependency_unavailable' }) },
+    { statusCode: 422, payload: boundReceipt(create) },
+  ];
+  for (const [index, variant] of variants.entries()) {
+    const { database } = fixture(t, 'refusal-unbound-' + index);
+    t.after(() => database.close());
+    await queueInOrder(database, [goldenMutation('ENTRY_CREATE')]);
+    const calls = [];
+    const http = fakeHttp(database, refusalRoutes(() => variant), calls);
+    await replication.runReplicationTick(facade(database), http, fs, config());
+    const row = queueRow(database, create.mutation_uuid);
+    assert.equal(row.attempts, 1);
+    assert.equal(JSON.parse(row.last_error).state, 'held');
+    assert.notEqual(row.next_attempt_at, REJECTED_UNTIL);
+    assert.equal(JSON.parse(row.last_error).http_status, variant.statusCode);
+  }
+});
+
+test('credential, timeout, rate-limit and server errors on a mutation still stop the tick and leave the row untouched (#447)', async (t) => {
+  resetEach(t);
+  for (const [status, expectedCode] of [
+    [401, 'cloud_protocol_failure'],
+    [403, 'cloud_protocol_failure'],
+    [408, 'cloud_protocol_failure'],
+    [429, 'transient_cloud_failure'],
+    [500, 'transient_cloud_failure'],
+    [503, 'transient_cloud_failure'],
+  ]) {
+    const { database } = fixture(t, 'refusal-guard-' + status);
+    t.after(() => database.close());
+    const create = goldenMutation('ENTRY_CREATE');
+    const product = goldenMutation('PRODUCT_UPSERT');
+    await queueInOrder(database, [create, product]);
+    const calls = [];
+    const http = fakeHttp(database, refusalRoutes((request) => (
+      request.payload.mutation_uuid === create.mutation_uuid
+        ? { statusCode: status, payload: { error: 'x' } }
+        : { statusCode: 200, payload: goldenResult(product.mutation_uuid) }
+    )), calls);
+    await assert.rejects(
+      () => replication.runReplicationTick(facade(database), http, fs, config()),
+      (cause) => cause.code === expectedCode,
+    );
+    assert.deepEqual(mutationPosts(calls), [create.mutation_uuid]);
+    const row = queueRow(database, create.mutation_uuid);
+    assert.equal(row.attempts, 0);
+    assert.equal(row.next_attempt_at, null);
+    assert.equal(row.last_error, null);
+    assert.equal(queueRow(database, product.mutation_uuid).status, 'pending');
+  }
+});
+
+test('a refused barrier receipt still blocks later mutations (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'refusal-barrier');
+  t.after(() => database.close());
+  const barrier = goldenMutation('CUTOVER_BARRIER_RECEIPT');
+  const product = goldenMutation('PRODUCT_UPSERT');
+  await queueInOrder(database, [barrier, product]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => (
+    request.payload.mutation_uuid === barrier.mutation_uuid
+      ? { statusCode: 400, payload: { error: 'invalid_journal_v2_request' } }
+      : { statusCode: 200, payload: goldenResult(product.mutation_uuid) }
+  ), acceptedCapability({ cloud_issuer_enabled: true, prepare_ready: true })), calls);
+  await assert.rejects(
+    () => replication.runReplicationTick(facade(database), http, fs, config()),
+    (cause) => cause.code === 'cloud_protocol_failure' && cause.status === 400,
+  );
+  assert.deepEqual(mutationPosts(calls), [barrier.mutation_uuid]);
+  const row = queueRow(database, barrier.mutation_uuid);
+  assert.equal(row.attempts, 0);
+  assert.equal(row.next_attempt_at, null);
+  assert.equal(row.last_error, null);
+});
+
+test('the rejection receipt check accepts every valid golden vector and refuses every invalid one (#447)', () => {
+  assert.equal(REJECTION_GOLDEN.valid_vectors.length, 4);
+  assert.equal(REJECTION_GOLDEN.invalid_vectors.length, 16);
+  for (const vector of REJECTION_GOLDEN.valid_vectors) {
+    assert.equal(replication.isMutationRejectionReceipt(vector.input), true, vector.name);
+  }
+  for (const vector of REJECTION_GOLDEN.invalid_vectors) {
+    assert.equal(replication.isMutationRejectionReceipt(vector.input), false, vector.name);
+  }
+  for (const value of [null, 'text', []]) {
+    assert.equal(replication.isMutationRejectionReceipt(value), false);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #447 amendment 1: a held or rejected mutation fences later mutations of the
+// same workspace and resource; other resources keep flowing.
+// ---------------------------------------------------------------------------
+
+const replicationCanonicalizer = require(path.join(
+  ROOT,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization',
+));
+const GENERIC_400 = { statusCode: 400, payload: { error: 'invalid_journal_v2_request' } };
+
+function variantOf(mutation, mutationUuid, edit) {
+  const next = structuredClone(mutation);
+  next.mutation_uuid = mutationUuid;
+  edit(next);
+  next.payload_sha256 = replicationCanonicalizer.hashMutation(next);
+  return next;
+}
+
+function appliedResult(mutation) {
+  const resource = mutation.resource;
+  if (mutation.operation.startsWith('ENTRY_')) {
+    return {
+      kind: 'ENTRY_MUTATION_RESULT',
+      mutation_uuid: mutation.mutation_uuid,
+      outcome: 'applied',
+      head: { entry_uuid: resource.entry_uuid, version: resource.base_version + 1 },
+      revision_uuid: '40000000-0000-4000-8000-00000000044' + String(resource.base_version + 1),
+      conflict_uuid: null,
+    };
+  }
+  if (mutation.operation === 'PLOT_SNAPSHOT') {
+    return {
+      kind: 'PLOT_SNAPSHOT_RESULT',
+      mutation_uuid: mutation.mutation_uuid,
+      outcome: 'applied',
+      projection_version: resource.projection_version,
+    };
+  }
+  return {
+    kind: 'REFERENCE_MUTATION_RESULT',
+    mutation_uuid: mutation.mutation_uuid,
+    outcome: 'applied',
+    resource_uuid: resource.product_uuid || resource.custom_field_uuid,
+  };
+}
+
+// The cloud answers GENERIC_400 to every mutation UUID in `refused` and
+// applies every other mutation.
+function refuseOnly(refused) {
+  return (request) => (refused.has(request.payload.mutation_uuid)
+    ? GENERIC_400
+    : { statusCode: 201, payload: appliedResult(request.payload) });
+}
+
+function assertUntouched(database, mutation) {
+  const row = queueRow(database, mutation.mutation_uuid);
+  assert.equal(row.status, 'pending');
+  assert.equal(row.attempts, 0);
+  assert.equal(row.next_attempt_at, null);
+  assert.equal(row.last_error, null);
+}
+
+test('a held mutation fences a later mutation of the same resource in the same tick, and other resources still go (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-same-tick');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const correct = goldenMutation('ENTRY_CORRECT');
+  const product = goldenMutation('PRODUCT_UPSERT');
+  await queueInOrder(database, [create, correct, product]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(refuseOnly(new Set([create.mutation_uuid]))), calls);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid, product.mutation_uuid]);
+  assert.equal(JSON.parse(queueRow(database, create.mutation_uuid).last_error).state, 'held');
+  assertUntouched(database, correct);
+  assert.equal(queueRow(database, product.mutation_uuid).status, 'applied');
+  assert.equal(result.sent_mutations, 1);
+  assert.equal(result.held_mutations, 1);
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 1, rejected: 0, blocked: 1 });
+});
+
+test('a successor queued while its head is held is not sent on a later tick (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-later-tick');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const correct = goldenMutation('ENTRY_CORRECT');
+  await queueInOrder(database, [create]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(refuseOnly(new Set([create.mutation_uuid]))), calls);
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  await replication.enqueueMutation(facade(database), correct);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid]);
+  assertUntouched(database, correct);
+  assert.deepEqual(
+    (await replication.nextMutations(facade(database), 10)).map((mutation) => mutation.mutation_uuid),
+    [correct.mutation_uuid],
+  );
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 1, rejected: 0, blocked: 1 });
+});
+
+test('reference updates and newer plot snapshots wait behind their held predecessor (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-reference-plot');
+  t.after(() => database.close());
+  const product = goldenMutation('PRODUCT_UPSERT');
+  const plot = goldenMutation('PLOT_SNAPSHOT');
+  const productUpdate = variantOf(product, '10000000-0000-4000-8000-000000004471', (next) => {
+    next.resource.base_version = 1;
+    next.candidate.product.sync_version = 2;
+  });
+  const newerPlot = variantOf(plot, '10000000-0000-4000-8000-000000004472', (next) => {
+    next.resource.projection_version += 1;
+    next.candidate.plot.sync_version += 1;
+  });
+  const create = goldenMutation('ENTRY_CREATE');
+  await queueInOrder(database, [product, plot, productUpdate, newerPlot, create]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(refuseOnly(new Set([
+    product.mutation_uuid, plot.mutation_uuid,
+  ]))), calls);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [
+    product.mutation_uuid, plot.mutation_uuid, create.mutation_uuid,
+  ]);
+  assertUntouched(database, productUpdate);
+  assertUntouched(database, newerPlot);
+  assert.equal(queueRow(database, create.mutation_uuid).status, 'applied');
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 2, rejected: 0, blocked: 2 });
+});
+
+test('a held head that later succeeds releases its successors in their original order in the same tick (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-release');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const correct = goldenMutation('ENTRY_CORRECT');
+  const voided = goldenMutation('ENTRY_VOID');
+  await queueInOrder(database, [create, correct, voided]);
+  let refused = new Set([create.mutation_uuid]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => refuseOnly(refused)(request)), calls);
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid]);
+  refused = new Set();
+  database.prepare(
+    "UPDATE journal_edge_mutations SET next_attempt_at='2000-01-01T00:00:00.000Z' WHERE mutation_uuid=?",
+  ).run(create.mutation_uuid);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [
+    create.mutation_uuid, create.mutation_uuid, correct.mutation_uuid, voided.mutation_uuid,
+  ]);
+  for (const mutation of [create, correct, voided]) {
+    assert.equal(queueRow(database, mutation.mutation_uuid).status, 'applied');
+  }
+  assert.equal(result.sent_mutations, 3);
+  assert.deepEqual(result.mutation_queue, { queued: 0, held: 0, rejected: 0, blocked: 0 });
+});
+
+test('within one resource the lower base_version goes first even when its created_at is later (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-base-order');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const correct = goldenMutation('ENTRY_CORRECT');
+  await queueInOrder(database, [create, correct]);
+  const setCreatedAt = database.prepare(
+    'UPDATE journal_edge_mutations SET created_at=? WHERE mutation_uuid=?',
+  );
+  setCreatedAt.run('2026-08-08T10:00:05.000Z', create.mutation_uuid);
+  setCreatedAt.run('2026-08-08T10:00:01.000Z', correct.mutation_uuid);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(refuseOnly(new Set())), calls);
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid, correct.mutation_uuid]);
+  assert.equal(queueRow(database, create.mutation_uuid).status, 'applied');
+  assert.equal(queueRow(database, correct.mutation_uuid).status, 'applied');
+});
+
+test('a rejected head keeps its successors queued and unsent, reported as blocked (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'fence-rejected');
+  t.after(() => database.close());
+  const create = goldenMutation('ENTRY_CREATE');
+  const correct = goldenMutation('ENTRY_CORRECT');
+  await queueInOrder(database, [create, correct]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes((request) => (
+    request.payload.mutation_uuid === create.mutation_uuid
+      ? { statusCode: 400, payload: boundReceipt(create) }
+      : { statusCode: 201, payload: appliedResult(request.payload) }
+  )), calls);
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [create.mutation_uuid]);
+  assert.equal(queueRow(database, create.mutation_uuid).next_attempt_at, REJECTED_UNTIL);
+  assertUntouched(database, correct);
+  assert.deepEqual(JSON.parse(database.prepare(
+    'SELECT payload_json FROM journal_edge_mutations WHERE mutation_uuid=?',
+  ).get(correct.mutation_uuid).payload_json), correct);
+  assert.deepEqual(
+    await replication.mutationQueueHealth(facade(database)),
+    { queued: 0, held: 0, rejected: 1, blocked: 1 },
+  );
+});
+
+test('an entry that references a plot whose snapshot is held is still sent; the cloud refusal only holds it (#447)', async (t) => {
+  resetEach(t);
+  const { database } = fixture(t, 'cross-resource-plot');
+  t.after(() => database.close());
+  const plot = goldenMutation('PLOT_SNAPSHOT');
+  const entryOnPlot = variantOf(goldenMutation('ENTRY_CREATE'), '10000000-0000-4000-8000-000000004473', (next) => {
+    next.candidate.entry.gateway_device_eui = plot.resource.gateway_device_eui;
+    next.candidate.entry.plot_uuid = plot.resource.plot_uuid;
+  });
+  await queueInOrder(database, [plot, entryOnPlot]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(refuseOnly(new Set([
+    plot.mutation_uuid, entryOnPlot.mutation_uuid,
+  ]))), calls);
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.deepEqual(mutationPosts(calls), [plot.mutation_uuid, entryOnPlot.mutation_uuid]);
+  for (const mutation of [plot, entryOnPlot]) {
+    const row = queueRow(database, mutation.mutation_uuid);
+    assert.equal(row.attempts, 1);
+    assert.equal(JSON.parse(row.last_error).state, 'held');
+  }
+  assert.equal(result.held_mutations, 2);
+});
+
+test('an oversized refusal body is checked and stored without allocating over its full length (#447)', async (t) => {
+  resetEach(t);
+  const arrayFrom = t.mock.method(Array, 'from');
+  const longStringCalls = () => arrayFrom.mock.calls.filter((call) => (
+    typeof call.arguments[0] === 'string' && call.arguments[0].length > 4096
+  )).length;
+  const create = goldenMutation('ENTRY_CREATE');
+  const huge = 'x'.repeat(1 << 20);
+  const seedling = '\u{1F331}';
+  assert.equal(replication.isMutationRejectionReceipt(boundReceipt(create, { message: huge })), false);
+  assert.equal(replication.isMutationRejectionReceipt(boundReceipt(create, { field_paths: ['/' + huge] })), false);
+  assert.equal(replication.isMutationRejectionReceipt(boundReceipt(create, { message: seedling.repeat(512) })), true);
+  assert.equal(replication.isMutationRejectionReceipt(boundReceipt(create, { message: seedling.repeat(513) })), false);
+  const { database } = fixture(t, 'refusal-oversized');
+  t.after(() => database.close());
+  await queueInOrder(database, [create]);
+  const calls = [];
+  const http = fakeHttp(database, refusalRoutes(() => ({
+    statusCode: 400,
+    payload: { error: 'invalid_journal_v2_request', message: ' ' + seedling.repeat(1 << 18) },
+  })), calls);
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  const detail = JSON.parse(queueRow(database, create.mutation_uuid).last_error);
+  assert.equal(detail.state, 'held');
+  assert.equal(detail.message, seedling.repeat(512));
+  assert.equal(longStringCalls(), 0);
+});

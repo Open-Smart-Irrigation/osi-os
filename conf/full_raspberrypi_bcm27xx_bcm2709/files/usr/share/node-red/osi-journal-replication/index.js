@@ -244,6 +244,33 @@ async function nextMutations(db, limit) {
   return rows.map(function(row) { return JSON.parse(row.payload_json); });
 }
 
+// #447: the tick sends only the head of each resource. The head is the
+// earliest pending mutation of its workspace_uuid and resource_uuid, ordered
+// by base_version (the chain the edge built: a create is 0, each later edit
+// is one more), then created_at, then mutation_uuid. created_at alone is not
+// enough: two edits written in one transaction can share a millisecond, and a
+// gateway clock can step back between two edits. A held or rejected head stays
+// pending, so it fences every later mutation of its resource in this tick and
+// in later ticks, while other resources keep flowing. Nothing is written to a
+// fenced row; it is sent once its head has settled.
+const PENDING_PREDECESSOR_EXISTS =
+  'EXISTS (SELECT 1 FROM journal_edge_mutations AS p ' +
+    "WHERE p.status='pending' AND p.workspace_uuid=m.workspace_uuid " +
+    'AND p.resource_uuid=m.resource_uuid AND (p.base_version<m.base_version ' +
+    'OR (p.base_version=m.base_version AND (p.created_at<m.created_at ' +
+    'OR (p.created_at=m.created_at AND p.mutation_uuid<m.mutation_uuid)))))';
+
+async function sendableMutations(db, limit) {
+  const rows = await all(
+    db,
+    "SELECT m.payload_json FROM journal_edge_mutations AS m WHERE m.status='pending' " +
+      'AND (m.next_attempt_at IS NULL OR m.next_attempt_at<=?) AND NOT ' + PENDING_PREDECESSOR_EXISTS +
+      ' ORDER BY m.created_at,m.mutation_uuid LIMIT ?',
+    [now(), limit]
+  );
+  return rows.map(function(row) { return JSON.parse(row.payload_json); });
+}
+
 function validateOutcome(mutation, outcome) {
   if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
     throw error('invalid_outcome', 'Mutation outcome must be an object');
@@ -740,10 +767,203 @@ async function cloudRequest(httpApi, request, acceptedStatuses) {
     }
     const failure = error('cloud_protocol_failure', 'Journal cloud request returned HTTP ' + status);
     failure.status = status;
+    failure.payload = response.payload;
     throw failure;
   }
   return response.payload;
 }
+
+// #447: a 4xx answer to one queued mutation must not hold back the mutations
+// of other resources. A JOURNAL_MUTATION_REJECTION receipt bound to the
+// mutation (docs/contracts/sync-schema/journal-mutation-rejection-v1.schema.json)
+// proves the cloud did not apply it: the row is parked as rejected and never
+// retried automatically. Any other per-mutation 4xx leaves the outcome
+// unknown, so the row is held and retried with a capped backoff; the cloud
+// replays a resent mutation_uuid. Both keep status 'pending' and record the
+// state in attempts, next_attempt_at and last_error, so no migration is
+// needed. A held or rejected row fences the later mutations of its own
+// resource (see sendableMutations). Clearing next_attempt_at re-queues a
+// parked row, and its fenced successors follow it in order.
+const MUTATION_REJECTED_UNTIL = '9999-12-31T23:59:59.999Z';
+const MUTATION_HOLD_INITIAL_MS = 15 * 60 * 1000;
+const MUTATION_HOLD_CAP_MS = 24 * 60 * 60 * 1000;
+const MUTATION_TICK_BUDGET = 10;
+const REJECTION_RECEIPT_KEYS = [
+  'kind', 'version', 'mutation_uuid', 'workspace_uuid', 'operation', 'resource_uuid',
+  'payload_sha256', 'actor_type', 'actor_identifier', 'disposition', 'code', 'message',
+  'field_paths',
+];
+const REJECTION_RECEIPT_OPERATIONS = new Set([
+  'ENTRY_CREATE', 'ENTRY_CORRECT', 'ENTRY_VOID', 'PRODUCT_UPSERT', 'CUSTOM_VOCAB_UPSERT',
+  'PLOT_SNAPSHOT', 'PLOT_GROUP_SNAPSHOT', 'CUTOVER_BARRIER_RECEIPT',
+]);
+const REJECTION_RECEIPT_CODES = new Set([
+  'entry_plot_required_for_final',
+  'entry_final_required_value_missing',
+]);
+const REJECTION_FIELD_PATH = /^(\/([^/~]|~[01])*)+$/;
+const REFUSAL_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+// Counts the code points of value, stopping at limit + 1, without allocating
+// over the whole string. More than 2 * limit UTF-16 units is always more than
+// limit code points. A cloud answer has no size cap on the way in, so no work
+// here may grow with its length.
+function codePointsUpTo(value, limit) {
+  if (value.length > 2 * limit) return limit + 1;
+  let count = 0;
+  for (let index = 0; index < value.length; index += value.codePointAt(index) > 0xffff ? 2 : 1) {
+    count += 1;
+    if (count > limit) break;
+  }
+  return count;
+}
+
+function isMutationRejectionReceipt(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body);
+  if (keys.length !== REJECTION_RECEIPT_KEYS.length) return false;
+  keys.sort();
+  const wanted = REJECTION_RECEIPT_KEYS.slice().sort();
+  if (keys.some(function(key, index) {
+    return key !== wanted[index];
+  })) return false;
+  if (body.kind !== 'JOURNAL_MUTATION_REJECTION' || body.version !== 1 ||
+      body.actor_type !== 'gateway' || body.disposition !== 'not_applied') return false;
+  if (![body.mutation_uuid, body.workspace_uuid, body.resource_uuid].every(function(value) {
+    return typeof value === 'string' && UUID.test(value);
+  })) return false;
+  if (!REJECTION_RECEIPT_OPERATIONS.has(body.operation) ||
+      !REJECTION_RECEIPT_CODES.has(body.code)) return false;
+  if (typeof body.payload_sha256 !== 'string' || !SHA256.test(body.payload_sha256)) return false;
+  if (typeof body.actor_identifier !== 'string' ||
+      !/^[0-9A-F]{16}$/.test(body.actor_identifier)) return false;
+  if (typeof body.message !== 'string' || body.message.length < 1 ||
+      codePointsUpTo(body.message, 512) > 512) return false;
+  if (!Array.isArray(body.field_paths) || body.field_paths.length > 4) return false;
+  return body.field_paths.every(function(fieldPath) {
+    return typeof fieldPath === 'string' && codePointsUpTo(fieldPath, 256) <= 256 &&
+      REJECTION_FIELD_PATH.test(fieldPath);
+  });
+}
+
+function receiptBindsMutation(receipt, mutation, gatewayEui) {
+  return receipt.mutation_uuid === mutation.mutation_uuid &&
+    receipt.workspace_uuid === mutation.workspace_uuid &&
+    receipt.operation === mutation.operation &&
+    receipt.resource_uuid === resourceIdentity(mutation) &&
+    receipt.payload_sha256 === mutation.payload_sha256 &&
+    receipt.actor_identifier === gatewayEui;
+}
+
+// Which answers to POST /mutations concern only that mutation. 401 and 403
+// concern the gateway's credentials and stop the tick as before; 408, 429 and
+// 5xx keep their existing handling. The capabilities call earlier in the same
+// tick passed the same gateway authentication, so a 404 here is a workspace
+// mismatch on this mutation or an entry the cloud does not have. A barrier
+// receipt keeps blocking: later mutations must not overtake it.
+function isPerMutationRefusal(mutation, cause) {
+  return Boolean(cause) && cause.code === 'cloud_protocol_failure' &&
+    mutation.operation !== 'CUTOVER_BARRIER_RECEIPT' &&
+    cause.status >= 400 && cause.status < 500 &&
+    ![401, 403, 408, 409, 429].includes(cause.status);
+}
+
+// At most 512 code points of a cloud-supplied string. The slice bounds the
+// work before trim, so an oversized answer is never copied or walked in full.
+function refusalText(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const bounded = value.slice(0, 4096).trim();
+  if (!bounded) return fallback;
+  let text = '';
+  let count = 0;
+  for (const character of bounded) {
+    if (count === 512) break;
+    text += character;
+    count += 1;
+  }
+  return text;
+}
+
+async function recordRefusal(db, mutation, gatewayEui, cause) {
+  const body = cause.payload;
+  const rejected = cause.status === 400 && isMutationRejectionReceipt(body) &&
+    receiptBindsMutation(body, mutation, gatewayEui);
+  return transaction(db, async function(tx) {
+    const row = await get(
+      tx,
+      'SELECT attempts FROM journal_edge_mutations WHERE mutation_uuid=? AND status=\'pending\'',
+      [mutation.mutation_uuid]
+    );
+    if (!row) throw error('not_found', 'Pending journal mutation was not found');
+    const refusedAt = now();
+    const attempts = Number(row.attempts || 0) + 1;
+    let detail;
+    let nextAttemptAt;
+    if (rejected) {
+      nextAttemptAt = MUTATION_REJECTED_UNTIL;
+      detail = {
+        state: 'rejected',
+        http_status: cause.status,
+        code: body.code,
+        message: body.message,
+        field_paths: body.field_paths.slice(),
+        refused_at: refusedAt,
+      };
+    } else {
+      const delayMs = Math.min(
+        MUTATION_HOLD_INITIAL_MS * Math.pow(2, attempts - 1),
+        MUTATION_HOLD_CAP_MS
+      );
+      nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+      const answer = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+      detail = {
+        state: 'held',
+        http_status: cause.status,
+        code: typeof answer.error === 'string' && REFUSAL_ERROR_CODE.test(answer.error)
+          ? answer.error
+          : 'http_' + cause.status,
+        message: refusalText(answer.message, refusalText(
+          answer.error,
+          'Journal cloud refused the mutation with HTTP ' + cause.status
+        )),
+        field_paths: [],
+        refused_at: refusedAt,
+      };
+    }
+    await run(
+      tx,
+      'UPDATE journal_edge_mutations SET attempts=?,next_attempt_at=?,last_error=?,updated_at=? ' +
+        'WHERE mutation_uuid=? AND status=\'pending\'',
+      [attempts, nextAttemptAt, JSON.stringify(detail), refusedAt, mutation.mutation_uuid]
+    );
+    return { mutation_uuid: mutation.mutation_uuid, state: detail.state, attempts };
+  });
+}
+
+// Pending totals. A row's own state wins: rejected (the sentinel), then held
+// (any other next_attempt_at, due or not). A row without its own state is
+// blocked while an earlier pending mutation of its resource exists, and
+// queued otherwise.
+async function mutationQueueHealth(db) {
+  const row = await get(
+    db,
+    'SELECT ' +
+      'SUM(CASE WHEN q.next_attempt_at IS NULL AND q.fenced=0 THEN 1 ELSE 0 END) AS queued,' +
+      'SUM(CASE WHEN q.next_attempt_at IS NOT NULL AND q.next_attempt_at<>? THEN 1 ELSE 0 END) AS held,' +
+      'SUM(CASE WHEN q.next_attempt_at=? THEN 1 ELSE 0 END) AS rejected,' +
+      'SUM(CASE WHEN q.next_attempt_at IS NULL AND q.fenced=1 THEN 1 ELSE 0 END) AS blocked ' +
+    'FROM (SELECT m.next_attempt_at,' + PENDING_PREDECESSOR_EXISTS + ' AS fenced ' +
+      "FROM journal_edge_mutations AS m WHERE m.status='pending') AS q",
+    [MUTATION_REJECTED_UNTIL, MUTATION_REJECTED_UNTIL]
+  );
+  return {
+    queued: Number(row && row.queued || 0),
+    held: Number(row && row.held || 0),
+    rejected: Number(row && row.rejected || 0),
+    blocked: Number(row && row.blocked || 0),
+  };
+}
+
 
 function workspaceNotLinked(message) {
   const value = error('workspace_not_linked', message);
@@ -1062,26 +1282,51 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   const capability = await persistCapability(db, config, capabilityPayload);
 
   let sentMutations = 0;
+  let heldMutations = 0;
+  let rejectedMutations = 0;
   let envelopes = [];
   let committedSequence = null;
   let appliedEnvelopes = 0;
   if (capability.locally_accepted) {
-    const queued = await nextMutations(db, 10);
-    for (const mutation of queued) {
-      if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT' &&
-          (!capability.prepare_ready || !capability.cloud_issuer_enabled)) break;
-      const outcome = await cloudRequest(httpApi, {
-        method: 'POST',
-        url: gatewayEndpoint(config, '/mutations'),
-        headers: authHeaders(config),
-        payload: mutation,
-        timeoutMs: 30000,
-      }, [200, 201, 409]);
-      await recordOutcome(db, mutation.mutation_uuid, outcome);
-      if (mutation.operation.startsWith('ENTRY_')) {
-        await bindPendingAttachments(db, mutation.mutation_uuid, outcome);
+    // At most MUTATION_TICK_BUDGET posts per tick, as before. Each pass sends
+    // the current head of every resource (sendableMutations); a head that
+    // settles makes its successor the head of the next pass, so a create and
+    // its corrections still drain in one tick. Every pass finds nothing,
+    // stops at a gated barrier, or spends budget, so the loop ends.
+    let attempted = 0;
+    let barrierGated = false;
+    while (!barrierGated && attempted < MUTATION_TICK_BUDGET) {
+      const queued = await sendableMutations(db, MUTATION_TICK_BUDGET - attempted);
+      if (!queued.length) break;
+      for (const mutation of queued) {
+        if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT' &&
+            (!capability.prepare_ready || !capability.cloud_issuer_enabled)) {
+          barrierGated = true;
+          break;
+        }
+        attempted += 1;
+        let outcome;
+        try {
+          outcome = await cloudRequest(httpApi, {
+            method: 'POST',
+            url: gatewayEndpoint(config, '/mutations'),
+            headers: authHeaders(config),
+            payload: mutation,
+            timeoutMs: 30000,
+          }, [200, 201, 409]);
+        } catch (cause) {
+          if (!isPerMutationRefusal(mutation, cause)) throw cause;
+          const refusal = await recordRefusal(db, mutation, config.gateway_device_eui, cause);
+          if (refusal.state === 'rejected') rejectedMutations += 1;
+          else heldMutations += 1;
+          continue;
+        }
+        await recordOutcome(db, mutation.mutation_uuid, outcome);
+        if (mutation.operation.startsWith('ENTRY_')) {
+          await bindPendingAttachments(db, mutation.mutation_uuid, outcome);
+        }
+        sentMutations += 1;
       }
-      sentMutations += 1;
     }
 
     const cursor = await oneCursor(db);
@@ -1121,6 +1366,9 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     capability_state: capability.locally_accepted ? 'accepted' : 'rejected',
     entry_batch_capability: entryBatchCapability,
     sent_mutations: sentMutations,
+    held_mutations: heldMutations,
+    rejected_mutations: rejectedMutations,
+    mutation_queue: await mutationQueueHealth(db),
     applied_envelopes: appliedEnvelopes,
     committed_sequence: committedSequence,
     photo_transfers: 0,
@@ -1268,8 +1516,10 @@ module.exports = {
   bindPendingAttachments,
   enforcePhotoCache,
   enqueueMutation,
+  isMutationRejectionReceipt,
   journalModuleEnabled,
   mediaPaths,
+  mutationQueueHealth,
   nextMutations,
   publishDownloadedMedia,
   recordOutcome,
