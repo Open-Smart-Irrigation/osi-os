@@ -28,9 +28,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   does any 4xx refusal of a cutover barrier (#447).
 - `deploy.sh` no longer refuses every deploy on a legacy-capture marker whose
   capture was pruned. It moves the marker aside and captures the live flows,
-  GUI and helper modules afresh, unless the deploy that wrote the marker was
-  cut off during its switch. The marker is now checked before any live file is
-  replaced (#466).
+  GUI and helper modules afresh. Before any capture it now checks that they
+  are one set, and refuses a set left half switched by a deploy cut off during
+  its switch, with or without a marker; without a marker, earlier releases
+  captured such a set as the rollback target. Both checks run before any live
+  file is replaced (#466).
 
 ---
 
