@@ -740,10 +740,170 @@ async function cloudRequest(httpApi, request, acceptedStatuses) {
     }
     const failure = error('cloud_protocol_failure', 'Journal cloud request returned HTTP ' + status);
     failure.status = status;
+    failure.payload = response.payload;
     throw failure;
   }
   return response.payload;
 }
+
+// #447: a 4xx answer to one queued mutation must not hold back every later
+// mutation of the gateway. A JOURNAL_MUTATION_REJECTION receipt bound to the
+// mutation (docs/contracts/sync-schema/journal-mutation-rejection-v1.schema.json)
+// proves the cloud did not apply it: the row is parked as rejected and never
+// retried automatically. Any other per-mutation 4xx leaves the outcome
+// unknown, so the row is held and retried with a capped backoff; the cloud
+// replays a resent mutation_uuid. Both keep status 'pending' and record the
+// state in attempts, next_attempt_at and last_error, so no migration is
+// needed. Clearing next_attempt_at re-queues a parked row.
+const MUTATION_REJECTED_UNTIL = '9999-12-31T23:59:59.999Z';
+const MUTATION_HOLD_INITIAL_MS = 15 * 60 * 1000;
+const MUTATION_HOLD_CAP_MS = 24 * 60 * 60 * 1000;
+const REJECTION_RECEIPT_KEYS = [
+  'kind', 'version', 'mutation_uuid', 'workspace_uuid', 'operation', 'resource_uuid',
+  'payload_sha256', 'actor_type', 'actor_identifier', 'disposition', 'code', 'message',
+  'field_paths',
+];
+const REJECTION_RECEIPT_OPERATIONS = new Set([
+  'ENTRY_CREATE', 'ENTRY_CORRECT', 'ENTRY_VOID', 'PRODUCT_UPSERT', 'CUSTOM_VOCAB_UPSERT',
+  'PLOT_SNAPSHOT', 'PLOT_GROUP_SNAPSHOT', 'CUTOVER_BARRIER_RECEIPT',
+]);
+const REJECTION_RECEIPT_CODES = new Set([
+  'entry_plot_required_for_final',
+  'entry_final_required_value_missing',
+]);
+const REJECTION_FIELD_PATH = /^(\/([^/~]|~[01])*)+$/;
+const REFUSAL_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+function characterCount(value) {
+  return Array.from(value).length;
+}
+
+function isMutationRejectionReceipt(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+  const keys = Object.keys(body).sort();
+  const wanted = REJECTION_RECEIPT_KEYS.slice().sort();
+  if (keys.length !== wanted.length || keys.some(function(key, index) {
+    return key !== wanted[index];
+  })) return false;
+  if (body.kind !== 'JOURNAL_MUTATION_REJECTION' || body.version !== 1 ||
+      body.actor_type !== 'gateway' || body.disposition !== 'not_applied') return false;
+  if (![body.mutation_uuid, body.workspace_uuid, body.resource_uuid].every(function(value) {
+    return typeof value === 'string' && UUID.test(value);
+  })) return false;
+  if (!REJECTION_RECEIPT_OPERATIONS.has(body.operation) ||
+      !REJECTION_RECEIPT_CODES.has(body.code)) return false;
+  if (typeof body.payload_sha256 !== 'string' || !SHA256.test(body.payload_sha256)) return false;
+  if (typeof body.actor_identifier !== 'string' ||
+      !/^[0-9A-F]{16}$/.test(body.actor_identifier)) return false;
+  if (typeof body.message !== 'string' || characterCount(body.message) < 1 ||
+      characterCount(body.message) > 512) return false;
+  if (!Array.isArray(body.field_paths) || body.field_paths.length > 4) return false;
+  return body.field_paths.every(function(fieldPath) {
+    return typeof fieldPath === 'string' && characterCount(fieldPath) <= 256 &&
+      REJECTION_FIELD_PATH.test(fieldPath);
+  });
+}
+
+function receiptBindsMutation(receipt, mutation, gatewayEui) {
+  return receipt.mutation_uuid === mutation.mutation_uuid &&
+    receipt.workspace_uuid === mutation.workspace_uuid &&
+    receipt.operation === mutation.operation &&
+    receipt.resource_uuid === resourceIdentity(mutation) &&
+    receipt.payload_sha256 === mutation.payload_sha256 &&
+    receipt.actor_identifier === gatewayEui;
+}
+
+// Which answers to POST /mutations concern only that mutation. 401 and 403
+// concern the gateway's credentials and stop the tick as before; 408, 429 and
+// 5xx keep their existing handling. The capabilities call earlier in the same
+// tick passed the same gateway authentication, so a 404 here is a workspace
+// mismatch on this mutation or an entry the cloud does not have. A barrier
+// receipt keeps blocking: later mutations must not overtake it.
+function isPerMutationRefusal(mutation, cause) {
+  return Boolean(cause) && cause.code === 'cloud_protocol_failure' &&
+    mutation.operation !== 'CUTOVER_BARRIER_RECEIPT' &&
+    cause.status >= 400 && cause.status < 500 &&
+    ![401, 403, 408, 409, 429].includes(cause.status);
+}
+
+function refusalText(value, fallback) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  return Array.from(value.trim()).slice(0, 512).join('');
+}
+
+async function recordRefusal(db, mutation, gatewayEui, cause) {
+  const body = cause.payload;
+  const rejected = cause.status === 400 && isMutationRejectionReceipt(body) &&
+    receiptBindsMutation(body, mutation, gatewayEui);
+  return transaction(db, async function(tx) {
+    const row = await get(
+      tx,
+      'SELECT attempts FROM journal_edge_mutations WHERE mutation_uuid=? AND status=\'pending\'',
+      [mutation.mutation_uuid]
+    );
+    if (!row) throw error('not_found', 'Pending journal mutation was not found');
+    const refusedAt = now();
+    const attempts = Number(row.attempts || 0) + 1;
+    let detail;
+    let nextAttemptAt;
+    if (rejected) {
+      nextAttemptAt = MUTATION_REJECTED_UNTIL;
+      detail = {
+        state: 'rejected',
+        http_status: cause.status,
+        code: body.code,
+        message: body.message,
+        field_paths: body.field_paths.slice(),
+        refused_at: refusedAt,
+      };
+    } else {
+      const delayMs = Math.min(
+        MUTATION_HOLD_INITIAL_MS * Math.pow(2, attempts - 1),
+        MUTATION_HOLD_CAP_MS
+      );
+      nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+      const answer = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+      detail = {
+        state: 'held',
+        http_status: cause.status,
+        code: typeof answer.error === 'string' && REFUSAL_ERROR_CODE.test(answer.error)
+          ? answer.error
+          : 'http_' + cause.status,
+        message: refusalText(answer.message, refusalText(
+          answer.error,
+          'Journal cloud refused the mutation with HTTP ' + cause.status
+        )),
+        field_paths: [],
+        refused_at: refusedAt,
+      };
+    }
+    await run(
+      tx,
+      'UPDATE journal_edge_mutations SET attempts=?,next_attempt_at=?,last_error=?,updated_at=? ' +
+        'WHERE mutation_uuid=? AND status=\'pending\'',
+      [attempts, nextAttemptAt, JSON.stringify(detail), refusedAt, mutation.mutation_uuid]
+    );
+    return { mutation_uuid: mutation.mutation_uuid, state: detail.state, attempts };
+  });
+}
+
+async function mutationQueueHealth(db) {
+  const row = await get(
+    db,
+    'SELECT ' +
+      'SUM(CASE WHEN next_attempt_at IS NULL THEN 1 ELSE 0 END) AS queued,' +
+      'SUM(CASE WHEN next_attempt_at IS NOT NULL AND next_attempt_at<>? THEN 1 ELSE 0 END) AS held,' +
+      'SUM(CASE WHEN next_attempt_at=? THEN 1 ELSE 0 END) AS rejected ' +
+    "FROM journal_edge_mutations WHERE status='pending'",
+    [MUTATION_REJECTED_UNTIL, MUTATION_REJECTED_UNTIL]
+  );
+  return {
+    queued: Number(row && row.queued || 0),
+    held: Number(row && row.held || 0),
+    rejected: Number(row && row.rejected || 0),
+  };
+}
+
 
 function workspaceNotLinked(message) {
   const value = error('workspace_not_linked', message);
@@ -1062,6 +1222,8 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   const capability = await persistCapability(db, config, capabilityPayload);
 
   let sentMutations = 0;
+  let heldMutations = 0;
+  let rejectedMutations = 0;
   let envelopes = [];
   let committedSequence = null;
   let appliedEnvelopes = 0;
@@ -1070,13 +1232,22 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     for (const mutation of queued) {
       if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT' &&
           (!capability.prepare_ready || !capability.cloud_issuer_enabled)) break;
-      const outcome = await cloudRequest(httpApi, {
-        method: 'POST',
-        url: gatewayEndpoint(config, '/mutations'),
-        headers: authHeaders(config),
-        payload: mutation,
-        timeoutMs: 30000,
-      }, [200, 201, 409]);
+      let outcome;
+      try {
+        outcome = await cloudRequest(httpApi, {
+          method: 'POST',
+          url: gatewayEndpoint(config, '/mutations'),
+          headers: authHeaders(config),
+          payload: mutation,
+          timeoutMs: 30000,
+        }, [200, 201, 409]);
+      } catch (cause) {
+        if (!isPerMutationRefusal(mutation, cause)) throw cause;
+        const refusal = await recordRefusal(db, mutation, config.gateway_device_eui, cause);
+        if (refusal.state === 'rejected') rejectedMutations += 1;
+        else heldMutations += 1;
+        continue;
+      }
       await recordOutcome(db, mutation.mutation_uuid, outcome);
       if (mutation.operation.startsWith('ENTRY_')) {
         await bindPendingAttachments(db, mutation.mutation_uuid, outcome);
@@ -1121,6 +1292,9 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     capability_state: capability.locally_accepted ? 'accepted' : 'rejected',
     entry_batch_capability: entryBatchCapability,
     sent_mutations: sentMutations,
+    held_mutations: heldMutations,
+    rejected_mutations: rejectedMutations,
+    mutation_queue: await mutationQueueHealth(db),
     applied_envelopes: appliedEnvelopes,
     committed_sequence: committedSequence,
     photo_transfers: 0,
@@ -1268,8 +1442,10 @@ module.exports = {
   bindPendingAttachments,
   enforcePhotoCache,
   enqueueMutation,
+  isMutationRejectionReceipt,
   journalModuleEnabled,
   mediaPaths,
+  mutationQueueHealth,
   nextMutations,
   publishDownloadedMedia,
   recordOutcome,
