@@ -624,41 +624,73 @@ function legacyCaptureStamp(root, flowsPath, guiRoot) {
   return existing.stamp;
 }
 
-// A marker whose capture directory is gone (pruned, or removed by a deploy.sh
-// that did not know the marker) guards nothing. deploy.sh calls this before it
-// replaces any live file: the marker is moved aside so the capture block starts
-// fresh, unless the deploy that wrote it switched flows or the GUI into its own
-// payload and never committed. That live pair is half switched and is not a
-// rollback target. Returns the line deploy.sh prints, or null.
+// Why the live flows, GUI and helper modules are not one set, or null.
+// deploy.sh records no committed payload, so the live links are checked
+// against the module set sealed in the payload the flows point into. flipTo()
+// switches flows first, then the GUI, then the modules, and restoreSwitched()
+// puts them back in reverse order, so every interrupted switch leaves flows
+// linked into a payload that the GUI or one of its modules does not point
+// into. A regular flows file means no switch is under way. A regular GUI
+// directory beside linked flows is a sysupgrade (it keeps /srv but not the
+// GUI link) or a deploy.sh from before the GUI was in the payload. A payload
+// without modules.json predates #603: its flows run the live module
+// directories.
+function halfSwitchedReason(root, flows, gui) {
+  if (!flows) return null;
+  if (gui && gui !== flows) return `the live flows point into payloads/${flows} but the GUI into payloads/${gui}`;
+  const manifest = readModuleManifest(root, flows);
+  if (!manifest) return null;
+  const stray = manifest.modules.filter((name) =>
+    moduleLinkStamp(root, name) !== flows || !isDirectory(moduleLink(root, name)));
+  if (!stray.length) return null;
+  return `the live flows point into payloads/${flows}, but its helper modules ${stray.join(', ')} are not linked into it`;
+}
+
+// deploy.sh calls this before it replaces any live file. When the live flows
+// and GUI are not one payload, the capture block further down keeps them, and
+// the live helper modules, as the rollback target. This decides first:
+// - a legacy-capture marker whose capture exists is reused when the live files
+//   match and refused when they changed;
+// - a marker whose capture directory is gone (pruned, or removed by a
+//   deploy.sh that did not know the marker) guards nothing and is moved aside,
+//   so the capture block starts fresh;
+// - a fresh capture is refused when the live set is half switched
+//   (halfSwitchedReason), whichever deploy attempt switched it.
+// Returns the line deploy.sh prints, or null.
 const PREVIOUS_SUFFIX = '-previous';
 
 function legacyCapturePreflight(root, flowsPath, guiRoot) {
-  const marker = legacyCapturePath(root);
-  if (!fs.existsSync(marker)) return null;
-  // The condition under which deploy.sh's capture block reads the marker.
+  // The condition under which deploy.sh's capture block runs.
   if (!isFile(flowsPath) || !isDirectory(guiRoot)) return null;
   const flows = currentStamp(root);
   const gui = guiStamp(root, guiRoot);
   if (flows && flows === gui) return null;
-  let existing;
-  try { existing = JSON.parse(fs.readFileSync(marker, 'utf8')); }
-  catch (error) { throw new Error(`legacyCapturePreflight: legacy evidence is unreadable: ${error.message}`); }
-  const stamp = existing ? existing.stamp : undefined;
-  if (!existing || existing.format !== 1 || typeof stamp !== 'string' || !stamp ||
-      stamp.includes('/') || stamp.startsWith('.')) {
-    throw new Error('legacyCapturePreflight: refusing to recapture changed legacy files after a prior attempt');
+  const marker = legacyCapturePath(root);
+  let stamp = null;
+  if (fs.existsSync(marker)) {
+    let existing;
+    try { existing = JSON.parse(fs.readFileSync(marker, 'utf8')); }
+    catch (error) { throw new Error(`legacyCapturePreflight: legacy evidence is unreadable: ${error.message}`); }
+    stamp = existing ? existing.stamp : undefined;
+    if (!existing || existing.format !== 1 || typeof stamp !== 'string' || !stamp ||
+        stamp.includes('/') || stamp.startsWith('.')) {
+      throw new Error('legacyCapturePreflight: refusing to recapture changed legacy files after a prior attempt');
+    }
+    if (isDirectory(payloadDir(root, stamp))) {
+      legacyCaptureStamp(root, flowsPath, guiRoot);
+      return null;
+    }
+    const attempt = stamp.endsWith(PREVIOUS_SUFFIX) ? stamp.slice(0, -PREVIOUS_SUFFIX.length) : '';
+    if (!attempt) {
+      throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and no deploy attempt can be read from it; refusing recapture`);
+    }
+    if (flows === attempt || gui === attempt) {
+      throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and the live ${flows === attempt ? 'flows' : 'GUI'} point into payloads/${attempt} from the deploy that wrote it; refusing to capture a half-switched state`);
+    }
   }
-  if (isDirectory(payloadDir(root, stamp))) {
-    legacyCaptureStamp(root, flowsPath, guiRoot);
-    return null;
-  }
-  const attempt = stamp.endsWith(PREVIOUS_SUFFIX) ? stamp.slice(0, -PREVIOUS_SUFFIX.length) : '';
-  if (!attempt) {
-    throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and no deploy attempt can be read from it; refusing recapture`);
-  }
-  if (flows === attempt || gui === attempt) {
-    throw new Error(`legacyCapturePreflight: the legacy-capture marker names payload ${stamp}, which is gone, and the live ${flows === attempt ? 'flows' : 'GUI'} point into payloads/${attempt} from the deploy that wrote it; refusing to capture a half-switched state`);
-  }
+  const reason = halfSwitchedReason(root, flows, gui);
+  if (reason) throw new Error(`legacyCapturePreflight: ${reason}; refusing to capture a half-switched state`);
+  if (stamp === null) return null;
   const aside = `${marker}.stale-${process.pid}-${Date.now()}`;
   fs.renameSync(marker, aside);
   return `WARN: stale legacy-capture marker (payload ${stamp} gone); moved to payloads/${path.basename(aside)}; recapturing`;

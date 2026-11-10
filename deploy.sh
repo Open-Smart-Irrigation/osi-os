@@ -2272,11 +2272,13 @@ same_fs_or_die
 echo "OK"
 
 # legacy capture preflight begin
-# Decides on the legacy-capture marker before any live file is replaced, so a
-# refusal leaves the gateway as it was. A marker whose capture is gone is
-# moved aside here, and the capture block further down starts fresh.
+# Runs before any live file is replaced, so a refusal leaves the gateway as it
+# was. When the live flows and GUI are not one payload, it refuses a
+# half-switched flows/GUI/module set and a legacy-capture marker whose capture
+# no longer matches, and moves aside a marker whose capture is gone, so the
+# capture block further down starts fresh.
 if ! legacy_preflight_report="$(swap_call legacyCapturePreflight "/srv/node-red/flows.json" "$GUI_ROOT")"; then
-    echo "ERROR: legacy flows+GUI evidence is missing or changed; refusing recapture before any file is replaced" >&2
+    echo "ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced" >&2
     exit 1
 fi
 [ -z "$legacy_preflight_report" ] || printf '%s\n' "$legacy_preflight_report"
