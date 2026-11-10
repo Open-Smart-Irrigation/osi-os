@@ -626,22 +626,39 @@ function legacyCaptureStamp(root, flowsPath, guiRoot) {
 
 // Why the live flows, GUI and helper modules are not one set, or null.
 // deploy.sh records no committed payload, so the live links are checked
-// against the module set sealed in the payload the flows point into. flipTo()
-// switches flows first, then the GUI, then the modules, and restoreSwitched()
-// puts them back in reverse order, so every interrupted switch leaves flows
-// linked into a payload that the GUI or one of its modules does not point
-// into. A regular flows file means no switch is under way. A regular GUI
-// directory beside linked flows is a sysupgrade (it keeps /srv but not the
-// GUI link) or a deploy.sh from before the GUI was in the payload. A payload
-// without modules.json predates #603: its flows run the live module
-// directories.
+// against the payload the flows point into. flipTo() switches flows first,
+// then the GUI, then each module in that payload's modules.json, and
+// restoreSwitched() puts them back in reverse order, so an interrupted switch
+// leaves flows linked into a payload that the GUI or one of those modules
+// does not point into. What no switch leaves behind is one set:
+// - a regular flows file: no switch is under way;
+// - a regular GUI directory: a sysupgrade keeps /srv but replaces the GUI
+//   link with the image GUI, and an older deploy.sh wrote the GUI in place;
+// - a GUI link into another payload while the flows payload has no gui/:
+//   flipTo() never switches flows into a payload without a GUI, only the
+//   flows-only switch of a v0.7.0 deploy.sh does;
+// - a payload without modules.json (from before #603): its flows run the live
+//   module directories;
+// - a module that is a directory, not a link into a payload, with a digest in
+//   modules.json: captureModules() copied it from the live directory these
+//   flows were already running on, and no switch turns a link back into a
+//   directory. A sysupgrade may have copied the image's helper over it since;
+//   the capture block copies it as it is now.
+// A module modules.json lists without a digest was sealed with the payload,
+// and a switch into the payload links it there.
 function halfSwitchedReason(root, flows, gui) {
   if (!flows) return null;
-  if (gui && gui !== flows) return `the live flows point into payloads/${flows} but the GUI into payloads/${gui}`;
+  if (gui && gui !== flows && isDirectory(guiPayloadDir(root, flows))) {
+    return `the live flows point into payloads/${flows} but the GUI into payloads/${gui}`;
+  }
   const manifest = readModuleManifest(root, flows);
   if (!manifest) return null;
-  const stray = manifest.modules.filter((name) =>
-    moduleLinkStamp(root, name) !== flows || !isDirectory(moduleLink(root, name)));
+  const stray = manifest.modules.filter((name) => {
+    const present = isDirectory(moduleLink(root, name));
+    const linked = moduleLinkStamp(root, name);
+    if (linked !== null) return linked !== flows || !present;
+    return manifest.captured[name] === undefined || !present;
+  });
   if (!stray.length) return null;
   return `the live flows point into payloads/${flows}, but its helper modules ${stray.join(', ')} are not linked into it`;
 }
