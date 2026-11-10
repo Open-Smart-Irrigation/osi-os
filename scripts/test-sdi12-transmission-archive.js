@@ -446,7 +446,12 @@ test('ordered migration upgrades the previous schema without changing stored can
   try {
     db.exec('DROP TABLE sdi12_transmissions');
     db.prepare('INSERT INTO device_data(deveui, recorded_at, vwc_1) VALUES(?,?,?)').run(EUI,'2026-10-28T09:00:00Z',23.81);
-    const migration=fs.readFileSync(path.join(ROOT,'database/migrations/ordered/0080__sdi12_transmissions.sql'),'utf8');
+    // The header says 0076 on purpose: these bytes were already applied on a
+    // customer line under that number, and ledger reconciliation renumbers that
+    // row to 80 only while the SHA-256 matches. Never edit this file.
+    const migrationBytes=fs.readFileSync(path.join(ROOT,'database/migrations/ordered/0080__sdi12_transmissions.sql'));
+    assert.equal(require('node:crypto').createHash('sha256').update(migrationBytes).digest('hex'),'126072b50e960359769cac9cd9fabe7899899b0a4fb7b991e0f3b83681c4687a');
+    const migration=migrationBytes.toString('utf8');
     db.exec(migration); db.exec(migration);
     assert.equal(db.prepare('SELECT vwc_1 FROM device_data WHERE deveui=?').get(EUI).vwc_1,23.81);
     assert.equal(records(db).length,0);
