@@ -19,7 +19,9 @@ function requireHealthHelperFresh() {
 const {
   gatherEdgeHealth,
   structuralSignature,
-  compareByCodepoint
+  compareByCodepoint,
+  isAuthRejection,
+  recordError
 } = requireHealthHelperFresh();
 
 const PUBLIC_HEALTH_KEYS = [
@@ -673,4 +675,83 @@ test('dead-lettered command ACKs are counted and do not drive health_state', asy
   } finally {
     db.close();
   }
+});
+
+test('isAuthRejection accepts only an exact tag bound to the throwing node (#462)', () => {
+  const ok = (code) => ({
+    _osiAuthFailure: { format: 1, code, sourceId: 'n1' },
+    error: { message: 'x', source: { id: 'n1' } }
+  });
+  assert.strictEqual(isAuthRejection(ok('MISSING_BEARER')), true);
+  assert.strictEqual(isAuthRejection(ok('INVALID_TOKEN')), true);
+  assert.strictEqual(isAuthRejection(ok('TOKEN_EXPIRED')), true);
+
+  const withTag = (tag) => ({ ...ok('INVALID_TOKEN'), _osiAuthFailure: tag });
+  const noError = ok('INVALID_TOKEN');
+  delete noError.error;
+  const wrongSource = ok('INVALID_TOKEN');
+  wrongSource.error.source.id = 'n2';
+  const cases = {
+    null: null,
+    'empty message': {},
+    'string tag': withTag('x'),
+    'extra key': withTag({ format: 1, code: 'INVALID_TOKEN', sourceId: 'n1', statusCode: 401 }),
+    'missing sourceId': withTag({ format: 1, code: 'INVALID_TOKEN' }),
+    'format 2': withTag({ format: 2, code: 'INVALID_TOKEN', sourceId: 'n1' }),
+    'unknown code': ok('FORBIDDEN'),
+    'source id mismatch': wrongSource,
+    'no msg.error': noError,
+    'empty source id': {
+      _osiAuthFailure: { format: 1, code: 'INVALID_TOKEN', sourceId: '' },
+      error: { message: 'x', source: { id: '' } }
+    }
+  };
+  for (const [label, msg] of Object.entries(cases)) {
+    assert.strictEqual(isAuthRejection(msg), false, label);
+  }
+});
+
+test('recordError counts an ordinary error and records the last one', () => {
+  const result = recordError(
+    { error: { message: 'boom', source: { name: 'Src' } } },
+    { now: 1000, counts: {}, warned: {} }
+  );
+  assert.deepStrictEqual(result.counts, { total: 1, last: { at: 1000, src: 'Src', message: 'boom' } });
+  assert.strictEqual(result.warning, 'Src: boom');
+});
+
+test('recordError leaves the counts alone for a tagged auth rejection but still warns', () => {
+  const last = { at: 5, src: 'Old', message: 'old' };
+  const counts = { total: 4, last };
+  const result = recordError(
+    {
+      _osiAuthFailure: { format: 1, code: 'MISSING_BEARER', sourceId: 'n1' },
+      error: {
+        message: 'Error: Unauthorized',
+        source: { id: 'n1', name: 'Decode Token & Get Username' }
+      }
+    },
+    { now: 2000, counts, warned: {} }
+  );
+  assert.strictEqual(result.counts.total, 4);
+  assert.strictEqual(result.counts.last, last);
+  assert.strictEqual(result.warning, 'Decode Token & Get Username: Error: Unauthorized');
+});
+
+test('recordError rate-limits warnings per message for 60 s and drops keys older than 10 minutes', () => {
+  const warned = { stale: 0 };
+  const msg = { error: { message: 'm', source: { name: 'S' } } };
+  const first = recordError(msg, { now: 600001, counts: {}, warned });
+  assert.strictEqual(first.warning, 'S: m');
+  assert.strictEqual('stale' in warned, false);
+  assert.strictEqual(recordError(msg, { now: 660000, counts: {}, warned }).warning, null);
+  assert.strictEqual(recordError(msg, { now: 660001, counts: {}, warned }).warning, 'S: m');
+});
+
+test('recordError restarts a non-numeric total at 1', () => {
+  const result = recordError(
+    { error: { message: 'boom', source: { name: 'Src' } } },
+    { now: 1, counts: { total: 'x' }, warned: {} }
+  );
+  assert.strictEqual(result.counts.total, 1);
 });
