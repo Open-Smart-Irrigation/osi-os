@@ -22,6 +22,9 @@ const NAME_TO_PATH = {
   // osiLib.require('history-helper'). Without this entry the lookup failed on
   // every gateway and rain_day was never sent, although the package shipped.
   'history-helper': 'osi-history-helper',
+  // #462: Record Error splits token rejections from gateway errors through
+  // osiLib.require('health-helper').
+  'health-helper': 'osi-health-helper',
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',
   'scoped-access-commands': 'osi-scoped-access-commands',

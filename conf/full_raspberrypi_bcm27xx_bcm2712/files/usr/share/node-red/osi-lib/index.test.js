@@ -30,6 +30,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'device-commands',
     'device-writer',
     'entity-name',
+    'health-helper',
     'history-helper',
     'history-router',
     'history-sync',
@@ -88,6 +89,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['agronomy-daily'], 'osi-agronomy-daily');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-commissioning'], 'osi-sdi12-commissioning');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');
+  assert.equal(osiLib.NAME_TO_PATH['health-helper'], 'osi-health-helper');
   assert.equal(osiLib.NAME_TO_PATH['history-helper'], 'osi-history-helper');
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
   assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
@@ -127,6 +129,7 @@ test('command flow helpers load from OSI_LIB_BASE and cache successful modules',
     ['sdi12-commissioning', 'osi-sdi12-commissioning'],
     ['journal-replication', 'osi-journal-replication'],
     ['history-helper', 'osi-history-helper'],
+    ['health-helper', 'osi-health-helper'],
   ]) {
     const helperDirectory = path.join(FIXTURE_BASE, directory);
     const helperPath = path.join(helperDirectory, 'index.js');

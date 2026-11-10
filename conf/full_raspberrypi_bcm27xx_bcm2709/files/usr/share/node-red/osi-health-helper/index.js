@@ -441,11 +441,68 @@ function gatherEdgeHealth(db, options = {}) {
   });
 }
 
+// Record Error (issue #462). A request that a token guard rejected with 401
+// is a client mistake, not a gateway fault. It must not raise
+// error_counts.total: that counter keeps health_state at 'degraded' until
+// Node-RED restarts, and the cloud and the deploy canary gate read it as
+// errors_total. A guard marks its rejection by setting msg._osiAuthFailure
+// on the message it throws on, and Node-RED keeps that tag on the copy each
+// catch node receives. An untagged error with the same text, such as a 401
+// in the cloud sync flows, still counts. Rejections stay visible through the
+// rate-limited warning.
+const AUTH_REJECTION_CODES = new Set(['MISSING_BEARER', 'INVALID_TOKEN', 'TOKEN_EXPIRED']);
+const RECORD_ERROR_WARN_INTERVAL_MS = 60000;
+
+function isAuthRejection(msg) {
+  const tag = msg && msg._osiAuthFailure;
+  if (!tag || typeof tag !== 'object') return false;
+  if (Object.keys(tag).sort().join(',') !== 'code,format,sourceId') return false;
+  const sourceId = msg.error && msg.error.source && msg.error.source.id;
+  return tag.format === 1
+    && AUTH_REJECTION_CODES.has(tag.code)
+    && typeof sourceId === 'string'
+    && sourceId !== ''
+    && tag.sourceId === sourceId;
+}
+
+function recordError(msg, state = {}) {
+  const m = msg || {};
+  const now = Number.isFinite(state.now) ? state.now : Date.now();
+  const err = m.error || m._error || {};
+  const source = err.source || (m._error && m._error.source) || {};
+  const rawMessage = err.message || (m.payload && m.payload.message) || String(err || 'unknown error');
+  const message = String(rawMessage || 'unknown error').slice(0, 120);
+  const src = String(source.name || source.id || source.type || m.topic || 'unknown');
+
+  const counts = state.counts && typeof state.counts === 'object' ? state.counts : {};
+  if (!isAuthRejection(m)) {
+    const previousTotal = Number(counts.total || 0);
+    counts.total = Number.isFinite(previousTotal) ? previousTotal + 1 : 1;
+    counts.last = { at: now, src, message };
+  }
+
+  const warned = state.warned && typeof state.warned === 'object' ? state.warned : {};
+  for (const key of Object.keys(warned)) {
+    if (now - Number(warned[key] || 0) > RECORD_ERROR_WARN_INTERVAL_MS * 10) {
+      delete warned[key];
+    }
+  }
+  let warning = null;
+  const lastWarned = Number(warned[message] || 0);
+  if (!lastWarned || now - lastWarned >= RECORD_ERROR_WARN_INTERVAL_MS) {
+    warned[message] = now;
+    warning = src + ': ' + message;
+  }
+  return { counts, warned, warning };
+}
+
 module.exports = {
   structuralSignature,
   gatherEdgeHealth,
   compareByCodepoint,
   registerStartup,
   readCrashState,
+  isAuthRejection,
+  recordError,
   rtcHealth
 };
