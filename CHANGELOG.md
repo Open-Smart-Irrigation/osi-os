@@ -31,8 +31,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   GUI and helper modules afresh. Before any capture it now checks that they
   are one set, and refuses a set left half switched by a deploy cut off during
   its switch, with or without a marker; without a marker, earlier releases
-  captured such a set as the rollback target. Both checks run before any live
-  file is replaced (#466).
+  captured such a set as the rollback target. The same refusal follows a
+  sysupgrade with a v0.8.1 or older image on a gateway deployed with helper
+  modules in the payload, because those images copy their helpers over the
+  module links. Both checks run before any live file is replaced (#466).
 
 ---
 

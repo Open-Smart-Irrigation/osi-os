@@ -387,36 +387,55 @@ committed deploy removes the marker.
 
 `deploy.sh` keeps no record of which payload committed. Right after the
 native sqlite3 preflight, before the first live file is replaced, it checks
-the live links against the module set (`modules.json`) of the payload
-`flows.json` points into, and then the marker:
+the live links against the payload `flows.json` points into, and then the
+marker. Each state below is a named case (`state table S1` to `S35`) in
+`scripts/deploy-payload-swap.test.js`:
 
-- captured: a regular `flows.json` beside a GUI directory (a fresh image, or
-  a gateway the payload layout has not reached); after a sysupgrade,
-  `flows.json` and every module in its payload's `modules.json` linked into
-  that payload beside the image GUI; `flows.json` linked into a payload
-  without `modules.json` (from before #603) beside a GUI directory;
-- not captured: `flows.json`, GUI and modules point into one payload, and
-  that payload is the rollback target. This includes a deploy that switched
-  all three and lost power before its self-check;
-- reused: a marker whose capture exists while the live files match it (a
-  retry);
-- moved aside, then captured: a marker whose capture is gone (pruned, or
-  removed by an older `deploy.sh` that did not know the marker) beside a live
-  set the first item accepts:
-  `WARN: stale legacy-capture marker (payload <stamp> gone); moved to payloads/.legacy-capture.json.stale-<pid>-<ms>; recapturing`.
-  If power is lost after the move, the rerun finds no marker and captures;
+- not checked, as before: `flows.json` or the GUI is missing or a dangling
+  link (for example a GUI payload pruned by a v0.7.0 `deploy.sh`). The
+  capture block does not run and the deploy has no rollback target;
+- not captured: `flows.json` and the GUI point into one payload, which is
+  the rollback target. This includes a deploy cut off after its GUI switch
+  and a deploy that switched everything and lost power before its
+  self-check. A marker is left alone;
+- reused: a marker whose capture exists while the live flows and GUI match
+  it (a retry, also after a sysupgrade with the same image);
+- captured, when there is no marker, or a marker whose capture is gone
+  (pruned, or removed by an older `deploy.sh` that did not know the marker),
+  which is first moved aside with
+  `WARN: stale legacy-capture marker (payload <stamp> gone); moved to payloads/.legacy-capture.json.stale-<pid>-<ms>; recapturing`:
+  a regular `flows.json` (a fresh image, a gateway the payload layout has
+  not reached, or flows replaced by hand); `flows.json` linked into the
+  flows-only payload of a v0.7.0 `deploy.sh`, beside a GUI directory or a
+  GUI link into an older payload; `flows.json` linked into a payload without
+  `modules.json` (from before #603) beside a GUI directory; or, after a
+  sysupgrade, `flows.json` linked into a payload beside the image GUI while
+  every module in that payload's `modules.json` is a link into it or a
+  directory for which `modules.json` records a digest. A digest is recorded
+  when a deploy copies a live helper directory into the previous payload,
+  for example on a v0.8.1 gateway whose deploy failed before the stop; the
+  directory may hold the image's copy of the helper since the sysupgrade.
+  If power is lost after the marker was moved, the rerun finds no marker
+  and captures;
 - refused with `refusing to capture a half-switched state`: `flows.json`
-  points into one payload and the GUI into another; `flows.json` points into
-  a payload beside a GUI directory while a module in that payload's
-  `modules.json` is a directory, points elsewhere or dangles; or a stale
-  marker while `flows.json` or the GUI points into the payload of the deploy
-  that wrote it. Each is a deploy cut off during its switch, whichever
-  attempt it was. Releases before #466 captured such a set when no marker
-  was present;
+  and the GUI point into different payloads and the flows payload has a
+  GUI (a deploy cut off between its flows and GUI switch); `flows.json`
+  points into a payload beside a GUI directory while a module in that
+  payload's `modules.json` points into another payload, dangles, is
+  missing, or is a directory without a recorded digest (a deploy cut off
+  during its switch, seen after a sysupgrade); or a stale marker while
+  `flows.json` or the GUI points into the payload of the deploy that wrote
+  it. A sysupgrade with a v0.8.1 or older image leaves the same state on a
+  gateway deployed with helper modules in the payload, because those images
+  copy their helpers over the module links; it is refused too. Releases
+  before #466 captured these sets when no marker was present;
 - refused for other reasons: a marker whose capture exists while the live
-  files changed (`refusing to recapture changed legacy files after a prior attempt`),
-  an unreadable marker, a marker that names no `-previous` capture, or an
-  unreadable `modules.json` in the payload `flows.json` points into.
+  flows or GUI changed
+  (`refusing to recapture changed legacy files after a prior attempt`),
+  for example after a sysupgrade with another image between a failed deploy
+  and its retry, as #466 asks; an unreadable marker; a marker that names no
+  `-previous` capture; or an unreadable `modules.json` in the payload
+  `flows.json` points into.
 
 Every refusal ends with
 `ERROR: the live flows, GUI and helper modules cannot be kept as the rollback target; refusing before any file is replaced`.
@@ -480,7 +499,9 @@ stopped:
 
 The image seed (`98_osi_node_red_seed`) copies a module from the image only
 where `/srv/node-red/<module>` is not a symlink, so a sysupgrade keeps the
-deployed flows and modules together. Each retained payload carries its module
+deployed flows and modules together. Images up to v0.8.1 copy their helpers
+over the links too; the next deploy then refuses (see "Rollback capture
+check"). Each retained payload carries its module
 copy: about 3 MB staged, up to about 5 MB for a capture of seed-installed
 modules (they include test files), times `PAYLOAD_KEEP_N`.
 
