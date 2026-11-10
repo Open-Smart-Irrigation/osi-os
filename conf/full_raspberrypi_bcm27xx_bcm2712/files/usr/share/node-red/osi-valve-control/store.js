@@ -885,6 +885,22 @@ async function recentStaleState(db, deviceEui) {
   return row ? row.reconciliation_state : null;
 }
 
+// #601: an accepted OPEN_FOR_DURATION sets devices.target_state OPEN (live-transport.js) and the
+// valve closes itself, so no command sets it back. The commanded open is over once no actuation
+// for the valve is live: resolve OPEN to CLOSED then, with the guard cancel.js uses for its own
+// target write. bumpSyncVersion makes the devices outbox trigger queue DEVICE_FLAGS_UPDATED
+// carrying the new target_state; a caller whose current_state write in the same transaction
+// already queues that event passes false. current_state and updated_at are never touched: they
+// are the observed state and its time, which the valve conflict check reads.
+async function resolveTimedOpenTargetTx(db, deviceEui, { bumpSyncVersion = true } = {}) {
+  await db.run(
+    "UPDATE devices SET target_state='CLOSED'" + (bumpSyncVersion ? ', sync_version=COALESCE(sync_version, 0) + 1' : '') +
+    " WHERE UPPER(deveui)=UPPER(?) AND target_state='OPEN' AND NOT EXISTS (SELECT 1 FROM valve_actuation_expectations" +
+    " WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING'))",
+    [deviceEui, deviceEui]
+  );
+}
+
 async function hasPendingObservation(db, deviceEui) {
   const row = await db.get("SELECT 1 AS x FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state='PENDING_OBSERVATION' LIMIT 1", [deviceEui]);
   return !!row;
@@ -922,5 +938,5 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
+module.exports = { markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
   supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX };

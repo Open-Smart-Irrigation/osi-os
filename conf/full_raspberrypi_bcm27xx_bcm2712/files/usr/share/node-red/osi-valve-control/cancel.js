@@ -515,6 +515,9 @@ async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason
       await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: active.expectation_id },
         { cancelled_unsent_at: nowIso });
     }
+    // #601: resolve an OPEN target with sync_version so the cloud mirror learns that the cancel
+    // ended the commanded open. The statement below is the cancel route's own write, unchanged.
+    await store.resolveTimedOpenTargetTx(tx, eui, { bumpSyncVersion: true });
     // Another actuation still running keeps the valve's target state.
     await tx.run(
       "UPDATE devices SET target_state='CLOSED', updated_at=? WHERE UPPER(deveui)=UPPER(?) " +
