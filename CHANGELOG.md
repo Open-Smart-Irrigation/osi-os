@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A rejected API token no longer marks the gateway `degraded` until
+  Node-RED restarts (#462).** Record Error counted every 401 from a token
+  guard as a gateway error, and `health_state` stays `degraded` while that
+  counter is above zero, so one unauthenticated request or a browser with
+  an expired token degraded the gateway until the next restart. Tagged token
+  rejections are no longer counted in `errors_total`; they still appear as
+  a rate-limited warning in the gateway log. Other errors count as before.
+
 ---
 
 ## [0.8.2] — 2026-11-09
