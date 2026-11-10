@@ -57,8 +57,8 @@ Risk class: VERIFY REALITY → PLAN (written) → ADVERSARIAL REVIEW → EXECUTE
 The standard loop's review is a cross-model reviewer looped until it approves the
 current head (on the maintainer workstation: the user-level `sol-loop` skill). Risk
 classes are reviewed by three models from different providers (`council`, capped at
-five rounds), and an unattended agent never merges them: the PR stops ready for a
-maintainer. Severity is impact times reachability, not frequency: retries, offline
+five rounds), and they merge only after council approval on the current head and
+sign-off by an independent lead architect. Severity is impact times reachability, not frequency: retries, offline
 recovery, restarts and interrupted migrations are ordinary paths on a gateway, so a
 data-loss bug on one of them is a blocker, never a nit. The stages below describe the
 full risk-class loop; the standard loop uses the ones it names.
