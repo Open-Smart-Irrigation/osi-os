@@ -12,12 +12,27 @@ export interface ValveSettingsDialogProps {
 
 type FlowSource = 'measured' | 'estimated';
 
+interface FlowState {
+  input: string;
+  source: FlowSource;
+}
+
+// A zone-sourced rate belongs to the zone calibration, not to this valve. Start the per-valve
+// field empty so a Save that did not touch it cannot copy the zone value into an override.
+function initialFlowState(valve: ValveSummary): FlowState {
+  return {
+    input: valve.flowRateLpm !== null && valve.flowRateSource !== 'zone' ? String(valve.flowRateLpm) : '',
+    source: valve.flowRateSource === 'measured' ? 'measured' : 'estimated',
+  };
+}
+
 export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve, open, onClose, onChanged }) => {
   const { t } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
   const [generation, setGeneration] = useState<StregaGeneration>(valve.stregaGeneration);
-  const [flowRateInput, setFlowRateInput] = useState(valve.flowRateLpm !== null ? String(valve.flowRateLpm) : '');
-  const [flowSource, setFlowSource] = useState<FlowSource>(valve.flowRateSource === 'measured' ? 'measured' : 'estimated');
+  const [initialFlow, setInitialFlow] = useState<FlowState>(() => initialFlowState(valve));
+  const [flowRateInput, setFlowRateInput] = useState(() => initialFlowState(valve).input);
+  const [flowSource, setFlowSource] = useState<FlowSource>(() => initialFlowState(valve).source);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -26,8 +41,10 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
   useEffect(() => {
     if (open) {
       setGeneration(valve.stregaGeneration);
-      setFlowRateInput(valve.flowRateLpm !== null ? String(valve.flowRateLpm) : '');
-      setFlowSource(valve.flowRateSource === 'measured' ? 'measured' : 'estimated');
+      const flow = initialFlowState(valve);
+      setInitialFlow(flow);
+      setFlowRateInput(flow.input);
+      setFlowSource(flow.source);
       setError(null);
       setConfirmClose(false);
       setCloseDone(false);
@@ -52,6 +69,10 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
   const trimmed = flowRateInput.trim();
   const parsedFlowRate = trimmed === '' ? null : Number(trimmed);
   const isFlowRateValid = parsedFlowRate === null || (Number.isFinite(parsedFlowRate) && parsedFlowRate > 0);
+  const flowEdited = trimmed !== initialFlow.input || (parsedFlowRate !== null && flowSource !== initialFlow.source);
+  const zoneFlowRate = valve.flowRateSource === 'zone' ? valve.flowRateLpm : null;
+  const showZoneFlow = zoneFlowRate !== null && trimmed === '';
+  const zoneFlowId = `valve-flow-zone-${valve.deviceEui}`;
   const titleId = `valve-settings-title-${valve.deviceEui}`;
 
   const handleSave = async () => {
@@ -61,8 +82,11 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
     try {
       await valvesAPI.updateSettings(valve.deviceEui, {
         stregaGeneration: generation,
-        flowRateLpm: parsedFlowRate,
-        ...(parsedFlowRate !== null ? { flowRateSource: flowSource } : {}),
+        // Flow fields go out only when edited. The route leaves an absent flow_rate_lpm untouched,
+        // so an unrelated Save keeps a zone-sourced rate linked to the zone calibration.
+        ...(flowEdited
+          ? { flowRateLpm: parsedFlowRate, ...(parsedFlowRate !== null ? { flowRateSource: flowSource } : {}) }
+          : {}),
       });
       onChanged();
       onClose();
@@ -104,7 +128,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">
-          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('settingsDialog.title')}</h2>
+          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('settingsDialog.title', { name: valve.name })}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -145,6 +169,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
               inputMode="decimal"
               value={flowRateInput}
               disabled={busy}
+              aria-describedby={showZoneFlow ? zoneFlowId : undefined}
               onChange={(event) => setFlowRateInput(event.target.value)}
               className="min-h-[44px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)]"
             />
@@ -157,6 +182,11 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
               {t('settingsDialog.clear')}
             </button>
           </div>
+          {showZoneFlow && (
+            <p id={zoneFlowId} className="mt-1 text-xs text-[var(--text-tertiary)]">
+              {t('settingsDialog.flowFromZone', { rate: zoneFlowRate })}
+            </p>
+          )}
           {!isFlowRateValid && (
             <p className="mt-1 text-xs text-[var(--warn-text)]">{t('settingsDialog.flowRateHint')}</p>
           )}
