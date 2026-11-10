@@ -1853,6 +1853,181 @@ test('W5: flag-off device-config routing preserves each legacy branch', async ()
   }
 });
 
+// #450: the four sensor flag routes (PUT /dendro, /temp, /rain-gauge,
+// /flow-meter). Scoped, a caller the guard authorized changes the device
+// whoever claimed it; a request that changes no row answers 404 in both flag
+// states. The chain follows the real wiring: guard, auth node, the sqlite node
+// (rows of `db.all(msg.topic)`, as node-red-node-sqlite does) and the node the
+// sqlite node is wired to.
+const SENSOR_FLAG_ROUTES = [
+  { suffix: '/dendro', auth: 'put-dendro-auth-fn', column: 'dendro_enabled' },
+  { suffix: '/temp', auth: 'put-temp-auth-fn', column: 'temp_enabled' },
+  { suffix: '/rain-gauge', auth: 'put-rain-gauge-auth-fn', column: 'rain_gauge_enabled' },
+  { suffix: '/flow-meter', auth: 'put-flow-meter-auth-fn', column: 'flow_meter_enabled' },
+];
+
+async function runSensorFlagAuth(db, route, msg, env) {
+  const auth = await executeFunction(loadNode(route.auth), { msg, env, db });
+  if (!auth.result[0]) return auth.result[1];
+  const sqliteNode = loadNode(loadNode(route.auth).wires[0][0]);
+  assert.equal(sqliteNode.type, 'sqlite', `${route.auth} feeds a sqlite node`);
+  const query = auth.result[0];
+  // node-sqlite3 rows are plain objects; node:sqlite's have a null prototype.
+  query.payload = db.prepare(query.topic).all().map((row) => ({ ...row }));
+  const response = await executeFunction(loadNode(sqliteNode.wires[0][0]), { msg: query, env, db });
+  return response.result;
+}
+
+async function putSensorFlag(db, route, userId, username, deveui, enabled, env = ENV) {
+  scopeHelper._resetForTests();
+  const guard = loadNode('scoped-device-config-guard');
+  const index = guard.wires.findIndex((out) => out[0] === route.auth);
+  assert.notEqual(index, -1, `${route.auth} is a guard output`);
+  const guarded = await executeFunction(guard, {
+    msg: scopedRequest(userId, username, 'PUT', `/api/devices/${deveui}${route.suffix}`, { deveui }, { enabled }),
+    env,
+    db,
+  });
+  if (!guarded.result[index]) return guarded.result.at(-1);
+  return runSensorFlagAuth(db, route, guarded.result[index], env);
+}
+
+function deviceFlag(db, deveui, column) {
+  return db.prepare(`SELECT ${column} AS value, sync_version FROM devices WHERE deveui = ?`).get(deveui);
+}
+
+test('#450: a granted researcher sets each sensor flag on a device another account claimed', async () => {
+  // DENDRO2 is claimed by admin1 and sits in zone 2; res1 holds grant g-3 on zone 2.
+  const db = seedScopedDb(VALVE_EUI);
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      const before = deviceFlag(db, 'DENDRO2', route.column);
+      const on = await putSensorFlag(db, route, 2, 'res1', 'DENDRO2', true);
+      assert.equal(on.statusCode, 200, route.suffix);
+      assert.deepEqual(on.payload, { [route.column]: 1 }, route.suffix);
+      const after = deviceFlag(db, 'DENDRO2', route.column);
+      assert.equal(after.value, 1, `${route.suffix} changes the row`);
+      assert.equal(after.sync_version, (before.sync_version || 0) + 1, `${route.suffix} bumps sync_version`);
+
+      const off = await putSensorFlag(db, route, 2, 'res1', 'DENDRO2', false);
+      assert.equal(off.statusCode, 200, route.suffix);
+      assert.deepEqual(off.payload, { [route.column]: 0 }, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO2', route.column).value, 0, `${route.suffix} clears the flag`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: a granted admin sets each sensor flag on a device another account claimed', async () => {
+  // DENDRO1 is claimed by res1 in zone 1; the grant below gives admin1 zone 1.
+  const db = seedScopedDb(VALVE_EUI);
+  try {
+    db.exec(`INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
+             VALUES ('g-450-admin', 'u-admin', 'z-1', '2026-01-01')`);
+    for (const route of SENSOR_FLAG_ROUTES) {
+      const response = await putSensorFlag(db, route, 1, 'admin1', 'DENDRO1', true);
+      assert.equal(response.statusCode, 200, route.suffix);
+      assert.deepEqual(response.payload, { [route.column]: 1 }, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO1', route.column).value, 1, `${route.suffix} changes the row`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: scoped, callers without write access change nothing', async () => {
+  const db = seedScopedDb(VALVE_EUI);
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      // view1 holds a grant on zone 1 but a viewer role; admin1 holds no grant on zone 1.
+      const viewer = await putSensorFlag(db, route, 3, 'view1', 'DENDRO1', true);
+      assert.equal(viewer.statusCode, 403, route.suffix);
+      const foreign = await putSensorFlag(db, route, 1, 'admin1', 'DENDRO1', true);
+      assert.equal(foreign.statusCode, 404, route.suffix);
+      const unknown = await putSensorFlag(db, route, 2, 'res1', 'A840410000000001', true);
+      assert.equal(unknown.statusCode, 404, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO1', route.column).value, 0, `${route.suffix} leaves the row`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: scoped, the owner filter stays on a message the guard did not authorize', async () => {
+  // Straight into the auth node, no msg.actor_user_uuid: res1 does not own DENDRO2.
+  const db = seedScopedDb(VALVE_EUI);
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      const msg = scopedRequest(2, 'res1', 'PUT', `/api/devices/DENDRO2${route.suffix}`, { deveui: 'DENDRO2' }, { enabled: true });
+      scopeHelper._resetForTests();
+      const response = await runSensorFlagAuth(db, route, msg, ENV);
+      assert.equal(response.statusCode, 404, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO2', route.column).value, 0, `${route.suffix} leaves the row`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: scoped, a device row gone after the guard decision answers 404', async () => {
+  const db = seedScopedDb(VALVE_EUI);
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      db.exec(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+               VALUES ('A840410000000045', 'Gone', 'DRAGINO_LSN50', 1, 2, '2026-01-01', '2026-01-01')`);
+      scopeHelper._resetForTests();
+      const guard = loadNode('scoped-device-config-guard');
+      const index = guard.wires.findIndex((out) => out[0] === route.auth);
+      const guarded = await executeFunction(guard, {
+        msg: scopedRequest(2, 'res1', 'PUT', `/api/devices/A840410000000045${route.suffix}`, { deveui: 'A840410000000045' }, { enabled: true }),
+        env: ENV,
+        db,
+      });
+      assert.ok(guarded.result[index], `${route.suffix} passes the guard`);
+      db.exec("DELETE FROM devices WHERE deveui = 'A840410000000045'");
+      const response = await runSensorFlagAuth(db, route, guarded.result[index], ENV);
+      assert.equal(response.statusCode, 404, route.suffix);
+      assert.deepEqual(response.payload, { message: 'Device not found' }, route.suffix);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: flag-off, a request whose owner filter matches no row answers 404', async () => {
+  const db = seedScopedDb(VALVE_EUI);
+  const flagOff = { ...ENV, OSI_SCOPED_ACCESS: '0' };
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      // res1 did not claim DENDRO2; user 99 is an account that does not exist.
+      const notOwner = await putSensorFlag(db, route, 2, 'res1', 'DENDRO2', true, flagOff);
+      assert.equal(notOwner.statusCode, 404, route.suffix);
+      const noAccount = await putSensorFlag(db, route, 99, 'gone', 'DENDRO1', true, flagOff);
+      assert.equal(noAccount.statusCode, 404, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO2', route.column).value, 0, `${route.suffix} leaves DENDRO2`);
+      assert.equal(deviceFlag(db, 'DENDRO1', route.column).value, 0, `${route.suffix} leaves DENDRO1`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('#450: flag-off, the owner still sets each sensor flag', async () => {
+  const db = seedScopedDb(VALVE_EUI);
+  const flagOff = { ...ENV, OSI_SCOPED_ACCESS: '0' };
+  try {
+    for (const route of SENSOR_FLAG_ROUTES) {
+      const response = await putSensorFlag(db, route, 2, 'res1', 'DENDRO1', true, flagOff);
+      assert.equal(response.statusCode, 200, route.suffix);
+      assert.deepEqual(response.payload, { [route.column]: 1 }, route.suffix);
+      assert.equal(deviceFlag(db, 'DENDRO1', route.column).value, 1, `${route.suffix} changes the row`);
+    }
+  } finally {
+    db.close();
+  }
+});
+
 const ZONE_CONFIG_ROUTES = [
   ['PUT', '/api/irrigation-zones/1/timezone', { zone_id: '1' }],
   ['PUT', '/api/irrigation-zones/1/location', { zone_id: '1' }],
