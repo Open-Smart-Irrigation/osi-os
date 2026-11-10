@@ -2266,6 +2266,22 @@ check_command_ledger_hold
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1
 
+echo "--- Deploy payload swap helper ---"
+fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+same_fs_or_die
+echo "OK"
+
+# legacy capture preflight begin
+# Decides on the legacy-capture marker before any live file is replaced, so a
+# refusal leaves the gateway as it was. A marker whose capture is gone is
+# moved aside here, and the capture block further down starts fresh.
+if ! legacy_preflight_report="$(swap_call legacyCapturePreflight "/srv/node-red/flows.json" "$GUI_ROOT")"; then
+    echo "ERROR: legacy flows+GUI evidence is missing or changed; refusing recapture before any file is replaced" >&2
+    exit 1
+fi
+[ -z "$legacy_preflight_report" ] || printf '%s\n' "$legacy_preflight_report"
+# legacy capture preflight end
+
 DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
 capture_previous_firmware_version
 if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
@@ -2330,11 +2346,6 @@ if [ -x /etc/init.d/osi-gateway-gps ]; then
     /etc/init.d/osi-gateway-gps disable || true
 fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
-echo "OK"
-
-echo "--- Deploy payload swap helper ---"
-fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
-same_fs_or_die
 echo "OK"
 
 echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
