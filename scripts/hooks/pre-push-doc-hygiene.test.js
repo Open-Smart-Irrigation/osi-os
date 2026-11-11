@@ -797,3 +797,27 @@ test('44. a pre-push-doc-hygiene link that points at the hook does not get the h
   assert.equal(fs.lstatSync(path.join(hooks, 'pre-push-doc-hygiene')).isSymbolicLink(), false);
   assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
 });
+
+test('45. with no hooks path the later install commands change nothing', (t) => {
+  // A failed `git rev-parse` leaves `hooks` empty; a reader may still paste the
+  // next lines one at a time. They must stop before any file command runs.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-push-install-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const bin = path.join(tmp, 'bin');
+  const log = path.join(tmp, 'calls.log');
+  fs.mkdirSync(bin);
+  for (const tool of ['rm', 'cp', 'chmod', 'mkdir']) {
+    fs.writeFileSync(path.join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> "${log}"\n`, { mode: 0o755 });
+  }
+  const lines = headerInstallCommands().split('\n');
+  assert.match(lines[0], /^hooks=\$\(git rev-parse --git-path hooks\)/);
+  assert.ok(lines.length >= 3);
+  for (const line of lines.slice(1)) {
+    const r = spawnSync('sh', ['-c', `hooks=''\n${line}`], {
+      cwd: tmp, env: { ...ENV, PATH: `${bin}${path.delimiter}${ENV.PATH}` }, encoding: 'utf8',
+    });
+    assert.notEqual(r.status, 0, `the command must fail with an empty hooks path: ${line}`);
+  }
+  assert.equal(fs.existsSync(log), false, fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
+  assert.equal(fs.existsSync(path.join(tmp, 'pre-push')), false);
+});
