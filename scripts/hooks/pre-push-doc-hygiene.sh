@@ -6,7 +6,7 @@
 # that file belongs to the directory's owner and may run other guards.
 #   hooks=$(git rev-parse --git-path hooks)
 #   cp scripts/hooks/pre-push-doc-hygiene.sh "$hooks/pre-push-doc-hygiene" && chmod +x "$hooks/pre-push-doc-hygiene"
-#   [ -e "$hooks/pre-push" ] || { printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/pre-push-doc-hygiene" "$@"' > "$hooks/pre-push" && chmod +x "$hooks/pre-push"; }
+#   [ -e "$hooks/pre-push" ] || [ -L "$hooks/pre-push" ] || { printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/pre-push-doc-hygiene" "$@"' > "$hooks/pre-push" && chmod +x "$hooks/pre-push"; }
 #   git config osi.docHygieneTermsFile <absolute path of the name list>
 # A pre-push hook that already exists is left as it is: make it run
 # pre-push-doc-hygiene with the same arguments and the same standard input.

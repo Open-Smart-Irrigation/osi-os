@@ -764,3 +764,15 @@ test('41. the install commands create a pre-push hook that runs the guard when n
   assert.equal(ok.code, 0, ok.out);
   assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
 });
+
+test('42. the install commands do not write through a dangling pre-push symlink', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  const target = path.join(s.tmp, 'owner-managed-hook');
+  fs.rmSync(path.join(hooks, 'pre-push'));
+  fs.symlinkSync(target, path.join(hooks, 'pre-push'));
+  runInstall(s.work);
+  assert.equal(fs.readlinkSync(path.join(hooks, 'pre-push')), target, 'the link must stay as it was');
+  assert.equal(fs.existsSync(target), false, 'nothing may be created at the link target');
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+});
