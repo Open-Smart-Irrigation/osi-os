@@ -233,7 +233,7 @@ Broker URL, heartbeat error counters, fan telemetry/control (`pwmfan` hwmon firs
   `node scripts/verify-doc-hygiene.js` enforces this in CI for files,
   pull-request text and commit messages; maintainers hold the name list.
   Maintainers install the matching pre-push guard once per clone and
-  reinstall the copy when the script changes; the two install commands are in
+  reinstall the copy when the script changes; the install commands are in
   the header of `scripts/hooks/pre-push-doc-hygiene.sh`. It scans the pushed
   commits and their messages before anything reaches the public repository.
 

@@ -712,3 +712,112 @@ test('39. a remote alias that carries a name is never printed', (t) => {
   assertNoTerm(r2.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
+
+// The install commands are the lines indented by three spaces in the header
+// comment; the one that sets the name list is not part of the file install.
+function headerInstallCommands() {
+  const lines = [];
+  for (const line of fs.readFileSync(HOOK, 'utf8').split('\n')) {
+    if (!line.startsWith('#')) break;
+    const m = line.match(/^# {3}(\S.*)$/);
+    if (m && !m[1].startsWith('git config ')) lines.push(m[1]);
+  }
+  return lines.join('\n');
+}
+
+function runInstall(work) {
+  write(work, 'scripts/hooks/pre-push-doc-hygiene.sh', fs.readFileSync(HOOK, 'utf8'));
+  const r = spawnSync('sh', ['-c', headerInstallCommands()], { cwd: work, env: ENV, encoding: 'utf8' });
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+}
+
+test('40. the install commands leave an existing pre-push hook untouched (shared hooks path)', (t) => {
+  const s = setup(t);
+  const shared = path.join(s.tmp, 'shared-hooks');
+  fs.mkdirSync(shared);
+  const other = '#!/bin/sh\n# another guard owns this file\nexit 0\n';
+  fs.writeFileSync(path.join(shared, 'pre-push'), other, { mode: 0o755 });
+  git(s.work, 'config', 'core.hooksPath', shared);
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(shared, 'pre-push'), 'utf8'), other, 'the existing hook must not be overwritten');
+  const guard = path.join(shared, 'pre-push-doc-hygiene');
+  assert.equal(fs.readFileSync(guard, 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  assert.notEqual(fs.statSync(guard).mode & 0o111, 0, 'the guard must be executable');
+});
+
+test('41. the install commands create a pre-push hook that runs the guard when none exists', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  fs.rmSync(path.join(hooks, 'pre-push'));
+  runInstall(s.work);
+  assert.notEqual(fs.statSync(path.join(hooks, 'pre-push')).mode & 0o111, 0);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  git(s.work, 'checkout', '-q', '-b', 'feature');
+  commit(s.work, { 'docs/policy/x.md': 'private\n' });
+  const refused = push(s.work, 'public', 'feature');
+  assert.notEqual(refused.code, 0, refused.out);
+  assert.match(refused.out, PRIVATE_MSG);
+  assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
+  git(s.work, 'checkout', '-q', 'main');
+  const sha = commit(s.work, { 'docs/ok.md': 'nothing to see\n' });
+  const ok = push(s.work, 'public', 'main');
+  assert.equal(ok.code, 0, ok.out);
+  assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
+});
+
+test('42. the install commands do not write through a dangling pre-push symlink', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  const target = path.join(s.tmp, 'owner-managed-hook');
+  fs.rmSync(path.join(hooks, 'pre-push'));
+  fs.symlinkSync(target, path.join(hooks, 'pre-push'));
+  runInstall(s.work);
+  assert.equal(fs.readlinkSync(path.join(hooks, 'pre-push')), target, 'the link must stay as it was');
+  assert.equal(fs.existsSync(target), false, 'nothing may be created at the link target');
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+});
+
+test('43. the install commands create a configured hooks directory that does not exist yet', (t) => {
+  const s = setup(t);
+  const shared = path.join(s.tmp, 'not-yet', 'hooks');
+  git(s.work, 'config', 'core.hooksPath', shared);
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(shared, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  assert.match(fs.readFileSync(path.join(shared, 'pre-push'), 'utf8'), /pre-push-doc-hygiene/);
+});
+
+test('44. a pre-push-doc-hygiene link that points at the hook does not get the hook overwritten', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  const other = '#!/bin/sh\n# another guard owns this file\nexit 0\n';
+  fs.writeFileSync(path.join(hooks, 'pre-push'), other, { mode: 0o755 });
+  fs.symlinkSync('pre-push', path.join(hooks, 'pre-push-doc-hygiene'));
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push'), 'utf8'), other, 'the existing hook must not be overwritten');
+  assert.equal(fs.lstatSync(path.join(hooks, 'pre-push-doc-hygiene')).isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+});
+
+test('45. with no hooks path the later install commands change nothing', (t) => {
+  // A failed `git rev-parse` leaves `hooks` empty; a reader may still paste the
+  // next lines one at a time. They must stop before any file command runs.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-push-install-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const bin = path.join(tmp, 'bin');
+  const log = path.join(tmp, 'calls.log');
+  fs.mkdirSync(bin);
+  for (const tool of ['rm', 'cp', 'chmod', 'mkdir']) {
+    fs.writeFileSync(path.join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> "${log}"\n`, { mode: 0o755 });
+  }
+  const lines = headerInstallCommands().split('\n');
+  assert.match(lines[0], /^hooks=\$\(git rev-parse --git-path hooks\)/);
+  assert.ok(lines.length >= 3);
+  for (const line of lines.slice(1)) {
+    const r = spawnSync('sh', ['-c', `hooks=''\n${line}`], {
+      cwd: tmp, env: { ...ENV, PATH: `${bin}${path.delimiter}${ENV.PATH}` }, encoding: 'utf8',
+    });
+    assert.notEqual(r.status, 0, `the command must fail with an empty hooks path: ${line}`);
+  }
+  assert.equal(fs.existsSync(log), false, fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
+  assert.equal(fs.existsSync(path.join(tmp, 'pre-push')), false);
+});
