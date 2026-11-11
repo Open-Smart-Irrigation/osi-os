@@ -776,3 +776,24 @@ test('42. the install commands do not write through a dangling pre-push symlink'
   assert.equal(fs.existsSync(target), false, 'nothing may be created at the link target');
   assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
 });
+
+test('43. the install commands create a configured hooks directory that does not exist yet', (t) => {
+  const s = setup(t);
+  const shared = path.join(s.tmp, 'not-yet', 'hooks');
+  git(s.work, 'config', 'core.hooksPath', shared);
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(shared, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  assert.match(fs.readFileSync(path.join(shared, 'pre-push'), 'utf8'), /pre-push-doc-hygiene/);
+});
+
+test('44. a pre-push-doc-hygiene link that points at the hook does not get the hook overwritten', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  const other = '#!/bin/sh\n# another guard owns this file\nexit 0\n';
+  fs.writeFileSync(path.join(hooks, 'pre-push'), other, { mode: 0o755 });
+  fs.symlinkSync('pre-push', path.join(hooks, 'pre-push-doc-hygiene'));
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push'), 'utf8'), other, 'the existing hook must not be overwritten');
+  assert.equal(fs.lstatSync(path.join(hooks, 'pre-push-doc-hygiene')).isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+});
