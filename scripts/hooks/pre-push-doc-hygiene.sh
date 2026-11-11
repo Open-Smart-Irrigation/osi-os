@@ -1,10 +1,16 @@
 #!/bin/sh
 # Pre-push guard for the public osi-os repository.
 #
-# Install once per clone (the command also works in a worktree):
-#   cp scripts/hooks/pre-push-doc-hygiene.sh "$(git rev-parse --git-path hooks/pre-push)" && chmod +x "$(git rev-parse --git-path hooks/pre-push)"
+# Install once per clone (the commands also work in a worktree). The guard is
+# copied beside the pre-push hook, never over it: with a shared core.hooksPath
+# that file belongs to the directory's owner and may run other guards.
+#   hooks=$(git rev-parse --git-path hooks)
+#   cp scripts/hooks/pre-push-doc-hygiene.sh "$hooks/pre-push-doc-hygiene" && chmod +x "$hooks/pre-push-doc-hygiene"
+#   [ -e "$hooks/pre-push" ] || { printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/pre-push-doc-hygiene" "$@"' > "$hooks/pre-push" && chmod +x "$hooks/pre-push"; }
 #   git config osi.docHygieneTermsFile <absolute path of the name list>
-# Reinstall the copy when the script changes.
+# A pre-push hook that already exists is left as it is: make it run
+# pre-push-doc-hygiene with the same arguments and the same standard input.
+# Repeat the cp line when the script changes.
 #
 # Git runs it as `pre-push <remote name> <remote url>` and writes one line per
 # pushed ref to standard input: <local ref> <local sha> <remote ref> <remote sha>.

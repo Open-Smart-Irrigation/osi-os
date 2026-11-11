@@ -712,3 +712,55 @@ test('39. a remote alias that carries a name is never printed', (t) => {
   assertNoTerm(r2.out);
   assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
+
+// The install commands are the lines indented by three spaces in the header
+// comment; the one that sets the name list is not part of the file install.
+function headerInstallCommands() {
+  const lines = [];
+  for (const line of fs.readFileSync(HOOK, 'utf8').split('\n')) {
+    if (!line.startsWith('#')) break;
+    const m = line.match(/^# {3}(\S.*)$/);
+    if (m && !m[1].startsWith('git config ')) lines.push(m[1]);
+  }
+  return lines.join('\n');
+}
+
+function runInstall(work) {
+  write(work, 'scripts/hooks/pre-push-doc-hygiene.sh', fs.readFileSync(HOOK, 'utf8'));
+  const r = spawnSync('sh', ['-c', headerInstallCommands()], { cwd: work, env: ENV, encoding: 'utf8' });
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+}
+
+test('40. the install commands leave an existing pre-push hook untouched (shared hooks path)', (t) => {
+  const s = setup(t);
+  const shared = path.join(s.tmp, 'shared-hooks');
+  fs.mkdirSync(shared);
+  const other = '#!/bin/sh\n# another guard owns this file\nexit 0\n';
+  fs.writeFileSync(path.join(shared, 'pre-push'), other, { mode: 0o755 });
+  git(s.work, 'config', 'core.hooksPath', shared);
+  runInstall(s.work);
+  assert.equal(fs.readFileSync(path.join(shared, 'pre-push'), 'utf8'), other, 'the existing hook must not be overwritten');
+  const guard = path.join(shared, 'pre-push-doc-hygiene');
+  assert.equal(fs.readFileSync(guard, 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  assert.notEqual(fs.statSync(guard).mode & 0o111, 0, 'the guard must be executable');
+});
+
+test('41. the install commands create a pre-push hook that runs the guard when none exists', (t) => {
+  const s = setup(t);
+  const hooks = path.join(s.work, '.git', 'hooks');
+  fs.rmSync(path.join(hooks, 'pre-push'));
+  runInstall(s.work);
+  assert.notEqual(fs.statSync(path.join(hooks, 'pre-push')).mode & 0o111, 0);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-push-doc-hygiene'), 'utf8'), fs.readFileSync(HOOK, 'utf8'));
+  git(s.work, 'checkout', '-q', '-b', 'feature');
+  commit(s.work, { 'docs/policy/x.md': 'private\n' });
+  const refused = push(s.work, 'public', 'feature');
+  assert.notEqual(refused.code, 0, refused.out);
+  assert.match(refused.out, PRIVATE_MSG);
+  assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
+  git(s.work, 'checkout', '-q', 'main');
+  const sha = commit(s.work, { 'docs/ok.md': 'nothing to see\n' });
+  const ok = push(s.work, 'public', 'main');
+  assert.equal(ok.code, 0, ok.out);
+  assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
+});
