@@ -6,7 +6,7 @@ import { SWRConfig } from 'swr';
 
 import { ValveControlPanel } from '../ValveControlPanel';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
-import { resetValveCommandHolds, VALVE_OPEN_HOLD_MS } from '../../../../services/valveCommandHold';
+import { resetValveCommandHoldsForTest, VALVE_OPEN_HOLD_MS } from '../../../../services/valveCommandHold';
 import type { ValveOpenDialog as ValveOpenDialogType } from '../ValveOpenDialog';
 import type { ValveSummary } from '../../../../types/farming';
 
@@ -81,7 +81,7 @@ async function openAndTimeOut() {
 
 describe('ValveControlPanel: an open that gets no answer', () => {
   beforeEach(() => {
-    resetValveCommandHolds();
+    resetValveCommandHoldsForTest();
     vi.clearAllMocks();
   });
   afterEach(() => {
@@ -107,7 +107,7 @@ describe('ValveControlPanel: an open that gets no answer', () => {
   });
 
   it('releases Open after one minute when no reading arrives', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });
     await openAndTimeOut();
     expect(screen.getByRole('button', { name: 'Open' })).toBeDisabled();
     await act(async () => { vi.advanceTimersByTime(VALVE_OPEN_HOLD_MS - 1_000); });

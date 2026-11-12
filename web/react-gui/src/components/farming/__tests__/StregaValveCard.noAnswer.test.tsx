@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StregaValveCard } from '../StregaValveCard';
 import { devicesAPI } from '../../../services/api';
-import { noteValveReading, resetValveCommandHolds } from '../../../services/valveCommandHold';
+import { beginValveReading, completeValveReading, resetValveCommandHoldsForTest } from '../../../services/valveCommandHold';
 import type { Device } from '../../../types/farming';
 
 // The zone card's open shares the panel's hold: after an open with no answer it says so,
@@ -36,7 +36,7 @@ const device = { deveui: EUI, name: 'North Valve', type_id: 'STREGA_VALVE', late
 
 describe('StregaValveCard: an open that gets no answer', () => {
   beforeEach(() => {
-    resetValveCommandHolds();
+    resetValveCommandHoldsForTest();
     vi.clearAllMocks();
   });
 
@@ -55,7 +55,7 @@ describe('StregaValveCard: an open that gets no answer', () => {
     const held = screen.getByRole('button', { name: /Open for/ });
     expect(held).toBeDisabled();
 
-    await act(async () => { noteValveReading(Date.now()); });
+    await act(async () => { completeValveReading(beginValveReading()); });
     await waitFor(() => expect(screen.getByRole('button', { name: /Open for/ })).toBeEnabled());
     expect(devicesAPI.controlValve).toHaveBeenCalledTimes(1);
   });

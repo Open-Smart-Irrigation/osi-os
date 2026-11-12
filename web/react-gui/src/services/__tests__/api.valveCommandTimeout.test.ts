@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import api, { VALVE_COMMAND_TIMEOUT_MS, devicesAPI, stregaAPI } from '../api';
+import { ValveOpenHeldError, holdValveOpen, isValveOpenHeld, resetValveCommandHoldsForTest } from '../valveCommandHold';
 
 // Valve commands are answered only after the radio transport decides, so they wait 30 s;
 // every other request keeps the instance default.
 describe('valve command timeout', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); resetValveCommandHoldsForTest(); });
 
   it('is 30 s, and the instance default is unchanged', () => {
     expect(VALVE_COMMAND_TIMEOUT_MS).toBe(30_000);
@@ -36,5 +37,57 @@ describe('valve command timeout', () => {
       [`/api/devices/${eui}/strega/flushing`, 30_000],
       [`/api/devices/${eui}/strega/model`, undefined],
     ]);
+  });
+});
+
+// The API functions are the one dispatch point for commands that open: while a valve is
+// held they refuse without sending, and an opening command that times out starts the hold.
+// Close and the closing variants are never held.
+describe('dispatch guard for commands that open', () => {
+  const eui = '0016C001F1000001';
+  const timeout = () => Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' });
+  afterEach(() => { vi.restoreAllMocks(); resetValveCommandHoldsForTest(); });
+
+  it('refuses every opening command while held, without sending, and lets closing ones through', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: {} });
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: {} });
+    holdValveOpen(eui);
+
+    await expect(devicesAPI.controlValve(eui, { action: 'OPEN_FOR_DURATION', duration_seconds: 300 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(devicesAPI.controlValve(eui, { action: 'OPEN' })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(stregaAPI.setTimedAction(eui, { action: 'OPEN', unit: 'minutes', amount: 2 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(stregaAPI.setPartialOpening(eui, { action: 'OPEN', percentage: 50 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(stregaAPI.setFlushing(eui, { returnPosition: 'CLOSE', percentage: 50 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    expect(post).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+
+    await devicesAPI.controlValve(eui, { action: 'CLOSE' });
+    await stregaAPI.setTimedAction(eui, { action: 'CLOSE', unit: 'minutes', amount: 2 });
+    await stregaAPI.setPartialOpening(eui, { action: 'CLOSE', percentage: 50 });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
+  it('an opening command that times out starts the hold; a close that times out does not', async () => {
+    vi.spyOn(api, 'post').mockRejectedValueOnce(timeout()).mockRejectedValueOnce(timeout());
+    await expect(devicesAPI.controlValve(eui, { action: 'CLOSE' })).rejects.toMatchObject({ code: 'ECONNABORTED' });
+    expect(isValveOpenHeld(eui)).toBe(false);
+    await expect(devicesAPI.controlValve(eui, { action: 'OPEN_FOR_DURATION', duration_seconds: 300 })).rejects.toMatchObject({ code: 'ECONNABORTED' });
+    expect(isValveOpenHeld(eui)).toBe(true);
+  });
+
+  it('a timed OPEN or a flush that times out starts the hold as well', async () => {
+    vi.spyOn(api, 'put').mockRejectedValue(timeout());
+    await expect(stregaAPI.setFlushing(eui, { returnPosition: 'OPEN', percentage: 30 })).rejects.toMatchObject({ code: 'ECONNABORTED' });
+    expect(isValveOpenHeld(eui)).toBe(true);
+    resetValveCommandHoldsForTest();
+    await expect(stregaAPI.setTimedAction(eui, { action: 'OPEN', unit: 'minutes', amount: 2 })).rejects.toMatchObject({ code: 'ECONNABORTED' });
+    expect(isValveOpenHeld(eui)).toBe(true);
+  });
+
+  it('an answered refusal starts no hold', async () => {
+    vi.spyOn(api, 'post').mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 409'), { code: 'ERR_BAD_REQUEST', response: { status: 409 } }));
+    await expect(devicesAPI.controlValve(eui, { action: 'OPEN_FOR_DURATION', duration_seconds: 300 })).rejects.toBeTruthy();
+    expect(isValveOpenHeld(eui)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { estimateLiters } from './valveState';
 import { formatTime } from '../../../utils/datetime';
+import { isValveOpenHeld, useValveOpenHeld } from '../../../services/valveCommandHold';
 
 export interface ValveOpenDialogProps {
   valve: ValveSummary;
@@ -44,6 +45,9 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
   }, [open, valve.deviceEui]);
 
   useModalFocus(dialogRef, open, onClose, 'input[type="number"]');
+  // An earlier open of this valve got no answer (from any surface): confirming stays
+  // unavailable, also in a dialog that was already open when that happened.
+  const openHeld = useValveOpenHeld(valve.deviceEui);
 
   if (!open) return null;
 
@@ -54,7 +58,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
   const titleId = `valve-open-title-${valve.deviceEui}`;
 
   const handleSubmit = async () => {
-    if (!isValid || busy) return;
+    if (!isValid || busy || isValveOpenHeld(valve.deviceEui)) return;
     setBusy(true);
     setError(null);
     try {
@@ -140,6 +144,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
           </div>
         )}
 
+        {openHeld && <p role="status" className="mt-3 text-sm text-[var(--warn-text)]">{t('commandNoAnswer.open')}</p>}
         {error && <p className="mt-3 text-sm text-[var(--warn-text)]">{error}</p>}
 
         <div className="mt-5 flex justify-end gap-2">
@@ -154,7 +159,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!isValid || busy}
+            disabled={!isValid || busy || openHeld}
             className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}

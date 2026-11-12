@@ -16,7 +16,7 @@ import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
 import { ValveControlPanel } from '../components/farming/valves/ValveControlPanel';
-import { fetchValveReading } from '../services/valveCommandHold';
+import { fetchValveReading } from '../services/valveReading';
 import { IrrigationPolicyEditor } from '../components/farming/IrrigationPolicyEditor';
 import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
 import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';

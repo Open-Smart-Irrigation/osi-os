@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import type { DeviceRemoveContext } from './useDeviceRemoval';
 import type { Device, StregaModel, ValveSummary } from '../../types/farming';
 import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../../services/api';
-import { holdValveOpen, isNoAnswerTimeout, useValveOpenHeld } from '../../services/valveCommandHold';
+import { holdValveOpen, isNoAnswerTimeout, isUnknownValveOutcome, isValveOpenHeld, useValveOpenHeld } from '../../services/valveCommandHold';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
@@ -291,10 +291,17 @@ const ConfigPanel: React.FC<{
   // next valve reading or one minute (services/valveCommandHold.ts).
   const openHeld = useValveOpenHeld(device.deveui);
   const reportedNoAnswer = (err: unknown, opens: boolean): boolean => {
-    if (!isNoAnswerTimeout(err)) return false;
-    if (opens) holdValveOpen(device.deveui);
+    if (!isUnknownValveOutcome(err)) return false;
+    if (opens && isNoAnswerTimeout(err)) holdValveOpen(device.deveui);
     setError(tv(opens ? 'commandNoAnswer.open' : 'commandNoAnswer.other'));
     onUpdate();
+    return true;
+  };
+  // Re-checked at the moment of sending: a control enabled a moment ago must not send.
+  const refusedWhileHeld = (opens: boolean): boolean => {
+    if (!opens || !isValveOpenHeld(device.deveui)) return false;
+    setError(tv('commandNoAnswer.open'));
+    setInfo(null);
     return true;
   };
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -384,6 +391,7 @@ const ConfigPanel: React.FC<{
       return;
     }
 
+    if (refusedWhileHeld(timedAction === 'OPEN')) return;
     setBusyAction('timed');
     setError(null);
     setInfo(null);
@@ -431,6 +439,7 @@ const ConfigPanel: React.FC<{
       return;
     }
 
+    if (refusedWhileHeld(partialAction === 'OPEN')) return;
     setBusyAction('partial');
     setError(null);
     setInfo(null);
@@ -459,6 +468,7 @@ const ConfigPanel: React.FC<{
       return;
     }
 
+    if (refusedWhileHeld(true)) return;
     setBusyAction('flush');
     setError(null);
     setInfo(null);
@@ -831,6 +841,10 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       return;
     }
 
+    if (isValveOpenHeld(device.deveui)) {
+      setError(tv('commandNoAnswer.open'));
+      return;
+    }
     setLoading('OPEN');
     setError(null);
     try {
@@ -840,8 +854,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       });
       onUpdate();
     } catch (err: any) {
-      if (isNoAnswerTimeout(err)) {
-        holdValveOpen(device.deveui);
+      if (isUnknownValveOutcome(err)) {
+        if (isNoAnswerTimeout(err)) holdValveOpen(device.deveui);
         setError(tv('commandNoAnswer.open'));
         onUpdate();
       } else {

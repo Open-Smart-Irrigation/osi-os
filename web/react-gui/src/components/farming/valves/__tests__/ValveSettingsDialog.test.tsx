@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ValveSettingsDialog } from '../ValveSettingsDialog';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
 import type { ValveSummary } from '../../../../types/farming';
-import { resetValveCommandHolds, valveOpenHeldUntil } from '../../../../services/valveCommandHold';
+import { isValveOpenHeld, resetValveCommandHoldsForTest } from '../../../../services/valveCommandHold';
 
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
@@ -172,7 +172,7 @@ describe('ValveSettingsDialog', () => {
   });
 
   it('after a close timeout says no answer arrived yet, never blocks close and holds nothing', async () => {
-    resetValveCommandHolds();
+    resetValveCommandHoldsForTest();
     const timeout = Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' });
     vi.mocked(devicesAPI.controlValve).mockRejectedValueOnce(timeout).mockRejectedValueOnce(timeout);
     render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
@@ -183,7 +183,7 @@ describe('ValveSettingsDialog', () => {
     expect(await screen.findByText(/No answer from the gateway yet\. The close command may have reached the valve/)).toBeInTheDocument();
     expect(screen.queryByText('Could not send the close command.')).not.toBeInTheDocument();
     expect(screen.queryByText('Close command sent.')).not.toBeInTheDocument();
-    expect(valveOpenHeldUntil('0016C001F1000001')).toBeNull();
+    expect(isValveOpenHeld('0016C001F1000001')).toBe(false);
     // Close stays available at once, with no further question: a second close is sent.
     const again = screen.getByRole('button', { name: 'Yes, close it' });
     expect(again).toBeEnabled();

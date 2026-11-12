@@ -46,6 +46,7 @@ import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import { historySourceChoicesFromSeries } from '../history/sourceSelection';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
 import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
+import { assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout } from './valveCommandHold';
 import type {
   Device,
   LoginRequest,
@@ -175,6 +176,22 @@ function toRenameError(error: unknown, fallback: string): EntityRenameError {
 
 /** Timeout for valve commands (POST /api/valve/:deveui, the STREGA command PUTs); other requests keep the default. */
 export const VALVE_COMMAND_TIMEOUT_MS = 30_000;
+
+/**
+ * The one dispatch point for a command that opens a valve. It refuses to send
+ * while an earlier opening command for the valve got no answer, and starts that
+ * hold when this one times out (services/valveCommandHold.ts). Every GUI caller
+ * goes through it, whatever control it comes from.
+ */
+async function sendOpeningValveCommand(deveui: string, send: () => Promise<unknown>): Promise<void> {
+  assertValveOpenNotHeld(deveui);
+  try {
+    await send();
+  } catch (error) {
+    if (isNoAnswerTimeout(error)) holdValveOpen(deveui);
+    throw error;
+  }
+}
 
 // Create axios instance with base configuration
 const api = axios.create({
@@ -620,7 +637,10 @@ export const devicesAPI = {
   // take longer than other requests; a timeout here does not mean the command was not sent
   // (services/valveCommandHold.ts).
   controlValve: async (deveui: string, action: ValveActionRequest): Promise<void> => {
-    await api.post(`/api/valve/${deveui}`, action, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    const send = () => api.post(`/api/valve/${deveui}`, action, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    // Close is never held: closing twice does no harm.
+    if (action.action === 'CLOSE') await send();
+    else await sendOpeningValveCommand(deveui, send);
   },
 
   // Resolves with the cancel outcome and its flush collateral (null when the reply has none). A
@@ -1431,7 +1451,9 @@ export const stregaAPI = {
     unit: 'seconds' | 'minutes' | 'hours';
     amount: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/timed-action`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    const send = () => api.put(`/api/devices/${deveui}/strega/timed-action`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    if (payload.action === 'OPEN') await sendOpeningValveCommand(deveui, send);
+    else await send();
   },
   setMagnetEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
     await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled }, { timeout: VALVE_COMMAND_TIMEOUT_MS });
@@ -1440,13 +1462,16 @@ export const stregaAPI = {
     action: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/partial-opening`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    const send = () => api.put(`/api/devices/${deveui}/strega/partial-opening`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    if (payload.action === 'OPEN') await sendOpeningValveCommand(deveui, send);
+    else await send();
   },
   setFlushing: async (deveui: string, payload: {
     returnPosition: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/flushing`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    // A flush opens the valve, whatever position it returns to.
+    await sendOpeningValveCommand(deveui, () => api.put(`/api/devices/${deveui}/strega/flushing`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS }));
   },
 };
 
