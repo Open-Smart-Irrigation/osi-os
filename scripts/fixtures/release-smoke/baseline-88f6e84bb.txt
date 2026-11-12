@@ -1,9 +1,10 @@
-Council blocker follow-up; unchanged payload base 88f6e84bb251a03034dc4a6e8fa8e3a10992a2e4.
-Strict release command: node scripts/test-release-smoke.js --release
-Expected exit: 1 (the 11 exact known failures refuse a release).
+NEW-1 follow-up on main base b0a5e3cfa2b905256a0e6e5491230e7d663d420c.
+Candidate flow SHA-256: a998be072f979e2c6cb4f1ac3c542fd65ec4320652f9caf2523b87de20ce0fc7
+Ordinary command: node scripts/test-release-smoke.js
+Expected exit: 0 (four exact known failures remain; strict release still refuses them).
 
-PROFILE PARITY: 2890 flow/helper files byte-identical
-EVIDENCE: <scratch>/osi-release-smoke-usEvJF
+PROFILE PARITY: 2891 flow/helper files byte-identical
+EVIDENCE: <scratch>/osi-release-smoke
 PASS runtime-started
 PASS login-and-lists
 PASS command-accepted:close
@@ -26,7 +27,18 @@ PASS command-invalid:{"action":"OPEN"}
 PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":0}
 PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":256}
 PASS open-report-close-open
+PASS open-no-report-open-later
+PASS open-no-report-open-at-once
+PASS no-clock-open-report-close-open
+PASS no-clock-open-no-report-open-later
+PASS no-clock-open-no-report-open-at-once
 PASS no-clock-safety-close
+PASS open-after:close-duration
+PASS open-at-once-after:close-duration
+PASS open-after:timed-close
+PASS open-at-once-after:timed-close
+PASS open-after:flushing
+PASS open-at-once-after:flushing
 PASS lifecycle:assign
 PASS lifecycle:remove
 PASS lifecycle:delete-device
@@ -198,22 +210,15 @@ PASS no-token:POST /api/irrigation-zones/:id/irrigation-policy/pause
 PASS no-token:POST /api/irrigation-zones/:id/irrigation-policy/retry-valve
 PASS no-token:GET /api/irrigation-zones/:id/irrigation-policy/decisions
 PASS enabled-inject-sweep
+PASS dendro-weather-transport
 PASS caught-node-errors
 PASS network-contained
 PASS flows-unchanged
 PASS helpers-unchanged
 PASS startup-function-errors
 PASS database-integrity
-KNOWN TO FAIL F-1 open-no-report-open-later [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]},{"code":"stored","actual":["STALE_NO_OBSERVATION"]}]
-KNOWN TO FAIL F-2 no-clock-open-report-close-open [{"code":"closed-state","actual":"OPEN"},{"code":"second-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["PENDING_OBSERVATION","OBSERVED_RUNNING"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
-KNOWN TO FAIL F-1 no-clock-open-no-report-open-later [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["STALE_NO_OBSERVATION"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
-KNOWN TO FAIL F-4 open-after:close-duration [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
-KNOWN TO FAIL F-4 open-after:timed-close [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
-KNOWN TO FAIL F-4 open-after:flushing [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":28,"hex":"3032","hasExpiry":false}]}]
 KNOWN TO FAIL F-7 scheduler-irrigates [{"code":"scheduler-persistence","actual":{"eventStored":false,"lastTriggered":false,"errors":[{"sourceId":"2cb3b5c1a3d0e5f7","sourceType":"sqlite","message":"Error: SQLITE_BUSY: database is locked"},{"sourceId":"3a0d9d0f1a1b2c3d","sourceType":"sqlite","message":"Error: SQLITE_BUSY: database is locked"}]}}]
 KNOWN TO FAIL F-13 no-token:POST /api/account-link [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-13 no-token:POST /api/sync/force [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL NEW-1 dendro-weather-transport [{"code":"weather-transport","actual":["OpenAgri weather failed zone Smoke zone: require is not defined","Weather API failed zone Smoke zone: require is not defined"]},{"code":"weather-output","actual":[{"rainfall_mm":null,"vpd_source":"unavailable"}]}]
 KNOWN TO FAIL F-14 startup-node-errors [{"code":"node-errors","actual":[{"id":"dendro-readings-sqlite","msg":"Sqlite database not configured"}]}]
-RESULT passed=200 failed=0 known-to-fail=11; 25.6s; peak RSS 260 MiB
-RELEASE REFUSED: 11 known failing cases remain
+RESULT passed=212 failed=0 known-to-fail=4; 26.9s; peak RSS 260 MiB

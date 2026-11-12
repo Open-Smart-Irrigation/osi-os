@@ -154,11 +154,13 @@ see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
-On payload baseline `88f6e84bb`, strict mode reports 200 passed, 0 unexpected
+The current gate on main base `b0a5e3cf` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643) removes only NEW-1. The earlier unchanged-list run proved `dendro-weather-transport` now passes: 5.4 mm rainfall, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed baseline identifies the current base and candidate flow checksum in its header.
+
+On the original payload baseline `88f6e84bb`, strict mode reported 200 passed, 0 unexpected
 failures and 11 known failing cases, then exits 1. The original list had 26
 entries. The untouched-list run proved 17 cases now pass before those entries
 were removed; six other entries lost their obsolete HTTP-timeout allowances.
-The council follow-up adds a deterministic competing-writer scheduler case
+That council follow-up added a deterministic competing-writer scheduler case
 under F-7 and reaches the existing NEW-1 in a populated dendrometer weather
 case, expanding the list from 9 to 11 without a new finding ID.
 See [the per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
@@ -183,7 +185,6 @@ its exact signatures.
 
 - F-7: `scheduler-irrigates`.
 
-- NEW-1: `dendro-weather-transport`.
 
 ## What a green run does not show
 

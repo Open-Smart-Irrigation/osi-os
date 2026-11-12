@@ -54,6 +54,7 @@ function stubHttp(weather, calls) {
       req.end = () => {
         process.nextTick(() => {
           const res = new EventEmitter();
+          res.destroy = () => res.emit('close');
           res.statusCode = weather.status;
           onResponse(res);
           if (weather.body != null) res.emit('data', JSON.stringify(weather.body));
@@ -133,7 +134,7 @@ function addUnstressedTreeDay(db, date) {
   for (const [position, time] of readings) insert.run(TREE, position, `${date}T${time}.000Z`);
 }
 
-async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO } = {}) {
+async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO, transport, completionTimeout } = {}) {
   const flowsPath = path.join(ROOT, profile, 'flows.json');
   const moduleDirs = {
     'dendro-analytics': path.join(ROOT, profile, 'node-red/osi-dendro-analytics'),
@@ -157,7 +158,7 @@ async function runDendro(db, { weather = { status: 500, body: null }, profile = 
       return { ok: true, value: require(moduleDirs[name]) }; // eslint-disable-line global-require
     },
   };
-  const http = stubHttp(weather, calls);
+  const http = transport || stubHttp(weather, calls);
   const env = { get: (key) => (Object.prototype.hasOwnProperty.call(envVars, key) ? envVars[key] : '') };
   const context = vm.createContext({ osiDb, osiLib, env, node: fakeNode, msg: {}, Buffer, Date: makeFixedDate(now) });
   assert.equal(vm.runInContext('typeof require', context), 'undefined', 'the function sandbox has no require');
@@ -165,7 +166,16 @@ async function runDendro(db, { weather = { status: 500, body: null }, profile = 
   // the function node a CommonJS loader that Node-RED does not provide.
   const requests = ['node:http', 'node:https'].map((name) => test.mock.method(require(name), 'request', http.request));
   try {
-    const result = await vm.runInContext('(async function(){\n' + node.func + '\n})()', context);
+    let watchdog;
+    const execution = vm.runInContext('(async function(){\n' + node.func + '\n})()', context);
+    let result;
+    try {
+      result = await (completionTimeout ? Promise.race([execution, new Promise((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error('analytics did not finish')), completionTimeout);
+      })]) : execution);
+    } finally {
+      clearTimeout(watchdog);
+    }
     assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
     return { result, calls, warnings };
   } finally {
@@ -376,6 +386,79 @@ for (const profile of PROFILES) {
       assert.equal(json.rain.rolling7d, 5);
       assert.equal(json.rain.rolling7d_days_present, 3);
       db.close();
+    });
+  }
+}
+
+// Real sockets exercise IncomingMessage abort/close and socket/deadline timers.
+// Only the URL is redirected; the shipped node calls the real profile helper.
+for (const profile of PROFILES) {
+  const tag = profile.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+  for (const scenario of ['disconnect', 'no-answer', 'slow-answer', 'endless-body']) {
+    test(`[${tag}] bounded weather transport: ${scenario}`, async (t) => {
+      const http = require('node:http');
+      const request = http.request;
+      const db = seedDb();
+      addUnstressedTreeDay(db, '2026-10-08');
+      db.exec(`
+        INSERT INTO irrigation_zones(id, name, user_id, created_at, updated_at, timezone, latitude, longitude)
+        SELECT 2, 'Later Zone', user_id, created_at, updated_at, timezone, latitude, longitude FROM irrigation_zones WHERE id=1;
+        INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at, irrigation_zone_id, dendro_enabled, is_reference_tree)
+        SELECT 'A840410000000002', 'Later Tree', type_id, user_id, created_at, updated_at, 2, 1, 0 FROM devices WHERE deveui='${TREE}';
+        INSERT INTO dendro_baselines(deveui, mds_max_reference_um, mds_mean_um, baseline_days, baseline_complete, computed_at)
+        SELECT 'A840410000000002', mds_max_reference_um, mds_mean_um, baseline_days, baseline_complete, computed_at FROM dendro_baselines;
+        INSERT INTO dendrometer_readings(deveui, position_um, is_valid, recorded_at)
+        SELECT 'A840410000000002', position_um, is_valid, recorded_at FROM dendrometer_readings;
+      `);
+      let calls = 0;
+      const timers = [];
+      const server = http.createServer((_req, res) => {
+        calls++;
+        if (calls > 1) { res.writeHead(503); res.end(); return; }
+        if (scenario === 'no-answer') return;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{');
+        if (scenario === 'disconnect') {
+          timers.push(setTimeout(() => res.destroy(), 25));
+        } else if (scenario === 'slow-answer') {
+          const body = JSON.stringify(openMeteoDay(5.4).body);
+          timers.push(setInterval(() => res.write(' '), 1000));
+          timers.push(setTimeout(() => res.end(body.slice(1)), 11000));
+        } else {
+          timers.push(setInterval(() => res.write(' '), 1000));
+        }
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      t.after(async () => {
+        for (const timer of timers) clearInterval(timer);
+        server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+        db.close();
+      });
+      const transport = { request(_url, options, callback) {
+        return request(`http://127.0.0.1:${server.address().port}/`, options, callback);
+      } };
+      const started = Date.now();
+      const { warnings } = await runDendro(db, {
+        profile, transport, completionTimeout: scenario === 'disconnect' ? 2000 : 18000,
+      });
+      assert.equal(calls, 2, 'the later zone is calculated after the first weather request');
+      const rows = db.prepare('SELECT * FROM zone_daily_recommendations ORDER BY zone_id').all();
+      assert.equal(rows.length, 2);
+      const daily = db.prepare('SELECT mds_um FROM dendrometer_daily').all();
+      assert.equal(daily.length, 2, 'both trees have stored sensor analytics');
+      assert.ok(daily.every(row => row.mds_um > 0), 'stored daily shrinkage comes from each tree’s readings');
+      for (const row of rows) {
+        const goodWeather = row.zone_id === 1 && scenario === 'slow-answer';
+        assert.equal(row.rainfall_mm, goodWeather ? 5.4 : null);
+        assert.equal(row.vpd_source, goodWeather ? 'open_meteo' : 'unavailable');
+        assert.equal(row.vpd_max_kpa == null, !goodWeather);
+        assert.ok(row.zone_stress_summary, 'sensor-based stress is still stored');
+        const zoneName = row.zone_id === 1 ? 'Fixture Zone' : 'Later Zone';
+        assert.equal(warnings.filter(w => w.includes('Weather API failed zone ' + zoneName)).length, goodWeather ? 0 : 1, warnings.join('; '));
+      }
+      assert.ok(Date.now() - started < 17500, 'request is bounded even with a continuously active socket');
+      if (scenario === 'slow-answer') assert.ok(Date.now() - started >= 11000, 'a slow but progressing response is accepted');
     });
   }
 }

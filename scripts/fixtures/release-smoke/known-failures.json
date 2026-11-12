@@ -58,27 +58,5 @@
         }
       }
     ]
-  },
-  {
-    "id": "dendro-weather-transport",
-    "finding": "NEW-1",
-    "failures": [
-      {
-        "code": "weather-transport",
-        "actual": [
-          "OpenAgri weather failed zone Smoke zone: require is not defined",
-          "Weather API failed zone Smoke zone: require is not defined"
-        ]
-      },
-      {
-        "code": "weather-output",
-        "actual": [
-          {
-            "rainfall_mm": null,
-            "vpd_source": "unavailable"
-          }
-        ]
-      }
-    ]
   }
 ]
