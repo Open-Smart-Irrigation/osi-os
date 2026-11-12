@@ -715,10 +715,13 @@ async function completePolicyEditTransport(options, result, activationMs) {
 async function completePauseTransport(options, result, nowMs) {
   const cancellations = [];
   for (const row of result.active || result.active_expectations || []) {
+    // wholeQueue: a pause of conditional irrigation keeps the whole-queue flush of owner decision
+    // D19/Q01, whatever the cancelled row is linked to. Only the operator's cancel of an ordinary
+    // open takes the 0.8.1 path (osi-valve-control cancel.js).
     if (typeof options.cancelActuation === 'function') {
-      cancellations.push(await options.cancelActuation({ db: options.db, deviceEui: row.device_eui, expectationId: row.expectation_id, reason: 'conditional_policy_paused', transport: options.transport, now: new Date(nowMs), warn: options.warn }));
+      cancellations.push(await options.cancelActuation({ db: options.db, deviceEui: row.device_eui, expectationId: row.expectation_id, reason: 'conditional_policy_paused', transport: options.transport, wholeQueue: true, now: new Date(nowMs), warn: options.warn }));
     } else if (options.transport) {
-      cancellations.push(await cancel.cancelActuation({ db: options.db, deviceEui: row.device_eui, expectationId: row.expectation_id, reason: 'conditional_policy_paused', transport: options.transport, now: new Date(nowMs), warn: options.warn }));
+      cancellations.push(await cancel.cancelActuation({ db: options.db, deviceEui: row.device_eui, expectationId: row.expectation_id, reason: 'conditional_policy_paused', transport: options.transport, wholeQueue: true, now: new Date(nowMs), warn: options.warn }));
     } else {
       throw apiError(503, 'transport_unavailable', 'conditional policy pause requires the live valve transport to cancel pending actuation', undefined, [row.device_eui]);
     }

@@ -246,6 +246,24 @@ function isReportOnlyExpectation(row) {
   return parsePhysicalRun(row).report_only;
 }
 
+// An open whose OPEN and CLOSED reports arrived while the clock was not synchronised keeps its
+// record pending (workers.js attachUntrustedReportTx), where v0.8.1 ended it on the CLOSED report.
+function runReportedOver(row) {
+  try { const seen = (JSON.parse((row && row.transport_json) || '{}') || {}).untrusted_report; return Boolean(seen && seen.open && seen.closed); }
+  catch (_) { return false; }
+}
+
+// An active record that stands for an open a cancel could still delete: a commanded timed open
+// whose run has not been reported over. A CLOSE owner (duration 0) and a run that only a report
+// produced are not. One rule for the cancel's targets (cancel.js) and for what the control panel
+// and the cloud are shown as the valve's active command (store.js); if the two differed, the
+// panel would offer a cancel that answers "nothing to cancel".
+function cancellableOpen(row) {
+  if (!row || isReportOnlyExpectation(row)) return false;
+  const seconds = row.commanded_duration_seconds != null ? row.commanded_duration_seconds : row.duration_seconds;
+  return Number(seconds) > 0 && !runReportedOver(row);
+}
+
 // ValveActuation v1 has no removal operation. A row adopted from an already
 // replicated on-valve schedule therefore keeps its old wire membership through
 // the physical-run marker. This validator is deliberately narrower than the
@@ -1657,7 +1675,7 @@ module.exports = {
   reserveValveCommand,
   reserveValveCommandTx,
   findValveConflictTx,
-  withValveWriter, withValveWriters, runtimeAttemptContext, observationOwnerEligibility, parsePhysicalRun, isReportOnlyExpectation,
+  withValveWriter, withValveWriters, runtimeAttemptContext, observationOwnerEligibility, parsePhysicalRun, isReportOnlyExpectation, cancellableOpen,
   isEdgeV1WireInstant, isLegacyV1CompatibilityExpectation, isV1LocalOnlyExpectation,
   projectObservationExpectation, hasBlockingObservation,
   validatePersistedOwnerRelation,
