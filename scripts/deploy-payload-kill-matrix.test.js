@@ -53,6 +53,11 @@ const EXPECTED_REFUSALS = {
   S38: /refusing to recapture changed legacy files after a prior attempt/,
 };
 
+// Variants the resume step repairs before the preflight reads the state, so
+// the deploy goes on instead of refusing: S28 variant 2 is a helper link
+// removed by hand, and the resume step links it into the active payload again.
+const REPAIRED_BY_RESUME = new Set(['S28 variant 2']);
+
 // Rows whose starting state serves no complete payload, so "complete old"
 // does not exist; what is checked instead is named in each entry.
 const NO_COMPLETE_OLD = {
@@ -293,7 +298,7 @@ const CASES = [];
 for (const row of table.STATE_TABLE) {
   row.builds.forEach((build, index) => {
     for (const stale of row.stale ? [false, true] : [false]) {
-      CASES.push({ row: row.row, label: `${row.row} variant ${index + 1}${stale ? ', stale marker' : ''}`, build, stale });
+      CASES.push({ row: row.row, variant: `${row.row} variant ${index + 1}`, label: `${row.row} variant ${index + 1}${stale ? ', stale marker' : ''}`, build, stale });
     }
   });
 }
@@ -335,7 +340,7 @@ for (const c of CASES) {
       }
       return;
     }
-    assert.ok(!EXPECTED_REFUSALS[c.row], `${c.label}: expected a refusal`);
+    assert.ok(!EXPECTED_REFUSALS[c.row] || REPAIRED_BY_RESUME.has(c.variant), `${c.label}: expected a refusal`);
     assert.ok(plan.after.flows.includes('new') && plan.after.gui.includes('new') && plan.after['osi-a'].includes('osi-a@new'), `${c.label}: the switch serves the new payload`);
     const loose = NO_COMPLETE_OLD[c.row];
 
