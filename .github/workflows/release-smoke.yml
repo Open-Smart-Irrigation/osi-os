@@ -30,7 +30,7 @@ jobs:
       - name: Install pinned runtime
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
       - name: Failure-list policy
-        run: node --test scripts/test-release-smoke-policy.js
+        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
       - name: Start shipped software and exercise HTTP and radio boundaries
         run: node scripts/test-release-smoke.js
       - name: Refuse a release with known failures

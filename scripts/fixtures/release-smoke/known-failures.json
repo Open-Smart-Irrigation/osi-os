@@ -15,110 +15,14 @@
     ]
   },
   {
-    "id": "command-accepted:close",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:close-duration",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:open-duration",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:interval",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:timed-close",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:magnet",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:partial-close",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "command-accepted:flushing",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "open-report-close-open",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
-      {
-        "code": "second-http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
     "id": "open-no-report-open-later",
-    "finding": "F-1 / F-5",
+    "finding": "F-1",
     "failures": [
-      {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
       {
         "code": "later-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "radio",
@@ -141,19 +45,17 @@
   },
   {
     "id": "no-clock-open-report-close-open",
-    "finding": "F-2 / F-5",
+    "finding": "F-2",
     "failures": [
-      {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
       {
         "code": "closed-state",
         "actual": "OPEN"
       },
       {
         "code": "second-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "stored",
@@ -177,15 +79,13 @@
   },
   {
     "id": "no-clock-open-no-report-open-later",
-    "finding": "F-1 / F-2 / F-5",
+    "finding": "F-1",
     "failures": [
       {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
-      {
         "code": "later-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "stored",
@@ -207,26 +107,14 @@
     ]
   },
   {
-    "id": "no-clock-safety-close",
-    "finding": "F-5 / known defect 2",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
     "id": "open-after:close-duration",
-    "finding": "F-4 / F-5",
+    "finding": "F-4",
     "failures": [
-      {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
       {
         "code": "open-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "stored",
@@ -247,15 +135,13 @@
   },
   {
     "id": "open-after:timed-close",
-    "finding": "F-4 / F-5",
+    "finding": "F-4",
     "failures": [
       {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
-      {
         "code": "open-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "stored",
@@ -276,15 +162,13 @@
   },
   {
     "id": "open-after:flushing",
-    "finding": "F-4 / F-5",
+    "finding": "F-4",
     "failures": [
       {
-        "code": "initial-http",
-        "symptom": "http-timeout"
-      },
-      {
         "code": "open-http",
-        "symptom": "http-timeout"
+        "status": 503,
+        "error": "valve_busy",
+        "missingCrypto": false
       },
       {
         "code": "stored",
@@ -300,114 +184,6 @@
             "hasExpiry": false
           }
         ]
-      }
-    ]
-  },
-  {
-    "id": "lifecycle:assign",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      },
-      {
-        "code": "stored",
-        "actual": {
-          "zone": null,
-          "user": 1,
-          "deleted": false
-        }
-      }
-    ]
-  },
-  {
-    "id": "lifecycle:remove",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      },
-      {
-        "code": "stored",
-        "actual": {
-          "zone": 1,
-          "user": 1,
-          "deleted": false
-        }
-      }
-    ]
-  },
-  {
-    "id": "lifecycle:delete-device",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      },
-      {
-        "code": "stored",
-        "actual": {
-          "zone": 1,
-          "user": 1,
-          "deleted": false
-        }
-      }
-    ]
-  },
-  {
-    "id": "scheduler-irrigates",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "save-http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      }
-    ]
-  },
-  {
-    "id": "no-token:DELETE /api/devices/:deveui",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      }
-    ]
-  },
-  {
-    "id": "no-token:PUT /api/irrigation-zones/:id/devices/:deveui",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
-      }
-    ]
-  },
-  {
-    "id": "no-token:DELETE /api/irrigation-zones/:id/devices/:deveui",
-    "finding": "known defect 1",
-    "failures": [
-      {
-        "code": "http",
-        "status": 500,
-        "error": "device-api failed",
-        "missingCrypto": true
       }
     ]
   },

@@ -20,6 +20,7 @@ function classify(cases,known) {
   const byId=new Map();
   for(const entry of known) {
     if(!entry.id||!entry.finding||!Array.isArray(entry.failures)||!entry.failures.length||byId.has(entry.id))throw new Error('invalid/duplicate known failure '+JSON.stringify(entry));
+    if(!/^(?:[FAS]-[1-9]\d*|NEW-[1-9]\d*|known defect 1)$/.test(entry.finding))throw new Error('known failure needs exactly one finding: '+entry.id);
     byId.set(entry.id,entry);
   }
   for(const result of cases) {
@@ -69,7 +70,7 @@ function main(argv) {
   const runtimeLog=path.join(run,'runtime.log');
   const fd=fs.openSync(runtimeLog,'w');
   let child;
-  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',OSI_SMOKE_RUN:run},stdio:['ignore',fd,fd]});}
+  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',UV_THREADPOOL_SIZE:'2',OSI_SMOKE_RUN:run},stdio:['ignore',fd,fd]});}
   finally {fs.closeSync(fd);}
   if(child.status!==0)throw new Error('runtime failed: '+fs.readFileSync(runtimeLog,'utf8'));
   const evidence=JSON.parse(fs.readFileSync(path.join(run,'results.json'),'utf8'));

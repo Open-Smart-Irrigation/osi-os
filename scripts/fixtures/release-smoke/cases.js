@@ -114,6 +114,8 @@ exports.run = async function(h) {
     try {
       const eui=(await device());httpCheck(check,await h.http('POST','/api/valve/'+eui,{action:'CLOSE'},token),202);
       e.radio=radio(eui);check('radio',e.radio.length===1&&e.radio[0].port===1&&e.radio[0].hex==='30'&&!e.radio[0].expiresAt,e.radio);
+      // The 202 reply can precede the downstream asynchronous actuator-log insert.
+      await waitFor(async()=>(await logs(eui)).length===1);
       check('stored',(await logs(eui)).length===1,(await logs(eui)).length);
     } finally {h.setMarker(h.state.markerValue);}
   });
@@ -140,7 +142,7 @@ exports.run = async function(h) {
   const weekly={kind:'WEEKLY',weekdays_mask:127,start_time:'06:00',duration_minutes:20,timezone:'UTC',enabled:true};
   async function waitFor(predicate,timeout=5000) {
     const until=Date.now()+timeout;
-    while(!predicate()&&Date.now()<until)await h.sleep(40);
+    while(!(await predicate())&&Date.now()<until)await h.sleep(40);
   }
   async function trySnapshot(eui) {
     const key='valve_snapshot_pending:'+eui;

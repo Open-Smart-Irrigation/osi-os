@@ -42,3 +42,12 @@ test('CI refuses listed failures on manual release checks and version tags',()=>
   assert.equal(gate(known,{ci:true,event:'push',ref:'refs/tags/v0.0.0'}),1);
   assert.equal(gate([],{ci:true,event:'push',ref:'refs/tags/v0.0.0'}),0);
 });
+
+test('each known case names exactly one finding',()=>{
+  for(const finding of ['F-1 / F-2','F-5 / known defect 2','untracked']) {
+    assert.throws(()=>classify([failed],[{...known[0],finding}]),/exactly one finding/);
+  }
+  for(const finding of ['F-1','A-1','S-1','NEW-1','known defect 1']) {
+    assert.equal(classify([failed],[{...known[0],finding}]).knownToFail.length,1);
+  }
+});

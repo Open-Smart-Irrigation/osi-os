@@ -4,11 +4,13 @@ This suite starts the shipped flows in Node-RED and drives their HTTP API.
 A green PR result permits only the exact failures in `known-failures.json`.
 It does not permit a release while that list has entries.
 
-From the repository root, with Node 22 and the `sqlite3` CLI installed:
+From the repository root, with Node 22 and the `sqlite3` CLI installed
+(on the maintainer workstation, run suites serially through `osi-heavy` and
+set `TMPDIR` to a disk-backed scratch directory):
 
 ```bash
 npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
-node --test scripts/test-release-smoke-policy.js
+node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
 node scripts/test-release-smoke.js
 node scripts/test-release-smoke.js --release
 ```
@@ -25,7 +27,7 @@ The runner checks the Node-RED version against the image feed Makefile,
 then builds a new scratch database with `scripts/build-seed-db.js --out`.
 That script calls the repository migration runner's `bootstrapFresh` and
 `verifyHead`. It never replaces a bundled database. One Node-RED process
-runs at a time, using the native npm `sqlite3` binding and the image settings'
+runs at a time (with a two-thread libuv pool), using the native npm `sqlite3` binding and the image settings'
 `os`, `fs`, `cp` global names. No `crypto`, `require`, or browser globals are
 added to the function sandbox.
 
@@ -94,7 +96,8 @@ The three totals are `passed`, `failed`, and `known-to-fail`. An unlisted
 failure, an additional assertion failure, a changed HTTP status/error or radio
 frame, a missing listed case, and an unexpectedly passing listed case all
 produce exit 1. Harness/setup exceptions produce exit 2 and cannot be listed.
-The policy's own tests exercise these branches. Volatile timestamps and queue
+Each listed case must name exactly one finding. The policy's own tests
+exercise these branches. Volatile timestamps and queue
 UUIDs do not define a failure signature; HTTP status/error, stored state and
 radio bytes do.
 
@@ -113,60 +116,31 @@ the empty-list gate after the suite; the release procedure also runs
 
 ## Known to fail on the baseline
 
-On payload baseline `1bdd49d5`, strict mode reports 182 passed, 0 unexpected
-failures and 26 known failing cases, then exits 1. The whole local command
-took 0:52.06 elapsed with maximum RSS 268868 KiB. Hosted timing is
-measured by the new workflow, whose timeout is ten minutes.
-The checked-in baseline output is in `baseline-1bdd49d5.txt`.
-Each line below names one case; the JSON file carries its exact signatures.
+On payload baseline `88f6e84bb`, strict mode reports 199 passed, 0 unexpected
+failures and 9 known failing cases, then exits 1. The original list had 26
+entries. The untouched-list run proved 17 cases now pass before those entries
+were removed; six other entries lost their obsolete HTTP-timeout allowances.
+See [the per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
+for each merged fix, the single finding behind every remaining case, and the
+assertions that need changing or strengthening for stage 1. Scenario assertions
+are unchanged in this update.
+
+The checked-in output is `baseline-88f6e84bb.txt`. Each line below names one
+remaining case; the JSON file carries its exact signatures.
 
 - F-14: `startup-node-errors`.
 
-- F-5 / known defect 2: `command-accepted:close`.
+- F-1: `open-no-report-open-later`.
 
-- F-5 / known defect 2: `command-accepted:close-duration`.
+- F-2: `no-clock-open-report-close-open`.
 
-- F-5 / known defect 2: `command-accepted:open-duration`.
+- F-1: `no-clock-open-no-report-open-later`.
 
-- F-5 / known defect 2: `command-accepted:interval`.
+- F-4: `open-after:close-duration`.
 
-- F-5 / known defect 2: `command-accepted:timed-close`.
+- F-4: `open-after:timed-close`.
 
-- F-5 / known defect 2: `command-accepted:magnet`.
-
-- F-5 / known defect 2: `command-accepted:partial-close`.
-
-- F-5 / known defect 2: `command-accepted:flushing`.
-
-- F-5 / known defect 2: `open-report-close-open`.
-
-- F-1 / F-5: `open-no-report-open-later`.
-
-- F-2 / F-5: `no-clock-open-report-close-open`.
-
-- F-1 / F-2 / F-5: `no-clock-open-no-report-open-later`.
-
-- F-5 / known defect 2: `no-clock-safety-close`.
-
-- F-4 / F-5: `open-after:close-duration`.
-
-- F-4 / F-5: `open-after:timed-close`.
-
-- F-4 / F-5: `open-after:flushing`.
-
-- known defect 1: `lifecycle:assign`.
-
-- known defect 1: `lifecycle:remove`.
-
-- known defect 1: `lifecycle:delete-device`.
-
-- known defect 1: `scheduler-irrigates`.
-
-- known defect 1: `no-token:DELETE /api/devices/:deveui`.
-
-- known defect 1: `no-token:PUT /api/irrigation-zones/:id/devices/:deveui`.
-
-- known defect 1: `no-token:DELETE /api/irrigation-zones/:id/devices/:deveui`.
+- F-4: `open-after:flushing`.
 
 - F-13: `no-token:POST /api/account-link`.
 

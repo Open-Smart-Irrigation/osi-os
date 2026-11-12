@@ -1,26 +1,74 @@
-Payload baseline: 1bdd49d5fd7d61468f47156e21f095e6dcab7588
+Payload baseline: 88f6e84bb251a03034dc4a6e8fa8e3a10992a2e4
+Commands ran serially through osi-heavy with --need-gib 1.
+Local TMPDIR was disk-backed; one Node-RED worker and a two-thread libuv pool.
+
+Before editing the original 26-entry list:
+Command: node scripts/test-release-smoke.js
+Exit: 1 (17 listed cases passed, six listed signatures changed, three unchanged)
+No unlisted case failed.
+FAIL command-accepted:close known case passed: remove its entry []
+FAIL command-accepted:close-duration known case passed: remove its entry []
+FAIL command-accepted:open-duration known case passed: remove its entry []
+FAIL command-accepted:interval known case passed: remove its entry []
+FAIL command-accepted:timed-close known case passed: remove its entry []
+FAIL command-accepted:magnet known case passed: remove its entry []
+FAIL command-accepted:partial-close known case passed: remove its entry []
+FAIL command-accepted:flushing known case passed: remove its entry []
+FAIL open-report-close-open known case passed: remove its entry []
+FAIL open-no-report-open-later failure signature changed [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]},{"code":"stored","actual":["STALE_NO_OBSERVATION"]}]
+FAIL no-clock-open-report-close-open failure signature changed [{"code":"closed-state","actual":"OPEN"},{"code":"second-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["PENDING_OBSERVATION","OBSERVED_RUNNING"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+FAIL no-clock-open-no-report-open-later failure signature changed [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["STALE_NO_OBSERVATION"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+FAIL no-clock-safety-close known case passed: remove its entry []
+FAIL open-after:close-duration failure signature changed [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+FAIL open-after:timed-close failure signature changed [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+FAIL open-after:flushing failure signature changed [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":28,"hex":"3032","hasExpiry":false}]}]
+FAIL lifecycle:assign known case passed: remove its entry []
+FAIL lifecycle:remove known case passed: remove its entry []
+FAIL lifecycle:delete-device known case passed: remove its entry []
+FAIL scheduler-irrigates known case passed: remove its entry []
+FAIL no-token:DELETE /api/devices/:deveui known case passed: remove its entry []
+FAIL no-token:PUT /api/irrigation-zones/:id/devices/:deveui known case passed: remove its entry []
+FAIL no-token:DELETE /api/irrigation-zones/:id/devices/:deveui known case passed: remove its entry []
+RESULT passed=182 failed=23 known-to-fail=3; 16.3s; peak RSS 280 MiB
+
+After removing only proven passes and narrowing the six reviewed signatures:
 Command: node scripts/test-release-smoke.js --strict
-Expected exit: 1 (listed release blockers only)
+Expected exit: 1 (nine listed release blockers only)
+Only the scratch-directory spelling in the following output was normalized.
 
 PROFILE PARITY: 2890 flow/helper files byte-identical
-EVIDENCE: /tmp/osi-release-smoke-2uSZs5
+EVIDENCE: <scratch>/osi-release-smoke-7zdNGt
 PASS runtime-started
 PASS login-and-lists
+PASS command-accepted:close
 PASS command-refused:close
+PASS command-accepted:close-duration
 PASS command-refused:close-duration
+PASS command-accepted:open-duration
 PASS command-refused:open-duration
+PASS command-accepted:interval
 PASS command-refused:interval
+PASS command-accepted:timed-close
 PASS command-refused:timed-close
+PASS command-accepted:magnet
 PASS command-refused:magnet
+PASS command-accepted:partial-close
 PASS command-refused:partial-close
+PASS command-accepted:flushing
 PASS command-refused:flushing
 PASS command-invalid:{"action":"OPEN"}
 PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":0}
 PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":256}
+PASS open-report-close-open
+PASS no-clock-safety-close
+PASS lifecycle:assign
+PASS lifecycle:remove
+PASS lifecycle:delete-device
 PASS lifecycle:delete-zone
 PASS weekly-save
 PASS weekly-change
 PASS weekly-delete
+PASS scheduler-irrigates
 PASS no-token:POST /auth/register
 PASS no-token:POST /auth/login
 PASS no-token:OPTIONS /auth/*
@@ -28,10 +76,13 @@ PASS no-token:GET /download/database
 PASS no-token:GET /api/devices
 PASS no-token:GET /api/catalog
 PASS no-token:POST /api/devices
+PASS no-token:DELETE /api/devices/:deveui
 PASS no-token:OPTIONS /api/*
 PASS no-token:POST /api/irrigation-zones
 PASS no-token:GET /api/irrigation-zones
 PASS no-token:DELETE /api/irrigation-zones/:id
+PASS no-token:PUT /api/irrigation-zones/:id/devices/:deveui
+PASS no-token:DELETE /api/irrigation-zones/:id/devices/:deveui
 PASS no-token:PUT /api/irrigation-zones/:id/schedule
 PASS no-token:POST /api/irrigation-zones/schedules/disable-all
 PASS no-token:POST /api/valve/:deveui
@@ -187,32 +238,16 @@ PASS helpers-unchanged
 PASS startup-function-errors
 PASS database-integrity
 KNOWN TO FAIL F-14 startup-node-errors [{"code":"node-errors","actual":[{"id":"dendro-readings-sqlite","msg":"Sqlite database not configured"}]}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:close [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:close-duration [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:open-duration [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:interval [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:timed-close [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:magnet [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:partial-close [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 command-accepted:flushing [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-5 / known defect 2 open-report-close-open [{"code":"initial-http","symptom":"http-timeout"},{"code":"second-http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-1 / F-5 open-no-report-open-later [{"code":"initial-http","symptom":"http-timeout"},{"code":"later-http","symptom":"http-timeout"},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]},{"code":"stored","actual":["STALE_NO_OBSERVATION"]}]
-KNOWN TO FAIL F-2 / F-5 no-clock-open-report-close-open [{"code":"initial-http","symptom":"http-timeout"},{"code":"closed-state","actual":"OPEN"},{"code":"second-http","symptom":"http-timeout"},{"code":"stored","actual":["PENDING_OBSERVATION","OBSERVED_RUNNING"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
-KNOWN TO FAIL F-1 / F-2 / F-5 no-clock-open-no-report-open-later [{"code":"initial-http","symptom":"http-timeout"},{"code":"later-http","symptom":"http-timeout"},{"code":"stored","actual":["STALE_NO_OBSERVATION"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
-KNOWN TO FAIL F-5 / known defect 2 no-clock-safety-close [{"code":"http","symptom":"http-timeout"}]
-KNOWN TO FAIL F-4 / F-5 open-after:close-duration [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
-KNOWN TO FAIL F-4 / F-5 open-after:timed-close [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
-KNOWN TO FAIL F-4 / F-5 open-after:flushing [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":28,"hex":"3032","hasExpiry":false}]}]
-KNOWN TO FAIL known defect 1 lifecycle:assign [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":null,"user":1,"deleted":false}}]
-KNOWN TO FAIL known defect 1 lifecycle:remove [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":1,"user":1,"deleted":false}}]
-KNOWN TO FAIL known defect 1 lifecycle:delete-device [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":1,"user":1,"deleted":false}}]
-KNOWN TO FAIL known defect 1 scheduler-irrigates [{"code":"save-http","status":500,"error":"device-api failed","missingCrypto":true}]
-KNOWN TO FAIL known defect 1 no-token:DELETE /api/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
-KNOWN TO FAIL known defect 1 no-token:PUT /api/irrigation-zones/:id/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
-KNOWN TO FAIL known defect 1 no-token:DELETE /api/irrigation-zones/:id/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
+KNOWN TO FAIL F-1 open-no-report-open-later [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]},{"code":"stored","actual":["STALE_NO_OBSERVATION"]}]
+KNOWN TO FAIL F-2 no-clock-open-report-close-open [{"code":"closed-state","actual":"OPEN"},{"code":"second-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["PENDING_OBSERVATION","OBSERVED_RUNNING"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+KNOWN TO FAIL F-1 no-clock-open-no-report-open-later [{"code":"later-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","actual":["STALE_NO_OBSERVATION"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+KNOWN TO FAIL F-4 open-after:close-duration [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+KNOWN TO FAIL F-4 open-after:timed-close [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+KNOWN TO FAIL F-4 open-after:flushing [{"code":"open-http","status":503,"error":"valve_busy","missingCrypto":false},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":28,"hex":"3032","hasExpiry":false}]}]
 KNOWN TO FAIL F-13 no-token:POST /api/account-link [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-13 no-token:POST /api/sync/force [{"code":"http","symptom":"http-timeout"}]
-RESULT passed=182 failed=0 known-to-fail=26; 43.9s; peak RSS 260 MiB
-RELEASE REFUSED: 26 known failing cases remain
+RESULT passed=199 failed=0 known-to-fail=9; 15.5s; peak RSS 274 MiB
+RELEASE REFUSED: 9 known failing cases remain
 
-Measured whole command: 0:52.06 elapsed, maximum RSS 268868 KiB, exit 1.
+Measured whole strict command: 25.53 seconds, maximum RSS 280668 KiB, exit 1.
+PR mode: 199 passed, 0 failed, 9 known-to-fail, exit 0.
