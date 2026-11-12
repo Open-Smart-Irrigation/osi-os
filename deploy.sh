@@ -1418,7 +1418,7 @@ record_deploy_hold() {
     rdh_backup_dir="${backup_dir:-${MIGRATE_BACKUP_DIR:-/data/backups/migrate}}"
     rdh_backup="$(ls -1t "$rdh_backup_dir"/"$(basename "$rdh_db")".premigrate-* 2>/dev/null | head -n 1)"
     [ -n "$rdh_backup" ] || rdh_backup="<newest $rdh_backup_dir/$(basename "$rdh_db").premigrate-*>"
-    rdh_line="HELD: Node-RED stopped. payloads/${DEPLOY_STAMP:-?} failed after migrating $rdh_db, and payloads/${PREV_STAMP:-?} does not fit the new schema. Restore the pre-migration backup and return to payloads/${PREV_STAMP:-?} with: cp '$rdh_backup' '$rdh_db.restore' && mv '$rdh_db.restore' '$rdh_db' && rm -f '$rdh_db-wal' '$rdh_db-shm' && node -e \"require('$rdh_root/.payload-swap.js').flipTo('$rdh_root','${PREV_STAMP:-?}','${GUI_ROOT:-/usr/lib/node-red/gui}')\" && /etc/init.d/osi-identityd start && ${NODE_RED_INIT:-/etc/init.d/node-red} start"
+    rdh_line="HELD: Node-RED stopped. payloads/${DEPLOY_STAMP:-?} failed after migrating $rdh_db, and payloads/${PREV_STAMP:-?} does not fit the new schema. Restore the pre-migration backup and return to payloads/${PREV_STAMP:-?} with: cp '$rdh_backup' '$rdh_db.restore' && mv '$rdh_db.restore' '$rdh_db' && rm -f '$rdh_db-wal' '$rdh_db-shm' && node -e \"const s=require('$rdh_root/.payload-swap.js'); s.flipTo('$rdh_root','${PREV_STAMP:-?}','${GUI_ROOT:-/usr/lib/node-red/gui}'); s.writePayloadState('$rdh_root','${PREV_STAMP:-?}','healthy','restored from the pre-migration backup by the operator','operator')\" && rm -f '$rdh_root/DEPLOY-HELD' && /etc/init.d/osi-identityd start && ${NODE_RED_INIT:-/etc/init.d/node-red} start"
     printf '%s\n' "$rdh_line" > "${DEPLOY_HELD_FILE:-$rdh_root/DEPLOY-HELD}" 2>/dev/null || true
     printf '%s\n' "$rdh_line" >&2
 }
@@ -1433,6 +1433,7 @@ run_owed_health_check() {
     fi
     owed_mark="$(logread 2>/dev/null | wc -l)"
     case "$owed_mark" in ''|*[!0-9]*) owed_mark=0 ;; esac
+    swap_call writePayloadState "${owed_payload:-}" unverified "its owed health check is running" deploy.sh >/dev/null || true
     if ! "$NODE_RED_INIT" restart; then
         return 1
     fi
@@ -1483,6 +1484,9 @@ deploy_exit_handler() {
             fi
             hold_identityd_stopped || true
             record_deploy_hold
+            if [ "${PAYLOAD_FLIPPED:-0}" = "1" ]; then
+                swap_call markFailed "${DEPLOY_STAMP:-}" "its deploy failed after migrating the database" >/dev/null 2>&1 || true
+            fi
             swap_call writePayloadState "${DEPLOY_STAMP:-}" held "it failed after migrating the database and no payload that passed its health check fits it; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null 2>&1 || true
         fi
     elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
@@ -1786,6 +1790,7 @@ restart_previous_payload() {
         echo "ERROR: restored payload pair could not be verified after activation; Node-RED remains stopped" >&2
         return 1
     fi
+    swap_call writePayloadState "$PREV_STAMP" healthy "returned to after payloads/${DEPLOY_STAMP:-?} failed" deploy.sh >/dev/null || true
     if ! "$NODE_RED_INIT" restart; then
         echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
         return 1
@@ -2287,6 +2292,8 @@ process.stdout.write(String(applied.length));
             fi
             PAYLOAD_FLIPPED=1
             echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+            # A switch ends any earlier hold; the health check decides below.
+            swap_call writePayloadState "$DEPLOY_STAMP" unverified "switched in by this deploy; its health check is pending" deploy.sh >/dev/null || true
             apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
         fi
         NODE_RED_LOG_MARK=0
@@ -2388,6 +2395,8 @@ if [ -n "$owed_plan" ]; then
         swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
         if [ "$owed_migrated" = "1" ] || [ -z "$owed_fallback" ]; then
             hold_node_red_stopped || true
+            # The restore command replaces the database: nothing may hold it open.
+            hold_identityd_stopped || true
             owed_saved_deploy="${DEPLOY_STAMP:-}"
             owed_saved_prev="${PREV_STAMP:-}"
             DEPLOY_STAMP="$owed_payload"
@@ -2399,6 +2408,13 @@ if [ -n "$owed_plan" ]; then
             exit 1
         fi
         echo "WARN: payloads/$owed_payload failed its owed health check; returning to payloads/$owed_fallback, which fits the database" >&2
+        # The owed check started Node-RED on the failed payload: stop it
+        # before the links change under it.
+        if ! hold_node_red_stopped; then
+            echo "ERROR: could not prove Node-RED stopped before returning to payloads/$owed_fallback; leaving payload links unchanged" >&2
+            exit 1
+        fi
+        swap_call writePayloadState "$owed_fallback" healthy "payloads/$owed_payload failed its owed health check; returned to this payload" deploy.sh >/dev/null || true
         if ! swap_call flipTo "$owed_fallback" "$GUI_ROOT" >/dev/null || \
            ! swap_call verifyPair "$owed_fallback" "$GUI_ROOT" >/dev/null || \
            ! "$NODE_RED_INIT" restart; then
@@ -2485,6 +2501,9 @@ fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p "$STAGED_GUI"
 tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null
+# A staged payload is no rollback target until its health check passes; a
+# deploy cut before then leaves it on disk.
+swap_call markStaged "$DEPLOY_STAMP" >/dev/null
 PREV_STAMP="$(swap_call currentStamp || true)"
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
@@ -3473,6 +3492,8 @@ if [ "$PAYLOAD_FLIPPED" != "1" ]; then
 else
     echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"
 fi
+# A switch ends any earlier hold; the health check below decides.
+swap_call writePayloadState "$DEPLOY_STAMP" unverified "switched in by this deploy; its health check is pending" deploy.sh >/dev/null || true
 
 if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
     # Flipped just above: the restart below must read the new version.
@@ -3605,6 +3626,8 @@ else
             echo "ERROR: restored payload pair could not be verified after activation; Node-RED remains stopped" >&2
             exit 1
         fi
+        swap_call markFailed "$DEPLOY_STAMP" "its deploy health check failed" >/dev/null || true
+        swap_call writePayloadState "$PREV_STAMP" healthy "returned to after payloads/$DEPLOY_STAMP failed its health check" deploy.sh >/dev/null || true
         if ! "$NODE_RED_INIT" restart; then
             node_red_restart_needed=0
             echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2

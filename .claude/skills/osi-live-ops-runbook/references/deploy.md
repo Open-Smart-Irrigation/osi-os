@@ -157,10 +157,15 @@ dev workstation unless noted.
 
    When the deploy migrated the database and no payload that passed its health
    check fits the new schema, it holds Node-RED stopped and ends with one line,
-   kept in `/srv/node-red/DEPLOY-HELD` until a deploy commits:
+   kept in `/srv/node-red/DEPLOY-HELD` until the hold ends:
    `HELD: Node-RED stopped. payloads/<failed> failed after migrating ... Restore the pre-migration backup and return to payloads/<healthy> with: <command>`.
    The command restores the named `/data/backups/migrate/farming.db.premigrate-*`
-   backup, switches back to that payload and starts identityd and Node-RED.
+   backup, switches back to that payload, records it healthy in
+   `/srv/node-red/payload-state.json`, removes `DEPLOY-HELD` and starts identityd
+   and Node-RED. While the gateway is held, Node-RED does not start, after a
+   reboot or `/etc/init.d/node-red start` either: the start logs the `HELD:`
+   line instead. The command, or a later deploy that switches in a payload,
+   ends the hold.
 
    Restarting Node-RED by hand right after a green deploy doesn't make it any
    safer — it only obscures which restart (migration, flip, or yours) produced

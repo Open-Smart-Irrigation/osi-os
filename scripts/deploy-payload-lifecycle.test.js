@@ -617,6 +617,7 @@ stage_new_deploy() {
   printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
   printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
   swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+  swap_call markStaged "$DEPLOY_STAMP" >/dev/null
   # What the fetch_required block writes.
   write_module "$MODULE_STAGE/osi-a" "a@$DEPLOY_STAMP"
   write_module "$MODULE_STAGE/osi-b" "b@$DEPLOY_STAMP"
@@ -924,6 +925,7 @@ test('owed check: a migrated, unchecked payload that fails is held with the one-
     assert.equal(state.state, 'held');
     assert.equal(state.active, 'cut');
     assert.equal(swap.readHealth(run.root, 'cut').state, 'failed');
+    assert.equal(run.state('identityd.state'), '0', 'identityd is stopped: the restore command replaces the database');
   } finally {
     run.cleanup();
   }
@@ -938,6 +940,9 @@ test('owed check: an unchecked payload that did not migrate and fails returns to
     assert.equal(swap.readPayloadState(run.root).state, 'healthy');
     assert.equal(swap.readPayloadState(run.root).active, 'old');
     assert.equal(run.state('node-red.state'), '1');
+    // The owed check restarted Node-RED on the failed payload; it is stopped
+    // before the links change, then started on the older payload.
+    assert.deepEqual(run.nodeRedLog().slice(-3), ['restart', 'stop', 'restart']);
   } finally {
     run.cleanup();
   }
@@ -1007,6 +1012,10 @@ printf '%s\\n' held
       assert.equal(restore.status, 0, restore.stderr);
       assert.equal(swap.currentStamp(run.root), 'old');
       assert.equal(swap.verifyPair(run.root, 'old', run.guiRoot), true);
+      // The command ends the hold: Node-RED's start no longer refuses.
+      assert.equal(fs.existsSync(path.join(run.root, 'DEPLOY-HELD')), false);
+      assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+      assert.equal(swap.readPayloadState(run.root).active, 'old');
     } finally {
       run.cleanup();
     }

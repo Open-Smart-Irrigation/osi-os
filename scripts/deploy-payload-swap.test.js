@@ -1044,3 +1044,49 @@ test('prune keeps the payload the next deploy would roll back to', (t) => {
   assert.ok(fs.existsSync(path.join(root, 'payloads', '20261101')), 'the healthy payload stays');
   assert.equal(fs.existsSync(path.join(root, 'payloads', '20261102')), false);
 });
+
+// Review of #636: a payload a deploy staged and never switched to (a cut
+// during npm install) is no rollback target and no restore target; payloads
+// from before the record stay trusted.
+test('a staged payload is never a rollback or restore target; one from before the record still is', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, '20261101', { 'osi-a': '' });
+  flipTo(root, '20261101', guiRoot);
+  swap.writeCompatibility(root, '20261101', '70', '70:a');
+  stageWithModules(root, '20261102', { 'osi-a': '' });
+  swap.markStaged(root, '20261102');
+  stageWithModules(root, '20261103', { 'osi-a': '' });
+  swap.writeCompatibility(root, '20261103', '79', '70:a,79:b');
+  swap.markActivated(root, '20261103');
+  flipTo(root, '20261103', guiRoot);
+  assert.equal(swap.payloadTrusted(root, '20261101'), true, 'no record: from before the record');
+  assert.equal(swap.payloadTrusted(root, '20261102'), false, 'staged');
+  assert.equal(swap.rollbackTarget(root, '20261103', 'next'), '20261101');
+  assert.equal(swap.owedCheckPlan(root, '79', '70:a,79:b'), '20261103|1||20261101');
+});
+
+// Review of #636: the health record and the payload state are on storage
+// before the switch that follows: the file is synced before its rename and
+// the directory after it.
+test('health records and the payload state are synced around their rename', (t) => {
+  const root = moduleRoot(t);
+  stageWithModules(root, 'p', { 'osi-a': '' });
+  const calls = [];
+  const real = { fsyncSync: fs.fsyncSync, renameSync: fs.renameSync, openSync: fs.openSync };
+  const kinds = new Map();
+  fs.openSync = function (file, ...rest) {
+    const fd = real.openSync.call(this, file, ...rest);
+    kinds.set(fd, fs.statSync(file).isDirectory() ? 'dir' : 'file');
+    return fd;
+  };
+  fs.fsyncSync = function (fd) { calls.push(`fsync ${kinds.get(fd)}`); return real.fsyncSync.call(this, fd); };
+  fs.renameSync = function (...args) { calls.push('rename'); return real.renameSync.apply(this, args); };
+  try {
+    swap.markActivated(root, 'p');
+    swap.writePayloadState(root, 'p', 'unverified', 'x');
+  } finally {
+    Object.assign(fs, real);
+  }
+  assert.deepEqual(calls, ['fsync file', 'rename', 'fsync dir', 'fsync file', 'rename', 'fsync dir']);
+});

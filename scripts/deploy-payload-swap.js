@@ -211,12 +211,61 @@ function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null) {
   return dir;
 }
 
-function atomicSymlink(link, target, label, { keepBackup = false } = {}) {
+// A directory of the image's read-only layer (overlay root, the same path is
+// a directory under /rom, redirect_dir off) cannot be renamed: rename(2)
+// returns EXDEV. It can be removed (the image's copy stays under /rom) and a
+// link created in its place. This read-only check decides how a switch
+// converts a real directory; it never refuses one. OSI_SWAP_IMAGE_LAYER_PATHS
+// (colon-separated) stands in for the overlay in tests, OSI_SWAP_ROM_ROOT for
+// /rom.
+function romRoot() {
+  return process.env.OSI_SWAP_ROM_ROOT || '/rom';
+}
+
+function romCopy(target) {
+  return path.join(romRoot(), path.resolve(target));
+}
+
+function imageLayerDir(target) {
+  const resolved = path.resolve(target);
+  if (process.env.OSI_SWAP_IMAGE_LAYER_PATHS !== undefined) {
+    return process.env.OSI_SWAP_IMAGE_LAYER_PATHS.split(':').includes(resolved);
+  }
+  try {
+    if (fs.readFileSync('/sys/module/overlay/parameters/redirect_dir', 'utf8').trim() === 'Y') return false;
+  } catch (_) {
+    // No overlay module parameters: no overlay to worry about.
+    return false;
+  }
+  if (!isDirectory(romCopy(resolved))) return false;
+  let mounts = '';
+  try {
+    mounts = fs.readFileSync('/proc/mounts', 'utf8');
+  } catch (_) {
+    return false;
+  }
+  let best = { point: '', type: '' };
+  for (const line of mounts.split('\n')) {
+    const [, point, type] = line.split(' ');
+    if (!point) continue;
+    if ((resolved === point || resolved.startsWith(point === '/' ? '/' : `${point}/`)) && point.length >= best.point.length) {
+      best = { point, type };
+    }
+  }
+  return best.type === 'overlay';
+}
+
+// replaceable: a verified identical copy of a real directory at <link>
+// exists in the payload the link will lead to, so the directory may be
+// removed instead of moved aside. The path is then absent until the link
+// takes its place; resumeInterruptedSwitch() restores it after a kill.
+function atomicSymlink(link, target, label, { keepBackup = false, replaceable = false } = {}) {
   const parent = path.dirname(link);
   const relativeTarget = path.relative(parent, target);
   const tmp = path.join(parent, `.${path.basename(link)}.flip-${process.pid}-${Date.now()}`);
   let backup = null;
   let previousTarget = null;
+  let removing = null;
   try {
     fs.mkdirSync(parent, { recursive: true });
     fs.rmSync(tmp, { force: true });
@@ -230,8 +279,25 @@ function atomicSymlink(link, target, label, { keepBackup = false } = {}) {
       const existing = fs.lstatSync(link);
       if (existing.isSymbolicLink()) previousTarget = fs.realpathSync(link);
       else if (existing.isDirectory()) {
-        backup = `${link}.osi-old-${process.pid}-${Date.now()}`;
-        fs.renameSync(link, backup);
+        let remove = replaceable && imageLayerDir(link);
+        if (!remove) {
+          backup = `${link}.osi-old-${process.pid}-${Date.now()}`;
+          try {
+            fs.renameSync(link, backup);
+          } catch (error) {
+            backup = null;
+            if (error.code !== 'EXDEV' || !replaceable) throw error;
+            remove = true;
+          }
+        }
+        if (remove) {
+          // The removal goes file by file, so a kill can leave the directory
+          // partly removed. The marker beside it (the link's target) lets
+          // resumeInterruptedSwitch() finish the removal and the link.
+          removing = `${link}.osi-removing`;
+          fs.writeFileSync(removing, `${target}\n`);
+          fs.rmSync(link, { recursive: true, force: true });
+        }
       } else if (keepBackup) {
         backup = `${link}.osi-old-${process.pid}-${Date.now()}`;
         fs.linkSync(link, backup);
@@ -249,6 +315,7 @@ function atomicSymlink(link, target, label, { keepBackup = false } = {}) {
       backup = null;
       throw error;
     }
+    if (removing) fs.rmSync(removing, { force: true });
     if (backup && !keepBackup) discardBackup(backup);
   } catch (error) {
     fs.rmSync(tmp, { force: true });
@@ -685,7 +752,7 @@ function switchPaths(root, guiRoot) {
   }
   const modules = new Set();
   for (const name of names) {
-    const base = name.replace(/^\./, '').replace(/\.(osi-old|flip)-.*$/, '');
+    const base = name.replace(/^\./, '').replace(/\.(osi-old|flip)-.*$/, '').replace(/\.osi-removing$/, '');
     if (MODULE_NAME.test(base)) modules.add(base);
   }
   for (const name of [...modules].sort()) paths.push(moduleLink(root, name));
@@ -706,12 +773,12 @@ function leftovers(link) {
   const stampOf = (name) => Number(name.split('-').pop()) || 0;
   return {
     aside: names.filter((name) => name.startsWith(`${base}.osi-old-`)).sort((a, b) => stampOf(b) - stampOf(a)).map((name) => path.join(dir, name)),
-    temps: names.filter((name) => name.startsWith(`.${base}.flip-`)).map((name) => path.join(dir, name)),
+    temps: names.filter((name) => name.startsWith(`.${base}.flip-`) || name.startsWith(`${base}.osi-rom-`)).map((name) => path.join(dir, name)),
   };
 }
 
 // Finishes what a killed switch left behind, before deploy.sh reads the live
-// state (and, in a later release, before Node-RED starts):
+// state and before node-red.init starts Node-RED:
 // - an entry that is absent while the directory or file a switch moved aside
 //   lies beside it is moved back, which restores exactly what was served;
 //   rename(2) cannot replace a directory with a link, so that window exists
@@ -724,13 +791,58 @@ function resumeInterruptedSwitch(root, guiRoot) {
   const lines = [];
   for (const link of switchPaths(root, guiRoot)) {
     const { aside, temps } = leftovers(link);
-    for (const temp of temps) fs.rmSync(temp, { force: true });
+    for (const temp of temps) fs.rmSync(temp, { recursive: true, force: true });
+    const removing = `${link}.osi-removing`;
+    if (isFile(removing)) {
+      const target = fs.readFileSync(removing, 'utf8').trim();
+      const stat = lstatOrNull(link);
+      if (target && (!stat || !stat.isSymbolicLink())) {
+        fs.rmSync(link, { recursive: true, force: true });
+        atomicSymlink(link, target, `finish ${path.basename(link)}`);
+        lines.push(`WARN: an interrupted switch was removing ${path.basename(link)}; finished it and linked it to ${path.relative(path.dirname(link), target)}`);
+      }
+      fs.rmSync(removing, { force: true });
+    }
     if (!lstatOrNull(link) && aside.length) {
       fs.renameSync(aside[0], link);
       lines.push(`WARN: an interrupted switch left ${path.basename(link)} at ${path.basename(aside[0])}; moved it back`);
       aside.shift();
     }
     for (const stale of aside) discardBackup(stale);
+  }
+  // A directory of the image layer is removed before its link is made, since
+  // rename(2) cannot move it. A kill in between leaves the path absent, also
+  // across a reboot. Link it into the active payload, which holds an identical
+  // copy; when no payload holds the GUI, copy it back from the image (/rom).
+  const active = activeStamp(root);
+  if (active) {
+    const restore = [[flowsLink(root), viaFlows(root), path.join(payloadDir(root, active), 'flows.json')]];
+    if (guiRoot) restore.push([guiLink(guiRoot), viaGui(root), guiPayloadDir(root, active)]);
+    let manifest = null;
+    try {
+      manifest = readModuleManifest(root, active);
+    } catch (_) {
+      // A malformed manifest restores no module; the deploy preflight refuses it.
+    }
+    for (const name of manifest ? manifest.modules : []) {
+      restore.push([moduleLink(root, name), viaModule(root, name), moduleTarget(root, active, name)]);
+    }
+    for (const [link, via, copy] of restore) {
+      if (lstatOrNull(link) || !statOrNull(copy)) continue;
+      if (linkedStamp(root, activeLink(root)) !== active) pointActive(root, active);
+      atomicSymlink(link, via, `restore ${path.basename(link)}`);
+      lines.push(`WARN: an interrupted switch left ${path.basename(link)} absent; linked it into payloads/${active} again`);
+    }
+  }
+  if (guiRoot && !lstatOrNull(guiLink(guiRoot)) && isDirectory(romCopy(guiLink(guiRoot)))) {
+    const temp = `${guiLink(guiRoot)}.osi-rom-${process.pid}-${Date.now()}`;
+    try {
+      copyTree(romCopy(guiLink(guiRoot)), temp);
+      fs.renameSync(temp, guiLink(guiRoot));
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+    lines.push(`WARN: the GUI was absent and no payload holds it; copied it back from ${romCopy(guiLink(guiRoot))}`);
   }
   let names = [];
   try {
@@ -775,6 +887,12 @@ function planSwitch(root, stamp, guiRoot, fromStamp) {
     if (!mismatch) {
       const notes = entries.filter((entry) => entry.completes)
         .map((entry) => `WARN: ${entry.label} was left behind by a switch into payloads/${base} that was cut; this switch completes it`);
+      for (const entry of entries) {
+        const stat = lstatOrNull(entry.link);
+        if (stat && stat.isDirectory() && !stat.isSymbolicLink() && imageLayerDir(entry.link)) {
+          notes.push(`OK: the ${entry.label} is a directory of the image layer; the switch removes it and links it into payloads/${base} (the image's copy stays under ${romRoot()})`);
+        }
+      }
       return { stamp, base, entries, modules, notes };
     }
     reasons.push(mismatch);
@@ -806,11 +924,15 @@ function switchPreflight(root, stamp, guiRoot = null, fromStamp = '') {
 // so a rerun resumes. Without a base (a first deploy, or regular flows with
 // no GUI to capture) the entries are linked before payloads/active exists.
 function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
+  // A switch killed earlier may have left an entry set aside, partly removed
+  // or absent: finish that first (it only restores what was served), so the
+  // rollback and the HELD restore command start from a whole entry.
+  resumeInterruptedSwitch(root, guiRoot);
   const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
   if (base) {
     if (linkedStamp(root, activeLink(root)) !== base) pointActive(root, base);
     for (const entry of entries) {
-      if (!linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`);
+      if (!linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`, { replaceable: true });
     }
     if (base !== stamp) pointActive(root, stamp);
   } else {
@@ -1114,17 +1236,43 @@ function healthPath(root, stamp) {
   return path.join(payloadDir(root, stamp), 'health.json');
 }
 
-function writeHealth(root, stamp, record) {
-  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`health record: payload missing: ${stamp}`);
-  const target = healthPath(root, stamp);
+// Writes <text> to <target> through a temporary file, with the file synced
+// before the rename and the directory after it, so a power cut leaves the old
+// or the new record on storage, never none, and the record is on storage
+// before the payload switch that follows it.
+function writeDurable(target, text) {
   const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
   try {
-    fs.writeFileSync(temp, `${JSON.stringify({ format: 1, payload_stamp: stamp, ...record })}\n`, { flag: 'wx' });
+    const fd = fs.openSync(temp, 'wx');
+    try {
+      fs.writeSync(fd, text);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(temp, target);
+    const dir = fs.openSync(path.dirname(target), 'r');
+    try {
+      fs.fsyncSync(dir);
+    } finally {
+      fs.closeSync(dir);
+    }
   } finally {
     fs.rmSync(temp, { force: true });
   }
   return target;
+}
+
+function writeHealth(root, stamp, record) {
+  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`health record: payload missing: ${stamp}`);
+  return writeDurable(healthPath(root, stamp), `${JSON.stringify({ format: 1, payload_stamp: stamp, ...record })}\n`);
+}
+
+// A payload this deploy staged: never a rollback target until a health check
+// passes. A payload from before the record (v0.8.0, v0.8.1, a capture of what
+// was running) has no file and stays trusted.
+function markStaged(root, stamp) {
+  return writeHealth(root, stamp, { state: 'staged' });
 }
 
 function payloadDigests(root, stamp) {
@@ -1204,9 +1352,10 @@ function markFailed(root, stamp, reason = '') {
 
 // The gateway's payload state, for status and for the next deploy:
 // /srv/node-red/payload-state.json, written only through this helper (by
-// deploy.sh and by node-red.init's start-up step). Format 1:
+// deploy.sh, by node-red.init's start-up step, and by the operator's HELD
+// restore command). Format 1:
 //   { "format": 1, "active": "<stamp>", "state": "healthy" | "unverified" | "held",
-//     "reason": "<one sentence>", "updated_at": "<ISO 8601>", "writer": "deploy.sh" | "node-red.init" }
+//     "reason": "<one sentence>", "updated_at": "<ISO 8601>", "writer": "deploy.sh" | "node-red.init" | "operator" }
 // osi-health-helper reports state "unverified" or "held" as health_state, so
 // it reaches the heartbeat and the local health summary.
 const PAYLOAD_STATE = 'payload-state.json';
@@ -1218,15 +1367,8 @@ function payloadStatePath(root) {
 function writePayloadState(root, active, state, reason = '', writer = 'deploy.sh') {
   if (!['healthy', 'unverified', 'held'].includes(state)) throw new Error(`payload state: unknown state ${state}`);
   const target = payloadStatePath(root);
-  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
   const record = { format: 1, active: String(active || ''), state, reason: String(reason), updated_at: new Date().toISOString(), writer };
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(record)}\n`, { flag: 'wx' });
-    fs.renameSync(temp, target);
-  } finally {
-    fs.rmSync(temp, { force: true });
-  }
-  return target;
+  return writeDurable(target, `${JSON.stringify(record)}\n`);
 }
 
 function readPayloadState(root) {
@@ -1345,8 +1487,10 @@ module.exports = {
   legacyCapturePreflight,
   resumeInterruptedSwitch,
   switchPreflight,
+  imageLayerDir,
   clearLegacyCapture,
   verifyPair,
+  markStaged,
   markActivated,
   markHealthy,
   payloadTrusted,
