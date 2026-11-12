@@ -881,7 +881,13 @@ test('after an application deploy the service runs the deployed bootstrap, not t
 // deployed one on a tie, and a copy without the line counts as 0. The banner
 // must name the same copy as the service.
 test('the service and the banner pick the bootstrap copy with the higher revision', () => {
-  const mark = (n) => (n === null ? "'use strict';\n" : `'use strict';\nconst OSI_BOOTSTRAP_REVISION = ${n};\n`);
+  // A string is the value as written on the line ("raw:" gives the whole line).
+  const mark = (n) => {
+    if (n === null) return "'use strict';\n";
+    if (typeof n === 'string' && n.startsWith('raw:')) return `'use strict';\n${n.slice(4)}\n`;
+    return `'use strict';\nconst OSI_BOOTSTRAP_REVISION = ${n};\n`;
+  };
+  const HUGE = '999999999999999999999999999999';
   const cases = [
     { name: 'old image without a mark, deployed copy marked (S-5)', rom: null, srv: 1, expect: 'srv' },
     { name: 'newer image after a sysupgrade, older deployed copy', rom: 2, srv: 1, expect: 'rom' },
@@ -889,6 +895,16 @@ test('the service and the banner pick the bootstrap copy with the higher revisio
     { name: 'same revision', rom: 3, srv: 3, expect: 'srv' },
     { name: 'deployed copy newer than the image', rom: 2, srv: 5, expect: 'srv' },
     { name: 'neither marked', rom: null, srv: null, expect: 'srv' },
+    // The supported range is 1 to 999999; anything else counts as 0, logged.
+    { name: 'top of the range, deployed newer', rom: 999998, srv: 999999, expect: 'srv' },
+    { name: 'top of the range, image newer', rom: 999999, srv: 1, expect: 'rom' },
+    { name: 'oversized deployed revision', rom: 1, srv: HUGE, expect: 'rom', logs: 'srv' },
+    { name: 'oversized image revision', rom: HUGE, srv: 1, expect: 'srv', logs: 'rom' },
+    { name: 'seven digits in the deployed copy', rom: 2, srv: 1000000, expect: 'rom', logs: 'srv' },
+    { name: 'a leading zero in the deployed copy', rom: 1, srv: '0002', expect: 'rom', logs: 'srv' },
+    { name: 'a malformed deployed revision against an unmarked image', rom: null, srv: "'7'", expect: 'srv', logs: 'srv' },
+    { name: 'a trailing comment on the deployed line', rom: 1, srv: 'raw:const OSI_BOOTSTRAP_REVISION = 2; // newer', expect: 'rom', logs: 'srv' },
+    { name: 'zero in the image copy', rom: 0, srv: 1, expect: 'srv', logs: 'rom' },
   ];
   const select = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('bootstrap_revision() {'), BOOTSTRAP_INIT.indexOf('boot() {'));
   for (const c of cases) {
@@ -898,12 +914,23 @@ test('the service and the banner pick the bootstrap copy with the higher revisio
     fs.mkdirSync(path.dirname(rom), { recursive: true }); fs.mkdirSync(path.dirname(srv), { recursive: true });
     fs.writeFileSync(rom, mark(c.rom)); fs.writeFileSync(srv, mark(c.srv));
     const expected = c.expect === 'srv' ? srv : rom;
+    writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', `echo "$*" >> ${JSON.stringify(fx.log)}`]);
     const service = runShell(`BOOTSTRAP_ROM=${JSON.stringify(rom)}\nBOOTSTRAP_FALLBACK=${JSON.stringify(srv)}\n${select}\nselect_bootstrap_script`, { PATH: childPath(fx.binDir) });
     assert.equal(service.status, 0, service.stderr);
+    assert.equal(service.stderr, '', `service: no shell error such as "integer expected": ${c.name}`);
     assert.equal(service.stdout.trim(), expected, `service: ${c.name}`);
+    const logged = fs.readFileSync(fx.log, 'utf8');
+    if (c.logs) {
+      assert.match(logged, new RegExp(`OSI_BOOTSTRAP_REVISION in \\S*${c.logs}/chirpstack-bootstrap\\.js is not 1 to 999999; counting it as 0`), `service log: ${c.name}`);
+      assert.equal(logged.trim().split('\n').length, 1, `service: one log line: ${c.name}`);
+    } else {
+      assert.equal(logged, '', `service: nothing logged: ${c.name}`);
+    }
     const banner = runShell(`set -eu\nOSI_BOOTSTRAP_INIT=${JSON.stringify(fx.init)}\nOSI_BOOTSTRAP_STAMP=${JSON.stringify(fx.stampFile)}\nCHIRPSTACK_ENV_FILE=${JSON.stringify(fx.envFile)}\nBOOTSTRAP_SCRIPT_ROM=${JSON.stringify(rom)}\nBOOTSTRAP_SCRIPT_FALLBACK=${JSON.stringify(srv)}\n${extractFunction('print_bootstrap_note')}\nprint_bootstrap_note`, { PATH: childPath(fx.binDir) });
     assert.equal(banner.status, 0, banner.stderr);
     assert.ok(banner.stdout.includes(expected) && !banner.stdout.includes(c.expect === 'srv' ? rom : srv), `banner: ${c.name}\n${banner.stdout}`);
+    if (c.logs) assert.match(banner.stderr.trim(), /^WARN: OSI_BOOTSTRAP_REVISION in \S+ is not 1 to 999999; counting it as 0$/, `banner warning: ${c.name}: ${banner.stderr}`);
+    else assert.equal(banner.stderr, '', `banner: no warning: ${c.name}`);
   }
 });
 

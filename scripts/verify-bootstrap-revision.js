@@ -22,22 +22,26 @@ const IMAGE_COPIES = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/chirpstack-bootstrap.js',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/chirpstack-bootstrap.js',
 ];
-// The same pattern the init script's sed uses.
-const REVISION_LINE = /^const OSI_BOOTSTRAP_REVISION = ([0-9]+);/m;
+// The supported range, shared with osi-bootstrap's bootstrap_revision() and
+// deploy.sh's print_bootstrap_note(): 1 to 999999, digits only, no leading
+// zero, so the shell's -ge can always compare it. The shell side counts a
+// value outside the range as 0; this check keeps one out of the repository.
+const REVISION_LINE = /^const OSI_BOOTSTRAP_REVISION = ([1-9][0-9]{0,5});\s*$/;
 
+// The declared revision; 0 without the line; null when the line is
+// duplicated, malformed or outside the range.
 function revisionOf(source) {
   const lines = source.split('\n').filter((line) => line.startsWith('const OSI_BOOTSTRAP_REVISION'));
   if (!lines.length) return 0;
-  const match = source.match(REVISION_LINE);
-  if (lines.length !== 1 || !match) return null;
-  return Number(match[1]);
+  const match = lines.length === 1 ? lines[0].match(REVISION_LINE) : null;
+  return match ? Number(match[1]) : null;
 }
 
 function check({ root, baseRef }) {
   const problems = [];
   const current = fs.readFileSync(path.join(root, SCRIPT_REL), 'utf8');
   const revision = revisionOf(current);
-  if (revision === null) problems.push(`${SCRIPT_REL}: OSI_BOOTSTRAP_REVISION must be one line "const OSI_BOOTSTRAP_REVISION = <n>;"`);
+  if (revision === null) problems.push(`${SCRIPT_REL}: OSI_BOOTSTRAP_REVISION must be one line "const OSI_BOOTSTRAP_REVISION = <n>;" with <n> from 1 to 999999, digits only, no leading zero`);
   else if (revision < 1) problems.push(`${SCRIPT_REL}: OSI_BOOTSTRAP_REVISION is missing`);
   for (const rel of IMAGE_COPIES) {
     const copy = path.join(root, rel);

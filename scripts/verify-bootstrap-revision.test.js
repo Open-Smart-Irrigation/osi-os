@@ -47,6 +47,26 @@ test('revisionOf reads the line the init script reads, 0 without it, null when m
   assert.equal(revisionOf(v(1) + v(2)), null);
 });
 
+// The range the shell can compare, shared with osi-bootstrap and deploy.sh.
+test('revisionOf accepts 1 to 999999, digits only, no leading zero', () => {
+  assert.equal(revisionOf(v(1)), 1);
+  assert.equal(revisionOf(v(999999)), 999999);
+  for (const bad of ['0', '1000000', '999999999999999999999999999999', '0002', '-1', '1e3', '1.5', ' 7']) {
+    assert.equal(revisionOf(`const OSI_BOOTSTRAP_REVISION = ${bad};\n`), null, bad);
+  }
+  assert.equal(revisionOf('const OSI_BOOTSTRAP_REVISION = 2; // newer\n'), null, 'a trailing comment');
+});
+
+test('an oversized revision fails the check, also when it is higher than the base', (t) => {
+  const root = repo(t, v(3, 'a();\n'));
+  write(root, v('999999999999999999999999999999', 'b();\n'));
+  assert.match(check({ root, baseRef: 'base' }).join('\n'), /from 1 to 999999, digits only, no leading zero/);
+  write(root, v(999999, 'b();\n'));
+  assert.deepEqual(check({ root, baseRef: 'base' }), []);
+  write(root, v(1000000, 'c();\n'));
+  assert.match(check({ root, baseRef: 'base' }).join('\n'), /from 1 to 999999/);
+});
+
 test('a change to the script without a higher revision fails; with one it passes', (t) => {
   const root = repo(t, v(3, 'a();\n'));
   assert.deepEqual(check({ root, baseRef: 'base' }), []);

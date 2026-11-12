@@ -12,11 +12,31 @@ stamp_valid() {
 	return 0
 }
 
-# The OSI_BOOTSTRAP_REVISION a bootstrap script declares; 0 without one.
+# The OSI_BOOTSTRAP_REVISION a bootstrap script declares. Supported range:
+# 1 to 999999, digits only, no leading zero; scripts/verify-bootstrap-revision.js
+# enforces the same rule in CI. A copy without the line counts as 0. A value
+# outside the range counts as 0 too, with one log line, so the -ge comparison
+# below never sees a number the shell cannot compare.
 bootstrap_revision() {
-	local revision
-	revision="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$1" 2>/dev/null | head -n 1)"
-	echo "${revision:-0}"
+	local line revision
+	if [ ! -r "$1" ]; then
+		logger -t osi-bootstrap "cannot read $1 for OSI_BOOTSTRAP_REVISION; counting it as 0"
+		echo 0
+		return 0
+	fi
+	line="$(grep '^const OSI_BOOTSTRAP_REVISION' "$1" 2>/dev/null | head -n 1)"
+	if [ -z "$line" ]; then
+		echo 0
+		return 0
+	fi
+	revision="$(printf '%s\n' "$line" | sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);[[:space:]]*$/\1/p')"
+	case "$revision" in
+		[1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9][0-9])
+			echo "$revision" ;;
+		*)
+			logger -t osi-bootstrap "OSI_BOOTSTRAP_REVISION in $1 is not 1 to 999999; counting it as 0"
+			echo 0 ;;
+	esac
 }
 
 # deploy.sh writes the current script to /srv/node-red and leaves the image

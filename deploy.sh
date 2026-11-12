@@ -598,13 +598,36 @@ enable_osi_bootstrap() {
 # and rewrite the env file. "Provisioned" uses the service's own test (stamp
 # plus a sensors application UUID in the env file).
 print_bootstrap_note() {
+    # The same rule as osi-bootstrap's bootstrap_revision(): 1 to 999999,
+    # digits only, no leading zero (scripts/verify-bootstrap-revision.js).
+    # No line, or a value outside the range, counts as 0; the latter with one
+    # warning, so -ge never sees a number the shell cannot compare.
+    pbn_revision() {
+        if [ ! -r "$1" ]; then
+            echo "WARN: cannot read $1 for OSI_BOOTSTRAP_REVISION; counting it as 0" >&2
+            echo 0
+            return 0
+        fi
+        pbn_line="$(grep '^const OSI_BOOTSTRAP_REVISION' "$1" 2>/dev/null | head -n 1)"
+        if [ -z "$pbn_line" ]; then
+            echo 0
+            return 0
+        fi
+        pbn_value="$(printf '%s\n' "$pbn_line" | sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);[[:space:]]*$/\1/p')"
+        case "$pbn_value" in
+            [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9][0-9]) echo "$pbn_value" ;;
+            *)
+                echo "WARN: OSI_BOOTSTRAP_REVISION in $1 is not 1 to 999999; counting it as 0" >&2
+                echo 0 ;;
+        esac
+    }
     pbn_script="$BOOTSTRAP_SCRIPT_ROM"
     if [ -f "$BOOTSTRAP_SCRIPT_FALLBACK" ]; then
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
         if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
-            pbn_rev_srv="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$BOOTSTRAP_SCRIPT_FALLBACK" 2>/dev/null | head -n 1)"
-            pbn_rev_rom="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$BOOTSTRAP_SCRIPT_ROM" 2>/dev/null | head -n 1)"
-            [ "${pbn_rev_srv:-0}" -ge "${pbn_rev_rom:-0}" ] || pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+            pbn_rev_srv="$(pbn_revision "$BOOTSTRAP_SCRIPT_FALLBACK")"
+            pbn_rev_rom="$(pbn_revision "$BOOTSTRAP_SCRIPT_ROM")"
+            [ "$pbn_rev_srv" -ge "$pbn_rev_rom" ] || pbn_script="$BOOTSTRAP_SCRIPT_ROM"
         fi
     fi
     echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
