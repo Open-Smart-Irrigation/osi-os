@@ -561,6 +561,30 @@ return (async () => {
 })().then(function(msgs) { return msgs.length ? [msgs] : null; });
 }
 
+// The 60 s tick behind "Observe valve-fired opens + trigger backfill": moved here unchanged from
+// the flow node, which now only loads this module.
+function liveValveObserve({ msg, node, osiLib }) {
+const dbLoad = osiLib.require('osi-db-helper');
+const vcLoad = osiLib.require('osi-valve-control');
+if (!dbLoad.ok || !vcLoad.ok) {
+  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');
+  node.error('Valve control helpers unavailable: ' + detail, msg);
+  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };
+  return null;
+}
+const dbHelper = dbLoad.value; const VC = vcLoad.value;
+return (async () => {
+  const db = new dbHelper.Database('/data/db/farming.db');
+  try {
+    const o = await VC.runObserveTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });
+    const b = await VC.runTriggerBackfill({ db: db, warn: function(m) { node.warn(m); } });
+    if (o.created || b.updated) node.status({ fill: 'green', shape: 'dot', text: 'observed ' + o.created + ' backfilled ' + b.updated });
+  } catch (e) { node.error('valve-observe: ' + (e && e.message ? e.message : e)); }
+  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }
+  return null;
+})();
+}
+
 function liveCloudCommand({ msg, node, env, chirpstack, osiLib }) {
 // Applies the cloud valve commands (schedules, settings, CANCEL_VALVE_ACTUATION) through
 // osi-valve-control applyCloudCommand, as the REST routes do. They carry only a
@@ -642,5 +666,6 @@ module.exports = {
   liveValveApiRouter,
   liveValveOnce,
   liveValveClock,
+  liveValveObserve,
   liveCloudCommand
 };
