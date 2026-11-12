@@ -5364,24 +5364,9 @@
     "x": 920,
     "y": 120,
     "wires": [
-      [
-        "dendro-readings-sqlite"
-      ]
+      []
     ],
     "func": "const d = msg.formattedData;\nif (!d || d.detectedMode === 9) return null;\nif (!d.devEui || d.dendroValid === null || d.dendroValid === undefined || d.positionMm === null || d.positionMm === undefined) return null;\nconst posUm = Math.round(d.positionMm * 1000);\nconst posRawUm = d.positionRawMm != null ? Math.round(d.positionRawMm * 1000) : null;\nconst dUm = d.deltaMm != null ? Math.round(d.deltaMm * 1000) : null;\nconst spike = dUm != null && Math.abs(dUm) > 200 ? 1 : 0;\nlet valid = d.dendroValid;\nlet reason = null;\nif (!valid) { reason = 'out_of_range'; }\nfunction ss(v) { return v == null ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\"; }\nfunction sn(v) { return v == null || !isFinite(Number(v)) ? 'NULL' : String(Number(v)); }\nmsg.topic = [\n  'INSERT INTO dendrometer_readings(deveui,position_um,position_raw_um,adc_v,adc_ch0v,adc_ch1v,dendro_ratio,dendro_mode_used,bat_v,is_valid,invalid_reason,is_outlier,dendro_saturated,dendro_saturation_side,recorded_at)VALUES(',\n  ss(d.devEui) + ',' + sn(posUm) + ',' + sn(posRawUm) + ',' + sn(d.adcV) + ',' + sn(d.adcV) + ',' + sn(d.adcCh1V) + ',' + sn(d.dendroRatio) + ',' + ss(d.dendroModeUsed) + ',' + sn(d.batV) + ',' + valid + ',' + ss(reason) + ',' + spike + ',' + sn(d.dendroSaturated) + ',' + ss(d.dendroSaturationSide) + ',' + ss(d.timestamp),\n  ');'\n].join('\\n');\nmsg.payload = msg.topic;\nnode.status({ fill: spike ? 'yellow' : (valid ? 'green' : 'red'), shape: 'dot', text: (valid ? posUm + ' µm' : (reason || 'invalid')) + (spike ? ' SPIKE' : '') });\nreturn msg;"
-  },
-  {
-    "id": "dendro-readings-sqlite",
-    "type": "sqlite",
-    "z": "lsn50-tab",
-    "name": "Dendrometer Readings Insert",
-    "wires": [
-      [
-        "lsn50-debug"
-      ]
-    ],
-    "x": 1130,
-    "y": 120
   },
   {
     "id": "dendro-analytics-tab",
@@ -15551,6 +15536,128 @@
       ],
       [
         "9d5e3035c3d069c4"
+      ]
+    ]
+  },
+  {
+    "id": "account-link-auth-http-catch",
+    "type": "catch",
+    "z": "account-link-tab",
+    "name": "Answer HTTP auth exceptions",
+    "scope": [
+      "al-link-validate"
+    ],
+    "uncaught": false,
+    "x": 3040,
+    "y": 620,
+    "wires": [
+      [
+        "account-link-auth-error-link-out"
+      ]
+    ]
+  },
+  {
+    "id": "account-link-auth-error-link-out",
+    "type": "link out",
+    "z": "account-link-tab",
+    "name": "HTTP auth error response",
+    "mode": "link",
+    "links": [
+      "auth-http-error-link-in"
+    ],
+    "x": 3260,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "sync-force-auth-http-catch",
+    "type": "catch",
+    "z": "93b1537a596e0e6d",
+    "name": "Answer HTTP auth exceptions",
+    "scope": [
+      "sync-force-build"
+    ],
+    "uncaught": false,
+    "x": 1530,
+    "y": 1420,
+    "wires": [
+      [
+        "sync-force-auth-error-link-out"
+      ]
+    ]
+  },
+  {
+    "id": "sync-force-auth-error-link-out",
+    "type": "link out",
+    "z": "93b1537a596e0e6d",
+    "name": "HTTP auth error response",
+    "mode": "link",
+    "links": [
+      "auth-http-error-link-in"
+    ],
+    "x": 1750,
+    "y": 1420,
+    "wires": []
+  },
+  {
+    "id": "auth-http-error-link-in",
+    "type": "link in",
+    "z": "auth-tab",
+    "name": "HTTP auth errors",
+    "links": [
+      "account-link-auth-error-link-out",
+      "sync-force-auth-error-link-out"
+    ],
+    "x": 880,
+    "y": 620,
+    "wires": [
+      [
+        "auth-http-error-has-response"
+      ]
+    ]
+  },
+  {
+    "id": "auth-http-error-has-response",
+    "type": "switch",
+    "z": "auth-tab",
+    "name": "HTTP requests only",
+    "property": "res",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "nnull"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 1,
+    "x": 1040,
+    "y": 620,
+    "wires": [
+      [
+        "auth-http-error-restore"
+      ]
+    ]
+  },
+  {
+    "id": "auth-http-error-restore",
+    "type": "change",
+    "z": "auth-tab",
+    "name": "Use original thrown HTTP error",
+    "rules": [
+      {
+        "t": "move",
+        "p": "_error",
+        "pt": "msg",
+        "to": "error",
+        "tot": "msg"
+      }
+    ],
+    "x": 1300,
+    "y": 620,
+    "wires": [
+      [
+        "auth-catch-http500"
       ]
     ]
   },
