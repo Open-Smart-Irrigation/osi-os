@@ -510,3 +510,76 @@ test('A-1 GET /api/valves: a legacy lowercase identifier does not fail the entir
     assert.deepEqual(out.payload.valves, [], 'the shared command policy still refuses the noncanonical device');
   } finally { fixture.cleanup(); }
 });
+
+
+// Council S1, adapted from the gate runner's Q2 probe: revoke access while the
+// request waits behind the real valve writer. Observe the queue call rather
+// than sleeping, so a slow first scope check cannot conceal a missing recheck.
+const authDispatch = require('./dispatch');
+async function authWriteSnapshot(db) {
+  return {
+    schedules: await db.all('SELECT * FROM valve_schedules ORDER BY id'),
+    settings: await db.all('SELECT * FROM valve_settings'),
+    pushes: await db.all('SELECT * FROM valve_schedule_pushes'),
+  };
+}
+for (const [condition, revoke, denied] of [
+  ['account disabled', "UPDATE users SET disabled_at=datetime('now') WHERE id=1", 403],
+  ['zone access lost', 'UPDATE devices SET irrigation_zone_id=NULL', 404],
+]) {
+  for (const [method, suffix, body] of AUTH_ROUTES.filter(([method]) => method !== 'GET')) {
+    test(`A-1 writer recheck ${method} ${suffix}: ${condition} while queued`, { timeout: 5000 }, async () => {
+      const fixture = await authFixture('valid grant');
+      const realWriter = authDispatch.withValveWriter;
+      let releaseWriter;
+      const held = new Promise(resolve => { releaseWriter = resolve; });
+      const holder = realWriter(FIXTURE_EUI, () => held);
+      let pending;
+      try {
+        const before = await authWriteSnapshot(fixture.db);
+        let reachedWriter;
+        const waiting = new Promise(resolve => { reachedWriter = resolve; });
+        authDispatch.withValveWriter = (eui, fn) => {
+          reachedWriter();
+          return realWriter(eui, fn);
+        };
+        // Start outside the holder's async context, so this request queues.
+        pending = new Promise((resolve, reject) => setImmediate(() =>
+          scopedCall(fixture, method, suffix, body).then(resolve, reject)));
+        await Promise.race([waiting, pending.then(() => { throw new Error('request returned before reaching the writer'); })]);
+        assert.deepEqual(await authWriteSnapshot(fixture.db), before, 'nothing written while queued');
+        await fixture.db.run(revoke);
+        releaseWriter();
+        await holder;
+        const { out, built } = await pending;
+        assert.equal(out.statusCode, denied, JSON.stringify(out.payload));
+        assert.deepEqual(await authWriteSnapshot(fixture.db), before, 'refusal writes no schedule, settings or push rows');
+        assert.equal(built, 0, 'refusal must not construct or call the transport');
+      } finally {
+        releaseWriter();
+        await Promise.allSettled([holder, pending]);
+        authDispatch.withValveWriter = realWriter;
+        fixture.cleanup();
+      }
+    });
+  }
+}
+
+test('A-1 GET /api/valves: disabled account owning no valve is refused', async () => {
+  const fixture = await authFixture('disabled account');
+  try {
+    await fixture.db.run('UPDATE devices SET user_id=2');
+    const { out, built } = await scopedCall(fixture, 'GET', null);
+    assert.equal(out.statusCode, 403);
+    assert.equal(built, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test('A-1 GET /api/valves: scoped flag off preserves the disabled owner list', async () => {
+  const fixture = await authFixture('disabled account');
+  try {
+    const { out } = await scopedCall(fixture, 'GET', null, undefined, '0');
+    assert.equal(out.statusCode, 200);
+    assert.deepEqual(out.payload.valves.map(valve => valve.device_eui), [FIXTURE_EUI]);
+  } finally { fixture.cleanup(); }
+});

@@ -188,7 +188,7 @@ async function ownedValve(db, eui, userId) {
 }
 
 // Match the manual command boundary's fresh scope check, then retain ownedValve.
-// The extra owner restriction is intentional pending a separate policy decision.
+// Decided policy: a zone grant does not permit operating another user's valve.
 async function freshValveScope(db, auth, eui) {
   const scope = require('../osi-scope-helper');
   const actor = await db.get('SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1', [auth.userId, auth.username]);

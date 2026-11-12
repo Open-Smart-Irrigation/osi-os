@@ -1,8 +1,9 @@
 # Valve route authorization repair
 
 The valve schedule and settings API must enforce the manual command path's current
-effective policy: fresh scoped access followed by device ownership. The separate
-question of granting valve operation to a non-owner remains open with the owner.
+effective policy: fresh scoped access followed by device ownership. The owner
+decided on 2026-11-12 that a zone grant does not permit operating another user's
+valve.
 This patch grants nobody new access.
 
 ## Scope and implementation
@@ -21,6 +22,8 @@ Mirror every changed file to the matching bcm2709 directory.
    before the existing owner check. Reuse that sequence at existing transaction
    checks. Take the valve writer before the scheduler-status recheck. The list
    route checks the current account and returns only its owned, accessible valves.
+   With the flag on, an owner's valve in no zone is omitted from the list and
+   answers 404 on the per-valve routes, as at the command boundary.
 3. In `live-transport.js`, forward `OSI_SCOPED_ACCESS` into the API environment.
    Resolve scope only when this flag is exactly `1`, preserving the flag-off path.
 4. Run the API tests, the valve module suite serially, profile parity, helper
