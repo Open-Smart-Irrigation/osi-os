@@ -1188,6 +1188,97 @@ function rollbackTarget(root, servedStamp, deployStamp = '') {
   return servedStamp;
 }
 
+function readHealth(root, stamp) {
+  try {
+    const record = JSON.parse(fs.readFileSync(healthPath(root, stamp), 'utf8'));
+    return record && record.format === 1 && record.payload_stamp === stamp ? record : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// A payload whose health check ran and failed: known bad, never a target.
+function markFailed(root, stamp, reason = '') {
+  return writeHealth(root, stamp, { state: 'failed', reason: String(reason) });
+}
+
+// The gateway's payload state, for status and for the next deploy:
+// /srv/node-red/payload-state.json, written only through this helper (by
+// deploy.sh and by node-red.init's start-up step). Format 1:
+//   { "format": 1, "active": "<stamp>", "state": "healthy" | "unverified" | "held",
+//     "reason": "<one sentence>", "updated_at": "<ISO 8601>", "writer": "deploy.sh" | "node-red.init" }
+// osi-health-helper reports state "unverified" or "held" as health_state, so
+// it reaches the heartbeat and the local health summary.
+const PAYLOAD_STATE = 'payload-state.json';
+
+function payloadStatePath(root) {
+  return path.join(root, PAYLOAD_STATE);
+}
+
+function writePayloadState(root, active, state, reason = '', writer = 'deploy.sh') {
+  if (!['healthy', 'unverified', 'held'].includes(state)) throw new Error(`payload state: unknown state ${state}`);
+  const target = payloadStatePath(root);
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  const record = { format: 1, active: String(active || ''), state, reason: String(reason), updated_at: new Date().toISOString(), writer };
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(record)}\n`, { flag: 'wx' });
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+  return target;
+}
+
+function readPayloadState(root) {
+  try {
+    const record = JSON.parse(fs.readFileSync(payloadStatePath(root), 'utf8'));
+    return record && record.format === 1 ? record : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// The active payload when a deploy switched to it and was cut before its
+// health check ran ("activated"): not known bad, only unchecked.
+function unverifiedActive(root) {
+  const active = activeStamp(root) || currentStamp(root);
+  if (!active) return null;
+  const record = readHealth(root, active);
+  return record && record.state === 'activated' ? active : null;
+}
+
+const UNVERIFIED_REASON = 'switched in by a deploy that was cut before its health check; it runs because it matches the database';
+
+// node-red.init, before Node-RED starts: an unchecked active payload still
+// starts (it is the code that matches the database; older code never starts
+// on a migrated database), and the state file says it is unverified.
+// Returns the line node-red.init logs, or null.
+function recordBootState(root) {
+  const active = unverifiedActive(root);
+  if (!active) return null;
+  const current = readPayloadState(root);
+  if (current && current.active === active && current.state !== 'healthy') return null;
+  writePayloadState(root, active, 'unverified', UNVERIFIED_REASON, 'node-red.init');
+  return `WARN: payloads/${active} runs unverified: ${UNVERIFIED_REASON}`;
+}
+
+// What the next deploy does first when the active payload is unchecked:
+// "<payload>|<migrated 0/1>|<fallback>|<restore target>", or null.
+// - fallback: the newest complete, trusted payload recorded for the current
+//   schema. Empty means the cut deploy migrated the database (or the schema
+//   is unknown): only the unchecked payload matches it, so its owed health
+//   check decides, and a failure holds Node-RED stopped.
+// - restore target: the payload a held gateway returns to after restoring
+//   the pre-migration backup.
+function owedCheckPlan(root, schemaHead = '', schemaLedger = '') {
+  const active = unverifiedActive(root);
+  if (!active) return null;
+  const others = listStamps(root).filter((stamp) => stamp !== active).reverse()
+    .filter((stamp) => verifyPair(root, stamp) && payloadTrusted(root, stamp));
+  const fits = schemaHead === '' ? null : others.find((stamp) => verifyCompatibility(root, stamp, schemaHead, schemaLedger));
+  return [active, fits ? '0' : '1', fits || '', others[0] || ''].join('|');
+}
+
 function listStamps(root) {
   try {
     return fs.readdirSync(payloadsRoot(root))
@@ -1260,6 +1351,13 @@ module.exports = {
   markHealthy,
   payloadTrusted,
   rollbackTarget,
+  readHealth,
+  markFailed,
+  writePayloadState,
+  readPayloadState,
+  unverifiedActive,
+  recordBootState,
+  owedCheckPlan,
   writeCompatibility,
   compatibilityExists,
   verifyCompatibility,

@@ -1423,6 +1423,40 @@ record_deploy_hold() {
     printf '%s\n' "$rdh_line" >&2
 }
 
+# The health check a deploy owed when it was cut between its switch and its
+# check: restart Node-RED on the active payload and require the boot node's
+# completion marker and a reachable /gui, as the deploy's own check does.
+run_owed_health_check() {
+    if ! command -v logread >/dev/null 2>&1; then
+        echo "WARN: logread is unavailable; the owed health check cannot prove schema initialization" >&2
+        return 1
+    fi
+    owed_mark="$(logread 2>/dev/null | wc -l)"
+    case "$owed_mark" in ''|*[!0-9]*) owed_mark=0 ;; esac
+    if ! "$NODE_RED_INIT" restart; then
+        return 1
+    fi
+    owed_timeout="${NODE_RED_INIT_TIMEOUT:-45}"
+    case "$owed_timeout" in ''|*[!0-9]*|0) owed_timeout=45 ;; esac
+    owed_elapsed=0
+    owed_result=""
+    while [ "$owed_elapsed" -lt "$owed_timeout" ]; do
+        owed_tail="$(logread 2>/dev/null | tail -n "+$((owed_mark + 1))")"
+        if printf '%s\n' "$owed_tail" | grep -q "devices rebuild ABORTED"; then
+            owed_result="ABORTED"
+            break
+        fi
+        if printf '%s\n' "$owed_tail" | grep -q "sync-init: schema init complete"; then
+            owed_result="OK"
+            break
+        fi
+        sleep 2
+        owed_elapsed=$((owed_elapsed + 2))
+    done
+    [ "$owed_result" = "OK" ] || return 1
+    wait_for_node_red_health "${NODE_RED_HEALTH_TIMEOUT:-30}"
+}
+
 deploy_exit_handler() {
     exit_status="$1"
     trap - EXIT INT TERM
@@ -1449,6 +1483,7 @@ deploy_exit_handler() {
             fi
             hold_identityd_stopped || true
             record_deploy_hold
+            swap_call writePayloadState "${DEPLOY_STAMP:-}" held "it failed after migrating the database and no payload that passed its health check fits it; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null 2>&1 || true
         fi
     elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
         { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
@@ -2321,6 +2356,59 @@ if ! legacy_preflight_report="$(swap_call legacyCapturePreflight "/srv/node-red/
 fi
 [ -z "$legacy_preflight_report" ] || printf '%s\n' "$legacy_preflight_report"
 # legacy capture preflight end
+
+# owed health check begin
+# A deploy cut between its switch and its health check leaves the active
+# payload unchecked. Unchecked is not failed: when that deploy migrated the
+# database, it is the only code that matches it, and stopping it would stop
+# the farm's irrigation for a reason nobody has observed. So this deploy
+# first runs the check that was owed. It passes: the payload is healthy and a
+# rollback target. It fails on a migrated database: Node-RED is held stopped
+# with the one-line restore instruction (DD10). It fails on a database it did
+# not migrate: the gateway returns to the newest healthy payload that fits.
+if [ -f "$DB_PATH" ]; then
+    owed_schema="$(schema_compatibility_metadata 2>/dev/null || true)"
+else
+    owed_schema=""
+fi
+owed_plan="$(swap_call owedCheckPlan "${owed_schema%%|*}" "${owed_schema#*|}" 2>/dev/null || true)"
+if [ -n "$owed_plan" ]; then
+    owed_payload="${owed_plan%%|*}"
+    owed_rest="${owed_plan#*|}"
+    owed_migrated="${owed_rest%%|*}"
+    owed_rest="${owed_rest#*|}"
+    owed_fallback="${owed_rest%%|*}"
+    owed_restore="${owed_rest#*|}"
+    echo "--- Owed health check: payloads/$owed_payload was switched in by a deploy cut before its check ---"
+    if run_owed_health_check; then
+        swap_call markHealthy "$owed_payload" >/dev/null
+        swap_call writePayloadState "$owed_payload" healthy "its owed health check passed" deploy.sh >/dev/null
+        echo "OK: payloads/$owed_payload passed its owed health check"
+    else
+        swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
+        if [ "$owed_migrated" = "1" ] || [ -z "$owed_fallback" ]; then
+            hold_node_red_stopped || true
+            owed_saved_deploy="${DEPLOY_STAMP:-}"
+            owed_saved_prev="${PREV_STAMP:-}"
+            DEPLOY_STAMP="$owed_payload"
+            PREV_STAMP="$owed_restore"
+            record_deploy_hold
+            swap_call writePayloadState "$owed_payload" held "its owed health check failed and only it matches the migrated database; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null || true
+            DEPLOY_STAMP="$owed_saved_deploy"
+            PREV_STAMP="$owed_saved_prev"
+            exit 1
+        fi
+        echo "WARN: payloads/$owed_payload failed its owed health check; returning to payloads/$owed_fallback, which fits the database" >&2
+        if ! swap_call flipTo "$owed_fallback" "$GUI_ROOT" >/dev/null || \
+           ! swap_call verifyPair "$owed_fallback" "$GUI_ROOT" >/dev/null || \
+           ! "$NODE_RED_INIT" restart; then
+            echo "ERROR: could not return to payloads/$owed_fallback; refusing the deploy" >&2
+            exit 1
+        fi
+        swap_call writePayloadState "$owed_fallback" healthy "payloads/$owed_payload failed its owed health check; returned to this payload" deploy.sh >/dev/null || true
+    fi
+fi
+# owed health check end
 
 DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
 capture_previous_firmware_version
@@ -3486,6 +3574,7 @@ if [ "$PROBE_OK" = "0" ]; then
     if ! swap_call markHealthy "$DEPLOY_STAMP" >/dev/null; then
         echo "WARN: could not record payloads/$DEPLOY_STAMP as healthy; the next deploy will not return to it" >&2
     fi
+    swap_call writePayloadState "$DEPLOY_STAMP" healthy "its deploy health check passed" deploy.sh >/dev/null || true
     swap_call clearLegacyCapture >/dev/null || true
     swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
 else
