@@ -26,7 +26,7 @@ const DEVIATIONS = {
   'report-order': { status: 'limit of the display', reason: 'The state shown is the last report the gateway accepted, not the valve\'s state. With a synchronised clock a report whose time is older than one already accepted is not accepted; v0.8.1 took whatever arrived last. That hides a delayed OPEN report of a valve that has closed since (sequence "two hours late"), and it also hides newer reports after the clock was set back, until the clock has passed the time of the newest report accepted before (sequence "set back four hours"). Nothing is decided from the state shown. Ordering across clock corrections is stage 2.' },
   'command-expiry': { status: 'exception to the v0.8.1 rule', reason: 'A cloud OPEN_FOR_DURATION that carries its own expires_at keeps the sender\'s intent, by the gateway\'s wall clock: it is not sent after that time, and before it is queued with that time as queue expiry. v0.8.1 ignored the field. With a wrong gateway clock the command is refused early or runs late, and dropping it can let a later, longer open run that the valve would have ignored.' },
   'duplicate-command': { status: 'kept', reason: 'A command id that was already handled is answered with the stored result and sends nothing. v0.8.1 failed on the primary key of its expectation row, sent nothing either, and logged an error.' },
-  'cancel-target': { status: 'one direction not safer, for decision', reason: 'Which opens a cancel finds active follows the records, and the records are this release\'s. Right after a run, before v0.8.1\'s monitor had marked it, v0.8.1 answered "cancelled" with nothing to take out; here the reports have marked the run and the answer is "No active actuation". In the other direction, two opens that were queued together stay active here for about an hour after the one run they produced (the report fits both), where v0.8.1 ended both on the CLOSED report: an unnamed cancel of a third open in that hour is refused as ambiguous here and was carried out by v0.8.1. Not safer; left, because the way out is either v0.8.1\'s rule that ends commands from the state shown or a cancel that picks a target nobody named (#428).' },
+  'cancel-target': { status: 'follows the records; safer where it differs in what is sent', reason: 'Which opens a cancel finds active follows the records, and the records are this release\'s. (1) Right after a run, before v0.8.1\'s monitor had marked it, v0.8.1 answered "cancelled" with nothing to take out; here the reports have marked the run and the answer is "No active actuation". (2) A cancel that names no open while several records are active: v0.8.1 refused it, also when only one of them still had its open in the queue (the other run was over, its OPEN report lost), and the valve ran the open the operator had tried to cancel. Here such a cancel reads the queue once and takes the one active open whose queue id, stored when ChirpStack accepted the frame, is still unsent in that reading. With none or several, or a queue that cannot be read, it is refused as before and says why. Nothing is inferred from the state shown, and no target is picked by recency (#428).' },
   'run-history': { status: 'decided: left as it is', reason: 'The history of runs is kept by the rules of #515: a run is marked observed only from reports with a synchronised clock that fit exactly one open. v0.8.1 marked every active open from the state shown, also an open the valve had not fetched or had ignored. Compared in two sequences only; differs in most.' },
 };
 
@@ -53,13 +53,15 @@ function sequence(name, options, script) {
     // The answer to a cancel: v0.8.1's fields are compared above; what this checkout adds is pinned.
     for (const entry of oracle.trace.filter((item) => item.cancelAdded)) assert.deepEqual(entry.cancelAdded, {}, 'v0.8.1 answers a cancel with the compared fields only');
     for (const entry of candidate.trace.slice(candidate.comparedFrom).filter((item) => item.cancelAdded)) {
-      assert.deepEqual(entry.cancelAdded, entry.decision === 'accepted' ? CANCEL_ADDED : { error: (options.cancelErrors || {})[candidate.trace.indexOf(entry)] }, 'what the answer to a cancel says beyond v0.8.1\'s' + traces);
+      const refusal = (options.cancelErrors || {})[candidate.trace.indexOf(entry)];
+      assert.deepEqual(entry.cancelAdded, entry.decision === 'accepted' ? CANCEL_ADDED : (typeof refusal === 'string' ? { error: refusal } : refusal), 'what the answer to a cancel says beyond v0.8.1\'s' + traces);
     }
   });
 }
 
 // What this checkout's answer to an accepted cancel says beyond v0.8.1's. A refused cancel adds
-// the error code beside v0.8.1's message; each sequence names it per step (cancelErrors).
+// the error code beside v0.8.1's message, and an ambiguous refusal says why no target was found
+// (ambiguity); each sequence names both per step (cancelErrors).
 const CANCEL_ADDED = { collateral: null, outcome: 'cancelled', transport_uncertain: false };
 
 // A record that belongs to no command (trigger 'unexplained') says why. 'no_owner': no open of
@@ -615,11 +617,23 @@ sequence('no time signal: a run is over, a new open is cancelled before the valv
   g.wait(1 * MINUTE); await g.uplink();
 });
 
-// v0.8.1 kept the first open active as well (its CLOSED report changed no state) and refused the
-// cancel as ambiguous; the valve then ran the open the operator had tried to cancel. Unchanged.
+// v0.8.1 kept the first open active as well (its CLOSED report changed no state), refused the
+// cancel as ambiguous, and the valve ran the open the operator had tried to cancel. Here the
+// cancel finds one open still in the queue and takes it.
 sequence('the OPEN report of a run is not received, a new open is cancelled before the valve fetches it', {
-  cancelErrors: { 5: 'ambiguous_actuation' },
-  reportOnly: [severalFit('OBSERVED_RUNNING')], // the run of the open that could not be cancelled fits both pending records
+  deviations: [
+    { id: 'cancel-target', step: 5, field: 'decision', oracle: 'refused', candidate: 'accepted' },
+    { id: 'cancel-target', step: 5, field: 'outcome', oracle: 'not cancelled', candidate: 'cancelled' },
+    { id: 'cancel-target', step: 5, field: 'cancelAnswer', oracle: { http: 409, status: null, confirmation: null, cancelled: null, previous_state: null, reason: null, chirpstack_queue_status: null, queue_scope: null, dropped_opens: null, message: 'More than one actuation is active; name the one to cancel (expectation_id)' }, candidate: { http: 200, status: 'cancelled', confirmation: 'queue_flushed', cancelled: 1, previous_state: 'PENDING_OBSERVATION', reason: 'operator_cancel', chirpstack_queue_status: 200, queue_scope: 'target_only', dropped_opens: 0, message: null } },
+    { id: 'cancel-target', step: 5, field: 'queue', oracle: ['2:410F'], candidate: [] },
+    { id: 'cancel-target', step: 6, field: 'delivered', oracle: '2:410F', candidate: null },
+    { id: 'cancel-target', step: 6, field: 'valve', oracle: 'OPEN', candidate: 'CLOSED' },
+    { id: 'cancel-target', step: 7, field: 'reported', oracle: 'OPEN', candidate: 'CLOSED' },
+    { id: 'cancel-target', step: 7, field: 'valve', oracle: 'OPEN', candidate: 'CLOSED' },
+    { id: 'cancel-target', step: 7, field: 'shown', oracle: 'OPEN', candidate: 'CLOSED' },
+    { id: 'cancel-target', step: 8, field: 'shown', oracle: 'OPEN', candidate: 'CLOSED' },
+    { id: 'cancel-target', step: 8, field: 'runs', oracle: [[1, 3], [13.33, 'still open']], candidate: [[1, 3]] },
+  ],
 }, async (g) => {
   await g.open(2);
   g.wait(1 * MINUTE); await g.uplink();
@@ -650,40 +664,56 @@ sequence('a cancel that names its open, with two opens, a setting, a flushing co
   for (let n = 0; n < 4; n += 1) { g.wait(2 * MINUTE); await g.uplink(); }
 });
 
-// The same queue and a cancel that names no open, as the control panel sends it: refused, as in
-// v0.8.1 (#428: a cancel never picks a target nobody named), and both opens run.
-sequence('a cancel that names no open, with two opens, a setting, a flushing command and a CLOSE queued', { cancelErrors: { 5: 'ambiguous_actuation' }, reportOnly: [severalFit()] }, async (g) => {
+// The same queue and a cancel that names no open, as the control panel sends it: both opens are
+// still queued, so it is refused as in v0.8.1 (#428: a cancel never picks a target nobody named),
+// and both opens run.
+sequence('a cancel that names no open, with two opens, a setting, a flushing command and a CLOSE queued', {
+  cancelErrors: { 5: { error: 'ambiguous_actuation', ambiguity: 'several_queued' } },
+  reportOnly: [severalFit()],
+}, async (g) => {
   await queuedBehindTwoOpens(g);
   await g.cancel();
   for (let n = 0; n < 6; n += 1) { g.wait(3 * MINUTE); await g.uplink(); }
 });
 
-// Two opens queued together produce one run whose report fits both; both records stay pending.
-// Here they make the cancel of a third open ambiguous, and the valve runs the open the operator
-// tried to cancel. v0.8.1 had ended both records on the CLOSED report and carried the cancel out.
-sequence('two opens queued together have run once; a third open is cancelled without a name within the hour', {
-  cancelErrors: { 7: 'ambiguous_actuation' },
-  // The second record without a command is the run of the third open: it fits three records.
-  reportOnly: [severalFit(), severalFit('OBSERVED_RUNNING')],
-  deviations: [
-    { id: 'cancel-target', step: 7, field: 'decision', oracle: 'accepted', candidate: 'refused' },
-    { id: 'cancel-target', step: 7, field: 'outcome', oracle: 'cancelled', candidate: 'not cancelled' },
-    { id: 'cancel-target', step: 7, field: 'cancelAnswer', oracle: { http: 200, status: 'cancelled', confirmation: 'queue_flushed', cancelled: 1, previous_state: 'PENDING_OBSERVATION', reason: 'operator_cancel', chirpstack_queue_status: 200, queue_scope: 'target_only', dropped_opens: 0, message: null }, candidate: { http: 409, status: null, confirmation: null, cancelled: null, previous_state: null, reason: null, chirpstack_queue_status: null, queue_scope: null, dropped_opens: null, message: 'More than one actuation is active; name the one to cancel (expectation_id)' } },
-    { id: 'cancel-target', step: 7, field: 'queue', oracle: [], candidate: ['2:410F'] },
-    { id: 'cancel-target', step: 8, field: 'delivered', oracle: null, candidate: '2:410F' },
-    { id: 'cancel-target', step: 8, field: 'valve', oracle: 'CLOSED', candidate: 'OPEN' },
-    { id: 'cancel-target', step: 9, field: 'reported', oracle: 'CLOSED', candidate: 'OPEN' },
-    { id: 'cancel-target', step: 9, field: 'valve', oracle: 'CLOSED', candidate: 'OPEN' },
-    { id: 'cancel-target', step: 9, field: 'shown', oracle: 'CLOSED', candidate: 'OPEN' },
-    { id: 'cancel-target', step: 10, field: 'shown', oracle: 'CLOSED', candidate: 'OPEN' },
-    { id: 'cancel-target', step: 10, field: 'runs', oracle: [[1.2, 3.2]], candidate: [[1.2, 3.2], [13.53, 'still open']] },
-  ],
-}, async (g) => {
+// Two opens queued together produce one run whose report fits both; both records stay pending
+// for about an hour. They do not stand in the way of cancelling a third open: it is the only one
+// still in the queue.
+sequence('two opens queued together have run once; a third open is cancelled without a name within the hour', { reportOnly: [severalFit()] }, async (g) => {
   await g.open(2);
   g.wait(12 * SECOND); await g.open(2);
   g.wait(1 * MINUTE); await g.uplink();
   await watchRun(g, 2);
   g.wait(5 * MINUTE); await g.uplink(); await g.ticks();
+  await g.open(15);
+  g.wait(1 * MINUTE); await g.cancel();
+  g.wait(4 * MINUTE); await g.uplink();
+  g.wait(1 * MINUTE); await g.uplink();
+});
+
+// Council on #648: the same state in ordinary use. The scheduler opens a valve, and the operator,
+// who sees it still closed, presses Open before the valve's next uplink.
+sequence('the scheduler opens a valve and the operator opens it again before its next uplink; after their one run a third open is cancelled from the panel', { reportOnly: [severalFit()] }, async (g) => {
+  await g.scheduler(15);
+  g.wait(3 * MINUTE); await g.open(15);
+  g.wait(5 * MINUTE); await g.uplink();
+  g.wait(20 * SECOND); await g.uplink();
+  g.wait(15 * MINUTE); await g.uplink();
+  g.wait(5 * MINUTE); await g.ticks();
+  await g.open(15);
+  g.wait(1 * MINUTE); await g.cancel();
+  g.wait(4 * MINUTE); await g.uplink();
+  g.wait(1 * MINUTE); await g.uplink();
+});
+
+// v0.8.1 let the unobserved first open go 32 minutes after its commanded end; this release keeps
+// its record for about an hour. Between the two, v0.8.1 carried this cancel out.
+sequence('the OPEN report of a run is not received; 40 minutes later a new open is cancelled from the panel', {}, async (g) => {
+  await g.open(2);
+  g.wait(1 * MINUTE); await g.uplink();
+  g.wait(20 * SECOND); await g.uplink({ report: 'lost' });
+  g.wait(2 * MINUTE); await g.uplink();
+  g.wait(37 * MINUTE); await g.uplink(); await g.ticks();
   await g.open(15);
   g.wait(1 * MINUTE); await g.cancel();
   g.wait(4 * MINUTE); await g.uplink();

@@ -1007,7 +1007,8 @@ test('whole-queue flush (conditional irrigation), fail closed: an open delivered
 
 function chirpstackClient(items) {
   const q = fakeQueue(items);
-  return { q, client: { getDeviceQueue: q.readQueue, flushDeviceQueue: q.flushQueue, enqueueDownlink: q.enqueue } };
+  let reads = 0;
+  return { q, reads: () => reads, client: { getDeviceQueue: async (eui) => { reads += 1; return q.readQueue(eui); }, flushDeviceQueue: q.flushQueue, enqueueDownlink: q.enqueue } };
 }
 const queueFrames = (q) => q.queue.map((item) => [item.fPort, Buffer.from(item.data, 'base64').toString('hex')]);
 
@@ -1092,5 +1093,104 @@ test('stage 1: an open with only an OPEN report attached is still a target of a 
   const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:02:00.000Z') });
   assert.equal(out.ok, true);
   assert.equal(out.queueScope, 'not_queued');
+  db.close();
+});
+
+// ---------------------------------------------------------------------------------------------
+// Council on #648: a cancel that names no open, with several opens active. A record whose run was
+// not attributed stays active for about an hour (a report that fits two opens, a lost OPEN
+// report), and the control panel never names an open. The cancel reads the queue once and takes
+// the one active open whose queue id, stored when ChirpStack accepted the frame, is still unsent
+// in that reading. It never picks by recency (#428) and infers nothing from the state shown.
+// ---------------------------------------------------------------------------------------------
+
+async function acceptedOpen(db, id, queueId, commandedAt) {
+  await insertExpectation(db, { id, state: 'PENDING_OBSERVATION', commandedAt });
+  if (queueId !== undefined) await setTransport(db, 'valve_actuation_expectations', 'expectation_id', id, { phase: 'ACCEPTED', queue_id: queueId, attempted_at: commandedAt });
+}
+const statesOf = async (db) => Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((row) => [row.expectation_id, row.reconciliation_state]));
+
+test('an unnamed cancel with several opens active takes the one whose stored queue id is still in the queue', async () => {
+  const { db } = await tempDb();
+  await acceptedOpen(db, 'e-ran-a', 'q-a', '2026-10-19T08:00:00.000Z');
+  await acceptedOpen(db, 'e-ran-b', 'q-b', '2026-10-19T08:00:30.000Z');
+  await acceptedOpen(db, 'e-queued', 'q-c', '2026-10-19T08:30:00.000Z');
+  const { q, reads, client } = chirpstackClient([queueItem('q-c', 2, [0x41, 15]), queueItem('q-cfg', 11, [0x00, 0x0a, 0x00, 0x02]), queueItem('q-close', 1, [0x30])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:31:00.000Z') });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.expectationId, 'e-queued');
+  assert.equal(out.queueScope, 'target_only');
+  assert.equal(reads(), 1, 'one queue read decides the target and what is queued again');
+  assert.deepEqual(queueFrames(q), [[11, '000a0002'], [1, '30']], 'the open is gone, the setting and the CLOSE are queued again');
+  assert.deepEqual(await statesOf(db), { 'e-ran-a': 'PENDING_OBSERVATION', 'e-ran-b': 'PENDING_OBSERVATION', 'e-queued': 'CANCELLED' });
+  db.close();
+});
+
+test('an unnamed cancel takes the queued open by its queue id, not by recency and not by its place among equal frames', async () => {
+  const { db } = await tempDb();
+  // The older record is the one still queued; the newer one's frame has left the queue.
+  await acceptedOpen(db, 'e-older-queued', 'q-old', '2026-10-19T08:00:00.000Z');
+  await acceptedOpen(db, 'e-newer-gone', 'q-new', '2026-10-19T08:10:00.000Z');
+  const { q, client } = chirpstackClient([queueItem('q-plan', 10, [0x01, 0x02, 0x03]), queueItem('q-old', 2, [0x41, 15])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:11:00.000Z') });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.expectationId, 'e-older-queued');
+  assert.deepEqual(queueFrames(q), [[10, '010203']]);
+  assert.deepEqual(await statesOf(db), { 'e-older-queued': 'CANCELLED', 'e-newer-gone': 'PENDING_OBSERVATION' });
+  db.close();
+});
+
+for (const [why, name, queue, records] of [
+  ['none_queued', 'none of them is still in the queue', [queueItem('q-cfg', 11, [0x00, 0x0a, 0x00, 0x02])], [['e-a', 'q-a'], ['e-b', 'q-b']]],
+  ['several_queued', 'two of them are still in the queue', [queueItem('q-a', 2, [0x41, 15]), queueItem('q-b', 2, [0x41, 15])], [['e-a', 'q-a'], ['e-b', 'q-b']]],
+  ['none_queued', 'the only queued frame is being sent by ChirpStack', [queueItem('q-b', 2, [0x41, 15], { isPending: true })], [['e-a', 'q-a'], ['e-b', 'q-b']]],
+  ['none_queued', 'a frame is queued but no record holds its queue id', [queueItem('q-x', 2, [0x41, 15])], [['e-a', undefined], ['e-b', undefined]]],
+]) {
+  test(`an unnamed cancel with several opens active is refused as before when ${name}, and says so`, async () => {
+    const { db } = await tempDb();
+    for (const [index, [id, queueId]] of records.entries()) await acceptedOpen(db, id, queueId, '2026-10-19T08:0' + index + ':00.000Z');
+    const { q, client } = chirpstackClient(queue);
+    const before = queueFrames(q);
+    const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:05:00.000Z') });
+    assert.equal(out.ok, false);
+    assert.equal(out.error, 'ambiguous_actuation');
+    assert.equal(out.permanent, true);
+    assert.equal(out.ambiguity, why);
+    assert.equal(q.calls.flush, 0, 'nothing is flushed');
+    assert.deepEqual(queueFrames(q), before);
+    assert.deepEqual(Object.values(await statesOf(db)), ['PENDING_OBSERVATION', 'PENDING_OBSERVATION']);
+    const answer = cancelHttpResponse(out, EUI);
+    assert.equal(answer.statusCode, 409);
+    assert.equal(answer.payload.message, 'More than one actuation is active; name the one to cancel (expectation_id)', 'the message of 0.8.1');
+    assert.equal(answer.payload.ambiguity, why);
+    db.close();
+  });
+}
+
+test('an unnamed cancel with several opens active is refused as before when the queue cannot be read, and says so', async () => {
+  const { db } = await tempDb();
+  await acceptedOpen(db, 'e-a', 'q-a', '2026-10-19T08:00:00.000Z');
+  await acceptedOpen(db, 'e-b', 'q-b', '2026-10-19T08:01:00.000Z');
+  let flushed = 0;
+  const client = { getDeviceQueue: async () => { throw new Error('queue rpc timed out'); }, flushDeviceQueue: async () => { flushed += 1; return {}; }, enqueueDownlink: async () => { throw new Error('nothing is queued'); } };
+  const warnings = [];
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:05:00.000Z'), warn: (m) => warnings.push(m) });
+  assert.equal(out.error, 'ambiguous_actuation');
+  assert.equal(out.ambiguity, 'queue_unreadable');
+  assert.equal(flushed, 0, 'an unreadable queue is not flushed for a cancel that has no target');
+  assert.equal(warnings.filter((m) => /queue rpc timed out/.test(m)).length, 1);
+  db.close();
+});
+
+test('an unnamed cancel with several opens active stays refused where conditional irrigation is involved, queue or not', async () => {
+  const { db } = await tempDb();
+  await conditionalOccurrence(db);
+  await acceptedOpen(db, 'e-a', 'q-a', '2026-10-19T08:00:00.000Z');
+  await acceptedOpen(db, 'e-b', 'q-b', '2026-10-19T08:01:00.000Z');
+  const { q, client } = chirpstackClient([queueItem('q-b', 2, [0x41, 15])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:05:00.000Z') });
+  assert.equal(out.error, 'ambiguous_actuation');
+  assert.equal(out.ambiguity, 'conditional_irrigation');
+  assert.equal(q.calls.flush, 0);
   db.close();
 });

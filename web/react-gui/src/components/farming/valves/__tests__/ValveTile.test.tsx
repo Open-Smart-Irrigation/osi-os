@@ -470,6 +470,20 @@ describe('ValveTile pending-cancel label (M-2)', () => {
     fireEvent.click(primary);
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  // Council on #648. On a gateway without a time signal a run keeps a pending record for about an
+  // hour after it ended, and a CLOSE keeps one for good; the target state stays OPEN meanwhile.
+  // The gateway no longer reports such a record as the active actuation (osi-valve-control
+  // store.js, the cancel's own filter), so the tile must offer Open, not a cancel that answers 404.
+  it('offers Open, not "Cancel queued open", when the gateway reports no active actuation although the target state is still OPEN', () => {
+    const onOpen = vi.fn();
+    const onCancel = vi.fn();
+    renderTile({ activeActuation: null, currentState: 'CLOSED', targetState: 'OPEN' }, { onOpen, onCancel });
+    expect(screen.queryByRole('button', { name: 'Cancel queued open' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
 });
 
 // D04 (owner decision 2026-10-18): the cancel control carries the verbatim help text, reachable

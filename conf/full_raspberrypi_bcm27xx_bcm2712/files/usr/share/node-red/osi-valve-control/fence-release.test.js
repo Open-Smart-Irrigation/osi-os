@@ -571,3 +571,56 @@ test('stage 1: with conditional irrigation configured on the valve an OPEN repor
   assert.equal(JSON.parse(controlRow.conditional_control_json).incident.state, 'OPEN');
 });
 
+// ---------------------------------------------------------------------------------------------
+// Council on #648: what the control panel shows as the valve's active command
+// ---------------------------------------------------------------------------------------------
+// The panel replaces Open with "Cancel queued open" while the valve has an active pending command
+// (store.listValvesForUser for the list, store.activeActuation for the runtime sent to the cloud).
+// A run whose OPEN and CLOSED reports are attached, and a CLOSE, are not opens a cancel can
+// delete, so they are not shown as one. The filter is the cancel's own (dispatch.cancellableOpen).
+
+async function shownActive(g) {
+  const owner = await g.db.get('SELECT user_id FROM devices WHERE deveui=?', [EUI]);
+  const listed = (await store.listValvesForUser(g.db, owner.user_id)).find((row) => row.deveui === EUI);
+  const single = await store.activeActuation(g.db, EUI);
+  return { list: listed.active_reconciliation_state, single: single ? single.reconciliation_state : null };
+}
+
+test('council: without a time signal the panel shows an open as pending until its run is reported over, then nothing', async (t) => {
+  const g = await gateway(t, { ntp: false });
+  await g.open(2);
+  assert.deepEqual(await shownActive(g), { list: 'PENDING_OBSERVATION', single: 'PENDING_OBSERVATION' }, 'a queued open can be cancelled');
+  g.advance(20 * SECOND);
+  await g.report('OPEN');
+  assert.deepEqual(await shownActive(g), { list: 'PENDING_OBSERVATION', single: 'PENDING_OBSERVATION' }, 'still the same record while the valve reports OPEN');
+  g.advance(2 * MINUTE);
+  await g.report('CLOSED');
+  assert.deepEqual(await shownActive(g), { list: null, single: null }, 'the run is reported over; the record itself stays pending');
+  assert.equal((await g.rows())[0].reconciliation_state, 'PENDING_OBSERVATION');
+  const cancel = await control.cancelActuation({ db: g.db, deviceEui: EUI, flushQueue: async () => ({}), now: new Date() });
+  assert.equal(cancel.error, 'no_active_actuation', 'and the cancel agrees with what the panel shows');
+});
+
+test('council: a CLOSE sent without a time signal is never shown as a pending open, also days later', async (t) => {
+  const g = await gateway(t, { ntp: false });
+  const close = await g.command({ action: 'CLOSE' });
+  assert.deepEqual(outcome(close), ACCEPTED);
+  assert.deepEqual(await shownActive(g), { list: null, single: null });
+  g.advance(3 * DAY);
+  await g.ticks();
+  assert.deepEqual(await shownActive(g), { list: null, single: null });
+  assert.equal((await g.rows())[0].reconciliation_state, 'PENDING_OBSERVATION', 'the CLOSE record gets no deadline; it is only not shown as an open');
+  assertAccepted(await g.open(2), 2, 'open after the CLOSE');
+  assert.deepEqual(await shownActive(g), { list: 'PENDING_OBSERVATION', single: 'PENDING_OBSERVATION' }, 'the open behind the CLOSE record is shown');
+});
+
+test('council: with a time signal a running open is shown as running, and nothing after its CLOSED report', async (t) => {
+  const g = await gateway(t);
+  await g.open(2);
+  g.advance(20 * SECOND);
+  await g.report('OPEN');
+  assert.deepEqual(await shownActive(g), { list: 'OBSERVED_RUNNING', single: 'OBSERVED_RUNNING' });
+  g.advance(2 * MINUTE);
+  await g.report('CLOSED');
+  assert.deepEqual(await shownActive(g), { list: null, single: null });
+});
