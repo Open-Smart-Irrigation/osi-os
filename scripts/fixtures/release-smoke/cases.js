@@ -24,7 +24,6 @@ exports.run = async function(h) {
     check('started',startup.some(l=>l.msg==='Started flows'),startup);
     check('missing-types',!startup.some(l=>/missing types|already registered|Error loading|Failed to register/.test(l.msg)),startup);
   });
-  await test('startup-function-errors',async check=>check('function-errors',!startup.some(l=>l.type==='function'&&l.level==='error'),startup.filter(l=>l.type==='function'&&l.level==='error')));
   await test('startup-node-errors',async check=>check('node-errors',!startup.some(l=>l.level==='error'),startup.filter(l=>l.level==='error').map(l=>({id:l.id,msg:l.msg}))));
   let token,user,zone;
   await test('login-and-lists',async(check,e)=>{
@@ -215,5 +214,7 @@ exports.run = async function(h) {
     const changed=fs.readdirSync(source).filter(name=>(name.startsWith('osi-')||name==='codecs')&&!same(name));
     check('bytes',changed.length===0,changed);
   });
+  // Check after all scenarios too: delayed startup injects must not escape the gate.
+  await test('startup-function-errors',async check=>check('function-errors',!h.state.logs.some(l=>l.type==='function'&&l.level==='error'),h.state.logs.filter(l=>l.type==='function'&&l.level==='error')));
   return results;
 };
