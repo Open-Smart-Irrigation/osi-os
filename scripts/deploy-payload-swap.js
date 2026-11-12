@@ -198,9 +198,15 @@ function discardBackup(backup) {
   }
 }
 
-function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null) {
+// <staged> ("staged" from deploy.sh): record the payload as staged before
+// anything is copied into it, in this one call, so a deploy cut while staging
+// never leaves a payload without a health record (which would count as one
+// from before the record, and so as a rollback target). The legacy capture
+// stages without it: a copy of what was running is trusted.
+function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null, staged = '') {
   const dir = payloadDir(root, stamp);
   fs.mkdirSync(dir, { recursive: true });
+  if (staged === 'staged' || staged === true) markStaged(root, stamp);
   fs.copyFileSync(srcFlowsPath, path.join(dir, 'flows.json'));
   if (srcGuiPath) {
     if (!fs.existsSync(srcGuiPath) || !fs.statSync(srcGuiPath).isDirectory()) {

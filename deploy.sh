@@ -2617,10 +2617,10 @@ STAGED_GUI="$TMP_DIR/gui"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
 mkdir -p "$STAGED_GUI"
 tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
-swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null
-# A staged payload is no rollback target until its health check passes; a
-# deploy cut before then leaves it on disk.
-swap_call markStaged "$DEPLOY_STAMP" >/dev/null
+# Recorded "staged" before anything is copied in: a staged payload is no
+# rollback target until its health check passes, also when a cut leaves it
+# half copied.
+swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null
 PREV_STAMP="$(swap_call currentStamp || true)"
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin

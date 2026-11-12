@@ -629,8 +629,7 @@ stage_new_deploy() {
   mkdir -p "$SWAP_ROOT/src-new-gui"
   printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
   printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
-  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
-  swap_call markStaged "$DEPLOY_STAMP" >/dev/null
+  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" staged >/dev/null
   # What the fetch_required block writes.
   write_module "$MODULE_STAGE/osi-a" "a@$DEPLOY_STAMP"
   write_module "$MODULE_STAGE/osi-b" "b@$DEPLOY_STAMP"
