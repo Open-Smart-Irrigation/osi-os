@@ -16,15 +16,6 @@ process that survives the SSH session ending. Use this path for any gateway
 on an unreliable link; the tunnel flow in the README is still the right
 choice on a stable LAN.
 
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 ## How it fits together
 
 | Script | Runs on | Job |

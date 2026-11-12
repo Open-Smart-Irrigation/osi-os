@@ -26,17 +26,6 @@ The actual guard, in `seed_db_if_missing()`:
    `sqlite3` if available), re-check the target is still absent (race guard), then
    `mv` the seed into place.
 
-## Before any upgrade by script
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 ## Quick reference
 
 | Task | Command |
@@ -407,15 +396,6 @@ a gateway in use by image.** Use `deploy.sh`, or the
 for supported upgrades. An image is for a new device or a deliberate reset.
 The post-sysupgrade states below describe recovery from unsupported operations;
 they do not authorize performing such an upgrade.
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
 
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the
