@@ -238,7 +238,7 @@ const activationPrerequisites = [
   ['chmod 755 /usr/libexec/osi-gateway-identity.sh', 'gateway identity helper installation'],
   ['chmod 755 /usr/libexec/osi-identityd.sh', 'identity daemon installation'],
   ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null', 'paired flows+GUI payload staging'],
-  ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null', 'paired flows+GUI payload activation'],
+  ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null', 'paired flows+GUI payload activation'],
   ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],
 ];
 for (const [needle, description] of activationPrerequisites) {
@@ -289,7 +289,7 @@ expectIncludes('deploy.sh', deploySource,
 
 expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard');
 expectIncludes('deploy.sh', deploySource,
-  'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then\n        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2\n        node_red_restart_needed=0\n        exit 1\n    fi\n    PAYLOAD_FLIPPED=1\n    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"\nelse\n    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"\nfi',
+  'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null; then\n        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2\n        node_red_restart_needed=0\n        exit 1\n    fi\n    PAYLOAD_FLIPPED=1\n    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"\nelse\n    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"\nfi',
   'retains paired payload activation and its already-active no-op');
 expectIncludes('deploy.sh', deploySource, 'if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then\n            echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2', 'retains the verified paired rollback');
 expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 1 &&

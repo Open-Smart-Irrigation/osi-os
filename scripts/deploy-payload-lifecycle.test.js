@@ -632,7 +632,7 @@ ${staging}
 # Node-RED stopped for the migration, as run_schema_migration does.
 stop_for_migration() { node_red_restart_needed=1; "$NODE_RED_INIT" stop; }
 commit_migration() { sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (78, 'main', 'applied');"; DB_MIGRATION_COMMITTED=1; }
-flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; PAYLOAD_FLIPPED=1; }
+flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "\${PREV_STAMP:-}" >/dev/null; PAYLOAD_FLIPPED=1; }
 quiesce_identityd_for_deploy
 ${scenario}
 `;
