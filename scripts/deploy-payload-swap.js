@@ -1329,6 +1329,20 @@ function payloadTrusted(root, stamp) {
   }
 }
 
+// A payload a deploy may return to: complete, trusted, and, on a gateway
+// whose helper modules link into payloads, carrying its own modules
+// (flipTo refuses one without; a payload staged by a deploy cut before its
+// modules has flows and GUI only).
+function returnable(root, stamp, linked = payloadModuleLinks(root)) {
+  if (!verifyPair(root, stamp) || !payloadTrusted(root, stamp)) return false;
+  if (linked.size === 0) return true;
+  try {
+    return readModuleManifest(root, stamp) !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
 // The payload a failed deploy returns to: the served one when it is trusted,
 // else the newest other complete, trusted payload, else the served one (a
 // complete set is better than none; deploy.sh warns).
@@ -1336,8 +1350,9 @@ function rollbackTarget(root, servedStamp, deployStamp = '') {
   if (!servedStamp) return '';
   if (payloadTrusted(root, servedStamp)) return servedStamp;
   const candidates = listStamps(root).filter((stamp) => stamp !== servedStamp && stamp !== deployStamp).reverse();
+  const linked = payloadModuleLinks(root);
   for (const stamp of candidates) {
-    if (verifyPair(root, stamp) && payloadTrusted(root, stamp)) return stamp;
+    if (returnable(root, stamp, linked)) return stamp;
   }
   return servedStamp;
 }
@@ -1421,8 +1436,9 @@ function recordBootState(root) {
 function owedCheckPlan(root, schemaHead = '', schemaLedger = '') {
   const active = unverifiedActive(root);
   if (!active) return null;
+  const linked = payloadModuleLinks(root);
   const others = listStamps(root).filter((stamp) => stamp !== active).reverse()
-    .filter((stamp) => verifyPair(root, stamp) && payloadTrusted(root, stamp));
+    .filter((stamp) => returnable(root, stamp, linked));
   const fits = schemaHead === '' ? null : others.find((stamp) => verifyCompatibility(root, stamp, schemaHead, schemaLedger));
   return [active, fits ? '0' : '1', fits || '', others[0] || ''].join('|');
 }
@@ -1461,7 +1477,8 @@ function prunePayloads(root, keepN) {
   }
   if (activeStamp(root)) keep.add(activeStamp(root));
   // The payload the next deploy would roll back to.
-  const trusted = [...stamps].reverse().find((stamp) => verifyPair(root, stamp) && payloadTrusted(root, stamp));
+  const moduleLinks = payloadModuleLinks(root);
+  const trusted = [...stamps].reverse().find((stamp) => returnable(root, stamp, moduleLinks));
   if (trusted) keep.add(trusted);
   for (const linked of payloadModuleLinks(root).values()) keep.add(linked);
   const removed = [];
