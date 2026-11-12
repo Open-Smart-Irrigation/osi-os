@@ -54,9 +54,12 @@ exports.run = async function(h) {
     {id:'partial-close',method:'PUT',url:e=>'/api/devices/'+e+'/strega/partial-opening',body:{action:'CLOSE',percentage:50},port:27,hex:'3032'},
     {id:'flushing',method:'PUT',url:e=>'/api/devices/'+e+'/strega/flushing',body:{returnPosition:'CLOSE',percentage:50},port:28,hex:'3032'},
   ];
+  const refusedChecks=[];
   for(const c of commands) {
     await test('command-accepted:'+c.id,async(check,e)=>{
-      const eui=(await device());const r=await h.http(c.method,c.url(eui),c.body,token);await h.sleep(120);httpCheck(check,r,202);
+      const eui=(await device());const r=await h.http(c.method,c.url(eui),c.body,token);
+      await waitFor(async()=>(await logs(eui)).length>0);
+      httpCheck(check,r,202);
       e.radio=radio(eui);e.stored=(await logs(eui));
       check('radio',isDeepStrictEqual(e.radio.map(x=>({port:x.port,hex:x.hex})),[{port:c.port,hex:c.hex}]),e.radio);
       const action={close:'CLOSE','close-duration':'CLOSE_FOR_DURATION','open-duration':'OPEN_FOR_DURATION',interval:'SET_INTERVAL','timed-close':'TIMED_ACTION',magnet:'SET_MAGNET_MODE','partial-close':'SET_PARTIAL_OPENING 50%',flushing:'SET_FLUSHING 50% -> CLOSE'}[c.id];
@@ -65,8 +68,13 @@ exports.run = async function(h) {
     await test('command-refused:'+c.id,async(check,e)=>{
       const eui=(await device('KIWI_SENSOR'));const before=JSON.stringify((await row(eui)));
       const r=await h.http(c.method,c.url(eui),c.body,token);httpCheck(check,r,409);
+      await h.sleep(120);
       e.radio=radio(eui);check('radio',e.radio.length===0,e.radio);
       check('stored',(await logs(eui)).length===0&&before===JSON.stringify((await row(eui))),(await row(eui)));
+      refusedChecks.push(async()=>{
+        const stored=await logs(eui),sent=radio(eui);
+        check('stored',stored.length===0,stored);check('radio',sent.length===0,sent);
+      });
     });
   }
   for(const body of [{action:'OPEN'},{action:'OPEN_FOR_DURATION',duration_minutes:0},{action:'OPEN_FOR_DURATION',duration_minutes:256}]) {
@@ -97,7 +105,7 @@ exports.run = async function(h) {
   const age=require('./time').age;
   await test('open-no-report-open-later',async(check,e)=>{
     const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-    (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
+    (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.settle();
     httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
     check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
     check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
@@ -142,7 +150,7 @@ exports.run = async function(h) {
     h.setMarker(false);
     try {
       const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-      (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
+      (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.settle();
       httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
       check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
       check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
@@ -213,8 +221,8 @@ exports.run = async function(h) {
     const before=radio(eui).length;
     h.inject('valve-clock-fn');
     await waitFor(()=>radio(eui).length>=before+8);
-    // The clock worker closes its database asynchronously after its last enqueue.
-    await h.sleep(120);
+    // Wait for post-enqueue persistence and the worker's asynchronous close.
+    await h.settle();
     return radio(eui).slice(before).filter(c=>c.port>=14&&c.port<=21).map(c=>({port:c.port,hex:c.hex}));
   }
   const planFrames=minutes=>[...Array.from({length:7},(_,day)=>({port:14+day,hex:minutes?'ff8600ff06'+String(minutes)+'ff'.repeat(18):'ff'.repeat(24)})),{port:21,hex:'30'}].sort((a,b)=>a.port-b.port);
@@ -323,6 +331,8 @@ exports.run = async function(h) {
     check('bytes',changed.length===0,changed);
   });
   await h.settle();
+  // A wrongful side-branch write may arrive after the local 120 ms window.
+  for(const recheck of refusedChecks)await recheck();
   // All error-level events are checked, including non-function nodes. Keep the
   // established F-14 node error separate from unhandled function errors.
   await test('startup-node-errors',async check=>{
