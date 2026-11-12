@@ -826,8 +826,9 @@ ${fragment('# legacy payload capture begin\n', '# legacy payload capture end').r
 [ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
 for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
 ${fragment('# module payload staging begin\n', '# module payload staging end')}
-[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/first/modules/osi-a ]
-[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/first/modules/osi-c ]
+[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/.active/modules/osi-a ]
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/.active/modules/osi-c ]
+[ "$(readlink "$PAYLOADS_ROOT/.active")" = first ]
 PAYLOAD_FLIPPED=0
 DB_MIGRATION_COMMITTED=0
 write_payload_compatibility "$PREV_STAMP"

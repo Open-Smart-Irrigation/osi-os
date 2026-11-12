@@ -220,6 +220,11 @@ jobs:
           node --test scripts/deploy-command-ledger-dependency.test.js \
             scripts/deploy-fetch-list.test.js \
             scripts/deploy-payload-lifecycle.test.js
+      # A deploy killed after any filesystem change of the payload activation
+      # leaves the old or the new payload complete, and its retry and rollback
+      # both activate a complete set (v0.8.2 review, S-1).
+      - name: Payload activation kill matrix
+        run: node --test scripts/deploy-payload-kill-matrix.test.js
       # Gateway records deploy.sh keeps outside the payload: the reported
       # firmware version, which follows the active payload through activation
       # and every rollback, and the

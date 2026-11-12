@@ -35,8 +35,8 @@ The actual guard, in `seed_db_if_missing()`:
 | Serve repo root | `python3 -m http.server 9876 --bind 127.0.0.1` |
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
 | Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
-| Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
-| Show active helper modules | `ls -l /srv/node-red/osi-lib` (symlink into `payloads/<stamp>/modules/`; every staged `osi-*` module follows the same stamp as `flows.json`) |
+| Show active payload | `ls -l /srv/node-red/payloads/.active` (link to `<stamp>`; `flows.json`, the GUI and every staged `osi-*` module link through it, and a switch is one rename of this link). A gateway last deployed by v0.8.2 or earlier links each entry straight into `payloads/<stamp>` until its next deploy converts it |
+| Show active helper modules | `readlink -f /srv/node-red/osi-lib` (resolves into `payloads/<stamp>/modules/`, the same stamp as `flows.json`) |
 | Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |

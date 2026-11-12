@@ -49,6 +49,8 @@ DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # /srv/node-red: /srv/node-red/<module> is a link into the active payload, and
 # flipTo() switches it together with flows.json and the GUI, so every switch
 # back to the previous payload also restores the previous modules (#603).
+# All of them lead through payloads/.active, and a switch is one rename of
+# that link, so a kill leaves the old payload or the new one complete.
 MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
 GUI_ROOT="/usr/lib/node-red/gui"
@@ -2224,7 +2226,7 @@ process.stdout.write(String(applied.length));
                 node_red_restart_needed=0
                 return 1
             fi
-            if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
+            if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null; then
                 echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
                 node_red_restart_needed=0
                 return 1
@@ -2272,6 +2274,15 @@ same_fs_or_die
 echo "OK"
 
 # legacy capture preflight begin
+# A directory cannot be replaced by a link in one rename, so a kill while
+# flipTo() converts the image GUI or a pre-#603 module directory leaves the
+# directory beside its absent path; this links it into the active payload
+# again before the live state is read.
+if ! resume_switch_report="$(swap_call resumeInterruptedSwitch "$GUI_ROOT")"; then
+    echo "ERROR: could not finish an interrupted payload switch; refusing before any file is replaced" >&2
+    exit 1
+fi
+[ -z "$resume_switch_report" ] || printf '%s\n' "$resume_switch_report"
 # Runs before any live file is replaced, so a refusal leaves the gateway as it
 # was. When the live flows and GUI are not one payload, it refuses a
 # half-switched flows/GUI/module set and a legacy-capture marker whose capture
@@ -3300,7 +3311,7 @@ fi
 # payload activation begin
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
-    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
+    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null; then
         echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
         node_red_restart_needed=0
         exit 1
