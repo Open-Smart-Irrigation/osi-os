@@ -400,3 +400,186 @@ test('mixed mode: enabling a disabled fixed schedule beside a conditional one is
   assert.equal(Number(row.enabled), 0, 'the refused enable is rolled back');
   db.close();
 });
+
+// A-1: the patch retains BOTH stages of the present manual-command policy.
+const AUTH_ZONE = '11111111-1111-4111-8111-111111111111';
+const AUTH_USER = '22222222-2222-4222-8222-222222222222';
+const AUTH_SCHEDULE = '33333333-3333-4333-8333-333333333333';
+const AUTH_ROUTES = [
+  ['GET', '/schedules', undefined, 200],
+  ['POST', '/schedules', { kind: 'ONCE', fire_at: new Date(Date.now() + 86400000).toISOString(), duration_minutes: 5 }, 201],
+  ['PUT', '/schedules/' + AUTH_SCHEDULE, { label: 'changed' }, 200],
+  ['DELETE', '/schedules/' + AUTH_SCHEDULE, undefined, 200],
+  ['POST', '/plan/resend', {}, 202],
+  ['POST', '/scheduler-status', { status: 'DEACTIVATED' }, 202],
+  ['PUT', '/settings', { default_open_minutes: 10 }, 200],
+];
+async function authFixture(condition) {
+  const fixture = await tempDb();
+  const { db, raw } = fixture;
+  await db.run('UPDATE users SET user_uuid=? WHERE id=1', [AUTH_USER]);
+  await db.run("INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES (2,'zone-owner','x',datetime('now'),'other-user')");
+  await db.run("INSERT INTO irrigation_zones(id,name,user_id,zone_uuid) VALUES (1,'Test zone',2,?)", [AUTH_ZONE]);
+  await db.run('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?', [FIXTURE_EUI]);
+  if (condition !== 'no zone access') {
+    await db.run("INSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES ('test-grant',?,?,datetime('now'))", [AUTH_USER, condition === 'grant for another zone' ? 'another-zone' : AUTH_ZONE]);
+  }
+  if (condition === 'no present role') {
+    raw.exec('PRAGMA ignore_check_constraints=ON');
+    await db.run("UPDATE users SET role='' WHERE id=1");
+    raw.exec('PRAGMA ignore_check_constraints=OFF');
+  }
+  if (condition === 'viewer role') await db.run("UPDATE users SET role='viewer' WHERE id=1");
+  if (condition === 'disabled account') await db.run("UPDATE users SET disabled_at=datetime('now') WHERE id=1");
+  if (condition === 'revoked grant') await db.run("UPDATE user_zone_assignments SET deleted_at=datetime('now')");
+  if (condition === 'granted non-owner: present policy refuses') await db.run('UPDATE devices SET user_id=2 WHERE deveui=?', [FIXTURE_EUI]);
+  await store.insertSchedule(db, { schedule_uuid: AUTH_SCHEDULE, device_eui: FIXTURE_EUI, kind: 'ONCE', fire_at: new Date(Date.now() + 7200000).toISOString(), duration_minutes: 5, timezone: 'UTC', enabled: 1 });
+  return fixture;
+}
+async function scopedCall(fixture, method, suffix, body, flag = '1') {
+  // Run the shipped flow adapter as well: a unit-only environment flag could hide
+  // a production adapter that never passes OSI_SCOPED_ACCESS to the API.
+  const flow = require('../..' + '/flows.json');
+  const router = flow.find(n => n.id === 'valve-api-router-fn');
+  const control = require('./index');
+  const { fakeChirpStack } = require('./test-helpers');
+  let built = 0;
+  const messages = [];
+  const data = Buffer.from(JSON.stringify({ userId: 1, username: 't', exp: Date.now() + 60000 })).toString('base64url');
+  const msg = req(method, '/api/valves' + (suffix === null ? '' : '/' + FIXTURE_EUI + suffix), body,
+    'Bearer ' + data + '.' + crypto.createHmac('sha256', SECRET).update(data).digest('base64url'));
+  function Database() { return new TestDatabase(fixture.path); }
+  const result = await new Function('msg', 'node', 'env', 'context', 'chirpstack', 'osiLib', router.func)(
+    msg, { error: value => messages.push(value), warn: value => messages.push(value) },
+    { get: name => ({ AUTH_TOKEN_SECRET: SECRET, OSI_SCOPED_ACCESS: flag, CHIRPSTACK_APP_ACTUATORS: 'app' })[name] || '' },
+    { get() {}, set() {} },
+    { createProvisioningClientFromEnv() { built += 1; return fakeChirpStack().transport; } },
+    { require: name => ({ ok: true, value: name === 'osi-db-helper' ? { Database } : control }) },
+  );
+  return { out: result[0], built, messages };
+}
+const AUTH_CASES = [
+  ['no present role', 403], ['viewer role', 403], ['disabled account', 403],
+  ['no zone access', 404], ['grant for another zone', 404], ['revoked grant', 404],
+  ['valid grant', null], ['granted non-owner: present policy refuses', 403],
+];
+for (const [method, suffix, body, success] of AUTH_ROUTES) {
+  for (const [condition, denied] of AUTH_CASES) {
+    test(`A-1 ${method} ${suffix}: ${condition}`, async () => {
+      const fixture = await authFixture(condition);
+      try {
+        const before = await fixture.db.all('SELECT * FROM valve_schedules');
+        const settings = await store.getSettings(fixture.db, FIXTURE_EUI);
+        const { out, built } = await scopedCall(fixture, method, suffix, body);
+        assert.equal(out.statusCode, denied || success, JSON.stringify(out.payload));
+        if (denied) {
+          assert.equal(built, 0, 'a denied request must not build a transport');
+          assert.deepEqual(await fixture.db.all('SELECT * FROM valve_schedules'), before);
+          assert.deepEqual(await store.getSettings(fixture.db, FIXTURE_EUI), settings);
+          assert.deepEqual(await fixture.db.all('SELECT * FROM valve_schedule_pushes'), []);
+        }
+      } finally { fixture.cleanup(); }
+    });
+  }
+  test(`A-1 ${method} ${suffix}: scoped flag off preserves the owner path`, async () => {
+    const fixture = await authFixture('disabled account');
+    try { assert.equal((await scopedCall(fixture, method, suffix, body, '0')).out.statusCode, success); }
+    finally { fixture.cleanup(); }
+  });
+}
+for (const [condition, denied] of AUTH_CASES) {
+  test(`A-1 GET /api/valves: ${condition}`, async () => {
+    const fixture = await authFixture(condition);
+    try {
+      const { out } = await scopedCall(fixture, 'GET', null);
+      const accountDenied = ['no present role', 'viewer role', 'disabled account'].includes(condition);
+      assert.equal(out.statusCode, accountDenied ? 403 : 200);
+      if (!accountDenied) assert.equal(out.payload.valves.length, denied ? 0 : 1);
+    } finally { fixture.cleanup(); }
+  });
+}
+
+
+test('A-1 GET /api/valves: a legacy lowercase identifier does not fail the entire list', async () => {
+  const fixture = await authFixture('valid grant');
+  try {
+    await fixture.db.run('DELETE FROM valve_schedules');
+    await fixture.db.run('UPDATE devices SET deveui=? WHERE deveui=?', [FIXTURE_EUI.toLowerCase(), FIXTURE_EUI]);
+    const { out } = await scopedCall(fixture, 'GET', null);
+    assert.equal(out.statusCode, 200, JSON.stringify(out.payload));
+    assert.deepEqual(out.payload.valves, [], 'the shared command policy still refuses the noncanonical device');
+  } finally { fixture.cleanup(); }
+});
+
+
+// Council S1, adapted from the gate runner's Q2 probe: revoke access while the
+// request waits behind the real valve writer. Observe the queue call rather
+// than sleeping, so a slow first scope check cannot conceal a missing recheck.
+const authDispatch = require('./dispatch');
+async function authWriteSnapshot(db) {
+  return {
+    schedules: await db.all('SELECT * FROM valve_schedules ORDER BY id'),
+    settings: await db.all('SELECT * FROM valve_settings'),
+    pushes: await db.all('SELECT * FROM valve_schedule_pushes'),
+  };
+}
+for (const [condition, revoke, denied] of [
+  ['account disabled', "UPDATE users SET disabled_at=datetime('now') WHERE id=1", 403],
+  ['zone access lost', 'UPDATE devices SET irrigation_zone_id=NULL', 404],
+]) {
+  for (const [method, suffix, body] of AUTH_ROUTES.filter(([method]) => method !== 'GET')) {
+    test(`A-1 writer recheck ${method} ${suffix}: ${condition} while queued`, { timeout: 5000 }, async () => {
+      const fixture = await authFixture('valid grant');
+      const realWriter = authDispatch.withValveWriter;
+      let releaseWriter;
+      const held = new Promise(resolve => { releaseWriter = resolve; });
+      const holder = realWriter(FIXTURE_EUI, () => held);
+      let pending;
+      try {
+        const before = await authWriteSnapshot(fixture.db);
+        let reachedWriter;
+        const waiting = new Promise(resolve => { reachedWriter = resolve; });
+        authDispatch.withValveWriter = (eui, fn) => {
+          reachedWriter();
+          return realWriter(eui, fn);
+        };
+        // Start outside the holder's async context, so this request queues.
+        pending = new Promise((resolve, reject) => setImmediate(() =>
+          scopedCall(fixture, method, suffix, body).then(resolve, reject)));
+        await Promise.race([waiting, pending.then(() => { throw new Error('request returned before reaching the writer'); })]);
+        assert.deepEqual(await authWriteSnapshot(fixture.db), before, 'nothing written while queued');
+        await fixture.db.run(revoke);
+        releaseWriter();
+        await holder;
+        const { out, built } = await pending;
+        assert.equal(out.statusCode, denied, JSON.stringify(out.payload));
+        assert.deepEqual(await authWriteSnapshot(fixture.db), before, 'refusal writes no schedule, settings or push rows');
+        assert.equal(built, 0, 'refusal must not construct or call the transport');
+      } finally {
+        releaseWriter();
+        await Promise.allSettled([holder, pending]);
+        authDispatch.withValveWriter = realWriter;
+        fixture.cleanup();
+      }
+    });
+  }
+}
+
+test('A-1 GET /api/valves: disabled account owning no valve is refused', async () => {
+  const fixture = await authFixture('disabled account');
+  try {
+    await fixture.db.run('UPDATE devices SET user_id=2');
+    const { out, built } = await scopedCall(fixture, 'GET', null);
+    assert.equal(out.statusCode, 403);
+    assert.equal(built, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test('A-1 GET /api/valves: scoped flag off preserves the disabled owner list', async () => {
+  const fixture = await authFixture('disabled account');
+  try {
+    const { out } = await scopedCall(fixture, 'GET', null, undefined, '0');
+    assert.equal(out.statusCode, 200);
+    assert.deepEqual(out.payload.valves.map(valve => valve.device_eui), [FIXTURE_EUI]);
+  } finally { fixture.cleanup(); }
+});

@@ -469,7 +469,7 @@ const flushQueue = function(eui) { return transport.flushDeviceQueue(eui); };
 return Promise.resolve().then(function() {
   return VC.handleHttpRequest({
     msg: msg, Database: dbHelper.Database, appId: appId, flushQueue: flushQueue, transport: transport,
-    environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI') },
+    environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI'), scopedAccess: env.get('OSI_SCOPED_ACCESS') },
     warn: function(m) { node.warn(m); }
   });
 }).then(function(out) {
