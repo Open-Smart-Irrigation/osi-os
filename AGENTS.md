@@ -312,10 +312,10 @@ Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`
 
 | What | Path |
 |------|------|
-| Node-RED flows | `/srv/node-red/flows.json` (symlink into `payloads/<stamp>/`; copy with `cp -L`) |
+| Node-RED flows | `/srv/node-red/flows.json` (symlink through `payloads/.active` into `payloads/<stamp>/`; copy with `cp -L`) |
 | SQLite database | `/data/db/farming.db` |
-| React GUI | `/usr/lib/node-red/gui/` (symlink into `payloads/<stamp>/gui`) |
-| Helper modules | `/srv/node-red/osi-*` (after the first deploy, symlinks into `payloads/<stamp>/modules/`, switched with flows; the command-ledger pair stays a real directory) |
+| React GUI | `/usr/lib/node-red/gui/` (symlink through `payloads/.active` into `payloads/<stamp>/gui`) |
+| Helper modules | `/srv/node-red/osi-*` (after the first deploy, symlinks through `payloads/.active` into `payloads/<stamp>/modules/`, switched with flows by one rename of `payloads/.active`; the command-ledger pair stays a real directory) |
 | Node-RED settings | `/srv/node-red/settings.js` |
 | MQTT credentials | `/srv/node-red/flows_cred.json` |
 | UCI identity | `osi-server.cloud.*` (`uci show osi-server`) |

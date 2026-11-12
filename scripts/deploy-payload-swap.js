@@ -439,7 +439,12 @@ function captureModules(root, prevStamp, deployStamp) {
   const lines = [];
   let changed = !prev;
   fs.mkdirSync(dir, { recursive: true });
-  for (const name of next.modules) {
+  // The new payload's modules, and every module the running flows' payload
+  // links that the new payload drops: a switch back must restore it too.
+  const served = currentStamp(root);
+  const names = new Set(next.modules);
+  for (const [name, linked] of payloadModuleLinks(root)) if (served && linked === served) names.add(name);
+  for (const name of [...names].sort()) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
     if (!stat || (linksTo(live, viaModule(root, name)) && !isDirectory(live))) continue;
@@ -588,101 +593,143 @@ function sameContent(live, copy, kind) {
     hashTree(copy, { followLinks: true, label: 'payload switch: unsupported entry' });
 }
 
-// The live entries a switch to <stamp> routes through payloads/.active.
+// The live entries a switch to <stamp> routes through payloads/.active, with
+// the copy each must match in <base>.
 function switchEntries(root, stamp, guiRoot, modules, base) {
   const entries = [{ link: flowsLink(root), via: viaFlows(root), copy: base && path.join(payloadDir(root, base), 'flows.json'), kind: 'file', label: 'flows' }];
   if (guiRoot) entries.push({ link: guiLink(guiRoot), via: viaGui(root), copy: base && guiPayloadDir(root, base), kind: 'dir', label: 'GUI' });
   const baseManifest = base ? readModuleManifest(root, base) : null;
   const baseModules = baseManifest ? baseManifest.modules : [];
-  const names = new Set([...modules.link, ...modules.unlink, ...(base ? baseModules : [])]);
+  const names = new Set([...modules.link, ...modules.unlink, ...baseModules]);
   for (const name of [...names].sort()) {
     const copy = base && baseModules.includes(name) ? moduleTarget(root, base, name) : null;
-    entries.push({ link: moduleLink(root, name), via: viaModule(root, name), copy, kind: 'dir', label: `module ${name}`, name });
+    const sealed = Boolean(copy && baseManifest.captured[name] === undefined);
+    entries.push({ link: moduleLink(root, name), via: viaModule(root, name), copy, sealed, kind: 'dir', label: `module ${name}`, name });
   }
   return entries;
 }
 
-// The directory atomicSymlink() moved aside for <link> when a kill left the
-// path absent before the link took its place, if it holds <copy>'s content.
-function interruptedConversion(link, copy) {
-  if (lstatOrNull(link)) return null;
-  const prefix = `${path.basename(link)}.osi-old-`;
-  let names;
-  try {
-    names = fs.readdirSync(path.dirname(link));
-  } catch (error) {
-    if (absent(error)) return null;
-    throw error;
-  }
-  for (const name of names.filter((entry) => entry.startsWith(prefix)).sort()) {
-    const aside = path.join(path.dirname(link), name);
-    if (sameContent(aside, copy, 'dir')) return aside;
-  }
-  return null;
-}
-
-// Why <base> cannot stand in for the live entries, or null. Checked before
-// anything moves: payloads/.active is pointed at <base> and every entry is
-// routed through it, which must not change a byte the gateway serves.
+// Why <base> cannot stand in for the live entries, or null. Every step before
+// the switch points payloads/.active at <base> or routes an entry through it,
+// so each served entry must already serve <base>'s bytes, with two
+// exceptions that are recorded on the entry:
+// - no GUI is served at all: routing it restores the payload's GUI;
+// - a module <base> carries as its own sealed copy while the flows already
+//   run from <base>: a switch into <base> by an older deploy.sh was cut
+//   during its module renames (state-table row S7), and routing the module
+//   completes that switch, as that deploy.sh would have.
 function baseMismatch(root, base, stamp, guiRoot, entries) {
   if (!isFile(path.join(payloadDir(root, base), 'flows.json'))) return `payloads/${base} has no flows.json`;
   if (guiRoot && !isDirectory(guiPayloadDir(root, base))) return `payloads/${base} has no GUI`;
+  const flowsInBase = currentStamp(root) === base;
   for (const entry of entries) {
     if (entry.copy) {
       if (sameContent(entry.link, entry.copy, entry.kind)) continue;
-      // A directory is moved aside before its link replaces it, and rename(2)
-      // cannot do both in one step. A kill in between leaves it beside the
-      // absent path; the conversion finishes here.
-      entry.aside = entry.kind === 'dir' ? interruptedConversion(entry.link, entry.copy) : null;
-      if (!entry.aside) return `the live ${entry.label} differs from payloads/${base}`;
-      continue;
+      if (entry.label === 'GUI' && !statOrNull(entry.link)) {
+        entry.restores = true;
+        continue;
+      }
+      if (entry.sealed && flowsInBase) {
+        entry.completes = true;
+        continue;
+      }
+      return `the live ${entry.label} differs from payloads/${base}`;
     }
-    // payloads/<base> has no copy: the live entry must be something the
-    // gateway does not run from, a link into a payload or nothing at all.
+    // payloads/<base> has no copy: the old flows must not run from the entry.
+    // Absent, leading nowhere, or linked into a payload the flows do not run
+    // from (a module new in this release, linked early for npm install) is
+    // fine; a module the flows' own payload carries is not.
     const stat = lstatOrNull(entry.link);
-    if (stat && !stat.isSymbolicLink()) {
-      return `the live ${entry.label} is a directory payloads/${base} does not hold`;
+    if (!stat || !statOrNull(entry.link)) continue;
+    if (!stat.isSymbolicLink()) return `the live ${entry.label} is a directory payloads/${base} does not hold`;
+    const into = moduleLinkStamp(root, entry.name);
+    if (into && into === currentStamp(root) && into !== base) {
+      return `the live ${entry.label} belongs to payloads/${into}, which the flows run from, and payloads/${base} does not hold it`;
     }
   }
   return null;
 }
 
-// Finishes a directory-to-link conversion a kill interrupted: the GUI or a
-// helper module of the active payload is absent and its directory lies beside
-// the path. deploy.sh calls this before it reads the live state, so the
-// capture block and the retry see the complete set. Returns the lines
-// deploy.sh prints, or null.
-function resumeInterruptedSwitch(root, guiRoot) {
-  const active = activeStamp(root);
-  if (!active) return null;
-  const entries = [];
-  if (guiRoot) entries.push({ link: guiLink(guiRoot), via: viaGui(root), copy: guiPayloadDir(root, active), label: 'GUI' });
-  const manifest = readModuleManifest(root, active);
-  for (const name of manifest ? manifest.modules : []) {
-    entries.push({ link: moduleLink(root, name), via: viaModule(root, name), copy: moduleTarget(root, active, name), label: `module ${name}` });
+function nothingServed(entries) {
+  return entries.every((entry) => !statOrNull(entry.link));
+}
+
+// The entry paths a switch can move aside or leave a temporary link for.
+function switchPaths(root, guiRoot) {
+  const paths = [flowsLink(root)];
+  if (guiRoot) paths.push(guiLink(guiRoot));
+  let names = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch (error) {
+    if (!absent(error)) throw error;
   }
+  const modules = new Set();
+  for (const name of names) {
+    const base = name.replace(/^\./, '').replace(/\.(osi-old|flip)-.*$/, '');
+    if (MODULE_NAME.test(base)) modules.add(base);
+  }
+  for (const name of [...modules].sort()) paths.push(moduleLink(root, name));
+  return paths;
+}
+
+// The sibling a killed atomicSymlink() left for <link>: the entry it moved
+// aside ("<name>.osi-old-<pid>-<ms>"), newest first, and its temporary links.
+function leftovers(link) {
+  const dir = path.dirname(link);
+  const base = path.basename(link);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  const stampOf = (name) => Number(name.split('-').pop()) || 0;
+  return {
+    aside: names.filter((name) => name.startsWith(`${base}.osi-old-`)).sort((a, b) => stampOf(b) - stampOf(a)).map((name) => path.join(dir, name)),
+    temps: names.filter((name) => name.startsWith(`.${base}.flip-`)).map((name) => path.join(dir, name)),
+  };
+}
+
+// Finishes what a killed switch left behind, before deploy.sh reads the live
+// state (and, in a later release, before Node-RED starts):
+// - an entry that is absent while the directory or file a switch moved aside
+//   lies beside it is moved back, which restores exactly what was served;
+//   rename(2) cannot replace a directory with a link, so that window exists
+//   once per converted directory, and older deploy.sh versions opened it for
+//   files too;
+// - leftover temporary links and moved-aside entries beside a present entry
+//   are removed, as are temporary payloads/.active links.
+// Returns the lines deploy.sh prints, or null.
+function resumeInterruptedSwitch(root, guiRoot) {
   const lines = [];
-  for (const entry of entries) {
-    const aside = interruptedConversion(entry.link, entry.copy);
-    if (!aside) continue;
-    atomicSymlink(entry.link, entry.via, `${entry.label} link`);
-    discardBackup(aside);
-    lines.push(`WARN: an interrupted switch left the ${entry.label} at ${path.basename(aside)}; linked it into payloads/${active} again`);
+  for (const link of switchPaths(root, guiRoot)) {
+    const { aside, temps } = leftovers(link);
+    for (const temp of temps) fs.rmSync(temp, { force: true });
+    if (!lstatOrNull(link) && aside.length) {
+      fs.renameSync(aside[0], link);
+      lines.push(`WARN: an interrupted switch left ${path.basename(link)} at ${path.basename(aside[0])}; moved it back`);
+      aside.shift();
+    }
+    for (const stale of aside) discardBackup(stale);
+  }
+  let names = [];
+  try {
+    names = fs.readdirSync(payloadsRoot(root));
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  for (const name of names) {
+    if (name.startsWith('.active.flip-')) fs.rmSync(path.join(payloadsRoot(root), name), { force: true });
   }
   return lines.length ? lines.join('\n') : null;
 }
 
-// Switches flows, the GUI and the helper modules to <stamp>. <fromStamp> is
-// the payload a rollback returns to (deploy.sh's PREV_STAMP); without it the
-// payload payloads/.active names, or the one the flows link into, serves.
-//
-// With such a payload, every step before the switch only re-points a live
-// entry at an identical copy in it, and the switch is one rename of
-// payloads/.active: a kill at any instant leaves the complete old payload or
-// the complete new one. Each step is idempotent, so a rerun resumes.
-// Without one (a first deploy, or flows without a GUI to capture) there is
-// nothing to keep, and the entries are linked before payloads/.active exists.
-function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
+// How a switch to <stamp> proceeds: the payload whose bytes the live entries
+// serve (the base), the entries to route, and the notes deploy.sh prints.
+// Throws when something is served and no payload holds it; deploy.sh calls
+// switchPreflight() before Node-RED stops, so that refusal comes first.
+function planSwitch(root, stamp, guiRoot, fromStamp) {
   const flowTarget = path.join(payloadDir(root, stamp), 'flows.json');
   if (!fs.existsSync(flowTarget)) {
     throw new Error(`flipTo: staged payload missing: ${flowTarget}`);
@@ -698,21 +745,53 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     throw new Error(`flipTo: rollback payload missing: ${fromStamp}`);
   }
   const modules = moduleFlipPlan(root, stamp);
-  let base = fromStamp || active || currentStamp(root);
-  let entries = switchEntries(root, stamp, guiRoot, modules, base);
-  if (base) {
+  // The rollback payload deploy.sh names; the payload .active names; the one
+  // the flows link into; the target itself (a rollback before the forward
+  // switch began serves the target's own captured bytes).
+  const candidates = fromStamp ? [fromStamp] : [...new Set([active, currentStamp(root), stamp].filter(Boolean))];
+  const reasons = [];
+  for (const base of candidates) {
+    const entries = switchEntries(root, stamp, guiRoot, modules, base);
     const mismatch = baseMismatch(root, base, stamp, guiRoot, entries);
-    if (mismatch && fromStamp) throw new Error(`flipTo: ${mismatch}; refusing to switch`);
-    if (mismatch) {
-      base = null;
-      entries = switchEntries(root, stamp, guiRoot, modules, null);
+    if (!mismatch) {
+      const notes = entries.filter((entry) => entry.completes)
+        .map((entry) => `WARN: ${entry.label} was left behind by a switch into payloads/${base} that was cut; this switch completes it`);
+      return { stamp, base, entries, modules, notes };
     }
+    reasons.push(mismatch);
   }
+  // No payload holds what is served. With a rollback payload named, that is
+  // a refusal. Without one there is nothing to return to anyway (a first
+  // deploy, or regular flows without a GUI to capture): the entries are
+  // linked one by one, as before payloads/.active existed.
+  if (fromStamp) throw new Error(`flipTo: ${reasons.join('; ')}; refusing to switch`);
+  const entries = switchEntries(root, stamp, guiRoot, modules, null);
+  return { stamp, base: null, entries, modules, notes: nothingServed(entries) ? [] :
+    ['WARN: no retained payload holds the live flows, GUI and modules; they are replaced one by one'] };
+}
+
+// The checks flipTo() makes, without changing anything; deploy.sh runs it
+// before Node-RED stops. Returns the lines to print, or null.
+function switchPreflight(root, stamp, guiRoot = null, fromStamp = '') {
+  const plan = planSwitch(root, stamp, guiRoot, fromStamp);
+  return plan.notes.length ? plan.notes.join('\n') : null;
+}
+
+// Switches flows, the GUI and the helper modules to <stamp>. <fromStamp> is
+// the payload the live entries serve, as deploy.sh captured it (PREV_STAMP).
+//
+// With such a base, every step before the switch only re-points a live entry
+// at an identical copy in it (see baseMismatch() for the two exceptions), and
+// the switch is one rename of payloads/.active: a kill at any instant leaves
+// the complete old payload or the complete new one. Each step is idempotent,
+// so a rerun resumes. Without a base (a first deploy, or regular flows with
+// no GUI to capture) the entries are linked before payloads/.active exists.
+function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
+  const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
   if (base) {
-    if (active !== base) pointActive(root, base);
+    if (activeStamp(root) !== base) pointActive(root, base);
     for (const entry of entries) {
       if (!linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`);
-      discardBackup(entry.aside);
     }
     if (base !== stamp) pointActive(root, stamp);
   } else {
@@ -720,7 +799,7 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     try {
       for (const entry of entries) {
         if (entry.name && modules.unlink.includes(entry.name)) continue;
-        switched.push(atomicSymlink(entry.link, entry.via, `${entry.label} link`, { keepBackup: true }));
+        if (!linksTo(entry.link, entry.via)) switched.push(atomicSymlink(entry.link, entry.via, `${entry.label} link`, { keepBackup: true }));
       }
       pointActive(root, stamp);
     } catch (error) {
@@ -735,7 +814,7 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     const stat = lstatOrNull(moduleLink(root, name));
     if (stat && stat.isSymbolicLink()) fs.rmSync(moduleLink(root, name), { force: true });
   }
-  const result = { flowsLink: flowsLink(root), target: flowTarget };
+  const result = { flowsLink: flowsLink(root), target: path.join(payloadDir(root, stamp), 'flows.json') };
   if (guiRoot) Object.assign(result, { guiLink: guiLink(guiRoot), guiTarget: guiPayloadDir(root, stamp) });
   if (modules.link.length || modules.unlink.length) result.modules = modules;
   return result;
@@ -1059,6 +1138,7 @@ module.exports = {
   legacyCaptureStamp,
   legacyCapturePreflight,
   resumeInterruptedSwitch,
+  switchPreflight,
   clearLegacyCapture,
   verifyPair,
   writeCompatibility,

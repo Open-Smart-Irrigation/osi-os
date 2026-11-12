@@ -2275,9 +2275,10 @@ echo "OK"
 
 # legacy capture preflight begin
 # A directory cannot be replaced by a link in one rename, so a kill while
-# flipTo() converts the image GUI or a pre-#603 module directory leaves the
-# directory beside its absent path; this links it into the active payload
-# again before the live state is read.
+# flipTo() converts the image GUI or a pre-#603 module directory (and, with an
+# older deploy.sh, a regular flows.json) leaves it beside its absent path; this
+# moves it back, and removes what killed switches left, before the live state
+# is read.
 if ! resume_switch_report="$(swap_call resumeInterruptedSwitch "$GUI_ROOT")"; then
     echo "ERROR: could not finish an interrupted payload switch; refusing before any file is replaced" >&2
     exit 1
@@ -3139,6 +3140,14 @@ if ! module_link_report="$(swap_call linkNewModules "$DEPLOY_STAMP" "${PREV_STAM
     exit 1
 fi
 [ -z "$module_link_report" ] || printf '%s\n' "$module_link_report"
+# The switch further down runs after Node-RED is stopped and the migration
+# has run; make the same decision now, while a refusal still leaves the
+# gateway running.
+if ! switch_preflight_report="$(swap_call switchPreflight "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}")"; then
+    echo "ERROR: the payload switch would refuse the live flows, GUI and helper modules; refusing the deploy before anything is stopped" >&2
+    exit 1
+fi
+[ -z "$switch_preflight_report" ] || printf '%s\n' "$switch_preflight_report"
 echo "OK: helper modules staged with payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
 # module payload staging end
 
