@@ -507,7 +507,31 @@ const STATE_TABLE = [
       fs.symlinkSync(text, at);
     }
   }] },
+  // The S-1 ruling: a deploy cut after its switch and before its health
+  // check. The cut payload is unchecked ("activated"); g.schema is the
+  // database's schema head and ledger after the cut.
+  { row: 'S41', verdict: 'PAYLOAD', name: 'a deploy cut between its switch and its health check after migrating the database', builds: [(g) => {
+    cutBeforeHealthCheck(g, { migrated: true });
+  }] },
+  { row: 'S42', verdict: 'PAYLOAD', name: 'a deploy cut between its switch and its health check that did not migrate the database', builds: [(g) => {
+    cutBeforeHealthCheck(g, { migrated: false });
+  }] },
 ];
+
+// A committed deploy "old" on schema 70, then a deploy "cut" that recorded
+// its compatibility (79 when it migrated, else 70), switched, and was cut
+// before its health check.
+function cutBeforeHealthCheck(g, { migrated }) {
+  freshImage(g);
+  moduleDeploy(g, 'old');
+  swap.writeCompatibility(g.root, 'old', '70', '70:a');
+  swap.markHealthy(g.root, 'old');
+  stageWithModules(g.root, 'cut', { 'osi-a': '', 'osi-b': '' });
+  g.schema = migrated ? ['79', '70:a,79:b'] : ['70', '70:a'];
+  swap.writeCompatibility(g.root, 'cut', ...g.schema);
+  swap.markActivated(g.root, 'cut');
+  flipTo(g.root, 'cut', g.guiRoot, 'old');
+}
 
 
 module.exports = {

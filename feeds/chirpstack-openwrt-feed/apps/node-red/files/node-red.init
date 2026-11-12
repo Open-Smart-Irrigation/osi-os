@@ -339,14 +339,18 @@ journal_media_invalid_reason() {
 # power cut while a deploy converts the image GUI or a v0.8.1 module directory
 # leaves that directory beside its absent path. Before Node-RED starts, the
 # helper moves it back, so the start serves the complete payload without a
-# deploy.
+# deploy. It also records an active payload whose deploy was cut before its
+# health check as unverified in /srv/node-red/payload-state.json: that payload
+# still starts, because it is the code that matches the database, and the
+# next deploy runs the check it owes first.
 payload_switch_repair() {
     local helper="/srv/$PACKAGE_NAME/.payload-swap.js"
     local report
     [ -f "$helper" ] || return 0
     if report="$(node -e '
-      const out = require(process.argv[1]).resumeInterruptedSwitch(process.argv[2], process.argv[3]);
-      if (out) process.stdout.write(out);
+      const swap = require(process.argv[1]);
+      const out = [swap.resumeInterruptedSwitch(process.argv[2], process.argv[3]), swap.recordBootState(process.argv[2])];
+      process.stdout.write(out.filter(Boolean).join("\n"));
     ' "$helper" "/srv/$PACKAGE_NAME" "/usr/lib/node-red/gui" 2>&1)"; then
         [ -z "$report" ] || logger -t node-red.init "$report"
     else

@@ -408,7 +408,25 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
       : (hasErrors || hasRejected ? 'degraded' : 'healthy');
   } catch (_) {}
 
+  // A payload a cut deploy switched in runs unverified until the next deploy
+  // checks it, or is held stopped: say so where the health answer goes.
+  const payloadState = readPayloadState(options);
+  if (payloadState && !health.crash_looping) health.health_state = payloadState;
+
   return health;
+}
+
+// "unverified" or "held" from /srv/node-red/payload-state.json (written by
+// deploy.sh and node-red.init through the payload swap helper), or null.
+function readPayloadState(options = {}) {
+  const file = (options && options.payloadStatePath) || '/srv/node-red/payload-state.json';
+  try {
+    const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (record && record.format === 1 && (record.state === 'unverified' || record.state === 'held')) return record.state;
+  } catch (_) {
+    // No state file, or one this helper does not understand: nothing to report.
+  }
+  return null;
 }
 
 function gatherEdgeHealth(db, options = {}) {
@@ -504,5 +522,6 @@ module.exports = {
   readCrashState,
   isAuthRejection,
   recordError,
-  rtcHealth
+  rtcHealth,
+  readPayloadState
 };

@@ -103,12 +103,38 @@ function bootRepair(g) {
   return readOr(path.join(g.root, 'boot.log'), '');
 }
 
+// deploy.sh's owed health check (between "# owed health check begin" and
+// "end"): an active payload a cut deploy left unchecked is checked first.
+// <outcome> stands for the health check's result. Returns null, or
+// { held: <payload> } when deploy.sh holds Node-RED stopped and exits.
+function owedCheck(g, outcome) {
+  const [head, ledger] = g.schema || ['', ''];
+  const plan = swap.owedCheckPlan(g.root, head, ledger);
+  if (!plan) return null;
+  const [payload, migrated, fallback] = plan.split('|');
+  if (outcome === 'pass') {
+    swap.markHealthy(g.root, payload);
+    swap.writePayloadState(g.root, payload, 'healthy', 'its owed health check passed');
+    return null;
+  }
+  swap.markFailed(g.root, payload, 'owed health check failed');
+  if (migrated === '1' || !fallback) {
+    swap.writePayloadState(g.root, payload, 'held', 'its owed health check failed and only it matches the migrated database');
+    return { held: payload };
+  }
+  swap.flipTo(g.root, fallback, g.guiRoot);
+  swap.writePayloadState(g.root, fallback, 'healthy', `payloads/${payload} failed its owed health check; returned to this payload`);
+  return null;
+}
+
 // deploy.sh's decision sequence for a deploy of <stamp>, before Node-RED
-// stops. Returns { refused } or { served, prev, notes }.
-function deployDecision(g, stamp) {
+// stops. Returns { refused }, { held } or { served, prev, notes }.
+function deployDecision(g, stamp, outcome = 'pass') {
   try {
     swap.resumeInterruptedSwitch(g.root, g.guiRoot);
     swap.legacyCapturePreflight(g.root, g.flowsPath, g.guiRoot);
+    const owed = owedCheck(g, outcome);
+    if (owed) return owed;
     table.stageWithModules(g.root, stamp, NEW_MODULES);
     let prev = swap.currentStamp(g.root) || '';
     const prevGui = swap.guiStamp(g.root, g.guiRoot);
@@ -208,6 +234,8 @@ function withRow(build, stale, fn) {
     build(g);
     if (stale) table.staleMarker(g.marker, 'gone-previous');
     const decision = deployDecision(g, 'new');
+    // deploy.sh records the payload as activated just before its switch.
+    if (!decision.refused && !decision.held) swap.markActivated(g.root, 'new');
     return fn(g, decision);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -224,6 +252,7 @@ function leftovers(g) {
 function retryAndRollback(g, label) {
   const retry = deployDecision(g, 'retry');
   assert.ok(!retry.refused, `${label}: the retry is not refused: ${retry.refused}`);
+  swap.markActivated(g.root, 'retry');
   swap.flipTo(g.root, 'retry', g.guiRoot, retry.served);
   assert.equal(swap.verifyPair(g.root, 'retry', g.guiRoot), true, `${label}: the retry activates completely`);
   const state = served(g);
@@ -392,3 +421,81 @@ test('a kill during a first activation leaves no flows running or the complete p
     }
   }
 });
+
+// The S-1 ruling: unchecked is not failed. A deploy cut between its switch
+// and its health check, with and without a migration; then the retry's owed
+// check passing, failing, or a reboot without any retry.
+for (const row of ['S41', 'S42']) {
+  const build = table.STATE_TABLE.find((r) => r.row === row).builds[0];
+  const migrated = row === 'S41';
+  const withCut = (fn) => {
+    const root = table.tableRoot();
+    try {
+      const g = table.tableGateway(root);
+      fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+      build(g);
+      return fn(g);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const runsCut = (g) => {
+    const state = served(g);
+    assert.ok(state.flows.includes('cut') && state.gui.includes('cut') && state['osi-a'].includes('osi-a@cut'), JSON.stringify(state));
+  };
+
+  test(`owed check ${row}: a reboot without a retry starts the cut payload and records it unverified`, () => {
+    withCut((g) => {
+      const log = bootRepair(g);
+      runsCut(g);
+      const state = swap.readPayloadState(g.root);
+      assert.equal(state.active, 'cut');
+      assert.equal(state.state, 'unverified');
+      assert.equal(state.writer, 'node-red.init');
+      assert.match(log, /payloads\/cut runs unverified/);
+      assert.equal(swap.payloadTrusted(g.root, 'cut'), false, 'never a rollback target while unverified');
+      assert.equal(swap.rollbackTarget(g.root, 'cut', 'next'), 'old');
+      assert.equal(bootRepair(g), log, 'a second boot changes nothing');
+    });
+  });
+
+  test(`owed check ${row}: the retry's check passes, the cut payload becomes healthy and the deploy goes on`, () => {
+    withCut((g) => {
+      bootRepair(g);
+      const decision = deployDecision(g, 'new', 'pass');
+      assert.ok(!decision.refused && !decision.held, JSON.stringify(decision));
+      assert.equal(decision.served, 'cut');
+      assert.equal(decision.prev, 'cut', 'the checked payload is the rollback target');
+      assert.equal(swap.payloadTrusted(g.root, 'cut'), true);
+      assert.deepEqual(
+        (({ active, state, writer }) => ({ active, state, writer }))(swap.readPayloadState(g.root)),
+        { active: 'cut', state: 'healthy', writer: 'deploy.sh' });
+      runsCut(g);
+    });
+  });
+
+  test(`owed check ${row}: the retry's check fails`, () => {
+    withCut((g) => {
+      bootRepair(g);
+      const decision = deployDecision(g, 'new', 'fail');
+      const state = swap.readPayloadState(g.root);
+      assert.equal(swap.readHealth(g.root, 'cut').state, 'failed');
+      if (migrated) {
+        // Only the cut payload matches the migrated database: held, never
+        // older code on it.
+        assert.deepEqual(decision, { held: 'cut' });
+        runsCut(g);
+        assert.equal(state.state, 'held');
+        assert.equal(state.active, 'cut');
+      } else {
+        // The database was not migrated: the older healthy payload fits it.
+        assert.ok(!decision.held && !decision.refused, JSON.stringify(decision));
+        const now = served(g);
+        assert.ok(now.flows.includes('old') && now.gui.includes('old') && now['osi-a'].includes('osi-a@old'), JSON.stringify(now));
+        assert.equal(state.state, 'healthy');
+        assert.equal(state.active, 'old');
+        assert.equal(decision.served, 'old');
+      }
+    });
+  });
+}

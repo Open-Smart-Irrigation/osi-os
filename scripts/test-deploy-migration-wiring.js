@@ -327,7 +327,9 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
   const logMarkIdx = deploy.indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"', healthCheckHeaderIdx);
   const probeCallIdx = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
-  const grepIdx = indexOf('grep -q "devices rebuild ABORTED"');
+  // The owed health check (run_owed_health_check) gates on the same line
+  // earlier in deploy.sh; this test is about the deploy's own check.
+  const grepIdx = deploy.indexOf('grep -q "devices rebuild ABORTED"', healthCheckHeaderIdx);
   const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
   const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
 
