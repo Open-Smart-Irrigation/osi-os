@@ -35,6 +35,6 @@ function evidence() {
   }
   const packages={};
   for(const name of ['node-red-node-sqlite','sqlite3','@chirpstack/chirpstack-api','@grpc/grpc-js','bcryptjs','google-protobuf','protobufjs','@grpc/proto-loader'])packages[name]=packageVersion(name);
-  return {runtime:config.name,node:process.versions.node,nodeRed:firmware('node-red/package.json').version,packages,sqliteModule,driver:sqliteRequire.resolve('sqlite3'),nativePaths};
+  return {runtime:config.name,node:process.versions.node,threadpool:process.env.UV_THREADPOOL_SIZE||'default (4)',nodeRed:firmware('node-red/package.json').version,packages,sqliteModule,driver:sqliteRequire.resolve('sqlite3'),nativePaths};
 }
 module.exports={config,firmware,load,evidence};

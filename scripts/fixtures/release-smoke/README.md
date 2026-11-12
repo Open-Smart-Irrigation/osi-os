@@ -43,18 +43,31 @@ install this resolves SQLite node 1.1.1 and sqlite3 5.1.7; npm honors the lock.
 Every runtime run repeats that install and records its log.
 
 Both layouts record resolved package versions and the actual mapped native
-addon in `results.json`. The stock run requires that one addon to reside in
+addon in `results.json` and the startup `runtime.json`. The stock run requires that one addon to reside in
 its user directory, with no firmware SQLite. The field-tester package is
 installed from the deploy lock but excluded from palette discovery because
 the suite uses the same outer field-tester stand-in in both runtimes.
 No product function, helper, wiring or function sandbox is replaced.
 
-The [211-case comparison](../release-smoke-stock/baseline-23bfda61e.md) on main baseline
-`23bfda61e` reports 200 passes and the same 11 exact known failures on each
-runtime, with no differing case or failure signature. Runs took 27.5 seconds
-(image) and 28.2 seconds (stock), excluding dependency installation and seed
-construction. The stock list is `../release-smoke-stock/known-failures.json`; its findings
-and exact symptoms match the image list at that baseline.
+The [216-case comparison](../release-smoke-stock/baseline-103e4c54.md) on main
+`103e4c54` contains five paired runs per runtime. The five known failures
+match exactly throughout. The image fixture has no unexpected failure;
+the stock runtime has one F-7 actuator-log BUSY failure in five runs. Its
+finished database has two log rows for three accepted opens. That failure
+stays unexpected and red; no case is weakened or added to a list.
+The other four stock runs pass 211 cases with five known failures.
+
+Six obsolete entries passed before removal from the stock list, all fixed
+by #648 (F-1/F-2/F-4). Both runtime lists now contain five entries. The
+[machine-readable report](../release-smoke-stock/baseline-103e4c54.json)
+records every case and run, including the initial stale-list refusal.
+Runtime execution takes 26.7–28.2 seconds, excluding install and seed build.
+
+**Pool setting:** the unchanged harness currently pins libuv to 2, while
+the product uses the default 4. F-7 owns the single product setting in the
+installed init script and the harness reader. This PR must rebase onto that
+change and repeat the comparison when it merges; it does not choose a
+second setting. These are provisional measurements under the current pin.
 
 | Flow dependency | Image fixture | Stock user install |
 | --- | --- | --- |
@@ -65,8 +78,9 @@ and exact symptoms match the image list at that baseline.
 | Node-RED MQTT node's client | 4.3.7 | 5.7.0 |
 | Node-RED HTTP node's got | 12.6.0 | 12.6.1 |
 
-The HTTP parser (1.20.3), cronosjs (1.7.1) and WebSocket module (7.5.10)
-resolve identically. The ChirpStack API 4.12.1 client against the stock
+The runtime's Express (4.21.2), HTTP parser (1.20.3), cronosjs (1.7.1)
+and WebSocket module (7.5.10) resolve identically. JSONata differs
+(1.8.7 versus 2.0.5), but the shipped flows have no JSONata configuration. The ChirpStack API 4.12.1 client against the stock
 base's ChirpStack 4.16.2 server remains a builder/device compatibility
 question; these tests use the local DeviceService stand-in.
 
@@ -122,12 +136,14 @@ checked after the sweep, whether or not its node is a function. Before
 boot it also compares both maintained image profiles, including every file
 under `usr/share/node-red`, rather than only a hardcoded helper list.
 
-The fixture lock supplies third-party modules rather than the image's
-vendored dependency tree. The direct versions agree for SQLite, bcryptjs,
-gRPC, ChirpStack API and protobuf; transitive versions can differ (for
-example protobufjs 7.6.6 here versus 7.5.4 in the baseline image, and
-proto-loader 0.8.1 versus 0.8.0). Scratch helper dependencies are discovered
-from directories rather than the shipped package manifest. Runtime module
+The image fixture lock supplies third-party modules rather than the image's
+vendored dependency tree. It uses SQLite node 1.1.1; the factory feed pins
+1.1.0. Their `sqlite.js` sources are byte-identical (checked against the
+feed's SHA-256-pinned tarball), but this does not qualify image packaging.
+Other direct versions agree for sqlite3, bcryptjs, gRPC, ChirpStack API and
+protobuf; transitive versions differ as recorded above. Image scratch
+helpers are discovered from directories; the stock install consumes the
+shipped manifest and lock. Runtime module
 installation is disabled; GUI static serving and provisioned credential
 encryption are not exercised. Matching flow/helper bytes and the Node-RED
 version does not establish image dependency, packaging or native ABI parity.

@@ -5,6 +5,8 @@ const watchdog=setTimeout(()=>{console.error('SMOKE infrastructure timeout');pro
 (async()=>{
   const h=await require('./runtime').start();
   try {
+    fs.writeFileSync(path.join(h.RUN,'runtime.json'),JSON.stringify(h.metadata,null,2)+'\n');
+    console.log('RUNTIME STARTED',JSON.stringify(h.metadata));
     const cases=await require('./cases').run(h);
     fs.writeFileSync(path.join(h.RUN,'results.json'),JSON.stringify({cases,metadata:h.metadata,logs:h.state.logs,radio:h.state.cs.calls,mqtt:h.state.mqtt,caught:h.state.caught,sweep:h.state.sweep,seconds:(Date.now()-started)/1000,maxRSSKiB:process.resourceUsage().maxRSS},null,2)+'\n');
   } finally {await h.stop();clearTimeout(watchdog);}

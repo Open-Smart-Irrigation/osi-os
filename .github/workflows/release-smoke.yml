@@ -52,6 +52,7 @@ jobs:
         with:
           name: release-runtime-smoke
           path: |
+            /tmp/osi-release-smoke-*/runtime.json
             /tmp/osi-release-smoke-*/results.json
             /tmp/osi-release-smoke-*/runtime.log
             /tmp/osi-release-smoke-*/seed.log
@@ -90,6 +91,7 @@ jobs:
         with:
           name: release-stock-runtime-smoke
           path: |
+            /tmp/osi-release-smoke-*/runtime.json
             /tmp/osi-release-smoke-*/results.json
             /tmp/osi-release-smoke-*/runtime.log
             /tmp/osi-release-smoke-*/seed.log
