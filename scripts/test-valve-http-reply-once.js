@@ -126,12 +126,19 @@ async function send(p, db, startId, fields, options = {}) {
     runFunction: async (node, current) => {
       const run = await executeFunction(node, {
         msg: current, env: Object.assign({}, ENV, options.env || {}), db,
-        osiLibModules: { 'osi-valve-control': p.valveControl }, libOverrides: { chirpstack },
+        osiLibModules: { 'osi-valve-control': p.valveControl },
+        libOverrides: Object.assign({ chirpstack }, options.valveControlMissing ? { osiLib: missingValveControl() } : {}),
       });
       return run.result;
     },
   });
   return { answers: http.answers, enqueued: chirpstack.enqueued, ...result };
+}
+
+// osiLib as it answers when osi-valve-control did not load: every other name
+// is still unregistered here, as the nodes on this path stop at the first refusal.
+function missingValveControl() {
+  return { require: (name) => ({ ok: false, error: 'Cannot find module ' + name }) };
 }
 
 function wiresWithLinkIn(receivers) {
@@ -191,6 +198,21 @@ for (const name of PROFILES) {
         const out = await send(p, db, builder, fields(), { row: { type_id: 'KIWI_SENSOR' } });
         assert.equal(out.enqueued.length, 0);
         assert.deepEqual(out.answers.map((a) => a.statusCode), [409], 'errors: ' + out.errors.join('; '));
+      } finally { db.close(); }
+    });
+  }
+
+  // Write STREGA Expectation passes the message on when the module is missing;
+  // the encoder must then answer the request itself (NEW-2).
+  for (const [label, builder, fields] of COMMANDS.filter(([, id]) => id === 'dde8e1ef265e96d7')) {
+    test(`${name}: ${label} answers 503 exactly once when osi-valve-control did not load`, async () => {
+      const db = seedDb();
+      try {
+        const out = await send(p, db, builder, fields(), { valveControlMissing: true });
+        assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
+        assert.equal(out.enqueued.length, 0);
+        assert.deepEqual(out.answers, [{ statusCode: 503, payload: { error: 'valve_control_unavailable' } }],
+          'errors: ' + out.errors.join('; '));
       } finally { db.close(); }
     });
   }
