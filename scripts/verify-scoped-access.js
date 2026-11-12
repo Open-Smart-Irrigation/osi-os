@@ -548,12 +548,17 @@ const NODE_TYPES = new Map([
   ['debug', 'internal'],
   ['split', 'internal'],
   ['switch', 'internal'],
-  ['change', 'internal: transforms messages, has no input of its own'],
   ['tab', 'configuration'],
   ['group', 'configuration'],
   ['global-config', 'configuration'],
   ['mqtt-broker', 'configuration'],
   ['sqlitedb', 'configuration'],
+]);
+
+// Only this Change is covered by the HTTP error-answer wiring tests. Other
+// Changes, including ones outside a probed path, still need classification.
+const INTERNAL_NODE_ENTRIES = new Map([
+  ['auth-http-error-restore', { type: 'change', reason: 'restores the caught error before the existing HTTP responder' }],
 ]);
 
 // Write rules. A write entry (PUT, POST, DELETE or PATCH, or any entry that
@@ -1160,6 +1165,7 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
 
   const unknownTypes = new Map();
   for (const node of flows) {
+    if (INTERNAL_NODE_ENTRIES.get(node.id)?.type === node.type) continue;
     if (!NODE_TYPES.has(node.type) && !unknownTypes.has(node.type)) unknownTypes.set(node.type, node.id);
   }
   for (const [type, id] of unknownTypes) {
