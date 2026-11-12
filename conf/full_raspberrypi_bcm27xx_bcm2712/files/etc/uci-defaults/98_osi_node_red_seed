@@ -23,7 +23,7 @@ if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
     cp "$SRC/package-lock.json" "$DST/package-lock.json"
 fi
 
-# The image's helpers, codecs, edge-channels.json and node_modules are copied
+# The image's helpers, codecs, node files, edge-channels.json and node_modules are copied
 # once per image install, at its first boot, before the sqlite3 block can
 # refuse. A refusing seed exits 1 and runs again at every boot, and a deploy
 # can run between two of those boots: copying again would put the image's
@@ -40,6 +40,11 @@ fi
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/codecs" ]; then
     mkdir -p "$DST/codecs"
     cp -a "$SRC/codecs/." "$DST/codecs/"
+fi
+
+if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/nodes" ]; then
+    mkdir -p "$DST/nodes"
+    cp -a "$SRC/nodes/." "$DST/nodes/"
 fi
 
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/node_modules" ]; then

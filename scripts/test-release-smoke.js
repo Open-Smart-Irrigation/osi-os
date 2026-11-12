@@ -70,7 +70,7 @@ function main(argv,options={}) {
   const runtimeLog=path.join(run,'runtime.log');
   const fd=fs.openSync(runtimeLog,'w');
   let child;
-  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',UV_THREADPOOL_SIZE:'2',OSI_SMOKE_RUN:run,OSI_SMOKE_CONTROL:options.control||''},stdio:['ignore',fd,fd]});}
+  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',OSI_SMOKE_RUN:run,OSI_SMOKE_CONTROL:options.control||''},stdio:['ignore',fd,fd]});}
   finally {fs.closeSync(fd);}
   if(child.status!==0)throw new Error('runtime failed: '+fs.readFileSync(runtimeLog,'utf8'));
   const evidence=JSON.parse(fs.readFileSync(path.join(run,'results.json'),'utf8'));

@@ -3102,6 +3102,17 @@ fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
+# Node-RED loads node files from /srv/node-red/nodes at start. This one puts
+# the flows' shared SQLite connection into serialized mode (F-7); it does not
+# depend on the flows' version, so it stays in place like the codecs.
+fetch_required "osi-sqlite-serialize node file" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.js" \
+    "/srv/node-red/nodes/osi-sqlite-serialize.js"
+
+fetch_required "osi-sqlite-serialize node file (.html)" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.html" \
+    "/srv/node-red/nodes/osi-sqlite-serialize.html"
+
 # module payload staging begin
 # The helper modules above went into payloads/$DEPLOY_STAMP/modules/; the
 # runtime package files, edge-channels.json and the codecs stay in place.
