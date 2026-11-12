@@ -36,6 +36,7 @@ function selectDriver(loadedFiles, localRequire, requireFrom = (file) => createR
 function refusal() {
   const refused = new Error('farm database refused: sqlite_driver_unavailable');
   refused.code = 'OSI_SQLITE_REFUSED';
+  refused.statusCode = 503;
   return refused;
 }
 
@@ -87,7 +88,7 @@ function createDriver(localRequire, { loadedFiles = () => Object.keys(require.ca
   acquire.guard = function guard() {
     if (!selected) return;
     standaloneStillValid();
-    startup.guard(selected.mode);
+    startup.guard();
   };
   return acquire;
 }

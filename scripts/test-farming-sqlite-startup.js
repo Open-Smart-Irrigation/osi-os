@@ -94,33 +94,48 @@ test('several mappings of one addon file count once', () => {
   assert.equal(f.state.getHealth().native_addons, 1);
 });
 
-test('two native addons refuse every farm connection, loudly, and latch', () => {
+test('a second SQLite library is reported loudly, with both paths, and refuses nothing', async () => {
   const f = fixture({ addons: [mapsLine(11467), mapsLine(3773, '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node')] });
   f.state.check();
+  await flush();
   f.state.recordDriver('node_red');
-  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED', message: /sqlite_module_conflict/ });
-  f.setAddons([mapsLine(11467)]);
-  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED' });
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'), 'a new connection opens');
+  assert.doesNotThrow(() => f.state.guard(), 'an open connection keeps working');
   const health = f.state.getHealth();
   assert.equal(health.module_conflict, true);
   assert.equal(health.health_state, 'sqlite_module_conflict');
-  assert.equal(f.logs.filter((l) => /found 2 native SQLite addons/.test(l)).length, 1);
+  assert.deepEqual(health.module_paths, ['/firmware/sqlite3/build/Release/node_sqlite3.node', '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node'].map((p) => p.startsWith('/srv/') ? p : '<outside the firmware and user directories>'));
+  const lines = f.logs.filter((l) => /a second SQLite library is loaded in this process \(2 native modules: .*\/srv\/node-red\/node_modules\/sqlite3/.test(l));
+  assert.equal(lines.length, 1, 'one line when seen');
+  f.setAddons([mapsLine(11467)]);
+  assert.equal(f.state.getHealth().health_state, 'sqlite_module_conflict', 'latched until Node-RED restarts');
 });
 
-test('a second addon loaded later is seen at the next open and at the next health read', () => {
+test('a module path outside the firmware and user trees is never reported', () => {
+  const f = fixture({ addons: [mapsLine(1, '/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3/build/Release/node_sqlite3.node'), mapsLine(2, '/home/someone/project/node_modules/sqlite3/build/Release/node_sqlite3.node')] });
+  f.state.recordDriver('node_red');
+  assert.deepEqual(f.state.getHealth().module_paths, [
+    '/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3/build/Release/node_sqlite3.node',
+    '<outside the firmware and user directories>',
+  ]);
+});
+
+test('a second addon loaded later is seen at the next open and at the next health read, and refuses nothing', async () => {
   const f = fixture({ addons: [mapsLine(11467)] });
   f.state.check();
+  await flush();
   f.state.recordDriver('node_red');
   f.state.beforeOpen('node_red');
-  f.setAddons([mapsLine(11467), mapsLine(3773, '/other/node_sqlite3.node (deleted)')]);
+  f.setAddons([mapsLine(11467), mapsLine(3773, '/srv/node-red/other/node_sqlite3.node (deleted)')]);
   assert.equal(f.state.getHealth().health_state, 'sqlite_module_conflict');
-  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED' });
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
 });
 
 test('a driver failure refuses and reports without a module path', () => {
   const f = fixture();
   f.state.driverFailed(new Error("Cannot find module 'sqlite3'\nRequire stack:\n- /usr/lib/node/node-red/node_modules/x.js"));
-  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED', message: /sqlite_driver_unavailable/ });
+  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED', statusCode: 503, message: /sqlite_driver_unavailable/ });
+  assert.throws(() => f.state.guard(), { code: 'OSI_SQLITE_REFUSED', statusCode: 503 });
   const health = f.state.getHealth();
   assert.equal(health.health_state, 'sqlite_driver_unavailable');
   assert.equal(health.driver_error, "Cannot find module 'sqlite3'");
@@ -207,23 +222,39 @@ function contextGlobal() {
   return { values, get: (key) => values.get(key), set: (key, value) => values.set(key, value) };
 }
 
-test('a refusing start-up fault reaches edge_health synchronously, without a connection', () => {
+test('an unavailable driver reaches edge_health synchronously, without a connection', () => {
   const { refreshGlobal } = require(HEALTH);
   const global = contextGlobal();
   let opened = 0;
   const osiDb = {
-    startupHealth: () => ({ health_state: 'sqlite_module_conflict', module_conflict: true, driver_error: null }),
+    startupHealth: () => ({ health_state: 'sqlite_driver_unavailable', module_conflict: false, driver_error: 'x' }),
     Database: function Database() { opened++; },
   };
   const pending = refreshGlobal({ global, osiDb });
   // Before any await: the heartbeat built from the same tick reads this.
   const health = global.get('edge_health');
-  assert.equal(health.health_state, 'sqlite_module_conflict');
-  // Build Heartbeat replaces health_state when crash_count is null.
-  assert.notEqual(health.crash_count, null);
+  assert.equal(health.health_state, 'sqlite_driver_unavailable');
   assert.ok(Number.isFinite(health.at));
   assert.equal(opened, 0);
+  // Build Heartbeat replaces health_state when crash_count is null.
+  assert.notEqual(health.crash_count, null);
   return pending;
+});
+
+test('a module conflict is published at once and the gather goes on', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  let opened = 0;
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'sqlite_module_conflict', module_conflict: true, driver_error: null }),
+    Database: function Database() { opened++; this.all = (s, cb) => cb(null, []); this.get = (s, cb) => cb(null, undefined); this.close = (cb) => cb(); },
+  };
+  const pending = refreshGlobal({ global, osiDb, options: { timeoutMs: 300, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') } });
+  assert.equal(global.get('edge_health').health_state, 'sqlite_module_conflict');
+  await pending;
+  assert.equal(opened, 1, 'the gather opened its connection');
+  assert.equal(global.get('edge_health').health_state, 'sqlite_module_conflict');
+  assert.notEqual(global.get('edge_health').disk_free_pct, null);
 });
 
 test('a damaged file is published at once and kept after the regular gather', async () => {
@@ -263,26 +294,6 @@ test('"not checked" never hides crash_looping or degraded; a fault replaces them
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('an open handle is refused once a second addon appears, re-read at most once a second', () => {
-  let now = 0, maps = [mapsLine(11467)];
-  const state = createStartupState({
-    files: { readFileSync: () => maps.join('\n'), statSync: () => ({}) },
-    spawn: () => fakeChild({ status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' }, false),
-    setTimer: () => ({}), clearTimer: () => {},
-    monotonicNow: () => now, log: () => {},
-  });
-  state.check();
-  state.recordDriver('node_red');
-  state.beforeOpen('node_red');
-  maps = [mapsLine(11467), mapsLine(3773, '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node')];
-  now = 500;
-  assert.doesNotThrow(() => state.guard('node_red'), 'within a second the map is not read again');
-  now = 1000;
-  assert.throws(() => state.guard('node_red'), { code: 'OSI_SQLITE_REFUSED', message: /sqlite_module_conflict/ });
-  now = 1100;
-  assert.throws(() => state.guard('node_red'), { code: 'OSI_SQLITE_REFUSED' }, 'the refusal stays latched');
 });
 
 test('"not checked" keeps the gathered figures and a degraded state on every tick', async () => {
@@ -372,4 +383,37 @@ test('the reader is killed when Node-RED exits, and the exit hook is removed onc
   g.state.check();
   await flush();
   assert.equal(g.exits.length, 0, 'no hook left after the verdict');
+});
+
+test('"not checked" gets one more attempt after the stated interval, then stands', async () => {
+  const { RETRY_MS } = require(path.join(HELPER, 'startup.js'));
+  assert.equal(RETRY_MS, 15 * 60 * 1000);
+  const f = fixture({ manual: true });
+  f.state.check();
+  f.timers[0].fn();                       // the first attempt passes its bound
+  let health = f.state.getHealth();
+  assert.equal(health.status, 'not_checked_timeout');
+  assert.equal(health.attempts, 1);
+  assert.equal(health.retry_in_ms, RETRY_MS);
+  const retry = f.timers.find((timer) => timer.ms === RETRY_MS);
+  assert.ok(retry, 'one retry is scheduled');
+  retry.fn();                              // fifteen minutes later
+  assert.equal(f.state.getHealth().status, 'checking');
+  assert.equal(f.calls.length, 2);
+  f.timers[f.timers.length - 1].fn();     // the second attempt passes its bound too
+  health = f.state.getHealth();
+  assert.equal(health.status, 'not_checked_timeout');
+  assert.equal(health.attempts, 2);
+  assert.equal(health.retry_in_ms, null);
+  assert.equal(f.timers.filter((timer) => timer.ms === RETRY_MS).length, 1, 'no third attempt');
+});
+
+test('a second attempt that answers gives the verdict', async () => {
+  const f = fixture({ manual: true, result: { status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' } });
+  f.state.check();
+  f.timers[0].fn();
+  f.timers.find((timer) => timer.ms === 15 * 60 * 1000).fn();
+  f.children[1].complete();
+  assert.equal(f.state.getHealth().status, 'healthy');
+  assert.equal(f.state.getHealth().health_state, null);
 });

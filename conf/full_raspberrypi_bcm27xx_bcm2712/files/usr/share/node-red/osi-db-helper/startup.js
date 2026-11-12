@@ -8,13 +8,17 @@
 //
 // Detection only: nothing here moves, restores, quarantines or deletes a
 // file. What a gateway does with an already-damaged file is the owner's
-// decision and is not made here. Only a driver failure or a second addon
-// refuses farm connections.
+// decision and is not made here. A second SQLite library in the process is
+// reported loudly and permanently, and does not stop irrigation: the helper
+// itself never holds a second copy (its driver is the SQLite nodes' own), so
+// refusing would stop the valves for certain against damage only the stranger
+// can cause. Only a driver that cannot be obtained refuses (HTTP 503).
 //
 // One state per process: the seed installs two real copies of this package
 // (/srv/node-red/osi-db-helper and node_modules/osi-db-helper), and both must
-// report and refuse alike.
+// report alike.
 const fs = require('node:fs');
+const path = require('node:path');
 const childProcess = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 
@@ -30,6 +34,14 @@ const FARM_DB = '/data/db/farming.db';
 // that will not finish, and so also bounds how long the reader holds back
 // checkpoints (the -wal grows by about 22 KB per committed write meanwhile).
 const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
+// "Not checked" gets one more attempt, then stands until the next restart.
+// Fifteen minutes lets a boot's disk load settle and the page cache warm; a
+// second attempt that again runs into the bound holds the write-ahead log
+// back for up to another ten minutes (about 22 KB per committed write).
+const RETRY_MS = 15 * 60 * 1000;
+// A module path in the health answer is one of these trees; anything else is
+// reported as outside them, so no other path is ever sent.
+const MODULE_ROOTS = ['/usr/lib/node/', '/usr/lib/node-red/', '/srv/node-red/', path.resolve(__dirname, '..') + '/'];
 const CORE_TABLES = ['users', 'devices', 'irrigation_zones'];
 const CHECK_SQL = 'PRAGMA quick_check(1); SELECT \'core_tables=\' || count(*) FROM sqlite_master'
   + " WHERE type='table' AND name IN (" + CORE_TABLES.map((name) => "'" + name + "'").join(',') + ');';
@@ -94,6 +106,9 @@ function createStartupState({
     driver_error: null,
     native_addons: null, // distinct node_sqlite3.node files mapped; 0 = none loaded yet
     module_conflict: false,
+    module_paths: null, // with a conflict: the mapped node_sqlite3.node files
+    attempts: 0,
+    retry_in_ms: null,
   };
   const reported = new Set();
   let attempted = false;
@@ -112,23 +127,32 @@ function createStartupState({
       report('maps', 'native SQLite addons could not be counted: ' + String(error && error.message ? error.message : error));
       return null;
     }
-    const identities = new Set();
+    const identities = new Map();
     for (const line of text.split('\n')) {
       if (!ADDON.test(line)) continue;
       const fields = line.trim().split(/\s+/);
-      identities.add(fields[3] + ':' + fields[4]);
+      const identity = fields[3] + ':' + fields[4];
+      if (!identities.has(identity)) identities.set(identity, fields.slice(5).join(' ').replace(/ \(deleted\)$/, ''));
     }
+    lastPaths = [...identities.values()].map(safePath);
     return identities.size;
+  }
+  let lastPaths = [];
+  function safePath(file) {
+    return MODULE_ROOTS.some((root) => file.startsWith(root)) ? file : '<outside the firmware and user directories>';
   }
 
   // Zero addons is "not yet observable", never a fault: at settings.js time
-  // no SQLite module is loaded. Once two are mapped the conflict latches.
+  // no SQLite module is loaded. Once two are mapped the conflict latches and
+  // is reported; it refuses nothing.
   function inspectModules() {
     const count = countAddons();
     state.native_addons = count;
     if (count > 1 && !state.module_conflict) {
       state.module_conflict = true;
-      report('conflict', 'found ' + count + ' native SQLite addons in this process; farm database connections refused');
+      state.module_paths = lastPaths;
+      report('conflict', 'a second SQLite library is loaded in this process (' + count + ' native modules: '
+        + lastPaths.join(', ') + '); the farm database is at risk until the one that is not the SQLite nodes\' own is removed');
     }
     return count;
   }
@@ -156,15 +180,20 @@ function createStartupState({
     report('driver', 'native SQLite driver unavailable: ' + state.driver_error + '; farm database connections refused');
   }
 
-  function finish(started, result) {
+  function finish(started, result, filename) {
     if (state.status !== 'checking') return;
     Object.assign(state, result);
     state.check_ms = Math.round(monotonicNow() - started);
+    if (/^not_checked/.test(state.status) && state.attempts < 2) {
+      state.retry_in_ms = RETRY_MS;
+      const retry = setTimer(() => { state.retry_in_ms = null; run(filename); }, RETRY_MS);
+      if (retry && typeof retry.unref === 'function') retry.unref();
+    }
     if (state.status !== 'healthy') {
       // Report only: the check opens the file read-only and moves or repairs
       // nothing. A fault points to the operator document.
       const fault = ['damaged', 'missing_core_tables', 'missing', 'unreadable'].includes(state.status);
-      report('check', 'farm database start-up check: ' + state.status + (state.detail ? ' (' + state.detail + ')' : '')
+      report('check' + state.attempts, 'farm database start-up check: ' + state.status + (state.detail ? ' (' + state.detail + ')' : '')
         + '; reported only, no file was moved or repaired'
         + (fault ? '; see docs/operations/damaged-farm-database.md (osi-os repository)' : ''));
     }
@@ -180,7 +209,12 @@ function createStartupState({
   function check(filename = farmPath) {
     if (attempted) return getHealth();
     attempted = true;
+    return run(filename);
+  }
+
+  function run(filename) {
     const started = monotonicNow();
+    state.attempts += 1;
     state.status = 'checking';
     try {
       files.statSync(filename);
@@ -194,7 +228,7 @@ function createStartupState({
     try {
       child = spawn('sqlite3', ['-readonly', filename, CHECK_SQL], { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
-      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) });
+      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) }, filename);
       return getHealth();
     }
     let stdout = '', stderr = '';
@@ -204,7 +238,7 @@ function createStartupState({
     const timer = setTimer(() => {
       stopWithProcess();
       try { child.kill('SIGKILL'); } catch (error) { report('kill', 'start-up check could not be stopped: ' + String(error && error.message || error)); }
-      finish(started, { status: 'not_checked_timeout', detail: 'check exceeded ' + CHECK_TIMEOUT_MS + ' ms' });
+      finish(started, { status: 'not_checked_timeout', detail: 'check exceeded ' + CHECK_TIMEOUT_MS + ' ms' }, filename);
     }, CHECK_TIMEOUT_MS);
     if (timer && typeof timer.unref === 'function') timer.unref();
     if (child.stdout) child.stdout.on('data', (chunk) => { if (stdout.length < 65536) stdout += chunk; });
@@ -212,20 +246,22 @@ function createStartupState({
     child.on('error', (error) => {
       clearTimer(timer);
       stopWithProcess();
-      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) });
+      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) }, filename);
     });
     child.on('close', (code) => {
       clearTimer(timer);
       stopWithProcess();
-      finish(started, classify({ status: code, stdout, stderr }));
+      finish(started, classify({ status: code, stdout, stderr }), filename);
     });
     return getHealth();
   }
 
+  // Only a driver that cannot be obtained refuses; a conflict is reported.
   function refuseIfLatched() {
-    if (state.driver_error || state.module_conflict) {
+    if (state.driver_error) {
       const error = new Error('farm database refused: ' + healthState());
       error.code = 'OSI_SQLITE_REFUSED';
+      error.statusCode = 503;
       throw error;
     }
   }
@@ -238,23 +274,15 @@ function createStartupState({
     if (mode === 'node_red') {
       if (!attempted) check();
       inspectModules();
-      lastInspected = monotonicNow();
     }
     refuseIfLatched();
   }
 
-  // Called before every operation on a farm handle, also on a handle opened
-  // before a second addon appeared: once a refusal is latched, no further
-  // statement runs through any handle. The map is read at most once a second.
-  let lastInspected = -Infinity;
-  function guard(mode) {
-    if (mode === 'node_red') {
-      const now = monotonicNow();
-      if (now - lastInspected >= 1000) {
-        lastInspected = now;
-        inspectModules();
-      }
-    }
+  // Called before every operation on a farm handle: refuses only when the
+  // driver could not be obtained. The module count is read at every new
+  // connection and every health read (one per heartbeat tick and per stats
+  // answer), not per statement.
+  function guard() {
     refuseIfLatched();
   }
 
@@ -266,3 +294,4 @@ module.exports = globalThis[STATE_KEY];
 module.exports.createStartupState = createStartupState;
 module.exports.classify = classify;
 module.exports.CHECK_TIMEOUT_MS = CHECK_TIMEOUT_MS;
+module.exports.RETRY_MS = RETRY_MS;

@@ -8,16 +8,16 @@ Two copies of the native `sqlite3` addon in one Node-RED process damaged the far
 
 `osi-db-helper/sqlite-driver.js` now takes `sqlite3` from the `node-red-node-sqlite` package that Node-RED actually loaded for its SQLite nodes (found in the module cache at the first connection). On a factory image that is the firmware package; after `npm install` in `/srv/node-red` it can be the package in the user directory, which Node-RED prefers. The real directory `/srv/node-red/node_modules/sqlite3` stays: npm, the seed and the bundle deploy need it, and Node-RED no longer loads it. A process that is not Node-RED (a test or a command-line tool) uses its own `sqlite3`; a separate process with its own library is safe.
 
-## What refuses
+## What is refused, and what is only reported
 
-`osi-db-helper` refuses every farm connection, with the error code `OSI_SQLITE_REFUSED`, in two cases:
+| Health state | Cause | Effect |
+|---|---|---|
+| `sqlite_module_conflict` | A second SQLite library is loaded in the Node-RED process: more than one `node_sqlite3.node` file mapped (`/proc/self/maps`, counted by device and inode). | **Reported, not refused.** The farm database is at risk until the library that is not the SQLite nodes' own is removed. The gateway keeps irrigating: the helper's own driver is the SQLite nodes' one, so it is never the second library, and refusing would stop the valves for certain against damage only the stranger can cause. |
+| `sqlite_driver_unavailable` | Node-RED runs but its SQLite node package is not loaded, more than one is loaded, or its `sqlite3` failed to load; or the helper chose its own `sqlite3` before Node-RED started in the same process. | **Refused:** every farm connection of the helper fails with code `OSI_SQLITE_REFUSED` and status 503. The helper never tries another copy. |
 
-| Health state | Cause |
-|---|---|
-| `sqlite_driver_unavailable` | Node-RED runs but its SQLite node package is not loaded, more than one is loaded, or its `sqlite3` failed to load. The helper never tries another copy. |
-| `sqlite_module_conflict` | More than one `node_sqlite3.node` file is mapped in the process (`/proc/self/maps`, counted by device and inode). Counted at every connection and every health read; once seen it stays latched until Node-RED restarts. |
+No module mapped yet is not a conflict: at `settings.js` time no SQLite module is loaded. The count is read at every new connection and at every health read (one per heartbeat tick and per stats answer); once a conflict is seen it stays until Node-RED restarts, and it is seen again at the next start if the stranger is still there. It is announced by one log line naming both files, `[osi-db-startup] ERROR a second SQLite library is loaded in this process (2 native modules: <path>, <path>); …`, and the two paths travel in the stats answer as `database.module_paths`. The heartbeat carries the state's name only. A path is reported only when it lies under `/usr/lib/node/`, `/usr/lib/node-red/`, `/srv/node-red/` or the helper's own install tree; any other is reported as `<outside the firmware and user directories>`.
 
-No addon mapped yet is not a conflict: at `settings.js` time no SQLite module is loaded.
+The valve and schedule routes answer a refusal with 503 and the code. The login route still answers it with 500: its flow node sets that status itself.
 
 ## The file check
 
@@ -40,6 +40,8 @@ The flows do not wait for it. Until it answers, the state reads `checking`; the 
 | `not_checked_timeout` | `database_not_checked` | The check passed its bound and was stopped. |
 | `not_checked` | `database_not_checked` | The check could not run: the tool is absent or did not start, or its answer was not one of the above. The reason is in `detail`. |
 
+A "not checked" result gets one more attempt 15 minutes later (`retry_in_ms` in the stats answer meanwhile), which lets a boot's disk load settle; a second attempt that again reaches the bound holds the write-ahead log back for up to another ten minutes. After the second attempt the state stands until Node-RED restarts.
+
 The verdict is decided by SQLite's message, not its exit code: the same damaged file gives exit 1 with `Error in 3rd command line argument: database disk image is malformed` on sqlite3 3.53.1 and exit 11 with `Error: stepping, database disk image is malformed (11)` on 3.46.1.
 
 **The bound is ten minutes**, from the field figure. `quick_check` reads every page: a 103 MiB file took 1.1 to 1.2 s cold on an emulated Pi 5. The production gateway's SD card copied its 94 MiB database in 18 s, a copy the emulator makes in 1 to 2 s, so it reads 9 to 18 times slower: the check needs 10 to 22 s per 100 MB there, about 50 s to 2 minutes for 500 MB, and ten minutes still gives a verdict on 2.7 to 6 GB. Because the check runs beside the flows, the bound delays nothing; it ends a read that will not finish.
@@ -55,7 +57,7 @@ The check sees damage, not loss: a sound file that lost rows, or a recovered fil
 ## Where the state shows
 
 - The heartbeat's `health.health_state` carries the database health state. A fault replaces `healthy`, `degraded` and `crash_looping`; `database_checking` and `database_not_checked` replace only `healthy`, so they never hide a crash loop or `degraded`. `Gather Edge Health` publishes it into `edge_health` before its first `await`, and the heartbeat tick reaches `Gather Edge Health` before `Build Heartbeat`, so every heartbeat carries the state as it is at that tick: `checking` at first, the verdict from the tick after it is known. With a refusal no connection is attempted.
-- `GET /api/system/stats` (authenticated, as before) has a `database` object: `status`, `detail`, `check_ms`, `timeout_ms`, `driver_mode`, `driver_error` (no module paths), `native_addons`, `module_conflict` and `health_state`.
+- `GET /api/system/stats` (authenticated, as before) has a `database` object: `status`, `detail`, `check_ms`, `timeout_ms`, `attempts`, `retry_in_ms`, `driver_mode`, `driver_error` (no module paths), `native_addons`, `module_conflict`, `module_paths` (only with a conflict) and `health_state`.
 - The gateway log has one `[osi-db-startup] ERROR` line per fault; for a damaged, missing or unreadable file it names [damaged-farm-database.md](damaged-farm-database.md).
 - A fault published while the regular health gather has not finished is laid over the last gathered figures (schema signature, sync counters, disk); a gateway whose file is sound but was not checked keeps sending them, and `degraded` stays `degraded`.
 

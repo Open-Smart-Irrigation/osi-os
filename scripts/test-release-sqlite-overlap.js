@@ -120,7 +120,8 @@ function run({source=ROOT,layout='dual'}={}) {
 const STARTUP_FAULTS={
   none:{id:'database-startup-healthy',status:'healthy',health:null},
   damaged:{id:'database-startup-damaged',status:'damaged',health:'database_damaged',log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
-  conflict:{id:'database-startup-module-conflict',status:'healthy',health:'sqlite_module_conflict',log:/\[osi-db-startup\] ERROR found 2 native SQLite addons/},
+  // A second SQLite library is reported with both paths; the gateway keeps irrigating.
+  conflict:{id:'database-startup-module-conflict',status:'healthy',health:'sqlite_module_conflict',log:/\[osi-db-startup\] ERROR a second SQLite library is loaded in this process \(2 native modules: /},
   // The check answers 12 s after the flows started: first "checking", then damaged.
   damaged_late:{id:'database-startup-damaged-late',status:'checking',health:'database_checking',late:{status:'damaged',health:'database_damaged'},
     log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
@@ -191,7 +192,10 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
       check('late-verdict-in-stats',laterDatabase?.status===expected.late.status&&laterDatabase?.health_state===expected.late.health,laterDatabase);
       check('late-verdict-in-next-heartbeat',laterHeartbeat?.health?.health_state===expected.late.health,laterHeartbeat?.health);
     }
-    if(fault==='conflict')check('refused-open',r.open.status===503&&r.open.json?.error==='OSI_SQLITE_REFUSED'&&r.openRadio===0,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
+    if(fault==='conflict') {
+      check('open-still-accepted',r.open.status===202&&r.openRadio>=1,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
+      check('conflict-paths',Array.isArray(database?.module_paths)&&database.module_paths.length===2&&database.module_paths.every(p=>/node_sqlite3\.node$/.test(p)),database?.module_paths);
+    }
   } else check('observation',false,'runtime wrote no startup.json');
   if(expected.log)check('loud-log',expected.log.test(text),'no start-up error line');
   else check('quiet-log',!/\[osi-db-startup\]/.test(text),'unexpected start-up error line');

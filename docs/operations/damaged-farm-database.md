@@ -8,7 +8,7 @@ Figures marked `<builder: …>` are measurements the image builder has not yet d
 
 - **A release that contains both #651 (this fix) and #636.** Until #636 is in a release, a second deploy on a gateway that already had one deploy of v0.8.2 or later stops at `--- Conditional irrigation NTP clock hook ---` with `ERROR: could not record existing clock hook mode` (NEW-27). Do not start this procedure before that release exists.
 - Shell access to the gateway, and the deploy method the gateway normally gets: the tunnel from `README.md`, or the bundle from `docs/operations/deploying-over-a-flaky-link.md`.
-- Free space on `/data` for at least twice the database's size (step 3).
+- Free space on `/data` for at least twice the database's size (step 2).
 - The `sqlite3` command-line tool. Our images carry it (`sqlite3-cli`); a stock ChirpStack Gateway OS base has none until the first deploy installs it from the `opkg` feed, in whatever version the feed offers. Check with `sqlite3 -version`. Neither gateway build can run `.recover`; option (b) runs on a workstation (see (b)).
 
 ## 1. How to tell
@@ -79,25 +79,14 @@ From the order of `deploy.sh` (the database check is in the migration step, afte
 
 An interrupted deploy, or a rollback to an older payload, leaves the same pair (a new `settings.js` with old helpers) and the same line. Step 2 puts the old `settings.js` back from the operator's copy.
 
-## 2. First, stop it getting worse
+## 2. First: copy the database and its side files, before any deploy
 
-1. Until step 6 is done, send valve commands one at a time, several seconds apart (the interim advice of #637). Do not save several schedules at once.
-2. **Take your own copy of the configuration files now, before any deploy is tried on a gateway suspected of damage.** A deploy overwrites `settings.js` and the init script without a copy:
+Do this before anything else on a gateway whose file may be damaged, and above all before any deploy is tried on it. The deploy checkpoints the live file before its integrity check: on a damaged file, `PRAGMA wal_checkpoint(TRUNCATE)` writes the write-ahead log into the damaged file and removes the log, and only then does the integrity check refuse. The rows still in the log and the file as the damage left it are then gone, and the deploy takes no copy of its own.
 
-   ```sh
-   TS=$(date +%Y%m%d-%H%M%S)
-   BK=/data/db/damaged-$TS   # not under /data/db/backups: this is not a backup to restore from
-   mkdir -p "$BK" && echo "$BK" > /tmp/osi-damaged-backup-dir
-   cp -aL /srv/node-red/settings.js "$BK/settings.js"
-   cp -aL /etc/init.d/node-red "$BK/node-red.init"
-   cp -aL /srv/node-red/flows.json "$BK/flows.json"
-   cp -aL /srv/node-red/flows_cred.json "$BK/flows_cred.json"
-   ls -l "$BK"
-   ```
+Until step 6 is done, send valve commands one at a time, several seconds apart, and do not save several schedules at once (the interim advice of #637).
 
-   If a deploy was already refused, these are the new release's files, not the old ones. In that case get the old `settings.js` from the tag the gateway ran (`git show v0.8.0:feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` on a workstation) and copy it to the gateway as `$BK/settings.js.old`.
-3. If a valve was opened without a duration, close it from the GUI now. A STREGA valve closes on its own after a timed open, with or without Node-RED; a valve opened without a duration closes only on a CLOSE command.
-4. **Stop Node-RED for the rest of the procedure:**
+1. If a valve was opened without a duration, close it from the GUI now. A STREGA valve closes on its own after a timed open, with or without Node-RED; a valve opened without a duration closes only on a CLOSE command.
+2. **Stop Node-RED**, the only writer of the farm database, and keep it stopped for the rest of the procedure:
 
    ```sh
    /etc/init.d/node-red stop
@@ -105,7 +94,41 @@ An interrupted deploy, or a rollback to an older payload, leaves the same pair (
    pgrep -f '[n]ode-red' >/dev/null 2>&1 && echo "STOP: Node-RED still running" || echo "Node-RED stopped"
    ```
 
-   While it is stopped: no schedule fires; no manual command can be sent; sensor readings arriving meanwhile are not stored; timed opens already sent still close on the valve's own timer. Do not reboot during the procedure: Node-RED starts again at boot. If the gateway reboots, run this step again.
+   It must print `Node-RED stopped`. While it is stopped: no schedule fires; no manual command can be sent; sensor readings arriving meanwhile are not stored; timed opens already sent still close on the valve's own timer. Do not reboot during the procedure: Node-RED starts again at boot. If the gateway reboots, run this step again.
+3. **Copy the database with all its side files in one go**, then the configuration files the deploy would overwrite without a copy, into a new directory on the same filesystem (outside `/data/db/backups`: this is not a backup to restore from):
+
+   ```sh
+   df -k /data
+   ls -l /data/db/farming.db*
+   TS=$(date +%Y%m%d-%H%M%S)
+   BK=/data/db/damaged-$TS
+   mkdir "$BK" && echo "$BK" > /tmp/osi-damaged-backup-dir
+   cp -a /data/db/farming.db /data/db/farming.db-* "$BK"/
+   cp -aL /srv/node-red/settings.js "$BK/settings.js"
+   cp -aL /etc/init.d/node-red "$BK/node-red.init"
+   cp -aL /srv/node-red/flows.json "$BK/flows.json"
+   cp -aL /srv/node-red/flows_cred.json "$BK/flows_cred.json"
+   ```
+
+   `df -k` must show free space of at least twice the database's size. If `ls` shows no `-wal`, `-shm` or `-journal`, the glob copies nothing for them, and that is right.
+4. **See that the copy is complete:** compare every copied database file with its original, byte for byte, and keep the checksums:
+
+   ```sh
+   BK=$(cat /tmp/osi-damaged-backup-dir)
+   for f in /data/db/farming.db /data/db/farming.db-*; do
+     [ -e "$f" ] && { cmp "$f" "$BK/$(basename "$f")" && echo "same: $(basename "$f")"; }
+   done
+   ( cd "$BK" && sha256sum farming.db* > SHA256SUMS && cat SHA256SUMS )
+   ```
+
+   Every file beside the database must print `same`. Node-RED is stopped, so nothing changes between the copy and the comparison.
+
+   If a deploy was already refused on this gateway, `settings.js` and the init script are already the new release's. Get the old `settings.js` from the tag the gateway ran (`git show v0.8.0:feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` on a workstation) and copy it to the gateway as `$BK/settings.js.old`.
+
+Why this method:
+
+- The repository's rule is never to copy the database and its `-wal` and `-shm` separately while Node-RED runs; with Node-RED stopped, one raw copy of all of them is consistent. The normal online copy, `sqlite3 … ".backup"`, reads every page through SQLite and stops at the first damaged page with `database disk image is malformed`.
+- Do not open the original with `sqlite3` without `-readonly` before this copy exists. The last read-write connection to close checkpoints the write-ahead log into the damaged file and deletes it, which is what the deploy's checkpoint does.
 
 ### To undo a refused upgrade and leave it there
 
@@ -119,29 +142,12 @@ cp -a "$F" /srv/node-red/settings.js && /etc/init.d/node-red restart
 
 The gateway then runs exactly as before the deploy, on the damaged file and with the two-copy code. The scheduler keeps failing every minute.
 
-## 3. Keep the damaged file
+## 3. Look at the copy
 
-With Node-RED stopped (step 2.4), copy the file and every sidecar as they are:
+Read the copy, never the original, and change nothing:
 
 ```sh
 BK=$(cat /tmp/osi-damaged-backup-dir)
-df -k /data
-ls -l /data/db/farming.db*
-for f in farming.db farming.db-wal farming.db-shm farming.db-journal; do
-  [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
-done
-( cd "$BK" && sha256sum farming.db* > SHA256SUMS && cat SHA256SUMS )
-```
-
-Why this method and not another:
-
-- A raw copy keeps exactly what is on disk, including the frames still in the write-ahead log. `sqlite3 … ".backup"` reads every page through SQLite and stops at the first damaged page with `database disk image is malformed`.
-- Do not open the original with `sqlite3` without `-readonly` before this copy exists. The last read-write connection to close checkpoints the write-ahead log into the damaged file and deletes it, which is what the deploy's checkpoint does. `sqlite3 -readonly` writes neither the database nor the log; it may create a missing `-shm` file, as any reader does.
-- Node-RED must be stopped, or the copy is not consistent.
-
-Then look at the copy without changing the original:
-
-```sh
 sqlite3 -readonly "$BK/farming.db" "PRAGMA quick_check(10);"
 sqlite3 -readonly "$BK/farming.db" "SELECT max(version) FROM schema_migrations;"
 ```
@@ -202,7 +208,7 @@ sqlite3 :memory: "PRAGMA compile_options;" | grep -i dbpage
 
 The second command must print `ENABLE_DBPAGE_VTAB`. Two files damaged by the overlapping round were recovered with 3.51.2.
 
-**Copy off.** From the workstation, with Node-RED still stopped on the gateway (`<gateway>` is its address, `$BK` the directory from step 3):
+**Copy off.** From the workstation, with Node-RED still stopped on the gateway (`<gateway>` is its address, `$BK` the directory from step 2):
 
 ```sh
 mkdir -m 700 recover-work && cd recover-work
@@ -210,7 +216,7 @@ scp 'root@<gateway>:<BK>/farming.db*' .
 sha256sum farming.db*
 ```
 
-The checksums must match `SHA256SUMS` in `$BK`.
+The checksums must match `SHA256SUMS` in `$BK` (step 2).
 
 **Recover from a second copy, and test that it worked.** `.recover` opens its input read-write, so it works on `../recover-src`, never on the copy whose checksums were just checked. A failed `.recover` still writes a few hundred bytes of SQL (a bare transaction frame). Loading that output gives an empty database, and an empty database passes `quick_check` and `integrity_check`. Two passing checks therefore prove nothing here. Test the exit status, then compare the tables and their row counts:
 
