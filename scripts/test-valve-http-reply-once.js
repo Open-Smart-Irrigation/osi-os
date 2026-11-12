@@ -34,6 +34,14 @@ const GATEWAY = '0016C001F1000001';
 const LINK_IN = '5974306566e99a92';
 const LINK_IN_DEBUG = '072f29aa8760340a';
 const ENV = { DEVICE_EUI: GATEWAY, CHIRPSTACK_APP_ACTUATORS: 'app-actuators' };
+const ENCODER = 'cdbaa3891d40d7a1';
+
+// The encoder's ledger read after the transport attempt sits outside its inner try, so a
+// failure there reaches its .catch (the exception path that answers 503).
+const failLedgerRead = {
+  select: ({ method, sql }) => (method === 'get' && /SELECT result_detail FROM applied_commands/.test(sql)
+    ? { kind: 'synthetic_busy' } : { kind: 'execute' }),
+};
 
 function profile(name) {
   const base = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share`);
@@ -126,12 +134,20 @@ async function send(p, db, startId, fields, options = {}) {
     runFunction: async (node, current) => {
       const run = await executeFunction(node, {
         msg: current, env: Object.assign({}, ENV, options.env || {}), db,
-        osiLibModules: { 'osi-valve-control': p.valveControl }, libOverrides: { chirpstack },
+        dbCallGate: node.id === ENCODER && options.encoderDbGate ? options.encoderDbGate : undefined,
+        osiLibModules: { 'osi-valve-control': p.valveControl },
+        libOverrides: Object.assign({ chirpstack }, options.valveControlMissing ? { osiLib: missingValveControl() } : {}),
       });
       return run.result;
     },
   });
   return { answers: http.answers, enqueued: chirpstack.enqueued, ...result };
+}
+
+// osiLib as it answers when osi-valve-control did not load: every other name
+// is still unregistered here, as the nodes on this path stop at the first refusal.
+function missingValveControl() {
+  return { require: (name) => ({ ok: false, error: 'Cannot find module ' + name }) };
 }
 
 function wiresWithLinkIn(receivers) {
@@ -142,6 +158,8 @@ const TOPOLOGIES = [
   ['as shipped', undefined],
   ['with a third receiver on the link in', wiresWithLinkIn((wires) => wires.concat(LINK_IN_DEBUG))],
   ['with the debug receiver removed', wiresWithLinkIn((wires) => wires.filter((id) => id !== LINK_IN_DEBUG))],
+  // Write STREGA Expectation gets a clone even if the shipped wires are ever reordered.
+  ['with a receiver put first on the link in', wiresWithLinkIn((wires) => [LINK_IN_DEBUG].concat(wires))],
 ];
 
 for (const name of PROFILES) {
@@ -164,6 +182,33 @@ for (const name of PROFILES) {
         } finally { db.close(); }
       });
     }
+  }
+
+  for (const [topology, wiresOf] of TOPOLOGIES) {
+    // A refusal raised by Write STREGA Expectation reaches the encoder as _stregaDispatchError.
+    test(`${name}: an open refused by the scope gate ${topology} answers 403 exactly once, with no frame`, async () => {
+      const db = seedDb();
+      try {
+        const out = await send(p, db, 'dde8e1ef265e96d7', valveRequest('OPEN_FOR_DURATION', 2),
+          { wiresOf, env: { OSI_SCOPED_ACCESS: '1' } });
+        assert.ok(out.trace.includes(ENCODER), 'refusal must reach the encoder: ' + out.trace.join(' > '));
+        assert.equal(out.enqueued.length, 0);
+        assert.equal(out.answers.length, 1, 'errors: ' + out.errors.join('; '));
+        assert.equal(out.answers[0].statusCode, 403);
+        assert.equal(out.answers[0].payload.error, 'scope_actor_required');
+      } finally { db.close(); }
+    });
+
+    test(`${name}: an open whose encoder throws after the transport ${topology} answers 503 exactly once`, async () => {
+      const db = seedDb();
+      try {
+        const out = await send(p, db, 'dde8e1ef265e96d7', valveRequest('OPEN_FOR_DURATION', 2),
+          { wiresOf, encoderDbGate: failLedgerRead });
+        assert.equal(out.answers.length, 1, 'errors: ' + out.errors.join('; '));
+        // The encoder's .catch answers with the thrown error's own message.
+        assert.deepEqual(out.answers[0], { statusCode: 503, payload: { error: 'SQLITE_BUSY', message: 'SQLITE_BUSY: database is locked' } });
+      } finally { db.close(); }
+    });
   }
 
   for (const [label, builder, fields] of COMMANDS) {
@@ -191,6 +236,21 @@ for (const name of PROFILES) {
         const out = await send(p, db, builder, fields(), { row: { type_id: 'KIWI_SENSOR' } });
         assert.equal(out.enqueued.length, 0);
         assert.deepEqual(out.answers.map((a) => a.statusCode), [409], 'errors: ' + out.errors.join('; '));
+      } finally { db.close(); }
+    });
+  }
+
+  // Write STREGA Expectation passes the message on when the module is missing;
+  // the encoder must then answer the request itself (NEW-2).
+  for (const [label, builder, fields] of COMMANDS.filter(([, id]) => id === 'dde8e1ef265e96d7')) {
+    test(`${name}: ${label} answers 503 exactly once when osi-valve-control did not load`, async () => {
+      const db = seedDb();
+      try {
+        const out = await send(p, db, builder, fields(), { valveControlMissing: true });
+        assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
+        assert.equal(out.enqueued.length, 0);
+        assert.deepEqual(out.answers, [{ statusCode: 503, payload: { error: 'valve_control_unavailable' } }],
+          'errors: ' + out.errors.join('; '));
       } finally { db.close(); }
     });
   }
