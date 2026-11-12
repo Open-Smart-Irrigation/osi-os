@@ -25,9 +25,18 @@ The target must be an active `valve_actuation_expectations` row
 `commanded_duration_seconds` that is not a report-only row. A body
 `expectation_id` names it: an unknown id answers 404 `no_active_actuation`,
 and a known row that is not such a target answers 409
-`actuation_not_active`. Without an id exactly one candidate may exist: none
-answers 404 `no_active_actuation`, two or more answer 409
-`ambiguous_actuation`. The route never picks the newest row.
+`actuation_not_active`. Without an id, none answers 404
+`no_active_actuation` and exactly one is the target. With two or more the
+cancel reads the queue once and takes the one candidate whose queue id, stored
+when ChirpStack accepted its frame, is still listed unsent; a record can stay
+active for about an hour after a run that no report was attributed to, and the
+control panel sends no id. If none or several are still queued, the queue
+cannot be read, or conditional irrigation is involved, the answer is 409
+`ambiguous_actuation` with the reason in `ambiguity` (`none_queued`,
+`several_queued`, `queue_unreadable`, `conditional_irrigation`). The route
+never picks the newest row and infers nothing from the state shown (#428).
+The same rule, `dispatch.cancellableOpen`, decides what the control panel and
+the cloud are shown as the valve's active command.
 
 Which of two paths a cancel takes depends on conditional irrigation. An
 ordinary open (manual, cloud, scheduler, one-time) on a valve without an active
