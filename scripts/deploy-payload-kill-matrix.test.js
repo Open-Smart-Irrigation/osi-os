@@ -40,9 +40,34 @@ function stage(root, stamp, modules) {
   swap.sealModules(root, stamp);
 }
 
+const NODE_RED_INIT = fs.readFileSync(path.join(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init'), 'utf8');
+
+// A reboot: node-red.init's repair step, which runs before Node-RED starts,
+// on this root and GUI path, with logger writing to a file.
+function bootRepair({ root, guiRoot }) {
+  const begin = NODE_RED_INIT.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT.indexOf('# payload switch repair end');
+  assert.ok(begin >= 0 && end > begin, 'node-red.init must keep its payload switch repair block');
+  const block = NODE_RED_INIT.slice(begin, end)
+    .split('/srv/$PACKAGE_NAME').join(root)
+    .split('/usr/lib/node-red/gui').join(guiRoot);
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-bin-'));
+  try {
+    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(root, 'boot.log'))}\n`, { mode: 0o755 });
+    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair`], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+  return readOr(path.join(root, 'boot.log'), '');
+}
+
 function baseRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srv-node-red-kill-'));
   fs.mkdirSync(path.join(root, 'payloads'));
+  // deploy.sh keeps its swap helper here for node-red.init.
+  fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
   writeModule(path.join(root, 'osi-command-ledger'), 'ledger-live');
   fs.mkdirSync(path.join(root, 'osi-watermark-binding'));
   fs.mkdirSync(path.join(root, 'codecs'));
@@ -315,7 +340,19 @@ for (const [name, fixture] of Object.entries(FIXTURES)) {
         assert.ok(kind, `kill after change ${k} of ${steps} leaves a mixed payload: ${JSON.stringify(state)}`);
         if (kind === 'window') seen.push(conversionWindow(env, state, olds));
 
-        // The retry: the resume step moves a set-aside directory back first.
+        // A reboot before any deploy: node-red.init's repair step serves the
+        // old side again, and leaves a complete payload alone.
+        const log = bootRepair(env);
+        const booted = served(env);
+        if (kind === 'window') {
+          assert.ok(olds.some((old) => sameOld(booted, old)), `k=${k}: the start after a reboot serves the old payload: ${JSON.stringify(booted)}`);
+          assert.match(log, /an interrupted switch left/);
+        } else {
+          assert.deepEqual(booted, state, `k=${k}: the boot repair leaves a complete payload alone`);
+          assert.doesNotMatch(log, /failed/);
+        }
+
+        // The retry: deploy.sh's resume step runs first.
         stage(env.root, 'retry', ['osi-a', 'osi-new']);
         const retryPrev = retryPrevious(env, 'retry');
         if (kind === 'window') assert.ok(olds.some((old) => sameOld(served(env), old)), `k=${k}: the resume step restores the old side`);
