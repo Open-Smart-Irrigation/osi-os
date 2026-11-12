@@ -1,0 +1,58 @@
+[
+  {
+    "id": "al-link-handle-auth",
+    "field": "func",
+    "identifier": "URL",
+    "locations": [
+      [
+        101,
+        18
+      ]
+    ],
+    "sha256": "de2dbea88ae235e8c11ecb6fc00fdf1f4e696dfc6e3b10a9d41034803e61e020",
+    "reason": "Guarded by typeof URL === function; the constructor branch cannot execute when URL is absent."
+  },
+  {
+    "id": "al-link-store-mqtt",
+    "field": "func",
+    "identifier": "URL",
+    "locations": [
+      [
+        21,
+        18
+      ]
+    ],
+    "sha256": "5cabb2f0c10d3e12ddef39d03f6805e47aed7856335945d3a1b7c11923946044",
+    "reason": "Guarded by typeof URL === function; the constructor branch cannot execute when URL is absent."
+  },
+  {
+    "id": "settings-disable-schedules-fn",
+    "field": "func",
+    "identifier": "disabledSchedules",
+    "locations": [
+      [
+        222,
+        21
+      ]
+    ],
+    "sha256": "cd6d8659bdc2156ac9833f8e1a1d11f67139521fff087bb7ed614628fb5708a4",
+    "reason": "Unreachable expression after unconditional return; retained outside the declaration-fix scope."
+  },
+  {
+    "id": "dendro-compute-fn",
+    "field": "func",
+    "identifier": "require",
+    "locations": [
+      [
+        140,
+        46
+      ],
+      [
+        140,
+        63
+      ]
+    ],
+    "sha256": "1547096ad74d76f88b11265998a5496697367605be292eea4d6560d935c2cec9",
+    "reason": "KNOWN DEFECT: optional OpenAgri weather request uses bare require. Needs transport extraction or two module bindings and a code change; outside this declaration-only fix. Tracked in #629."
+  }
+]
