@@ -314,6 +314,33 @@ test('setup-node must pin a numeric Node version', () => {
   assert.match(errorsOf(missing), /setup-node without node-version/);
 });
 
+test('setup-node resolves only a quoted patch version from workflow-level env', () => {
+  const base = { [INVENTORY]: EMPTY_INVENTORY, 'scripts/a.test.js': PASSING };
+  const make = (expression, env = "env:\n  NODE_PIN: '20.18.3'", override = '') => {
+    let text = workflow(['node --test scripts/a.test.js'], env)
+      .replace("node-version: '22'", 'node-version: ' + expression);
+    if (override === 'job') text = text.replace('    steps:', "    env:\n      NODE_PIN: '20.18.3'\n    steps:");
+    if (override === 'step') text = text.replace('        with:', "        env:\n          NODE_PIN: '20.18.3'\n        with:");
+    return repo({ ...base, '.github/workflows/ci.yml': text });
+  };
+  for (const quote of ["'", '"']) {
+    assert.equal(errorsOf(make('${{ env.NODE_PIN }}', 'env:\n  NODE_PIN: ' + quote + '20.18.3' + quote)), '');
+  }
+  for (const expression of ['${{ matrix.node }}', '${{ vars.NODE_PIN }}', '${{ inputs.node }}', "${{ env.NODE_PIN || '22' }}", '${{ env.MISSING }}']) {
+    assert.match(errorsOf(make(expression)), /not a pinned version/, expression);
+  }
+  for (const value of ["'^20.18.3'", "'lts/*'", "'20'", '20.18.3', "'20.18'", "'20.18.3-beta'"]) {
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', 'env:\n  NODE_PIN: ' + value)), /not a pinned version/, value);
+  }
+  for (const override of ['job', 'step']) {
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', "env:\n  NODE_PIN: '20.18.3'", override)), /not a pinned version/, override);
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', '', override)), /not a pinned version/, override + ' only');
+  }
+  assert.match(errorsOf(make('${{ env.NODE_PIN }}', "env:\n  NODE_PIN: 20.18.3\n  OTHER:\n    NODE_PIN: '20.18.3'")), /not a pinned version/);
+  const file = workflow(['node --test scripts/a.test.js']).replace("node-version: '22'", 'node-version-file: .node-version');
+  assert.match(errorsOf(repo({ ...base, '.node-version': '20.18.3', '.github/workflows/ci.yml': file })), /node-version-file is not supported/);
+});
+
 test('workflows install with npm ci only, without peer-dependency bypasses', () => {
   for (const [cmd, re] of [
     ['npm install', /npm install: use npm ci/],

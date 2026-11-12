@@ -343,8 +343,11 @@ gh pr create --title "release: OSI OS v<NEW>" --body "Version bump and changelog
 After the merge, re-run the CI check from the pre-flight against the merge
 commit. Before creating a tag, manually start **Release Runtime Smoke** on
 `main` in GitHub Actions. Verify that the run's `headSha` is exactly the
-release merge commit and wait for `release-runtime-smoke` to succeed. A
-manual run is strict: any entry in `known-failures.json` blocks it. A green
+release merge commit and wait for both `release-runtime-smoke` and
+`release-stock-runtime-smoke` to succeed. The stock job is not yet a
+ruleset-required PR check; it is required by this release procedure. A
+manual run is strict: any entry in either runtime's `known-failures.json`
+blocks it. A green
 ordinary push or PR run permits listed failures and does not satisfy this
 pre-tag requirement. If `main` moves, select and check the release commit
 again before tagging; do not use a successful run from another commit.
@@ -372,7 +375,8 @@ reach the public repository (AGENTS.md, "Branch and tag visibility").
 
 ## Step 5 — Build the factory images
 
-Start only after the tag's own `release-runtime-smoke` check is green.
+Start only after both smoke jobs in the tag's own **Release Runtime Smoke**
+run are green.
 Build both release images from the tagged commit with a clean
 `git status` (the feed GUI from Step 3 is part of that commit), following
 [docs/build/rpi5-full-osi-image.md](build/rpi5-full-osi-image.md) from "Pre-Build Verification" through "Build Pi 4 / 400 / 3 / 2":

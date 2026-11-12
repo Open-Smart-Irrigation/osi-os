@@ -5,9 +5,11 @@
 // independent byte-integrity case or an HTTP scenario failing incidentally.
 const assert=require('node:assert/strict');
 const {main}=require('./test-release-smoke');
+const args=process.argv.slice(2);
+if(args.length>1||args.some(arg=>!['--runtime=image','--runtime=stock'].includes(arg)))throw new Error('usage: node scripts/test-release-smoke-controls.js [--runtime=image|--runtime=stock]');
 for(const control of ['late','caught']) {
   let observed;
-  const status=main([],{control,onSummary:(summary,evidence)=>{observed={summary,evidence};}});
+  const status=main(args,{control,onSummary:(summary,evidence)=>{observed={summary,evidence};}});
   assert.equal(status,1,control+' negative control must turn the gate red');
   assert.ok(observed,control+' must complete the runtime');
   const id=control==='late'?'valve-observe-fn':'sync-outbox-build';

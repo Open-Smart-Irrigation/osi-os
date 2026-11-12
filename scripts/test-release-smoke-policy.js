@@ -61,3 +61,35 @@ test('expected refusals are exact by scenario, source, type and full message',()
   }
   assert.equal(isExpectedRefusal({...refusal,message:'SQLITE_BUSY: database is locked'},[refusal]),false);
 });
+
+const {runtimeConfig,combineKnown,parseVersions,checkRuntime}=require('./lib/release-smoke-runtimes');
+test('both deployed runtimes have pinned versions and unknown runtimes fail closed',()=>{
+  assert.equal(runtimeConfig('image').nodeRed,'3.1.15');
+  assert.equal(runtimeConfig('stock').nodeRed,'4.0.9');
+  assert.equal(runtimeConfig('stock').node,'20.18.3');
+  assert.throws(()=>runtimeConfig('typo'),/unknown runtime/);
+  assert.throws(()=>parseVersions('env:\n  OSI_SMOKE_NODE_VERSION: lts\n'),/version/);
+});
+test('workflow runtime versions must match both fixture locks',t=>{
+  const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+  for(const name of ['image','stock']) {
+    const config=runtimeConfig(name);
+    const lock=require(path.join(config.fixture,'package-lock.json'));
+    assert.equal(lock.packages['node_modules/node-red'].version,config.nodeRed);
+    assert.equal(require(path.join(config.fixture,'package.json')).dependencies['node-red'],config.nodeRed);
+    assert.throws(()=>checkRuntime({...config,node:process.versions.node,nodeRed:'0.0.0'}),/differs from workflow/);
+  }
+  const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'smoke-pin-test-'));t.after(()=>fs.rmSync(fixture,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(fixture,'package.json'),JSON.stringify({dependencies:{'node-red':'4.0.9'}}));
+  fs.writeFileSync(path.join(fixture,'package-lock.json'),JSON.stringify({packages:{'node_modules/node-red':{version:'4.0.8'}}}));
+  assert.throws(()=>checkRuntime({name:'stock',node:process.versions.node,nodeRed:'4.0.9',fixture}),/package-lock.json.*differs from workflow/);
+});
+test('release policy includes the stock list even when the image list is empty',()=>{
+  const both=combineKnown({image:[],stock:known});
+  assert.equal(both[0].runtime,'stock');
+  assert.equal(gate(both,{ci:true,event:'push',ref:'refs/tags/v0.0.0'}),1);
+  assert.equal(gate(both,{ci:true,event:'workflow_dispatch'}),1);
+  assert.equal(gate(combineKnown({image:[],stock:[]})),0);
+  assert.throws(()=>combineKnown({image:[]}),/stock/);
+  assert.throws(()=>combineKnown({image:[],stock:null}),/stock/);
+});

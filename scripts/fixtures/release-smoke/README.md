@@ -2,17 +2,20 @@
 
 This suite starts the shipped flows in Node-RED and drives their HTTP API.
 A green PR result permits only the exact failures in `known-failures.json`.
-It does not permit a release while that list has entries.
+It does not permit a release while either deployed runtime's list has entries.
 
-From the repository root, with Node 22 and the `sqlite3` CLI installed
-(on the maintainer workstation, run suites serially through `osi-heavy` and
-set `TMPDIR` to a disk-backed scratch directory):
+From the repository root, with the Node version pinned in the workflow
+and the `sqlite3` CLI installed (run suites serially through the campaign's
+resource wrapper and set `TMPDIR` to your assigned scratch directory):
 
 ```bash
 npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
 node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
 node scripts/test-release-smoke-controls.js
 node scripts/test-release-smoke.js
+npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
+node scripts/test-release-smoke.js --runtime=stock
+node scripts/test-release-smoke-controls.js --runtime=stock
 node scripts/test-release-smoke.js --release
 ```
 
@@ -21,6 +24,65 @@ release verdict on the withdrawn baseline. The runner prints its evidence
 directory: `results.json` contains assertions and observations, `runtime.log`
 contains each completed case, and `seed.log` records the seed/migration build.
 GitHub retains these logs and the summary as an artifact for seven days.
+
+## Two deployed runtimes
+
+The shared version declarations are the three workflow-level `OSI_SMOKE_*_VERSION`
+keys in `.github/workflows/release-smoke.yml`. Both jobs and the runner read them.
+The runner checks the selected Node-RED manifest, lock and installed version
+against its key, and checks the process Node version before starting.
+
+The default image job remains `release-runtime-smoke` (Node-RED 3.1.15).
+`release-stock-runtime-smoke` adds Node-RED 4.0.9 under the same Node 20.18.3
+without changing the ruleset. Its separate firmware fixture contains no
+SQLite package. Before network fencing, the runner copies the shipped user
+manifest, lock and local helpers into its fresh user directory and runs the
+same `npm install --omit=dev --no-fund --no-audit` as `deploy.sh`. It rejects
+any changed locked version or added unlocked package. On the measured clean
+install this resolves SQLite node 1.1.1 and sqlite3 5.1.7; npm honors the lock.
+Every runtime run repeats that install and records its log.
+
+Both layouts record resolved package versions and the actual mapped native
+addon in `results.json`. The stock run requires that one addon to reside in
+its user directory, with no firmware SQLite. The field-tester package is
+installed from the deploy lock but excluded from palette discovery because
+the suite uses the same outer field-tester stand-in in both runtimes.
+No product function, helper, wiring or function sandbox is replaced.
+
+The [211-case comparison](../release-smoke-stock/baseline-23bfda61e.md) on main baseline
+`23bfda61e` reports 200 passes and the same 11 exact known failures on each
+runtime, with no differing case or failure signature. Runs took 27.5 seconds
+(image) and 28.2 seconds (stock), excluding dependency installation and seed
+construction. The stock list is `../release-smoke-stock/known-failures.json`; its findings
+and exact symptoms match the image list at that baseline.
+
+| Flow dependency | Image fixture | Stock user install |
+| --- | --- | --- |
+| SQLite node / sqlite3 | 1.1.1 / 5.1.7 | 1.1.1 / 5.1.7 |
+| ChirpStack API / gRPC | 4.12.1 / 1.14.3 | 4.12.1 / 1.14.3 |
+| bcryptjs / google-protobuf | 3.0.3 / 3.21.4 | 3.0.3 / 3.21.4 |
+| protobufjs / proto-loader | 7.6.6 / 0.8.1 | 7.5.4 / 0.8.0 |
+| Node-RED MQTT node's client | 4.3.7 | 5.7.0 |
+| Node-RED HTTP node's got | 12.6.0 | 12.6.1 |
+
+The HTTP parser (1.20.3), cronosjs (1.7.1) and WebSocket module (7.5.10)
+resolve identically. The ChirpStack API 4.12.1 client against the stock
+base's ChirpStack 4.16.2 server remains a builder/device compatibility
+question; these tests use the local DeviceService stand-in.
+
+Comparing both `10-function.js` files finds no removed, renamed or added
+top-level sandbox name or function wrapper binding. The 4.0.9 code wraps
+`RED.util.getSetting` to bind the requesting node; no shipped function uses
+that method. The allowed-name list in `verify-flows-sandbox.js` therefore
+needs no change. Node-RED 4 also replaces `util.isArray` with `Array.isArray`;
+that does not add a function global.
+
+`--strict`, `--release` and the release-list gate refuse any nonempty list
+across **both** runtimes, even if the selected runtime's own list is empty.
+A tag run is red while the stock list has entries. Ordinary PR/branch runs
+permit only each runtime's exact listed failures. Releases must wait for
+both jobs on the release commit and on the tag; an optional ruleset check
+is not a release waiver. A missing or unreadable runtime list fails closed.
 
 ## What runs
 
@@ -148,7 +210,7 @@ is a maintainer action. This change does not edit the ruleset or rename an
 existing required check. Manual workflow dispatches and `v*` tag runs enforce
 the empty-list gate after the suite; the release procedure also runs
 `node scripts/test-release-smoke.js --release` before tagging or publishing.
-A manual strict hosted run must succeed on the exact release merge SHA
+A manual strict hosted run of both runtime jobs must succeed on the exact release merge SHA
 before tag creation, and the tag's own run must succeed before image builds;
 see [the release procedure](../../../docs/versioning-workflow.md).
 
