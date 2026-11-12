@@ -42,3 +42,6 @@ __pycache__/
 !/.agents/
 /.agents/*
 !/.agents/skills
+
+# Release smoke dependencies
+/scripts/fixtures/release-smoke/node_modules

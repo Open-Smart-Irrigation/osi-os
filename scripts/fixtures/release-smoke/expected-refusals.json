@@ -1,0 +1,200 @@
+[
+  {
+    "caseId": "no-token:GET /api/devices",
+    "sourceId": "get-devices-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/devices",
+    "sourceId": "post-devices-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:DELETE /api/devices/:deveui",
+    "sourceId": "delete-device-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/irrigation-zones",
+    "sourceId": "post-zone-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:GET /api/irrigation-zones",
+    "sourceId": "get-zones-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/irrigation-zones/:id/devices/:deveui",
+    "sourceId": "assign-device-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:DELETE /api/irrigation-zones/:id/devices/:deveui",
+    "sourceId": "unassign-device-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/irrigation-zones/:id/schedule",
+    "sourceId": "70fcbea336401bd1",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/valve/:deveui",
+    "sourceId": "83bb4a452dd9ae37",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/dendro",
+    "sourceId": "put-dendro-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/temp",
+    "sourceId": "put-temp-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/account-link",
+    "sourceId": "al-link-validate",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/sync/force",
+    "sourceId": "sync-force-build",
+    "sourceType": "function",
+    "message": "Error: Missing bearer token"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/lsn50/mode",
+    "sourceId": "put-lsn50-mode-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/lsn50/interval",
+    "sourceId": "put-lsn50-interval-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/kiwi/interval",
+    "sourceId": "put-kiwi-interval-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/devices/:deveui/kiwi/temperature-humidity/enable",
+    "sourceId": "post-kiwi-enable-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/interval",
+    "sourceId": "put-strega-interval-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/lsn50/interrupt-mode",
+    "sourceId": "put-lsn50-interrupt-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/lsn50/5v-warmup",
+    "sourceId": "put-lsn50-5v-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/model",
+    "sourceId": "put-strega-model-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/timed-action",
+    "sourceId": "put-strega-timed-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/magnet",
+    "sourceId": "put-strega-magnet-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/partial-opening",
+    "sourceId": "put-strega-partial-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/strega/flushing",
+    "sourceId": "put-strega-flush-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:GET /api/gateway/location",
+    "sourceId": "get-gateway-location-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:GET /api/gateways/:gatewayEui/location",
+    "sourceId": "get-gateway-location-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/rain-gauge",
+    "sourceId": "put-rain-gauge-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/flow-meter",
+    "sourceId": "put-flow-meter-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/soil-moisture-depths",
+    "sourceId": "put-soil-depth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:PUT /api/devices/:deveui/dendro-config",
+    "sourceId": "put-dendro-config-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:POST /api/devices/:deveui/dendro-baseline/reset",
+    "sourceId": "post-dendro-baseline-reset-auth-fn",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  },
+  {
+    "caseId": "no-token:GET /api/me",
+    "sourceId": "api-me-auth",
+    "sourceType": "function",
+    "message": "Error: Unauthorized"
+  }
+]
