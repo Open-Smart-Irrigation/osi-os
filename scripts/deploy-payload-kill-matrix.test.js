@@ -87,6 +87,7 @@ function legacyCapture(root, guiRoot) {
 // rolledBack is what the rollback serves when the kill came before the
 // switch (default: the state before the deploy).
 const FIXTURES = {
+  // A gateway whose last deploy used this code: everything through payloads/active.
   'one active link': { windows: [], build: ({ root, guiRoot }) => {
     stage(root, 'old', ['osi-a', 'osi-gone']);
     swap.flipTo(root, 'old', guiRoot);
@@ -95,6 +96,26 @@ const FIXTURES = {
     swap.linkNewModules(root, 'new', 'old');
     return 'old';
   } },
+  // A gateway converted by the first version of this layout, which named the
+  // link payloads/.active.
+  'one .active link (first version)': { windows: [], build: ({ root, guiRoot }) => {
+    stage(root, 'old', ['osi-a', 'osi-gone']);
+    swap.flipTo(root, 'old', guiRoot);
+    const payloads = path.join(root, 'payloads');
+    fs.renameSync(path.join(payloads, 'active'), path.join(payloads, '.active'));
+    const relink = (at) => {
+      const text = fs.readlinkSync(at).replace(/(^|\/)payloads\/active\//, '$1payloads/.active/');
+      fs.rmSync(at);
+      fs.symlinkSync(text, at);
+    };
+    for (const at of [path.join(root, 'flows.json'), guiRoot, path.join(root, 'osi-a'), path.join(root, 'osi-gone')]) relink(at);
+    stage(root, 'new', ['osi-a', 'osi-new']);
+    swap.captureModules(root, 'old', 'new');
+    swap.linkNewModules(root, 'new', 'old');
+    return 'old';
+  } },
+  // A v0.8.2 gateway (1bdd49d5 and earlier): one link per entry, straight
+  // into payloads/old.
   'one link per entry (v0.8.2 layout)': { windows: [], build: ({ root, guiRoot }) => {
     stage(root, 'old', ['osi-a', 'osi-gone']);
     linkDirect(root, guiRoot, 'old', ['osi-a', 'osi-gone']);
@@ -305,6 +326,8 @@ for (const [name, fixture] of Object.entries(FIXTURES)) {
         const left = [env.root, path.dirname(env.guiRoot), path.join(env.root, 'payloads')]
           .flatMap((dir) => fs.readdirSync(dir).filter((entry) => /\.(flip|osi-old)-/.test(entry)));
         assert.deepEqual(left, [], `k=${k}: the retry leaves nothing a killed switch left behind`);
+        assert.throws(() => fs.lstatSync(path.join(env.root, 'payloads', '.active')), /ENOENT/, `k=${k}: the first version's link is gone`);
+        assert.equal(fs.readlinkSync(path.join(env.root, 'payloads', 'active')), 'retry');
         assert.deepEqual(served(env), { ...after, flows: 'flows@retry', gui: 'gui@retry', 'osi-a': 'osi-a@retry', 'osi-new': 'osi-new@retry' });
 
         // The rollback returns to a complete set: the old payload when the

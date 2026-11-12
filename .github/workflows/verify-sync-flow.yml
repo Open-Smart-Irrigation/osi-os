@@ -235,6 +235,10 @@ jobs:
       # both activate a complete set (v0.8.2 review, S-1).
       - name: Payload activation kill matrix
         run: node --test scripts/deploy-payload-kill-matrix.test.js
+      # The swap helpers of the v0.8.1 and v0.8.2 tags, read from git, on a
+      # gateway in the payloads/active layout: a downgrade ends complete.
+      - name: Payload layout downgrade
+        run: node --test scripts/deploy-payload-downgrade.test.js
       # Gateway records deploy.sh keeps outside the payload: the reported
       # firmware version, which follows the active payload through activation
       # and every rollback, and the
