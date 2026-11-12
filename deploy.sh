@@ -2226,7 +2226,8 @@ process.stdout.write(String(applied.length));
                 node_red_restart_needed=0
                 return 1
             fi
-            if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null; then
+            if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \
+               ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null; then
                 echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
                 node_red_restart_needed=0
                 return 1
@@ -3149,6 +3150,27 @@ fi
 echo "OK: helper modules staged with payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
 # module payload staging end
 
+# rollback target begin
+# PREV_STAMP named the payload the gateway serves now; flipTo() keeps that one
+# (SERVED_STAMP) while it switches. A failed deploy returns to a payload that
+# passed its health check: a deploy killed after its switch leaves a served
+# payload that never did, and an older deploy.sh may have written helper files
+# into one since.
+SERVED_STAMP="${PREV_STAMP:-}"
+if [ -n "$SERVED_STAMP" ]; then
+    if ! PREV_STAMP="$(swap_call rollbackTarget "$SERVED_STAMP" "$DEPLOY_STAMP")" || [ -z "$PREV_STAMP" ]; then
+        echo "ERROR: could not choose the rollback payload; refusing the deploy before anything is stopped" >&2
+        exit 1
+    fi
+    if [ "$PREV_STAMP" != "$SERVED_STAMP" ]; then
+        PREV_CAPTURED=0
+        echo "WARN: payloads/$SERVED_STAMP never passed a health check or changed since; a failed deploy returns to payloads/$PREV_STAMP" >&2
+    elif ! swap_call payloadTrusted "$SERVED_STAMP" >/dev/null; then
+        echo "WARN: payloads/$SERVED_STAMP never passed a health check and no healthy payload is retained; it stays the rollback target" >&2
+    fi
+fi
+# rollback target end
+
 # issue-183 Gen2 begin
 if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
    ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
@@ -3318,7 +3340,8 @@ fi
 # payload activation begin
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
-    if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${PREV_STAMP:-}" >/dev/null; then
+    if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \
+       ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null; then
         echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
         node_red_restart_needed=0
         exit 1
@@ -3425,6 +3448,9 @@ fi
 
 if [ "$PROBE_OK" = "0" ]; then
     echo "OK: committing payload $DEPLOY_STAMP"
+    if ! swap_call markHealthy "$DEPLOY_STAMP" >/dev/null; then
+        echo "WARN: could not record payloads/$DEPLOY_STAMP as healthy; the next deploy will not return to it" >&2
+    fi
     swap_call clearLegacyCapture >/dev/null || true
     swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
 else
