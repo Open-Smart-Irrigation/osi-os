@@ -1,14 +1,25 @@
 'use strict';
 
-// Issue S-1 (v0.8.2 review): a deploy killed during payload activation must
-// leave the complete old payload or the complete new one, never a mix, and
-// the retry and the rollback must both find a complete set.
+// Issue S-1 (v0.8.2 review), council #636: a deploy killed at any instant
+// leaves the complete old payload or the complete new one, and the retry and
+// the rollback both end on a healthy payload, from every state the field can
+// be in.
 //
-// Each case runs a swap call in a child process that exits right after its
-// k-th filesystem change, for every k the call makes, so no catch block or
-// finally clause runs, as with a kill or a power cut. After each kill the
-// test reads what the gateway would serve, runs deploy.sh's preflight and
-// capture choice for a retry, completes the retry, and rolls it back.
+// The starting states are the rows of the deploy state table
+// (scripts/helpers/deploy-state-table.js), every variant, and the variant
+// with a stale legacy-capture marker where the table has one. From each row
+// the test runs deploy.sh's decision sequence (resume step, legacy-capture
+// preflight, capture block, module capture, switch preflight, rollback
+// target). A row deploy.sh refuses there is refused before Node-RED stops:
+// the test checks that nothing served changed and that the refusal is one of
+// the expected ones. For every other row it kills, after every filesystem
+// change, in a child process that exits on the spot (no catch, no finally):
+// - the forward switch; after each kill a reboot (node-red.init's repair
+//   step), then a retry and a rollback;
+// - the rollback after a completed switch;
+// - a rollback before the switch began (deploy.sh's exit handler after a
+//   failure between the Node-RED stop and the switch);
+// - the resume step, from every state the forward switch left in a window.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,245 +27,152 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const swap = require('./deploy-payload-swap');
+const table = require('./helpers/deploy-state-table');
 
 const SWAP_JS = path.join(__dirname, 'deploy-payload-swap.js');
 const KILLED = 86;
-const MODULES = ['osi-a', 'osi-gone', 'osi-new'];
+const MODULES = ['osi-a', 'osi-b', 'osi-c'];
+// The release this deploy brings: it keeps osi-a, drops osi-b, adds osi-c.
+const NEW_MODULES = { 'osi-a': '', 'osi-c': '' };
 
-function write(file, content) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content);
-}
+// Rows deploy.sh refuses before Node-RED stops, with the refusal's reason.
+// The table's REFUSE rows, plus the rows the resume step turns into one.
+const EXPECTED_REFUSALS = {
+  S13: /refusing to recapture changed legacy files after a prior attempt/,
+  S15: /no deploy attempt can be read from it/,
+  S16: /legacy evidence is unreadable|refusing to recapture changed legacy files after a prior attempt/,
+  S17: /refusing to capture a half-switched state/,
+  S18: /refusing to capture a half-switched state/,
+  S26: /refusing to capture a half-switched state/,
+  S27: /refusing to capture a half-switched state/,
+  S28: /refusing to capture a half-switched state/,
+  S29: /module manifest (unreadable|malformed)/,
+  S30: /refusing to recapture changed legacy files after a prior attempt/,
+  S32: /refusing to capture a half-switched state/,
+  S33: /refusing to capture a half-switched state/,
+  S38: /refusing to recapture changed legacy files after a prior attempt/,
+};
 
-function writeModule(dir, marker) {
-  write(path.join(dir, 'package.json'), JSON.stringify({ name: path.basename(dir), version: '1.0.0', main: 'index.js' }) + '\n');
-  write(path.join(dir, 'index.js'), `exports.marker = ${JSON.stringify(marker)};\n`);
-}
-
-function stage(root, stamp, modules) {
-  const src = path.join(root, `src-${stamp}`);
-  write(path.join(src, 'flows.json'), JSON.stringify([{ id: 'x', marker: `flows@${stamp}` }]));
-  write(path.join(src, 'gui', 'index.html'), `gui@${stamp}\n`);
-  swap.stagePayload(root, stamp, path.join(src, 'flows.json'), path.join(src, 'gui'));
-  for (const name of modules) writeModule(path.join(root, 'payloads', stamp, 'modules', name), `${name}@${stamp}`);
-  swap.sealModules(root, stamp);
-}
+// Rows whose starting state serves no complete payload, so "complete old"
+// does not exist; what is checked instead is named in each entry.
+const NO_COMPLETE_OLD = {
+  S2: 'flows.json leads into a payload that is gone, so no flows run: the switch removes payloads/active first, and a kill leaves no flows served or the complete new payload',
+  S3: 'the GUI leads into a pruned payload and the flows payload has no GUI (v0.7.0): the switch replaces entries one by one, as before payloads/active; a kill leaves old flows with a missing or new GUI',
+};
 
 const NODE_RED_INIT = fs.readFileSync(path.join(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init'), 'utf8');
-
-// A reboot: node-red.init's repair step, which runs before Node-RED starts,
-// on this root and GUI path, with logger writing to a file.
-function bootRepair({ root, guiRoot }) {
-  const begin = NODE_RED_INIT.indexOf('# payload switch repair begin');
-  const end = NODE_RED_INIT.indexOf('# payload switch repair end');
-  assert.ok(begin >= 0 && end > begin, 'node-red.init must keep its payload switch repair block');
-  const block = NODE_RED_INIT.slice(begin, end)
-    .split('/srv/$PACKAGE_NAME').join(root)
-    .split('/usr/lib/node-red/gui').join(guiRoot);
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-bin-'));
-  try {
-    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(root, 'boot.log'))}\n`, { mode: 0o755 });
-    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair`], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
-    assert.equal(run.status, 0, run.stderr);
-  } finally {
-    fs.rmSync(bin, { recursive: true, force: true });
-  }
-  return readOr(path.join(root, 'boot.log'), '');
-}
-
-function baseRoot() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srv-node-red-kill-'));
-  fs.mkdirSync(path.join(root, 'payloads'));
-  // deploy.sh keeps its swap helper here for node-red.init.
-  fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
-  writeModule(path.join(root, 'osi-command-ledger'), 'ledger-live');
-  fs.mkdirSync(path.join(root, 'osi-watermark-binding'));
-  fs.mkdirSync(path.join(root, 'codecs'));
-  write(path.join(root, 'edge-channels.json'), '{}\n');
-  return { root, guiRoot: path.join(root, 'usr-lib', 'gui') };
-}
-
-function link(target, at) {
-  fs.mkdirSync(path.dirname(at), { recursive: true });
-  fs.symlinkSync(path.relative(path.dirname(at), target), at);
-}
-
-// The v0.8.2 layout: one link per entry, straight into payloads/<stamp>.
-function linkDirect(root, guiRoot, stamp, modules) {
-  link(path.join(root, 'payloads', stamp, 'flows.json'), path.join(root, 'flows.json'));
-  link(path.join(root, 'payloads', stamp, 'gui'), guiRoot);
-  for (const name of modules) link(path.join(root, 'payloads', stamp, 'modules', name), path.join(root, name));
-}
-
-// A sysupgrade keeps /srv (flows and module links) and replaces the GUI link
-// with the image GUI directory.
-function sysupgrade(guiRoot) {
-  fs.rmSync(guiRoot, { recursive: true, force: true });
-  write(path.join(guiRoot, 'index.html'), 'gui@image\n');
-}
-
-// deploy.sh's capture block and module staging for the deploy of "new" on a
-// gateway whose live flows and GUI are not one payload.
-function legacyCapture(root, guiRoot) {
-  swap.captureExisting(root, 'new-previous', path.join(root, 'flows.json'), guiRoot);
-  swap.captureGui(root, 'new-previous', guiRoot);
-  swap.captureModules(root, 'new-previous', 'new');
-  swap.linkNewModules(root, 'new', 'new-previous');
-  return 'new-previous';
-}
-
-// Each fixture is a gateway before the deploy of payload "new", which carries
-// osi-a and osi-new and drops osi-gone. build() returns the rollback payload
-// deploy.sh passes. windows lists the entries whose directory-to-link
-// conversion has a one-rename window; extraOld lists other states the old
-// side may show (row S7 starts mixed and the switch completes it);
-// rolledBack is what the rollback serves when the kill came before the
-// switch (default: the state before the deploy).
-const FIXTURES = {
-  // A gateway whose last deploy used this code: everything through payloads/active.
-  'one active link': { windows: [], build: ({ root, guiRoot }) => {
-    stage(root, 'old', ['osi-a', 'osi-gone']);
-    swap.flipTo(root, 'old', guiRoot);
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    swap.captureModules(root, 'old', 'new');
-    swap.linkNewModules(root, 'new', 'old');
-    return 'old';
-  } },
-  // A gateway converted by the first version of this layout, which named the
-  // link payloads/.active.
-  'one .active link (first version)': { windows: [], build: ({ root, guiRoot }) => {
-    stage(root, 'old', ['osi-a', 'osi-gone']);
-    swap.flipTo(root, 'old', guiRoot);
-    const payloads = path.join(root, 'payloads');
-    fs.renameSync(path.join(payloads, 'active'), path.join(payloads, '.active'));
-    const relink = (at) => {
-      const text = fs.readlinkSync(at).replace(/(^|\/)payloads\/active\//, '$1payloads/.active/');
-      fs.rmSync(at);
-      fs.symlinkSync(text, at);
-    };
-    for (const at of [path.join(root, 'flows.json'), guiRoot, path.join(root, 'osi-a'), path.join(root, 'osi-gone')]) relink(at);
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    swap.captureModules(root, 'old', 'new');
-    swap.linkNewModules(root, 'new', 'old');
-    return 'old';
-  } },
-  // A v0.8.2 gateway (1bdd49d5 and earlier): one link per entry, straight
-  // into payloads/old.
-  'one link per entry (v0.8.2 layout)': { windows: [], build: ({ root, guiRoot }) => {
-    stage(root, 'old', ['osi-a', 'osi-gone']);
-    linkDirect(root, guiRoot, 'old', ['osi-a', 'osi-gone']);
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    swap.captureModules(root, 'old', 'new');
-    swap.linkNewModules(root, 'new', 'old');
-    return 'old';
-  } },
-  'regular files captured (v0.8.1 after sysupgrade)': { windows: ['gui', 'osi-a'], build: ({ root, guiRoot }) => {
-    write(path.join(root, 'flows.json'), JSON.stringify([{ id: 'x', marker: 'flows@old' }]));
-    write(path.join(guiRoot, 'index.html'), 'gui@old\n');
-    writeModule(path.join(root, 'osi-a'), 'osi-a@old');
-    writeModule(path.join(root, 'osi-gone'), 'osi-gone@old');
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    swap.captureExisting(root, 'old', path.join(root, 'flows.json'), guiRoot);
-    swap.captureModules(root, 'old', 'new');
-    swap.linkNewModules(root, 'new', 'old');
-    return 'old';
-  } },
-  // Council #636 round 1: a module the old payload links and the new one
-  // drops must be in the capture and stay served until the switch.
-  'v0.8.2 layout after a sysupgrade, module dropped': { windows: ['gui'], build: ({ root, guiRoot }) => {
-    stage(root, 'old', ['osi-a', 'osi-gone']);
-    linkDirect(root, guiRoot, 'old', ['osi-a', 'osi-gone']);
-    sysupgrade(guiRoot);
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    return legacyCapture(root, guiRoot);
-  } },
-  'active layout after a sysupgrade, module dropped': { windows: ['gui'], build: ({ root, guiRoot }) => {
-    stage(root, 'old', ['osi-a', 'osi-gone']);
-    swap.flipTo(root, 'old', guiRoot);
-    sysupgrade(guiRoot);
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    return legacyCapture(root, guiRoot);
-  } },
-  // State-table row S7: a v0.8.2 deploy into "cut" was killed during its
-  // module renames. Flows, GUI and osi-a are in cut; osi-gone is still the
-  // v0.8.1 directory. The switch completes cut, as v0.8.2 would have.
-  'v0.8.2 switch cut during the module renames (row S7)': {
-    windows: ['osi-gone'],
-    extraOld: [{ 'osi-gone': 'osi-gone@cut' }],
-    rolledBack: { 'osi-gone': 'osi-gone@cut' },
-    build: ({ root, guiRoot }) => {
-      writeModule(path.join(root, 'osi-gone'), 'osi-gone@old');
-      stage(root, 'cut', ['osi-a', 'osi-gone']);
-      link(path.join(root, 'payloads', 'cut', 'flows.json'), path.join(root, 'flows.json'));
-      link(path.join(root, 'payloads', 'cut', 'gui'), guiRoot);
-      link(path.join(root, 'payloads', 'cut', 'modules', 'osi-a'), path.join(root, 'osi-a'));
-      stage(root, 'new', ['osi-a', 'osi-new']);
-      swap.captureModules(root, 'cut', 'new');
-      swap.linkNewModules(root, 'new', 'cut');
-      assert.match(swap.switchPreflight(root, 'new', guiRoot, 'cut'), /module osi-gone was left behind by a switch into payloads\/cut/);
-      return 'cut';
-    },
-  },
-};
 
 function readOr(file, fallback) {
   try { return fs.readFileSync(file, 'utf8'); } catch (_) { return fallback; }
 }
 
 // What a Node-RED restarted at this instant would load.
-function served({ root, guiRoot }) {
-  const state = {};
-  const flows = readOr(path.join(root, 'flows.json'), null);
-  state.flows = flows === null ? 'absent' : JSON.parse(flows)[0].marker;
-  state.gui = readOr(path.join(guiRoot, 'index.html'), 'absent').trim();
-  for (const name of MODULES) {
-    const source = readOr(path.join(root, name, 'index.js'), null);
-    state[name] = source === null ? 'absent' : JSON.parse(source.match(/= (".*");/)[1]);
+function served(g) {
+  const out = { flows: readOr(g.flowsPath, 'absent'), gui: readOr(path.join(g.guiRoot, 'index.html'), 'absent') };
+  for (const name of MODULES) out[name] = readOr(path.join(g.root, name, 'index.js'), 'absent');
+  return out;
+}
+
+// osi-c is new in this release: deploy.sh links it before the stop for npm
+// install, and the old flows never load it.
+function sameOld(state, old) {
+  const strip = ({ 'osi-c': _new, ...rest }) => JSON.stringify(rest);
+  return strip(state) === strip(old);
+}
+
+function same(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function bootRepair(g) {
+  const begin = NODE_RED_INIT.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT.indexOf('# payload switch repair end');
+  assert.ok(begin >= 0 && end > begin, 'node-red.init must keep its payload switch repair block');
+  const block = NODE_RED_INIT.slice(begin, end)
+    .split('/srv/$PACKAGE_NAME').join(g.root)
+    .split('/usr/lib/node-red/gui').join(g.guiRoot);
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-bin-'));
+  try {
+    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(g.root, 'boot.log'))}\n`, { mode: 0o755 });
+    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair`], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
   }
-  return state;
+  return readOr(path.join(g.root, 'boot.log'), '');
 }
 
-// The old payload does not carry osi-new. deploy.sh links a module new in
-// this release before the stop, for npm install; the old flows never load it.
-function sameOld(state, before) {
-  const strip = ({ 'osi-new': _new, ...rest }) => JSON.stringify(rest);
-  return strip(state) === strip(before);
+// deploy.sh's decision sequence for a deploy of <stamp>, before Node-RED
+// stops. Returns { refused } or { served, prev, notes }.
+function deployDecision(g, stamp) {
+  try {
+    swap.resumeInterruptedSwitch(g.root, g.guiRoot);
+    swap.legacyCapturePreflight(g.root, g.flowsPath, g.guiRoot);
+    table.stageWithModules(g.root, stamp, NEW_MODULES);
+    let prev = swap.currentStamp(g.root) || '';
+    const prevGui = swap.guiStamp(g.root, g.guiRoot);
+    const guiDir = fs.existsSync(g.guiRoot) && fs.statSync(g.guiRoot).isDirectory();
+    const flowsFile = fs.existsSync(g.flowsPath) && fs.statSync(g.flowsPath).isFile();
+    if (prev && !guiDir && !swap.verifyPair(g.root, prev)) prev = '';
+    if ((!prev || prevGui !== prev) && flowsFile && guiDir) {
+      prev = swap.legacyCaptureStamp(g.root, g.flowsPath, g.guiRoot);
+      if (!prev) {
+        prev = `${stamp}-previous`;
+        swap.captureExisting(g.root, prev, g.flowsPath, g.guiRoot);
+      }
+    }
+    if (prev) {
+      swap.captureGui(g.root, prev, g.guiRoot);
+      swap.captureModules(g.root, prev, stamp);
+    }
+    swap.linkNewModules(g.root, stamp, prev);
+    const notes = swap.switchPreflight(g.root, stamp, g.guiRoot, prev) || '';
+    const target = prev ? swap.rollbackTarget(g.root, prev, stamp) : '';
+    return { served: prev, prev: target, notes };
+  } catch (error) {
+    return { refused: error.message };
+  }
 }
 
-function oldSide(fixture, before) {
-  return [before, ...(fixture.extraOld || []).map((change) => ({ ...before, ...change }))];
+// The states the old side may show: as served, with a module a cut switch
+// left behind completed (switchPreflight names it), and with a missing GUI
+// restored from the base.
+function oldSide(g, old, decision) {
+  const olds = [old];
+  for (const [, name, stamp] of decision.notes.matchAll(/module (osi-[a-z0-9-]+) was left behind by a switch into payloads\/(\S+) that was cut/g)) {
+    olds.push({ ...olds[olds.length - 1], [name]: readOr(path.join(g.root, 'payloads', stamp, 'modules', name, 'index.js'), 'absent') });
+  }
+  if (old.gui === 'absent' && decision.served) {
+    for (const o of [...olds]) olds.push({ ...o, gui: readOr(path.join(g.root, 'payloads', decision.served, 'gui', 'index.html'), 'absent') });
+  }
+  return olds;
 }
 
-// A directory cannot be replaced by a link in one rename(2) (EISDIR), so
-// converting the image GUI or a pre-#603 module directory moves it aside
-// first. A kill between the two renames leaves exactly that entry absent with
-// its old content beside it, and everything else on the old side. Returns
-// the entry, or null for any other state.
-function conversionWindow({ root, guiRoot }, state, olds) {
-  for (const before of olds) {
-    const missing = Object.keys(before).filter((key) => key !== 'osi-new' && state[key] === 'absent' && before[key] !== 'absent');
+// A directory cannot be replaced by a link in one rename(2) (EISDIR). A kill
+// between moving it aside and linking leaves exactly that entry absent with
+// its old content beside it.
+function conversionWindow(g, state, olds) {
+  for (const old of olds) {
+    const missing = Object.keys(old).filter((key) => key !== 'osi-c' && state[key] === 'absent' && old[key] !== 'absent');
     if (missing.length !== 1) continue;
     const [key] = missing;
-    if (!sameOld({ ...state, [key]: before[key] }, before)) continue;
-    const at = key === 'gui' ? guiRoot : path.join(root, key);
+    if (!sameOld({ ...state, [key]: old[key] }, old)) continue;
+    const at = key === 'gui' ? g.guiRoot : key === 'flows' ? g.flowsPath : path.join(g.root, key);
     const aside = fs.readdirSync(path.dirname(at)).filter((name) => name.startsWith(`${path.basename(at)}.osi-old-`));
-    if (aside.length !== 1) continue;
-    const file = key === 'gui' ? 'index.html' : 'index.js';
-    if (fs.readFileSync(path.join(path.dirname(at), aside[0], file), 'utf8').includes(before[key])) return key;
+    const file = key === 'gui' ? 'index.html' : key === 'flows' ? '' : 'index.js';
+    if (aside.some((name) => readOr(path.join(path.dirname(at), name, file), null) === old[key])) return key;
   }
   return null;
 }
 
-function classify(env, state, olds, after) {
+function classify(g, state, olds, after) {
   if (olds.some((old) => sameOld(state, old))) return 'old';
-  if (after && JSON.stringify(state) === JSON.stringify(after)) return 'new';
-  return conversionWindow(env, state, olds) ? 'window' : null;
+  if (after && same(state, after)) return 'new';
+  return conversionWindow(g, state, olds) ? 'window' : null;
 }
 
-// Runs one swap call in a child that exits after its k-th filesystem change;
-// k = 0 runs to the end and reports the number of changes.
-function killed(env, k, call, args) {
+function killed(g, k, call, args) {
   return spawnSync(process.execPath, ['-e', `
     const fs = require('node:fs');
     const swap = require(${JSON.stringify(SWAP_JS)});
@@ -270,221 +188,207 @@ function killed(env, k, call, args) {
         return result;
       };
     }
-    swap[${JSON.stringify(call)}](...${JSON.stringify([env.root, ...args])});
+    swap[${JSON.stringify(call)}](...${JSON.stringify([g.root, ...args])});
     process.stdout.write(String(count));
   `], { encoding: 'utf8' });
 }
 
-function countSteps(env, call, args) {
-  const run = killed(env, 0, call, args);
+function countSteps(g, call, args) {
+  const run = killed(g, 0, call, args);
   assert.equal(run.status, 0, run.stderr);
   return Number(run.stdout);
 }
 
-// deploy.sh's choice of rollback payload for the retry: the resume step, the
-// legacy capture preflight, the capture block, the module capture and the
-// switch preflight, in deploy.sh's order.
-function retryPrevious({ root, guiRoot }, stamp) {
-  const flowsPath = path.join(root, 'flows.json');
-  swap.resumeInterruptedSwitch(root, guiRoot);
-  swap.legacyCapturePreflight(root, flowsPath, guiRoot);
-  let prev = swap.currentStamp(root);
-  if (prev && !fs.existsSync(guiRoot)) prev = null;
-  if ((!prev || swap.guiStamp(root, guiRoot) !== prev) && fs.existsSync(flowsPath) && fs.existsSync(guiRoot)) {
-    prev = swap.legacyCaptureStamp(root, flowsPath, guiRoot);
-    if (!prev) {
-      prev = `${stamp}-previous`;
-      swap.captureExisting(root, prev, flowsPath, guiRoot);
-    }
-  }
-  if (prev) {
-    swap.captureGui(root, prev, guiRoot);
-    swap.captureModules(root, prev, stamp);
-  }
-  swap.linkNewModules(root, stamp, prev || '');
-  swap.switchPreflight(root, stamp, guiRoot, prev || '');
-  return prev || '';
-}
-
-function withEnv(fn) {
-  const env = baseRoot();
+// Builds the row's gateway, runs the decision, and hands both to fn.
+function withRow(build, stale, fn) {
+  const root = table.tableRoot();
   try {
-    return fn(env);
+    const g = table.tableGateway(root);
+    fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+    build(g);
+    if (stale) table.staleMarker(g.marker, 'gone-previous');
+    const decision = deployDecision(g, 'new');
+    return fn(g, decision);
   } finally {
-    fs.rmSync(env.root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
-for (const [name, fixture] of Object.entries(FIXTURES)) {
-  test(`a kill at every step of the activation leaves one complete payload: ${name}`, () => {
-    const { before, after, steps } = withEnv((dry) => {
-      const prev = fixture.build(dry);
-      const state = served(dry);
-      const n = countSteps(dry, 'flipTo', ['new', dry.guiRoot, prev]);
-      return { before: state, after: served(dry), steps: n };
-    });
-    assert.equal(after.flows, 'flows@new');
-    assert.equal(after.gui, 'gui@new');
-    assert.equal(after['osi-new'], 'osi-new@new');
-    const olds = oldSide(fixture, before);
-    const rolledBack = { ...before, ...(fixture.rolledBack || {}) };
+function leftovers(g) {
+  return [g.root, path.dirname(g.guiRoot), path.join(g.root, 'payloads')]
+    .flatMap((dir) => fs.readdirSync(dir).filter((entry) => /\.(flip|osi-old)-/.test(entry)));
+}
 
-    const seen = [];
-    for (let k = 1; k <= steps; k += 1) {
-      withEnv((env) => {
-        const prev = fixture.build(env);
-        const run = killed(env, k, 'flipTo', ['new', env.guiRoot, prev]);
-        assert.equal(run.status, KILLED, `k=${k}: ${run.stderr}`);
-        const state = served(env);
-        const kind = classify(env, state, olds, after);
-        assert.ok(kind, `kill after change ${k} of ${steps} leaves a mixed payload: ${JSON.stringify(state)}`);
-        if (kind === 'window') seen.push(conversionWindow(env, state, olds));
+// The retry after a kill and its rollback: both end on a complete payload,
+// and the rollback on one that passed its health check or predates the record.
+function retryAndRollback(g, label) {
+  const retry = deployDecision(g, 'retry');
+  assert.ok(!retry.refused, `${label}: the retry is not refused: ${retry.refused}`);
+  swap.flipTo(g.root, 'retry', g.guiRoot, retry.served);
+  assert.equal(swap.verifyPair(g.root, 'retry', g.guiRoot), true, `${label}: the retry activates completely`);
+  const state = served(g);
+  for (const [key, want] of [['flows', 'retry'], ['gui', 'retry'], ['osi-a', 'osi-a@retry'], ['osi-c', 'osi-c@retry']]) {
+    assert.ok(state[key].includes(want), `${label}: the retry serves ${key} from payloads/retry: ${state[key]}`);
+  }
+  assert.deepEqual(leftovers(g), [], `${label}: the retry leaves nothing a killed switch left behind`);
+  if (!retry.prev) return;
+  swap.flipTo(g.root, retry.prev, g.guiRoot);
+  assert.equal(swap.verifyPair(g.root, retry.prev, g.guiRoot), true, `${label}: the rollback activates payloads/${retry.prev} completely`);
+  assert.equal(swap.payloadTrusted(g.root, retry.prev), true, `${label}: the rollback target passed its health check or predates the record`);
+}
 
-        // A reboot before any deploy: node-red.init's repair step serves the
-        // old side again, and leaves a complete payload alone.
-        const log = bootRepair(env);
-        const booted = served(env);
-        if (kind === 'window') {
-          assert.ok(olds.some((old) => sameOld(booted, old)), `k=${k}: the start after a reboot serves the old payload: ${JSON.stringify(booted)}`);
-          assert.match(log, /an interrupted switch left/);
-        } else {
-          assert.deepEqual(booted, state, `k=${k}: the boot repair leaves a complete payload alone`);
-          assert.doesNotMatch(log, /failed/);
-        }
-
-        // The retry: deploy.sh's resume step runs first.
-        stage(env.root, 'retry', ['osi-a', 'osi-new']);
-        const retryPrev = retryPrevious(env, 'retry');
-        if (kind === 'window') assert.ok(olds.some((old) => sameOld(served(env), old)), `k=${k}: the resume step restores the old side`);
-        assert.notEqual(retryPrev, '', `k=${k}: the retry finds a rollback payload`);
-        assert.equal(swap.verifyPair(env.root, retryPrev), true, `k=${k}: payloads/${retryPrev} is complete`);
-        swap.flipTo(env.root, 'retry', env.guiRoot, retryPrev);
-        assert.equal(swap.verifyPair(env.root, 'retry', env.guiRoot), true, `k=${k}: the retry activates completely`);
-        const left = [env.root, path.dirname(env.guiRoot), path.join(env.root, 'payloads')]
-          .flatMap((dir) => fs.readdirSync(dir).filter((entry) => /\.(flip|osi-old)-/.test(entry)));
-        assert.deepEqual(left, [], `k=${k}: the retry leaves nothing a killed switch left behind`);
-        assert.throws(() => fs.lstatSync(path.join(env.root, 'payloads', '.active')), /ENOENT/, `k=${k}: the first version's link is gone`);
-        assert.equal(fs.readlinkSync(path.join(env.root, 'payloads', 'active')), 'retry');
-        assert.deepEqual(served(env), { ...after, flows: 'flows@retry', gui: 'gui@retry', 'osi-a': 'osi-a@retry', 'osi-new': 'osi-new@retry' });
-
-        // The rollback returns to a complete set: the old payload when the
-        // kill came before the switch, the new one after it.
-        swap.flipTo(env.root, retryPrev, env.guiRoot);
-        assert.equal(swap.verifyPair(env.root, retryPrev, env.guiRoot), true, `k=${k}: the rollback activates completely`);
-        const back = served(env);
-        assert.ok(kind === 'new' ? JSON.stringify(back) === JSON.stringify(after) : sameOld(back, rolledBack),
-          `k=${k}: the rollback serves the ${kind === 'new' ? 'new' : 'old'} payload: ${JSON.stringify(back)}`);
-      });
-    }
-    assert.deepEqual(seen.sort(), fixture.windows, 'only a directory conversion leaves an entry absent, once each');
-  });
-
-  test(`a kill at every step of the rollback after a completed switch leaves one complete payload: ${name}`, () => {
-    const { before, after, steps } = withEnv((dry) => {
-      const prev = fixture.build(dry);
-      const state = served(dry);
-      swap.flipTo(dry.root, 'new', dry.guiRoot, prev);
-      const done = served(dry);
-      return { before: state, after: done, steps: countSteps(dry, 'flipTo', [prev, dry.guiRoot]) };
-    });
-    const rolledBack = { ...before, ...(fixture.rolledBack || {}) };
-    for (let k = 1; k <= steps; k += 1) {
-      withEnv((env) => {
-        const prev = fixture.build(env);
-        swap.flipTo(env.root, 'new', env.guiRoot, prev);
-        assert.equal(killed(env, k, 'flipTo', [prev, env.guiRoot]).status, KILLED);
-        const state = served(env);
-        assert.ok(JSON.stringify(state) === JSON.stringify(after) || sameOld(state, rolledBack),
-          `rollback killed after change ${k} of ${steps}: ${JSON.stringify(state)}`);
-        swap.flipTo(env.root, prev, env.guiRoot);
-        assert.ok(sameOld(served(env), rolledBack));
-      });
-    }
-  });
-
-  test(`a kill at every step of a rollback before the switch began keeps the old payload served: ${name}`, () => {
-    // deploy.sh's exit handler after a failure between the Node-RED stop and
-    // the forward switch: flipTo(PREV, GUI) with nothing switched yet.
-    const { before, steps } = withEnv((dry) => {
-      const prev = fixture.build(dry);
-      const state = served(dry);
-      return { before: state, steps: countSteps(dry, 'flipTo', [prev, dry.guiRoot]) };
-    });
-    const olds = oldSide(fixture, before);
-    for (let k = 1; k <= steps; k += 1) {
-      withEnv((env) => {
-        const prev = fixture.build(env);
-        assert.equal(killed(env, k, 'flipTo', [prev, env.guiRoot]).status, KILLED);
-        const state = served(env);
-        // The old payload stays served; converting a real directory to a link
-        // has its one-rename window here as on the forward switch.
-        assert.ok(classify(env, state, olds, null), `rollback before the switch killed after change ${k} of ${steps}: ${JSON.stringify(state)}`);
-        swap.resumeInterruptedSwitch(env.root, env.guiRoot);
-        swap.flipTo(env.root, prev, env.guiRoot);
-        assert.equal(swap.verifyPair(env.root, prev, env.guiRoot), true);
-        assert.ok(sameOld(served(env), { ...before, ...(fixture.rolledBack || {}) }));
-      });
+const CASES = [];
+for (const row of table.STATE_TABLE) {
+  row.builds.forEach((build, index) => {
+    for (const stale of row.stale ? [false, true] : [false]) {
+      CASES.push({ row: row.row, label: `${row.row} variant ${index + 1}${stale ? ', stale marker' : ''}`, build, stale });
     }
   });
 }
 
-test('a kill at every step of the resume step leaves the window or the old payload', () => {
-  const fixture = FIXTURES['regular files captured (v0.8.1 after sysupgrade)'];
-  const before = withEnv((dry) => { fixture.build(dry); return served(dry); });
-  const steps = withEnv((dry) => {
-    const prev = fixture.build(dry);
-    return countSteps(dry, 'flipTo', ['new', dry.guiRoot, prev]);
-  });
-  const windows = [];
-  for (let k = 1; k <= steps; k += 1) {
-    withEnv((env) => {
-      killed(env, k, 'flipTo', ['new', env.guiRoot, fixture.build(env)]);
-      if (conversionWindow(env, served(env), [before])) windows.push(k);
-    });
-  }
-  assert.equal(windows.length, fixture.windows.length);
-  for (const at of windows) {
-    const resumeSteps = withEnv((env) => {
-      killed(env, at, 'flipTo', ['new', env.guiRoot, fixture.build(env)]);
-      return countSteps(env, 'resumeInterruptedSwitch', [env.guiRoot]);
-    });
-    assert.ok(resumeSteps >= 1);
-    for (let k = 1; k <= resumeSteps; k += 1) {
-      withEnv((env) => {
-        killed(env, at, 'flipTo', ['new', env.guiRoot, fixture.build(env)]);
-        assert.equal(killed(env, k, 'resumeInterruptedSwitch', [env.guiRoot]).status, KILLED);
-        const state = served(env);
-        assert.ok(sameOld(state, before) || conversionWindow(env, state, [before]),
-          `resume killed after change ${k} of ${resumeSteps} (window at ${at}): ${JSON.stringify(state)}`);
-        swap.resumeInterruptedSwitch(env.root, env.guiRoot);
-        assert.ok(sameOld(served(env), before));
-      });
-    }
-  }
+test('every row of the deploy state table is a starting state of the kill matrix', () => {
+  const rows = new Set(CASES.map((c) => c.row));
+  assert.deepEqual([...rows], table.STATE_TABLE.map((r) => r.row));
 });
 
-test('a kill during a first activation leaves no flows running or the complete payload', () => {
-  const build = ({ root }) => {
-    stage(root, 'new', ['osi-a', 'osi-new']);
-    // deploy.sh links every module before the stop, for npm install.
-    swap.linkNewModules(root, 'new', '');
-  };
-  const { after, steps } = withEnv((dry) => {
-    build(dry);
-    const n = countSteps(dry, 'flipTo', ['new', dry.guiRoot, '']);
-    return { after: served(dry), steps: n };
-  });
-  for (let k = 1; k <= steps; k += 1) {
-    withEnv((env) => {
-      build(env);
-      assert.equal(killed(env, k, 'flipTo', ['new', env.guiRoot, '']).status, KILLED);
-      const state = served(env);
-      assert.ok(JSON.stringify(state) === JSON.stringify(after) || (state.flows === 'absent' && state.gui === 'absent'),
-        `kill after change ${k} of ${steps} leaves a partial first payload: ${JSON.stringify(state)}`);
-      stage(env.root, 'retry', ['osi-a', 'osi-new']);
-      const prev = retryPrevious(env, 'retry');
-      swap.flipTo(env.root, 'retry', env.guiRoot, prev);
-      assert.equal(swap.verifyPair(env.root, 'retry', env.guiRoot), true);
+for (const c of CASES) {
+  test(`kill matrix ${c.label}`, () => {
+    const plan = withRow(c.build, c.stale, (g, decision) => {
+      const old = served(g);
+      if (decision.refused) return { refused: decision.refused };
+      const olds = oldSide(g, old, decision);
+      const steps = countSteps(g, 'flipTo', ['new', g.guiRoot, decision.served]);
+      const after = served(g);
+      const rollbackSteps = decision.prev ? countSteps(g, 'flipTo', [decision.prev, g.guiRoot]) : 0;
+      const rolledBack = served(g);
+      return { olds, after, steps, rollbackSteps, rolledBack, prev: decision.prev };
     });
+
+    if (plan.refused) {
+      assert.ok(EXPECTED_REFUSALS[c.row], `${c.label}: refused unexpectedly: ${plan.refused}`);
+      assert.match(plan.refused, EXPECTED_REFUSALS[c.row]);
+      // The refusal comes before anything served changes.
+      withRow(c.build, c.stale, () => null);
+      const root = table.tableRoot();
+      try {
+        const g = table.tableGateway(root);
+        c.build(g);
+        if (c.stale) table.staleMarker(g.marker, 'gone-previous');
+        swap.resumeInterruptedSwitch(g.root, g.guiRoot);
+        const resumed = served(g);
+        deployDecision(g, 'new');
+        assert.deepEqual(served(g), resumed, `${c.label}: a refusal changes nothing served`);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+      return;
+    }
+    assert.ok(!EXPECTED_REFUSALS[c.row], `${c.label}: expected a refusal`);
+    assert.ok(plan.after.flows.includes('new') && plan.after.gui.includes('new') && plan.after['osi-a'].includes('osi-a@new'), `${c.label}: the switch serves the new payload`);
+    const loose = NO_COMPLETE_OLD[c.row];
+
+    const windows = [];
+    for (let k = 1; k <= plan.steps; k += 1) {
+      withRow(c.build, c.stale, (g, decision) => {
+        assert.equal(killed(g, k, 'flipTo', ['new', g.guiRoot, decision.served]).status, KILLED);
+        const state = served(g);
+        const kind = classify(g, state, plan.olds, plan.after);
+        if (loose) {
+          assert.ok(kind || state.flows === 'absent' || c.row === 'S3', `${c.label} k=${k}: ${JSON.stringify(state)}`);
+        } else {
+          assert.ok(kind, `${c.label}: kill after change ${k} of ${plan.steps} leaves a mixed payload: ${JSON.stringify(state)}`);
+        }
+        if (kind === 'window') windows.push(k);
+        const log = bootRepair(g);
+        const booted = served(g);
+        if (kind === 'window') {
+          assert.ok(plan.olds.some((old) => sameOld(booted, old)), `${c.label} k=${k}: the start after a reboot serves the old payload: ${JSON.stringify(booted)}`);
+        } else if (loose && /moved it back/.test(log)) {
+          // A per-entry replacement window; the repair moved the entry back.
+        } else {
+          assert.deepEqual(booted, state, `${c.label} k=${k}: the boot repair leaves a complete payload alone`);
+        }
+        assert.doesNotMatch(log, /failed/);
+        retryAndRollback(g, `${c.label} k=${k}`);
+      });
+    }
+
+    for (let k = 1; k <= plan.rollbackSteps; k += 1) {
+      withRow(c.build, c.stale, (g, decision) => {
+        swap.flipTo(g.root, 'new', g.guiRoot, decision.served);
+        assert.equal(killed(g, k, 'flipTo', [decision.prev, g.guiRoot]).status, KILLED);
+        const state = served(g);
+        assert.ok(same(state, plan.after) || same(state, plan.rolledBack),
+          `${c.label}: rollback killed after change ${k} of ${plan.rollbackSteps}: ${JSON.stringify(state)}`);
+        swap.flipTo(g.root, decision.prev, g.guiRoot);
+        assert.equal(swap.verifyPair(g.root, decision.prev, g.guiRoot), true);
+      });
+    }
+
+    if (plan.prev) {
+      const beforeSteps = withRow(c.build, c.stale, (g, decision) => countSteps(g, 'flipTo', [decision.prev, g.guiRoot]));
+      for (let k = 1; k <= beforeSteps; k += 1) {
+        withRow(c.build, c.stale, (g, decision) => {
+          assert.equal(killed(g, k, 'flipTo', [decision.prev, g.guiRoot]).status, KILLED);
+          const state = served(g);
+          assert.ok(classify(g, state, plan.olds, null) || loose,
+            `${c.label}: rollback before the switch killed after change ${k} of ${beforeSteps}: ${JSON.stringify(state)}`);
+          swap.resumeInterruptedSwitch(g.root, g.guiRoot);
+          swap.flipTo(g.root, decision.prev, g.guiRoot);
+          assert.equal(swap.verifyPair(g.root, decision.prev, g.guiRoot), true);
+          assert.equal(swap.payloadTrusted(g.root, decision.prev), true);
+        });
+      }
+    }
+
+    for (const at of windows) {
+      const resumeSteps = withRow(c.build, c.stale, (g, decision) => {
+        killed(g, at, 'flipTo', ['new', g.guiRoot, decision.served]);
+        return countSteps(g, 'resumeInterruptedSwitch', [g.guiRoot]);
+      });
+      for (let k = 1; k <= resumeSteps; k += 1) {
+        withRow(c.build, c.stale, (g, decision) => {
+          killed(g, at, 'flipTo', ['new', g.guiRoot, decision.served]);
+          assert.equal(killed(g, k, 'resumeInterruptedSwitch', [g.guiRoot]).status, KILLED);
+          const state = served(g);
+          assert.ok(plan.olds.some((old) => sameOld(state, old)) || conversionWindow(g, state, plan.olds),
+            `${c.label}: resume killed after change ${k} of ${resumeSteps} (window at ${at}): ${JSON.stringify(state)}`);
+          swap.resumeInterruptedSwitch(g.root, g.guiRoot);
+          assert.ok(plan.olds.some((old) => sameOld(served(g), old)));
+        });
+      }
+    }
+  });
+}
+
+test('a kill during a first activation leaves no flows running or the complete payload', () => {
+  const build = (g) => {
+    table.stageWithModules(g.root, 'new', NEW_MODULES);
+    swap.linkNewModules(g.root, 'new', '');
+  };
+  const root0 = table.tableRoot();
+  let steps;
+  let after;
+  try {
+    const g = table.tableGateway(root0);
+    build(g);
+    steps = countSteps(g, 'flipTo', ['new', g.guiRoot, '']);
+    after = served(g);
+  } finally {
+    fs.rmSync(root0, { recursive: true, force: true });
+  }
+  for (let k = 1; k <= steps; k += 1) {
+    const root = table.tableRoot();
+    try {
+      const g = table.tableGateway(root);
+      build(g);
+      assert.equal(killed(g, k, 'flipTo', ['new', g.guiRoot, '']).status, KILLED);
+      const state = served(g);
+      assert.ok(same(state, after) || (state.flows === 'absent' && state.gui === 'absent'),
+        `kill after change ${k} of ${steps} leaves a partial first payload: ${JSON.stringify(state)}`);
+      retryAndRollback(g, `first activation k=${k}`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
