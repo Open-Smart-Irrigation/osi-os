@@ -496,6 +496,45 @@ function recordError(msg, state = {}) {
   return { counts, warned, warning };
 }
 
+// Gather Edge Health (inject every 60 s, once at start). A farm database
+// start-up fault is published synchronously, before the first await, so the
+// heartbeat built from the same tick carries it. When the helper refuses farm
+// connections no connection is attempted.
+// A database fault replaces the gathered state; "not checked" (a 10 s
+// timeout on a large file, say) only replaces "healthy", so it never hides
+// crash_looping or degraded.
+function withDatabaseState(gathered, databaseState) {
+  if (!databaseState) return gathered;
+  if (databaseState !== 'database_not_checked') return databaseState;
+  return gathered === 'healthy' || gathered == null ? databaseState : gathered;
+}
+
+async function refreshGlobal({ global, osiDb, options = {} }) {
+  const errCounts = global.get('error_counts') || {};
+  const errorsTotal = Number.isFinite(errCounts.total) ? errCounts.total : null;
+  const errorsLastAt = errCounts.last && Number.isFinite(errCounts.last.at) ? errCounts.last.at : null;
+  const meta = { at: Date.now(), errors_total: errorsTotal, errors_last_at: errorsLastAt };
+  const database = osiDb.startupHealth();
+  if (database.health_state) {
+    // Build Heartbeat refills a null crash_count and then sets health_state
+    // itself; carry the crash state so the database state stays.
+    const crash = readCrashState(options);
+    global.set('edge_health', Object.assign(allNullHealth(), meta, crash, {
+      health_state: withDatabaseState(crash.crash_looping ? 'crash_looping' : 'healthy', database.health_state)
+    }));
+    if (database.driver_error || database.module_conflict) return null;
+  }
+  const _db = new osiDb.Database('/data/db/farming.db');
+  try {
+    const health = await gatherEdgeHealth(_db, Object.assign({}, options, { errorCount: errorsTotal }));
+    health.health_state = withDatabaseState(health.health_state, database.health_state);
+    global.set('edge_health', Object.assign(meta, health));
+  } finally {
+    _db.close(() => {});
+  }
+  return null;
+}
+
 module.exports = {
   structuralSignature,
   gatherEdgeHealth,
@@ -504,5 +543,6 @@ module.exports = {
   readCrashState,
   isAuthRejection,
   recordError,
-  rtcHealth
+  rtcHealth,
+  refreshGlobal
 };

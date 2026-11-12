@@ -1108,9 +1108,11 @@ if (silentCatchBaseline) {
   // 77: issue #356 durable Chameleon diagnostic link -- Insert Chameleon Reading's
   // close() catch and calibration-local-backfill's ROLLBACK and close() catches become
   // visible node.warn while both nodes move to one scoped db.transaction: 80 -> 77.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 77 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 77,
-    'silent-catch baseline records 77 for both maintained profiles',
-    'silent-catch baseline must be 77 for both maintained profiles');
+  // 76: NEW-15, DENDRO SIM SETUP opens the farm file through osi-db-helper and
+  // its close() catch gains a visible node.warn: 77 -> 76.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 76 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 76,
+    'silent-catch baseline records 76 for both maintained profiles',
+    'silent-catch baseline must be 76 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

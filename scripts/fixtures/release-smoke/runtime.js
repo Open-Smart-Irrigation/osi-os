@@ -5,12 +5,13 @@ const fs = require('node:fs'), path = require('node:path'), http = require('node
 const os = require('node:os'), net = require('node:net'), dns = require('node:dns');
 const Module = require('node:module');
 const ROOT = path.resolve(__dirname, '../../..');
-const SRC = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
+const SOURCE_ROOT=process.env.OSI_SMOKE_SOURCE||ROOT;
+const SRC = path.join(SOURCE_ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
 const RUN = process.env.OSI_SMOKE_RUN;
 if (!RUN || !path.isAbsolute(RUN)) throw new Error('OSI_SMOKE_RUN must name an isolated absolute scratch directory');
 const DBFILE = path.join(RUN, 'data/db/farming.db');
 const MARKER_PATH = '/var/run/osi-irrigation-clock.json';
-const state = { marker: true, markerOverride: null, cs: { queue: {}, calls: [] }, mqtt: [], logs: [], exec: [], caught: [], received: [], sweep: [], sqlitePending: 0 };
+const state = { marker: true, markerOverride: null, cs: { queue: {}, calls: [] }, mqtt: [], logs: [], exec: [], caught: [], received: [], sweep: [], heartbeats: [], sqlitePending: 0 };
 fs.mkdirSync(path.dirname(DBFILE), {recursive:true});
 fs.mkdirSync(path.join(RUN, 'var/run'), {recursive:true});
 const nr = path.join(SRC, 'usr/share/node-red');
@@ -82,6 +83,17 @@ function refuseExec(name) {
   };
 }
 const fakeCp = {}; for (const k of ['exec', 'execFile', 'spawn', 'execSync', 'execFileSync', 'spawnSync', 'fork']) fakeCp[k] = refuseExec(k);
+// One exception: the farm database start-up check (osi-db-helper/startup.js)
+// runs `sqlite3 -readonly <db> <sql>`, a read-only separate process; it runs
+// for real on the relocated file and is recorded like every other command.
+const refusedSpawnSync = fakeCp.spawnSync;
+fakeCp.spawnSync = function (cmd, args, ...rest) {
+  if (cmd === 'sqlite3' && Array.isArray(args) && args.length === 3 && args[0] === '-readonly' && remap(args[1]) === DBFILE) {
+    state.exec.push({ fn: 'spawnSync', cmd: 'sqlite3 -readonly ' + args[1] });
+    return require('node:child_process').spawnSync(cmd, ['-readonly', DBFILE, args[2]], ...rest);
+  }
+  return refusedSpawnSync(cmd, args, ...rest);
+};
 // path remap for the function nodes' fs (functionGlobalContext.fs) and for the clock marker
 function remap(p) {
   if (typeof p !== 'string' || p === RUN || p.startsWith(RUN + '/')) return p;
@@ -136,12 +148,26 @@ for (const fn of ['writeFileSync', 'renameSync', 'unlinkSync', 'mkdirSync', 'exi
 
 
 // Keep the actual sqlite3 binding. Only absolute image paths are relocated.
-const nativeSqlite = require('sqlite3');
-const NativeDatabase = nativeSqlite.Database;
+const {createRequire}=require('node:module');
+// The harness's own connections use the sqlite3 instance of the
+// node-red-node-sqlite package Node-RED loaded, looked up at first use, so the
+// harness never maps a native addon of its own (NEW-15 layouts depend on it).
+let harnessDriver=null;
+function nativeSqlite() {
+  if(harnessDriver)return harnessDriver;
+  const files=Object.keys(require.cache).filter(file=>/[\\/]node-red-node-sqlite[\\/]sqlite\.js$/.test(file));
+  if(files.length!==1)throw new Error('harness: expected one loaded node-red-node-sqlite, found '+files.length);
+  return harnessDriver=createRequire(files[0])('sqlite3');
+}
+const relocatedDrivers=new WeakSet();
 let observation;
 // Observe completion of native operations that already have callbacks. Keep
 // the product's binding, arguments, lock policy and callback result unchanged.
-for(const method of ['all','get','run','exec','close']) {
+function relocateDriver(driver) {
+  if(relocatedDrivers.has(driver))return driver;
+  relocatedDrivers.add(driver);
+  const NativeDatabase=driver.Database;
+  for(const method of ['all','get','run','exec','close']) {
   const original=NativeDatabase.prototype[method];
   NativeDatabase.prototype[method]=function(...args) {
     const index=args.length-1,callback=args[index];
@@ -153,18 +179,25 @@ for(const method of ['all','get','run','exec','close']) {
     };
     try{return original.apply(this,args);}catch(error){state.sqlitePending--;throw error;}
   };
+  }
+  driver.Database=class RelocatedDatabase extends NativeDatabase {
+    constructor(filename,...args){super(remap(filename),...args);}
+  };
+  return driver;
 }
-class RelocatedDatabase extends NativeDatabase {
-  constructor(filename, ...args) { super(remap(filename), ...args); }
-}
-nativeSqlite.Database = RelocatedDatabase;
 const originalLoad = Module._load;
 Module._load = function(request,parent,isMain) {
+  // settings.js loads the start-up check by its absolute image path.
+  if(typeof request==='string'&&request.startsWith('/srv/node-red/'))request=remap(request);
   if(parent?.filename?.startsWith(RUN)) {
     if(request==='child_process'||request==='node:child_process')return fakeCp;
     if(request==='fs'||request==='node:fs')return fakeFs;
   }
-  return originalLoad.call(this,request,parent,isMain);
+  const value=originalLoad.call(this,request,parent,isMain);
+  // Observe and relocate each actual driver independently. Never replace one
+  // physical addon with another: the overlap regression must expose that layout.
+  if(request==='sqlite3'&&typeof value?.Database?.prototype?.all==='function')return relocateDriver(value);
+  return value;
 };
 
 async function start() {
@@ -193,7 +226,7 @@ async function start() {
   const RED=require('node-red'), express=require('express');
   const app=express(), server=http.createServer(app);
   // Use the image settings, including exactly os/fs/cp in global context.
-  const settings=require(path.join(ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js'));
+  const settings=require(path.join(SOURCE_ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js'));
   RED.init(server,{...settings,functionGlobalContext:{...settings.functionGlobalContext,fs:fakeFs,cp:fakeCp},userDir:RUN,flowFile:path.join(RUN,'flows.json'),httpStatic:undefined,
     externalModules:{modules:{allowInstall:false}},credentialSecret:false,
     logging:{console:{level:'off',metrics:false,audit:false}}});
@@ -233,7 +266,7 @@ async function start() {
       }
     },
     async writerLock() {
-      const db=await new Promise((resolve,reject)=>{const d=new nativeSqlite.Database(DBFILE,e=>e?reject(e):resolve(d));});
+      const db=await new Promise((resolve,reject)=>{const d=new (nativeSqlite().Database)(DBFILE,e=>e?reject(e):resolve(d));});
       await new Promise((resolve,reject)=>db.run('BEGIN IMMEDIATE',e=>e?reject(e):resolve()));
       return async()=>{
         await new Promise((resolve,reject)=>db.run('ROLLBACK',e=>e?reject(e):resolve()));
@@ -244,7 +277,7 @@ async function start() {
       // One SQLite library owns every connection in this process. Mixing the
       // Node builtin and sqlite3 gives them separate in-process lock registries.
       let db;
-      db=await new Promise((resolve,reject)=>{const d=new nativeSqlite.Database(DBFILE,e=>e?reject(e):resolve(d));});
+      db=await new Promise((resolve,reject)=>{const d=new (nativeSqlite().Database)(DBFILE,e=>e?reject(e):resolve(d));});
       db.configure('busyTimeout',4000);
       try {
         return await new Promise((resolve,reject)=>{

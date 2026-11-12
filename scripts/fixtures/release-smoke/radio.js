@@ -15,7 +15,9 @@ exports.start = async function (state) {
       (state.cs.queue[eui] ||= []).push(item);
       state.cs.calls.push({ fn:'enqueue', eui, port:item.getFPort(), hex:Buffer.from(item.getData_asU8()).toString('hex'), id:item.getId(),expiresAt:item.getExpiresAt()?.toDate().toISOString()||null });
       const response = new pb.EnqueueDeviceQueueItemResponse(); response.setId(item.getId());
-      callback(null,response);
+      // A case may model a slow network server; the default answers at once.
+      if (state.cs.latencyMs) setTimeout(() => callback(null, response), state.cs.latencyMs);
+      else callback(null,response);
     },
     getQueue(call,callback) {
       const response=new pb.GetDeviceQueueItemsResponse();response.setResultList(state.cs.queue[call.request.getDevEui().toUpperCase()]||[]);callback(null,response);

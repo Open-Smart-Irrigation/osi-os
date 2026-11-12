@@ -42,7 +42,7 @@ Boot-time one-shot services in `files/etc/init.d/`:
 
 | Init script | START | Behavior |
 |---|---|---|
-| `osi-db-integrity` | 90 | Runs `/usr/share/node-red/osi-db-integrity/index.js` before Node-RED; logs SQLite integrity verdicts to syslog; never blocks boot. |
+| `osi-db-integrity` | 90 | Linked but inert: `USE_PROCD=0` is non-empty, so `rc.common` replaces `start()` with procd's `start`, which calls the absent `start_service`; the tool never runs. Kept inert on purpose (run by hand it can move or restore the database). The read-only farm database check runs from `settings.js` instead: [farm-database-startup-check.md](../../operations/farm-database-startup-check.md). |
 | `osi-bootstrap` | 99 | First-boot ChirpStack provisioning; later boots validate the stamp and exit (next section). |
 | `osi-rootfs-resize` | — | Second half of the rootfs grow: retries `resize2fs` after the `parted resizepart` + reboot performed by the uci-defaults hook. |
 

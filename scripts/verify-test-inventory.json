@@ -34,6 +34,10 @@
       "path": "web/react-gui/tests/browser/device-registration.spec.ts",
       "runner": "web/react-gui/playwright.device-registration.config.ts",
       "note": "The GUI browser job runs this Playwright config through test:browser:device-registration."
+    },
+    {
+      "path": "scripts/test-release-sqlite-overlap.js",
+      "runner": "scripts/test-release-smoke.js"
     }
   ],
   "excluded": [

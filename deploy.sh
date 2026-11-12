@@ -2416,6 +2416,14 @@ fetch_required "osi-db-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js" \
     "$MODULE_STAGE/osi-db-helper/index.js"
 
+fetch_required "osi-db-helper startup.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/startup.js" \
+    "$MODULE_STAGE/osi-db-helper/startup.js"
+
+fetch_required "osi-db-helper sqlite-driver.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/sqlite-driver.js" \
+    "$MODULE_STAGE/osi-db-helper/sqlite-driver.js"
+
 fetch_required "osi-health-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-health-helper/package.json" \
     "$MODULE_STAGE/osi-health-helper/package.json"
