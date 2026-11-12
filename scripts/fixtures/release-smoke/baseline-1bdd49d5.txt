@@ -1,0 +1,217 @@
+Payload baseline: 1bdd49d5fd7d61468f47156e21f095e6dcab7588
+Command: node scripts/test-release-smoke.js --strict
+Expected exit: 1 (listed release blockers only)
+
+PROFILE PARITY: 2890 flow/helper files byte-identical
+EVIDENCE: /tmp/osi-release-smoke-3FvsMZ
+PASS runtime-started
+PASS startup-function-errors
+PASS login-and-lists
+PASS command-refused:close
+PASS command-refused:close-duration
+PASS command-refused:open-duration
+PASS command-refused:interval
+PASS command-refused:timed-close
+PASS command-refused:magnet
+PASS command-refused:partial-close
+PASS command-refused:flushing
+PASS command-invalid:{"action":"OPEN"}
+PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":0}
+PASS command-invalid:{"action":"OPEN_FOR_DURATION","duration_minutes":256}
+PASS lifecycle:delete-zone
+PASS weekly-save
+PASS weekly-change
+PASS weekly-delete
+PASS no-token:POST /auth/register
+PASS no-token:POST /auth/login
+PASS no-token:OPTIONS /auth/*
+PASS no-token:GET /download/database
+PASS no-token:GET /api/devices
+PASS no-token:GET /api/catalog
+PASS no-token:POST /api/devices
+PASS no-token:OPTIONS /api/*
+PASS no-token:POST /api/irrigation-zones
+PASS no-token:GET /api/irrigation-zones
+PASS no-token:DELETE /api/irrigation-zones/:id
+PASS no-token:PUT /api/irrigation-zones/:id/schedule
+PASS no-token:POST /api/irrigation-zones/schedules/disable-all
+PASS no-token:POST /api/valve/:deveui
+PASS no-token:GET /download-sensordata
+PASS no-token:GET /api/devices/:deveui/dendro-history
+PASS no-token:PUT /api/devices/:deveui/dendro
+PASS no-token:PUT /api/devices/:deveui/temp
+PASS no-token:GET /api/devices/:deveui/sensor-history
+PASS no-token:GET /api/devices/:deveui/rain-history
+PASS no-token:GET /api/system/stats
+PASS no-token:POST /api/system/reboot
+PASS no-token:POST /api/system/fan
+PASS no-token:OPTIONS /api/system/*
+PASS no-token:GET /api/account-link/status
+PASS no-token:DELETE /api/account-link
+PASS no-token:OPTIONS /api/account-link
+PASS no-token:GET /api/dendrometer/:deveui/daily
+PASS no-token:GET /api/irrigation-zones/:zone_id/recommendations
+PASS no-token:GET /api/dendrometer/:deveui/readings
+PASS no-token:PUT /api/devices/:deveui/reference-tree
+PASS no-token:PUT /api/irrigation-zones/:zone_id/timezone
+PASS no-token:OPTIONS /api/dendrometer/*
+PASS no-token:OPTIONS /api/irrigation-zones/:zone_id/recommendations
+PASS no-token:OPTIONS /api/devices/:deveui/reference-tree
+PASS no-token:PUT /api/irrigation-zones/:zone_id/location
+PASS no-token:OPTIONS /api/irrigation-zones/:zone_id/location
+PASS no-token:PUT /api/irrigation-zones/:zone_id/config
+PASS no-token:OPTIONS /api/irrigation-zones/:zone_id/config
+PASS no-token:GET /api/sync/state
+PASS no-token:PUT /api/devices/:deveui/lsn50/mode
+PASS no-token:PUT /api/devices/:deveui/lsn50/interval
+PASS no-token:PUT /api/devices/:deveui/kiwi/interval
+PASS no-token:POST /api/devices/:deveui/kiwi/temperature-humidity/enable
+PASS no-token:PUT /api/devices/:deveui/strega/interval
+PASS no-token:PUT /api/devices/:deveui/lsn50/interrupt-mode
+PASS no-token:PUT /api/devices/:deveui/lsn50/5v-warmup
+PASS no-token:PUT /api/devices/:deveui/strega/model
+PASS no-token:PUT /api/devices/:deveui/strega/timed-action
+PASS no-token:PUT /api/devices/:deveui/strega/magnet
+PASS no-token:PUT /api/devices/:deveui/strega/partial-opening
+PASS no-token:PUT /api/devices/:deveui/strega/flushing
+PASS no-token:GET /api/gateway/location
+PASS no-token:GET /api/gateways/:gatewayEui/location
+PASS no-token:GET /api/irrigation-zones/:zone_id/environment-summary
+PASS no-token:OPTIONS /api/irrigation-zones/:zone_id/environment-summary
+PASS no-token:PUT /api/devices/:deveui/rain-gauge
+PASS no-token:PUT /api/devices/:deveui/flow-meter
+PASS no-token:GET /api/devices/:deveui/zone-assignments
+PASS no-token:PUT /api/devices/:deveui/zone-assignments
+PASS no-token:PUT /api/devices/:deveui/soil-moisture-depths
+PASS no-token:PUT /api/devices/:deveui/chameleon
+PASS no-token:PUT /api/devices/:deveui/dendro-config
+PASS no-token:POST /api/devices/:deveui/dendro-baseline/reset
+PASS no-token:POST /api/v1/valves/:deveui/cancel
+PASS no-token:POST /api/valve/:deveui/cancel
+PASS no-token:GET /api/v1/devices/:deveui/today-liters
+PASS no-token:POST /api/devices/:deveui/chameleon/refresh-calibration
+PASS no-token:PUT /api/devices/:deveui/chameleon/depth
+PASS no-token:GET /api/devices/:deveui/watermark/calibration
+PASS no-token:PUT /api/devices/:deveui/watermark/calibration
+PASS no-token:DELETE /api/devices/:deveui/watermark/calibration
+PASS no-token:GET /api/irrigation/recent-actuations
+PASS no-token:POST /api/irrigation-zones/:id/calibration
+PASS no-token:GET /api/irrigation-zones/:zone_id/rain-source
+PASS no-token:PUT /api/irrigation-zones/:zone_id/rain-source
+PASS no-token:GET /api/history/zones/:zoneId/cards
+PASS no-token:GET /api/history/zones/:zoneId/cards/:cardId/data
+PASS no-token:GET /api/history/zones/:zoneId/cards/:cardId/advanced
+PASS no-token:GET /api/history/gateways/:gatewayEui/cards
+PASS no-token:GET /api/history/gateways/:gatewayEui/cards/:cardId/data
+PASS no-token:GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced
+PASS no-token:GET /api/history/workspaces
+PASS no-token:POST /api/history/workspaces
+PASS no-token:PUT /api/history/workspaces/:id
+PASS no-token:DELETE /api/history/workspaces/:id
+PASS no-token:PUT /api/history/zones/:zoneId/cards/:cardId/preferences
+PASS no-token:POST /api/history/zones/:zoneId/cards/:cardId/opened
+PASS no-token:PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences
+PASS no-token:POST /api/history/gateways/:gatewayEui/cards/:cardId/opened
+PASS no-token:GET /api/system/features
+PASS no-token:POST /api/history/rollups/run
+PASS no-token:GET /api/history/zones/:zoneId/export.csv
+PASS no-token:GET /api/history/export.csv
+PASS no-token:DELETE /api/analysis/views/:id
+PASS no-token:GET /api/analysis/channels
+PASS no-token:POST /api/analysis/series
+PASS no-token:GET /api/analysis/views
+PASS no-token:POST /api/analysis/views
+PASS no-token:GET /api/improvement-requests
+PASS no-token:GET /api/improvement-requests/diagnostics-preview
+PASS no-token:POST /api/improvement-requests
+PASS no-token:GET /api/journal/catalog
+PASS no-token:GET /api/journal/entries
+PASS no-token:POST /api/journal/entries
+PASS no-token:PUT /api/journal/entries/:uuid
+PASS no-token:POST /api/journal/entries/:uuid/void
+PASS no-token:POST /api/journal/custom-vocab
+PASS no-token:PUT /api/journal/custom-vocab/:uuid
+PASS no-token:GET /api/journal/plots
+PASS no-token:POST /api/journal/plots
+PASS no-token:PUT /api/journal/plots/:uuid
+PASS no-token:GET /api/journal/plot-groups
+PASS no-token:POST /api/journal/plot-groups
+PASS no-token:PUT /api/journal/plot-groups/:uuid
+PASS no-token:GET /api/journal/export.csv
+PASS no-token:GET /api/journal/export.package
+PASS no-token:GET /api/journal/export.json
+PASS no-token:GET /api/journal/export.adapt.json
+PASS no-token:POST /api/devices/:deveui/sdi12/recipe/rollback
+PASS no-token:POST /api/devices/:deveui/sdi12/recipe/apply
+PASS no-token:PUT /api/devices/:deveui/sdi12/config
+PASS no-token:GET /api/sdi12/probe-profiles
+PASS no-token:POST /api/devices/:deveui/sdi12/identify
+PASS no-token:GET /api/valves
+PASS no-token:GET /api/valves/:deveui/schedules
+PASS no-token:POST /api/valves/:deveui/schedules
+PASS no-token:PUT /api/valves/:deveui/schedules/:uuid
+PASS no-token:DELETE /api/valves/:deveui/schedules/:uuid
+PASS no-token:POST /api/valves/:deveui/plan/resend
+PASS no-token:POST /api/valves/:deveui/scheduler-status
+PASS no-token:PUT /api/valves/:deveui/settings
+PASS no-token:GET /api/system/settings
+PASS no-token:PUT /api/system/settings
+PASS no-token:GET /api/me
+PASS no-token:GET /api/users
+PASS no-token:POST /api/users
+PASS no-token:POST /api/users/:uuid/password-reset
+PASS no-token:PUT /api/users/:uuid/role
+PASS no-token:PUT /api/users/:uuid/disabled
+PASS no-token:POST /api/grants/zone
+PASS no-token:DELETE /api/grants/zone/:assignmentUuid
+PASS no-token:POST /api/grants/plot
+PASS no-token:DELETE /api/grants/plot/:assignmentUuid
+PASS no-token:GET /api/network/observations
+PASS no-token:GET /api/devices/:deveui/installation-location
+PASS no-token:PUT /api/devices/:deveui/installation-location
+PASS no-token:GET /api/devices/:deveui/installation-location/revisions
+PASS no-token:GET /api/devices/:deveui/radio-configuration
+PASS no-token:PUT /api/devices/:deveui/radio-configuration
+PASS no-token:GET /api/devices/:deveui/radio-configuration/revisions
+PASS no-token:PUT /api/gateway/location
+PASS no-token:PUT /api/irrigation-zones/:id/name
+PASS no-token:PUT /api/devices/:deveui/name
+PASS no-token:POST /api/sync/outbox/recover
+PASS no-token:GET /api/irrigation-zones/:id/irrigation-policy
+PASS no-token:PUT /api/irrigation-zones/:id/irrigation-policy
+PASS no-token:POST /api/irrigation-zones/:id/irrigation-policy/pause
+PASS no-token:POST /api/irrigation-zones/:id/irrigation-policy/retry-valve
+PASS no-token:GET /api/irrigation-zones/:id/irrigation-policy/decisions
+PASS network-contained
+PASS flows-unchanged
+PASS helpers-unchanged
+KNOWN TO FAIL F-14 startup-node-errors [{"code":"node-errors","actual":[{"id":"dendro-readings-sqlite","msg":"Sqlite database not configured"}]}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:close [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:close-duration [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:open-duration [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:interval [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:timed-close [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:magnet [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:partial-close [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 command-accepted:flushing [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-5 / known defect 2 open-report-close-open [{"code":"initial-http","symptom":"http-timeout"},{"code":"second-http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-1 / F-5 open-no-report-open-later [{"code":"initial-http","symptom":"http-timeout"},{"code":"later-http","symptom":"http-timeout"},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]},{"code":"stored","actual":["STALE_NO_OBSERVATION"]}]
+KNOWN TO FAIL F-2 / F-5 no-clock-open-report-close-open [{"code":"initial-http","symptom":"http-timeout"},{"code":"closed-state","actual":"OPEN"},{"code":"second-http","symptom":"http-timeout"},{"code":"stored","actual":["PENDING_OBSERVATION","OBSERVED_RUNNING"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+KNOWN TO FAIL F-1 / F-2 / F-5 no-clock-open-no-report-open-later [{"code":"initial-http","symptom":"http-timeout"},{"code":"later-http","symptom":"http-timeout"},{"code":"stored","actual":["STALE_NO_OBSERVATION"]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4101","hasExpiry":true}]}]
+KNOWN TO FAIL F-5 / known defect 2 no-clock-safety-close [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-4 / F-5 open-after:close-duration [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+KNOWN TO FAIL F-4 / F-5 open-after:timed-close [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":2,"hex":"4002","hasExpiry":false}]}]
+KNOWN TO FAIL F-4 / F-5 open-after:flushing [{"code":"initial-http","symptom":"http-timeout"},{"code":"open-http","symptom":"http-timeout"},{"code":"stored","frames":[]},{"code":"radio","frames":[{"fn":"enqueue","port":28,"hex":"3032","hasExpiry":false}]}]
+KNOWN TO FAIL known defect 1 lifecycle:assign [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":null,"user":1,"deleted":false}}]
+KNOWN TO FAIL known defect 1 lifecycle:remove [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":1,"user":1,"deleted":false}}]
+KNOWN TO FAIL known defect 1 lifecycle:delete-device [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true},{"code":"stored","actual":{"zone":1,"user":1,"deleted":false}}]
+KNOWN TO FAIL known defect 1 scheduler-irrigates [{"code":"save-http","status":500,"error":"device-api failed","missingCrypto":true}]
+KNOWN TO FAIL known defect 1 no-token:DELETE /api/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
+KNOWN TO FAIL known defect 1 no-token:PUT /api/irrigation-zones/:id/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
+KNOWN TO FAIL known defect 1 no-token:DELETE /api/irrigation-zones/:id/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
+KNOWN TO FAIL F-13 no-token:POST /api/account-link [{"code":"http","symptom":"http-timeout"}]
+KNOWN TO FAIL F-13 no-token:POST /api/sync/force [{"code":"http","symptom":"http-timeout"}]
+RESULT passed=181 failed=0 known-to-fail=26; 42.2s; peak RSS 259 MiB
+RELEASE REFUSED: 26 known failing cases remain
+
+Measured whole command: 50.35 seconds, maximum RSS 268392 KiB, exit 1.

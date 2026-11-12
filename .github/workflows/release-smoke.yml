@@ -1,0 +1,48 @@
+name: Release Runtime Smoke
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-runtime-smoke:
+    name: release-runtime-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/fixtures/release-smoke/package-lock.json
+      - name: Install SQLite CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Install pinned runtime
+        run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: Failure-list policy
+        run: node --test scripts/test-release-smoke-policy.js
+      - name: Start shipped software and exercise HTTP and radio boundaries
+        run: node scripts/test-release-smoke.js
+      - name: Refuse a release with known failures
+        run: node scripts/release-smoke-gate.js --ci
+      - name: Preserve runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-runtime-smoke
+          path: |
+            /tmp/osi-release-smoke-*/results.json
+            /tmp/osi-release-smoke-*/runtime.log
+            /tmp/osi-release-smoke-*/seed.log
+            /tmp/osi-release-smoke-*/summary.json
+          retention-days: 7

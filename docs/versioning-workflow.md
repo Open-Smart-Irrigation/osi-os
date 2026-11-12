@@ -30,17 +30,33 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
 - [ ] All feature branches merged to `main` in both `osi-os` and `osi-server`.
 - [ ] `osi-server` VPS is healthy (`docker compose ps` — all services Up/healthy).
 - [ ] No uncommitted changes: `git status --short` is clean.
-- [ ] Every CI workflow is green on the `main` commit you are releasing. There
-      are ten: Codec Verifiers, Doc Hygiene, Field Journal Tests, History
+- [ ] Every CI workflow is green on the `main` commit you are releasing. These include
+      Codec Verifiers, Doc Hygiene, Field Journal Tests, History
       Router Tests, Journal Catalog Vendor Parity, Edge Migrations, GUI
       Typecheck & Unit Tests, UI Core Vendor Parity, Sync Flow Verifier,
       Test Inventory (`.github/workflows/*.yml`). Check with:
       ```bash
       gh run list --commit "$(git rev-parse origin/main)" --json workflowName,conclusion
       ```
-      Ten entries, each `success`. A run still in progress is not green.
+      Every applicable workflow must report `success`. A run still in
+      progress is not green.
       Test Inventory (`node scripts/verify-test-inventory.js`) is the gate
       that fails when a test file exists that no workflow can fail on.
+- [ ] Start and try the release software before tagging or publishing:
+      ```bash
+      npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      node scripts/test-release-smoke.js --release
+      ```
+      This boots the image's Node-RED version with unchanged flows/helpers,
+      a freshly migrated seed, and local radio/cloud stand-ins. It exercises
+      login, valve commands and reports, device/zone changes and schedules.
+      It refuses a release while `known-failures.json` is nonempty; an entry
+      that starts passing also fails until removed. See
+      [the smoke suite](../scripts/fixtures/release-smoke/README.md) for limits.
+      The `release-runtime-smoke` check runs on PRs; listed failures alone
+      do not fail ordinary PRs. Manual workflow runs and release tags also
+      enforce the empty-list gate. The main branch ruleset must name the
+      new check before it becomes required; this change does not edit it.
 - [ ] Decide whether the sync contract changed since the previous release:
       ```bash
       git diff --stat v<OLD>..origin/main -- docs/contracts/
@@ -495,7 +511,8 @@ On each Pi after the deploy:
 ## Checklist summary
 
 ```
-[ ] Pre-flight — mains merged, CI green (all workflows), contract change decided,
+[ ] Pre-flight — mains merged, CI green (all workflows), runtime smoke --release green,
+                 contract change decided,
                  matching osi-server revision found with verify-sync-op-parity
                  Luganda release gate checked (docs/i18n/pending-luganda-translations.md)
 [ ] Step 1  — Bump every version location; run the verifiers
