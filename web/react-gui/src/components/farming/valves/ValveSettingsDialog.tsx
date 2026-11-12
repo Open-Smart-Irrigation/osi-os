@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { StregaGeneration, ValveSummary } from '../../../types/farming';
 import { devicesAPI, valvesAPI } from '../../../services/api';
+import { isNoAnswerTimeout } from '../../../services/valveCommandHold';
 
 export interface ValveSettingsDialogProps {
   valve: ValveSummary;
@@ -111,8 +112,9 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
       setCloseDone(true);
       setConfirmClose(false);
       onChanged();
-    } catch {
-      setError(t('settingsDialog.closeFailed'));
+    } catch (err) {
+      // No answer is not "not sent". Close is never held: closing twice does no harm.
+      setError(t(isNoAnswerTimeout(err) ? 'commandNoAnswer.close' : 'settingsDialog.closeFailed'));
     } finally {
       setBusy(false);
     }

@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Último envio: {{when}}",
   "actionFailed": "Não foi possível concluir a ação.",
+  "commandNoAnswer": { "open": "Ainda sem resposta do gateway. O comando pode ter chegado à válvula: abrir fica bloqueado até o estado da válvula ser atualizado, no máximo durante um minuto.", "close": "Ainda sem resposta do gateway. O comando de fecho pode ter chegado à válvula. Pode fechar novamente: fechar duas vezes não causa problemas.", "other": "Ainda sem resposta do gateway. O comando pode ter chegado à válvula." },
   "resumeRefusedClearPending": "Ainda não é possível retomar: a válvula ainda não confirmou a limpeza do seu programa para a rega condicional.",
   "lastContact": "Último contacto há {{when}}",
   "loadFailed": "Não foi possível carregar as válvulas.",

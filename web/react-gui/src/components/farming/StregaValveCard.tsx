@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import type { DeviceRemoveContext } from './useDeviceRemoval';
 import type { Device, StregaModel, ValveSummary } from '../../types/farming';
 import { devicesAPI, stregaAPI, valveAPI, type IrrigationActuation } from '../../services/api';
+import { holdValveOpen, isNoAnswerTimeout, useValveOpenHeld } from '../../services/valveCommandHold';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { useTranslation } from 'react-i18next';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
@@ -283,7 +284,19 @@ const ConfigPanel: React.FC<{
   onClose: () => void;
 }> = ({ device, onUpdate, onClose }) => {
   const { t } = useTranslation('devices');
+  const { t: tv } = useTranslation('valves');
   const ref = useRef<HTMLDivElement>(null);
+  // These commands answer only after the radio transport decides. A timeout is no answer, not
+  // a failure: an opening command then holds every opening control of this valve until the
+  // next valve reading or one minute (services/valveCommandHold.ts).
+  const openHeld = useValveOpenHeld(device.deveui);
+  const reportedNoAnswer = (err: unknown, opens: boolean): boolean => {
+    if (!isNoAnswerTimeout(err)) return false;
+    if (opens) holdValveOpen(device.deveui);
+    setError(tv(opens ? 'commandNoAnswer.open' : 'commandNoAnswer.other'));
+    onUpdate();
+    return true;
+  };
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [closedIntervalInput, setClosedIntervalInput] = useState('');
   const [openedIntervalInput, setOpenedIntervalInput] = useState('2');
@@ -340,7 +353,7 @@ const ConfigPanel: React.FC<{
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedToSetInterval')));
+      if (!reportedNoAnswer(err, false)) setError(getApiMessage(err, t('stregaValve.failedToSetInterval')));
     } finally {
       setBusyAction(null);
     }
@@ -387,7 +400,7 @@ const ConfigPanel: React.FC<{
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedTimedAction')));
+      if (!reportedNoAnswer(err, timedAction === 'OPEN')) setError(getApiMessage(err, t('stregaValve.failedTimedAction')));
     } finally {
       setBusyAction(null);
     }
@@ -404,7 +417,7 @@ const ConfigPanel: React.FC<{
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedMagnet')));
+      if (!reportedNoAnswer(err, false)) setError(getApiMessage(err, t('stregaValve.failedMagnet')));
     } finally {
       setBusyAction(null);
     }
@@ -432,7 +445,7 @@ const ConfigPanel: React.FC<{
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedPartial')));
+      if (!reportedNoAnswer(err, partialAction === 'OPEN')) setError(getApiMessage(err, t('stregaValve.failedPartial')));
     } finally {
       setBusyAction(null);
     }
@@ -460,7 +473,7 @@ const ConfigPanel: React.FC<{
       }));
       onUpdate();
     } catch (err: any) {
-      setError(getApiMessage(err, t('stregaValve.failedFlush')));
+      if (!reportedNoAnswer(err, true)) setError(getApiMessage(err, t('stregaValve.failedFlush')));
     } finally {
       setBusyAction(null);
     }
@@ -518,7 +531,7 @@ const ConfigPanel: React.FC<{
           <button
             type="button"
             onClick={applyTimedAction}
-            disabled={busyAction !== null}
+            disabled={busyAction !== null || (timedAction === 'OPEN' && openHeld)}
             className="mt-3 w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyAction === 'timed'
@@ -672,7 +685,7 @@ const ConfigPanel: React.FC<{
             <button
               type="button"
               onClick={applyPartialOpening}
-              disabled={busyAction !== null}
+              disabled={busyAction !== null || (partialAction === 'OPEN' && openHeld)}
               className="w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'partial'
@@ -705,7 +718,7 @@ const ConfigPanel: React.FC<{
             <button
               type="button"
               onClick={applyFlushing}
-              disabled={busyAction !== null}
+              disabled={busyAction !== null || openHeld}
               className="w-full rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busyAction === 'flush'
@@ -749,6 +762,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   // confirm (ValveOpenDialog); this card went straight to controlValve, so the same valve
   // was laxer here than there. osi-os#171.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // An open that got no answer may have reached the valve (services/valveCommandHold.ts).
+  const openHeld = useValveOpenHeld(device.deveui);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
   // R19 finding 1: a removed valve whose weekly plan is still being cleared (or whose clear
@@ -825,7 +840,13 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       });
       onUpdate();
     } catch (err: any) {
-      setError(err.response?.data?.message || t('stregaValve.failedToOpen'));
+      if (isNoAnswerTimeout(err)) {
+        holdValveOpen(device.deveui);
+        setError(tv('commandNoAnswer.open'));
+        onUpdate();
+      } else {
+        setError(err.response?.data?.message || t('stregaValve.failedToOpen'));
+      }
     } finally {
       setLoading(null);
     }
@@ -1041,7 +1062,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           />
           <button
             onClick={() => { if (!confirmOpen) { setConfirmOpen(true); return; } setConfirmOpen(false); void handleOpen(); }}
-            disabled={loading !== null}
+            disabled={loading !== null || openHeld}
             className={`mt-1 w-full ${confirmOpen ? 'bg-[var(--warn-border)] text-[var(--on-warn)]' : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)]'} disabled:bg-[var(--border)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2`}
           >
             {loading === 'OPEN' ? (

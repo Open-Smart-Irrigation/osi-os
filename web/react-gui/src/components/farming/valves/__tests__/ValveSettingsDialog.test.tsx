@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ValveSettingsDialog } from '../ValveSettingsDialog';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
 import type { ValveSummary } from '../../../../types/farming';
+import { resetValveCommandHolds, valveOpenHeldUntil } from '../../../../services/valveCommandHold';
 
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
@@ -27,6 +28,7 @@ const { translateForTest } = vi.hoisted(() => {
     'settingsDialog.closeConfirm': 'Yes, close it',
     'settingsDialog.closeSent': 'Close command sent.',
     'settingsDialog.closeFailed': 'Could not send the close command.',
+    'commandNoAnswer.close': 'No answer from the gateway yet. The close command may have reached the valve. You can close again: closing twice does no harm.',
     cancel: 'Cancel',
     close: 'Close',
   };
@@ -167,6 +169,27 @@ describe('ValveSettingsDialog', () => {
 
     expect(await screen.findByText('Could not send the close command.')).toBeInTheDocument();
     expect(screen.queryByText('Close command sent.')).not.toBeInTheDocument();
+  });
+
+  it('after a close timeout says no answer arrived yet, never blocks close and holds nothing', async () => {
+    resetValveCommandHolds();
+    const timeout = Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' });
+    vi.mocked(devicesAPI.controlValve).mockRejectedValueOnce(timeout).mockRejectedValueOnce(timeout);
+    render(<ValveSettingsDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close valve now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, close it' }));
+
+    expect(await screen.findByText(/No answer from the gateway yet\. The close command may have reached the valve/)).toBeInTheDocument();
+    expect(screen.queryByText('Could not send the close command.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Close command sent.')).not.toBeInTheDocument();
+    expect(valveOpenHeldUntil('0016C001F1000001')).toBeNull();
+    // Close stays available at once, with no further question: a second close is sent.
+    const again = screen.getByRole('button', { name: 'Yes, close it' });
+    expect(again).toBeEnabled();
+    fireEvent.click(again);
+    await waitFor(() => expect(devicesAPI.controlValve).toHaveBeenCalledTimes(2));
+    expect(devicesAPI.controlValve).toHaveBeenLastCalledWith('0016C001F1000001', { action: 'CLOSE' });
   });
 
   const ZONE_LINE = 'Using the zone calibration: 12 L/min. Enter a rate to override it for this valve.';

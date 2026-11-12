@@ -14,6 +14,7 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 import { ValveControlHelp } from '../shared/ValveControlHelp';
 import { ValveCancelOutcome } from './ValveCancelOutcome';
 import { valveCancelResultFromError, type ValveCancelResult } from '../../../services/valveCancel';
+import { fetchValveReading, holdValveOpen, isNoAnswerTimeout } from '../../../services/valveCommandHold';
 
 // The heading's information button. Hover and keyboard focus show the tip; a tap
 // pins it (focus fires before click on touch, so the first tap opens and a second
@@ -39,7 +40,7 @@ export interface ValveControlPanelProps {
 
 type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
-const valvesFetcher = () => valvesAPI.list();
+const valvesFetcher = fetchValveReading;
 
 // A refused Resume on a conditional valve whose clear is not confirmed gets its own explanation;
 // every other failure keeps the generic actionFailed.
@@ -109,7 +110,19 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
 
   const handleOpenSubmit = async (minutes: number) => {
     if (!selectedValve) return;
-    await devicesAPI.controlValve(selectedValve.deviceEui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 });
+    try {
+      await devicesAPI.controlValve(selectedValve.deviceEui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 });
+    } catch (err) {
+      if (!isNoAnswerTimeout(err)) throw err;
+      // No answer is not "not sent": the open may have reached the valve. Say so, hold Open
+      // on this valve until the next reading (requested now) or one minute, and close the
+      // dialog so a second press cannot send a second open unseen.
+      holdValveOpen(selectedValve.deviceEui);
+      setCancelNotice(null);
+      setActionError(t('commandNoAnswer.open'));
+      mutate().catch((refreshErr) => console.warn('Failed to refresh the valve list after an unanswered open', refreshErr));
+      return;
+    }
     // The open command already succeeded at this point — a failure saving the "remember this
     // duration" preference is not worth surfacing as an open failure (which would keep the
     // dialog open and imply the valve didn't actually open).

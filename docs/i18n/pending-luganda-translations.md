@@ -411,3 +411,14 @@ Tracked in code at `web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
+
+## `valves.json` — valve command with no answer
+
+| Keys | Reason |
+|---|---|
+| `commandNoAnswer.open`, `commandNoAnswer.close`, `commandNoAnswer.other` (3 keys in `valves.json`) | Added when a valve command that times out stopped reporting "could not send": the gateway may have accepted the command, so the panel says no answer has arrived yet. After an opening command it holds the open control until the next valve reading, or one minute. The texts tell an operator whether water may be flowing, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. de-CH/es/fr/it/pt are translated (native review pending). |
+
+Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from this table in the same change.

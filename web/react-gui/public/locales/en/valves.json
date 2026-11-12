@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Last sent {{when}}",
   "actionFailed": "The action could not be completed.",
+  "commandNoAnswer": { "open": "No answer from the gateway yet. The command may have reached the valve, so opening stays unavailable until the valve status updates, for one minute at most.", "close": "No answer from the gateway yet. The close command may have reached the valve. You can close again: closing twice does no harm.", "other": "No answer from the gateway yet. The command may have reached the valve." },
   "resumeRefusedClearPending": "Resume is not possible yet: the valve has not confirmed its conditional clear.",
   "lastContact": "Last contact {{when}} ago",
   "loadFailed": "Could not load valves.",

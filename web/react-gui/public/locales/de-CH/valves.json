@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Zuletzt gesendet {{when}}",
   "actionFailed": "Die Aktion konnte nicht abgeschlossen werden.",
+  "commandNoAnswer": { "open": "Noch keine Antwort vom Gateway. Der Befehl ist vielleicht beim Ventil angekommen. Öffnen ist deshalb gesperrt, bis der Ventilstatus neu geladen ist, höchstens eine Minute lang.", "close": "Noch keine Antwort vom Gateway. Der Schliessbefehl ist vielleicht beim Ventil angekommen. Sie können erneut schliessen: Zweimal schliessen schadet nicht.", "other": "Noch keine Antwort vom Gateway. Der Befehl ist vielleicht beim Ventil angekommen." },
   "resumeRefusedClearPending": "Fortsetzen ist noch nicht möglich: Das Ventil hat das Löschen seines Programms für die bedingte Bewässerung noch nicht bestätigt.",
   "lastContact": "Letzter Kontakt vor {{when}}",
   "loadFailed": "Ventile konnten nicht geladen werden.",

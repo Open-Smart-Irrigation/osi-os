@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Dernier envoi {{when}}",
   "actionFailed": "L'action n'a pas pu être confirmée. Vérifiez la passerelle, puis réessayez.",
+  "commandNoAnswer": { "open": "Pas encore de réponse de la passerelle. La commande est peut-être arrivée à la vanne : l’ouverture reste bloquée jusqu’à la mise à jour de l’état de la vanne, une minute au plus.", "close": "Pas encore de réponse de la passerelle. La commande de fermeture est peut-être arrivée à la vanne. Vous pouvez fermer à nouveau : fermer deux fois ne pose aucun problème.", "other": "Pas encore de réponse de la passerelle. La commande est peut-être arrivée à la vanne." },
   "resumeRefusedClearPending": "La reprise n'est pas encore possible : la vanne n'a pas encore confirmé l'effacement de son programme pour l'irrigation conditionnelle.",
   "lastContact": "Dernier contact il y a {{when}}",
   "loadFailed": "Impossible de charger les vannes.",

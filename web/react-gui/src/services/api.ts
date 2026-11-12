@@ -173,6 +173,9 @@ function toRenameError(error: unknown, fallback: string): EntityRenameError {
   return mapped;
 }
 
+/** Timeout for valve commands (POST /api/valve/:deveui, the STREGA command PUTs); other requests keep the default. */
+export const VALVE_COMMAND_TIMEOUT_MS = 30_000;
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: '/', // Vite proxy will forward to localhost:1880
@@ -613,8 +616,11 @@ export const devicesAPI = {
     return response.data;
   },
 
+  // The gateway answers a valve command only after the radio transport has decided, which can
+  // take longer than other requests; a timeout here does not mean the command was not sent
+  // (services/valveCommandHold.ts).
   controlValve: async (deveui: string, action: ValveActionRequest): Promise<void> => {
-    await api.post(`/api/valve/${deveui}`, action);
+    await api.post(`/api/valve/${deveui}`, action, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
 
   // Resolves with the cancel outcome and its flush collateral (null when the reply has none). A
@@ -1415,7 +1421,7 @@ export const stregaAPI = {
     openedMinutes?: number;
     tamperDisabled?: boolean;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/interval`, payload);
+    await api.put(`/api/devices/${deveui}/strega/interval`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setModel: async (deveui: string, model: StregaModel): Promise<void> => {
     await api.put(`/api/devices/${deveui}/strega/model`, { model });
@@ -1425,22 +1431,22 @@ export const stregaAPI = {
     unit: 'seconds' | 'minutes' | 'hours';
     amount: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/timed-action`, payload);
+    await api.put(`/api/devices/${deveui}/strega/timed-action`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setMagnetEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled });
+    await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled }, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setPartialOpening: async (deveui: string, payload: {
     action: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/partial-opening`, payload);
+    await api.put(`/api/devices/${deveui}/strega/partial-opening`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setFlushing: async (deveui: string, payload: {
     returnPosition: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/flushing`, payload);
+    await api.put(`/api/devices/${deveui}/strega/flushing`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
 };
 

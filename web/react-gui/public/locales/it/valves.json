@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Ultimo invio: {{when}}",
   "actionFailed": "Impossibile completare l'azione.",
+  "commandNoAnswer": { "open": "Ancora nessuna risposta dal gateway. Il comando potrebbe aver raggiunto la valvola: l’apertura resta bloccata finché lo stato della valvola non si aggiorna, al massimo per un minuto.", "close": "Ancora nessuna risposta dal gateway. Il comando di chiusura potrebbe aver raggiunto la valvola. Puoi chiudere di nuovo: chiudere due volte non causa problemi.", "other": "Ancora nessuna risposta dal gateway. Il comando potrebbe aver raggiunto la valvola." },
   "resumeRefusedClearPending": "Non è ancora possibile riprendere: la valvola non ha ancora confermato la cancellazione del suo programma per l'irrigazione condizionale.",
   "lastContact": "Ultimo contatto {{when}} fa",
   "loadFailed": "Impossibile caricare le valvole.",

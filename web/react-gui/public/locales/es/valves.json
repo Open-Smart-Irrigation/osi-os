@@ -33,6 +33,7 @@
   "planLost": "Device may not hold this plan",
   "lastSent": "Último envío: {{when}}",
   "actionFailed": "No se pudo completar la acción.",
+  "commandNoAnswer": { "open": "Todavía no hay respuesta del gateway. Es posible que la orden haya llegado a la válvula: abrir queda bloqueado hasta que se actualice el estado de la válvula, como máximo un minuto.", "close": "Todavía no hay respuesta del gateway. Es posible que la orden de cierre haya llegado a la válvula. Puede cerrar de nuevo: cerrar dos veces no causa ningún problema.", "other": "Todavía no hay respuesta del gateway. Es posible que la orden haya llegado a la válvula." },
   "resumeRefusedClearPending": "Todavía no se puede reanudar: la válvula aún no ha confirmado el borrado de su programa para el riego condicional.",
   "lastContact": "Último contacto hace {{when}}",
   "loadFailed": "No se pudieron cargar las válvulas.",

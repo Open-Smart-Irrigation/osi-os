@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import useSWR from 'swr';
-import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI, valvesAPI } from '../services/api';
+import { devicesAPI, irrigationOutcomesAPI, irrigationZonesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
 import { ValveControlPanel } from '../components/farming/valves/ValveControlPanel';
+import { fetchValveReading } from '../services/valveCommandHold';
 import { IrrigationPolicyEditor } from '../components/farming/IrrigationPolicyEditor';
 import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
 import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';
@@ -33,7 +34,7 @@ import type { IrrigationActuationsResponse } from '../services/api';
 const devicesFetcher = () => devicesAPI.getAll();
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const irrigationActuationsFetcher = () => irrigationOutcomesAPI.recentActuations();
-const valvesFetcher = () => valvesAPI.list();
+const valvesFetcher = fetchValveReading;
 
 export const FarmingDashboard: React.FC = () => {
   const { username, logout } = useAuth();
