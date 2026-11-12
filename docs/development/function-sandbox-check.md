@@ -31,7 +31,7 @@ probes and checks their subsequent identifier uses. It does not infer control
 flow, including feature guards and unreachable statements. ESLint suppression
 comments inside flow code cannot disable the rule.
 
-`scripts/flows-sandbox-exceptions.json` records four reviewed exceptions. Each
+`scripts/flows-sandbox-exceptions.json` records three reviewed exceptions. Each
 matches a node ID, source field, identifier, exact locations and the SHA-256 of
 the complete field. Changed code or diagnostic counts fail the check and require
 reviewing or removing the exception. Each applied exception is printed.
@@ -41,12 +41,3 @@ reviewing or removing the exception. Each applied exception is printed.
   branch never executes and the existing fallback runs.
 - `settings-disable-schedules-fn`: the `disabledSchedules` expression follows
   an unconditional return and cannot execute.
-- `dendro-compute-fn`: **known runtime defect**, retained outside this fix's
-  scope and tracked in [issue #629](https://github.com/Open-Smart-Irrigation/osi-os/issues/629).
-  Both the default Open-Meteo fetch and configured OpenAgri fetch call bare
-  `require('https')` or `require('http')`. The sandbox has no `require`, so
-  dendrometer zones with coordinates get no weather rainfall or weather VPD
-  fallback. The defect also exists in v0.8.1. Repair needs transport
-  bindings plus a code change or module extraction, rather than the missing
-  one-line declaration corrected by this change. The exception preserves the
-  finding visibly; it does not classify that path as safe.
