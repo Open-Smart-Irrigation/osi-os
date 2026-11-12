@@ -34,7 +34,7 @@ function classify(cases,known) {
     else if(actual.length)failed.push(result);
     else passed.push(result);
   }
-  for(const entry of known)if(!seen.has(entry.id))failed.push({id:entry.id,reason:'known case was not executed'});
+  for(const entry of known)if(!seen.has(entry.id))failed.push({id:entry.id,reason:'known case was not executed',failures:[]});
   return {passed,failed,knownToFail};
 }
 function parity() {
@@ -81,7 +81,21 @@ function main(argv,options={}) {
   if(evidence.maxRSSKiB>=4*1024*1024)throw new Error('runtime exceeded 4 GiB RSS');
   if(evidence.seconds>=10*60)throw new Error('runtime exceeded 10 minutes');
   for(const file of ['runtime.log','seed.log'])if(/Disk quota exceeded|EDQUOT|ENOSPC/i.test(fs.readFileSync(path.join(run,file),'utf8')))throw new Error('quota-contaminated runtime rejected');
+  // NEW-15: overlapping valve commands in the gateway's dependency layouts,
+  // each in its own Node-RED process (scripts/test-release-sqlite-overlap.js).
+  // The negative controls exercise only the runtime suite.
+  if(!options.control) {
+    const sqliteCases=require('./test-release-sqlite-overlap');
+    for(const layout of ['dual','npm','stock'])evidence.cases.push(sqliteCases.run({layout}));
+    // Start-up state: healthy, damaged file, two native addons.
+    for(const fault of ['none','damaged','conflict'])evidence.cases.push(sqliteCases.startupCase({fault}));
+    // The field layout (stock base, only the user copy): one addon, no fault.
+    evidence.cases.push(sqliteCases.startupCase({fault:'none',layout:'stock'}));
+  }
   const known=JSON.parse(fs.readFileSync(config.knownFile,'utf8'));
+  return report(evidence,known,run,argv,options);
+}
+function report(evidence,known,run,argv=[],options={}) {
   const summary=classify(evidence.cases,known);
   for(const c of summary.passed)console.log('PASS',c.id);
   for(const c of summary.knownToFail)console.log('KNOWN TO FAIL',c.finding,c.id,JSON.stringify(c.failures.map(signature)));
@@ -97,4 +111,4 @@ function main(argv,options={}) {
   return 0;
 }
 if(require.main===module){try{process.exitCode=main(process.argv.slice(2));}catch(e){console.error(e.stack);process.exitCode=2;}}
-module.exports={classify,signature,parity,main};
+module.exports={classify,signature,parity,main,report};

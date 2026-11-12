@@ -423,7 +423,20 @@ function hasRequiredGatherLibs(libs) {
   ));
 }
 
-function assertGatherNode(profile, gatherNode) {
+// The refresh body lives in osi-health-helper.refreshGlobal (NEW-15: a farm
+// database start-up fault is published before the first await, without a
+// connection the helper would refuse). Same structural rules, on that source.
+function refreshGlobalSource(profile) {
+  try {
+    const helper = require(path.join(profile.nodeRedRoot, 'osi-health-helper/index.js'));
+    return typeof helper.refreshGlobal === 'function' ? helper.refreshGlobal.toString() : null;
+  } catch (error) {
+    failures.push(`${profile.name}: osi-health-helper did not load: ${error.message}`);
+    return null;
+  }
+}
+
+function assertGatherNode(profile, gatherNode, refreshSource) {
   assert(profile, gatherNode, `Gather Edge Health node ${GATHER_ID} is missing`);
   if (!gatherNode) return;
 
@@ -437,15 +450,21 @@ function assertGatherNode(profile, gatherNode) {
   assert(profile, typeof gatherNode.func === 'string', 'Gather Edge Health.func is missing');
   if (typeof gatherNode.func !== 'string') return;
 
-  assert(profile, gatherNode.func.includes("global.set('edge_health'"), "Gather Edge Health must set global edge_health");
+  assert(profile, /^\s*return osiHealth\.refreshGlobal\(\{ global, osiDb \}\);\s*$/.test(gatherNode.func),
+    'Gather Edge Health must return osiHealth.refreshGlobal({ global, osiDb })');
+  compileAsyncBody(profile, 'Gather Edge Health', gatherNode.func);
+  assert(profile, typeof refreshSource === 'string', 'osi-health-helper must export refreshGlobal');
+  if (typeof refreshSource !== 'string') return;
+  assert(profile, refreshSource.includes("global.set('edge_health'"), 'refreshGlobal must set global edge_health');
   assert(
     profile,
-    gatherNode.func.includes("new osiDb.Database('/data/db/farming.db')"),
-    'Gather Edge Health must open /data/db/farming.db via osiDb.Database'
+    refreshSource.includes("new osiDb.Database('/data/db/farming.db')"),
+    'refreshGlobal must open /data/db/farming.db via osiDb.Database'
   );
-  assert(profile, gatherNode.func.includes('.close('), 'Gather Edge Health must close the DB handle');
-  assert(profile, /\bfinally\s*{[\s\S]*_db\.close\s*\(\s*\(\s*\)\s*=>\s*{}\s*\)/.test(gatherNode.func), 'Gather Edge Health must close _db in a finally block');
-  compileAsyncBody(profile, 'Gather Edge Health', gatherNode.func);
+  assert(profile, /\bfinally\s*{[\s\S]*_db\.close\s*\(\s*\(\s*\)\s*=>\s*{}\s*\)/.test(refreshSource), 'refreshGlobal must close _db in a finally block');
+  const firstAwait = refreshSource.indexOf('await ');
+  const faultPublish = refreshSource.indexOf("global.set('edge_health', Object.assign(allNullHealth()");
+  assert(profile, faultPublish > 0 && faultPublish < firstAwait, 'refreshGlobal must publish a start-up fault before its first await');
 }
 
 function assertExactObject(profile, label, actual, expected) {
@@ -537,6 +556,9 @@ function assertInjectWiring(profile, injectNode) {
     : [];
   assert(profile, firstOutput.includes(BUILD_ID), `heartbeat inject does not wire to Build Heartbeat ${BUILD_ID}`);
   assert(profile, firstOutput.includes(GATHER_ID), `heartbeat inject does not wire to Gather Edge Health ${GATHER_ID}`);
+  // Delivery follows wire order: Gather publishes a start-up fault first, so
+  // the heartbeat built from the same tick (the first one at start) carries it.
+  assert(profile, firstOutput.indexOf(GATHER_ID) < firstOutput.indexOf(BUILD_ID), 'heartbeat inject must reach Gather Edge Health before Build Heartbeat');
 }
 
 const parsedProfiles = PROFILES.map((profile) => ({ profile, parsed: parseFlow(profile) }));
@@ -544,7 +566,7 @@ const parsedProfiles = PROFILES.map((profile) => ({ profile, parsed: parseFlow(p
 for (const { profile, parsed } of parsedProfiles) {
   if (!parsed) continue;
   assertBuildNode(profile.name, parsed.byId[BUILD_ID]);
-  assertGatherNode(profile.name, parsed.byId[GATHER_ID]);
+  assertGatherNode(profile.name, parsed.byId[GATHER_ID], refreshGlobalSource(profile));
   assertPackagedGatherLibs(profile, parsed.byId[GATHER_ID]);
   assertInjectWiring(profile.name, parsed.byId[INJECT_ID]);
 }

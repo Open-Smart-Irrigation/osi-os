@@ -1,6 +1,14 @@
 'use strict';
 
-const sqlite3 = require('sqlite3');
+// One native SQLite module for the farm database (NEW-15): see sqlite-driver.js.
+// The helper's own require is passed in, so a standalone process still loads
+// its sqlite3 from this file.
+const startup = require('./startup');
+const farmDriver = require('./sqlite-driver').createDriver(require);
+// SQLite's open flags; constants, so loading the helper selects no driver.
+const OPEN_READONLY = 1;
+const OPEN_READWRITE = 2;
+const OPEN_CREATE = 4;
 
 const DB_PATH = '/data/db/farming.db';
 const PRAGMAS = [
@@ -54,6 +62,14 @@ function runRaw(database, method, sql, params) {
 
 function openDatabase(filename, mode) {
   return new Promise((resolve, reject) => {
+    let sqlite3;
+    try {
+      sqlite3 = farmDriver();
+    } catch (error) {
+      setLastError(error);
+      reject(error);
+      return;
+    }
     const callback = (error) => {
       if (error) {
         reject(error);
@@ -230,7 +246,7 @@ class DatabaseFacade {
     if (typeof executor !== 'function') {
       throw new TypeError('Database.readSnapshot requires an executor function');
     }
-    const database = await openDatabase(this.filename, sqlite3.OPEN_READONLY);
+    const database = await openDatabase(this.filename, OPEN_READONLY);
     let began = false;
     let operationFailed = false;
     let failure;
@@ -424,10 +440,18 @@ module.exports = {
   Database: DatabaseFacade,
   open: (filename, options) => new IndependentDatabaseFacade(filename, options),
   approvedPath,
-  OPEN_READONLY: sqlite3.OPEN_READONLY,
-  OPEN_READWRITE: sqlite3.OPEN_READWRITE,
-  OPEN_CREATE: sqlite3.OPEN_CREATE,
+  OPEN_READONLY,
+  OPEN_READWRITE,
+  OPEN_CREATE,
   verbose: () => module.exports,
   getHealth,
-  quickCheck
+  quickCheck,
+  // Start-up state of the farm database: driver, native addon count, check.
+  startupHealth: () => startup.getHealth(),
+  // A native handle on the farm database through the selected driver, for
+  // code that needs the sqlite3 callback API itself. Throws when refused.
+  openNativeFarming(...args) {
+    const sqlite3 = farmDriver();
+    return new sqlite3.Database(DB_PATH, ...args);
+  }
 };
