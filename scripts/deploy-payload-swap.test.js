@@ -1103,3 +1103,27 @@ test('health records and the payload state are synced around their rename', (t) 
   }
   assert.deepEqual(calls, ['fsync file', 'rename', 'fsync dir', 'fsync file', 'rename', 'fsync dir']);
 });
+
+// Review of #636 (residual gap 1): the "staged" record is written before
+// anything is copied into the payload, in the same call, so a cut while
+// staging never leaves a payload without a record.
+test('stagePayload records "staged" before it copies anything into the payload', (t) => {
+  const root = moduleRoot(t);
+  const seen = [];
+  const realCopy = fs.copyFileSync;
+  const realCp = fs.cpSync;
+  const record = () => fs.existsSync(path.join(root, 'payloads', 'p', 'health.json'));
+  fs.copyFileSync = function (...args) { seen.push(['copyFileSync', record()]); return realCopy.apply(this, args); };
+  fs.cpSync = function (...args) { seen.push(['cpSync', record()]); return realCp.apply(this, args); };
+  try {
+    stagePayload(root, 'p', fakeFlowsSrcAt(root, 'p'), fakeGuiSrcAt(root, 'p'), 'staged');
+  } finally {
+    fs.copyFileSync = realCopy;
+    fs.cpSync = realCp;
+  }
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every(([, present]) => present), JSON.stringify(seen));
+  assert.equal(swap.payloadTrusted(root, 'p'), false);
+  stagePayload(root, 'capture', fakeFlowsSrcAt(root, 'capture'), fakeGuiSrcAt(root, 'capture'));
+  assert.equal(swap.payloadTrusted(root, 'capture'), true, 'the legacy capture stays trusted');
+});
