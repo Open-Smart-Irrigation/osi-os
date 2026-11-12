@@ -665,7 +665,9 @@ esac
 `, { mode: 0o755 });
   const result = spawnSync('sh', ['-c', transform(moduleDeployScript(root, dbPath, guiRoot, scenario))], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    // OSI_TEST_GATEWAY_PATH: only the commands both gateway bases carry
+    // (scripts/test-deploy-gateway-commands.js).
+    env: { ...process.env, PATH: `${bin}:${process.env.OSI_TEST_GATEWAY_PATH || process.env.PATH}` },
   });
   const markers = (via = '') => {
     const out = spawnSync(process.execPath, ['-e', `

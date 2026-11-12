@@ -79,6 +79,7 @@ printf '%s' "$?" >"$INSTALL_STATUS"
     INSTALL_STATUS: statusFile,
   };
   if (options.path) env.PATH = options.path;
+  else if (process.env.OSI_TEST_GATEWAY_PATH) env.PATH = process.env.OSI_TEST_GATEWAY_PATH;
   const child = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
   assert.equal(child.error, undefined, child.error && child.error.message);
   const status = Number(fs.readFileSync(statusFile, 'utf8'));
@@ -172,7 +173,7 @@ test('missing or disabled NTP prerequisites fail closed without enable or UCI ed
 function pathWithout(dir, missing) {
   const bin = path.join(dir, 'path-without-' + missing.join('-'));
   fs.mkdirSync(bin);
-  const sources = [path.dirname(process.execPath), ...(process.env.PATH || '').split(':')];
+  const sources = [path.dirname(process.execPath), ...(process.env.OSI_TEST_GATEWAY_PATH || process.env.PATH || '').split(':')];
   for (const source of sources) {
     let names = [];
     try { names = fs.readdirSync(source); } catch (_) { continue; }

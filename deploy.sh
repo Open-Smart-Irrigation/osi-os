@@ -99,6 +99,31 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# command check begin
+# Every external command the deploy runs, checked before it changes anything
+# (NEW-27: an absent stat(1) stopped every deploy after the first, the retry
+# included). The list is the deploy's own commands that both bases carry:
+# the stock ChirpStack Gateway OS 4.10.1 and our images; it must stay inside
+# scripts/helpers/gateway-base-commands.js (a test checks it). sqlite3 is not
+# on a stock base before its first deploy: it is present, or opkg is there to
+# install it, and ensure_sqlite3_cli verifies it after the install.
+GATEWAY_REQUIRED_COMMANDS="awk basename cat chmod chown cp curl cut date df dirname du grep head id ln logger logread ls mkdir mktemp mv node npm readlink rm rmdir sed sleep sync tail tar touch tr ubus uci uname wc wget"
+check_gateway_commands() {
+    gcc_missing=""
+    for gcc_command in $GATEWAY_REQUIRED_COMMANDS; do
+        command -v "$gcc_command" >/dev/null 2>&1 || gcc_missing="$gcc_missing $gcc_command"
+    done
+    if ! command -v sqlite3 >/dev/null 2>&1 && ! command -v opkg >/dev/null 2>&1; then
+        gcc_missing="$gcc_missing sqlite3(or opkg to install it)"
+    fi
+    if [ -n "$gcc_missing" ]; then
+        echo "ERROR: this gateway lacks commands the deploy needs:$gcc_missing; refusing before anything is changed" >&2
+        return 1
+    fi
+}
+check_gateway_commands || exit 1
+# command check end
+
 mkdir -p "$TMP_DIR" /srv/node-red "$PAYLOADS_ROOT" "$DB_DIR"
 
 fetch() {
