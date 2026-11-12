@@ -119,7 +119,7 @@ function run({source=ROOT,layout='dual'}={}) {
 // heartbeat and the authenticated stats answer; nothing is repaired.
 const STARTUP_FAULTS={
   none:{id:'database-startup-healthy',status:'healthy',health:null},
-  damaged:{id:'database-startup-damaged',status:'damaged',health:'database_damaged',log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*nothing was changed/},
+  damaged:{id:'database-startup-damaged',status:'damaged',health:'database_damaged',log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
   conflict:{id:'database-startup-module-conflict',status:'healthy',health:'sqlite_module_conflict',log:/\[osi-db-startup\] ERROR found 2 native SQLite addons/},
 };
 function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
@@ -149,6 +149,10 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   let evidence={fault,layout,run};
   if(fs.existsSync(observation)) {
     const r=JSON.parse(fs.readFileSync(observation,'utf8'));
+    // The first heartbeat as handed to its MQTT output node. The harness broker
+    // (aedes, MQTT 3.1.1) cannot accept the cloud broker node's MQTT 5
+    // connection, so publication itself is not observable here; `published`
+    // stays in the evidence.
     const first=r.heartbeats[0]?JSON.parse(r.heartbeats[0].payload):null;
     const database=r.stats.json&&r.stats.json.database;
     evidence={...evidence,statsStatus:r.stats.status,addons:r.addons.length,firstHeartbeatHealth:first?.health?.health_state,database,
@@ -161,7 +165,7 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
     // the database state is added either way.
     check('stats-database',[200,500].includes(r.stats.status)&&database?.status===expected.status&&database?.health_state===expected.health,{status:r.stats.status,database});
     check('native-addons',r.addons.length===(fault==='conflict'?2:1),r.addons.length);
-    if(fault==='conflict')check('refused-open',r.open.status!==202,r.open.status);
+    if(fault==='conflict')check('refused-open',r.open.status===503&&r.open.json?.error==='OSI_SQLITE_REFUSED'&&r.openRadio===0,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
   } else check('observation',false,'runtime wrote no startup.json');
   if(expected.log)check('loud-log',expected.log.test(text),'no start-up error line');
   else check('quiet-log',!/\[osi-db-startup\]/.test(text),'unexpected start-up error line');

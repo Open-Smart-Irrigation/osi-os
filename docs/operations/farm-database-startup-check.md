@@ -29,6 +29,8 @@ sqlite3 -readonly /data/db/farming.db "PRAGMA quick_check(1); <count of users, d
 
 The check runs once per process in a separate `sqlite3` process, bounded at 10 s with a monotonic timer and `SIGKILL`; the wall clock plays no part, because it can read decades off in the first seconds of a boot. If `settings.js` cannot load the module, it logs `[osi-db-startup] ERROR`, Node-RED still starts, and the helper runs the same check before its first connection.
 
+The check depends on the `sqlite3` command-line tool. Our images carry it (`sqlite3-cli` in the image configuration); a stock ChirpStack Gateway OS base has none until the first deploy installs it from the `opkg` feed. When the tool is absent or does not start, the check reports `not_checked` (`database_not_checked`): never healthy, never a fault.
+
 | Status | Health state | Meaning |
 |---|---|---|
 | `healthy` | none | `quick_check` answered `ok` and all three core tables exist. |
@@ -39,15 +41,20 @@ The check runs once per process in a separate `sqlite3` process, bounded at 10 s
 | `not_checked_timeout` | `database_not_checked` | The check took longer than 10 s. Never reported as healthy. |
 | `not_checked` | `database_not_checked` | The check could not finish for another reason, for example a lock or a missing `sqlite3` CLI. |
 
-The check reports and changes nothing: it does not move, restore, quarantine or delete the file, and a damaged file does not stop irrigation. What a gateway does by itself with a damaged file is the owner's decision and is not settled. A leftover `-wal` from a power cut is read as it is; a missing `-shm` is recreated, as by any reader.
+The check sees damage, not loss: a sound file that lost rows, or a recovered file whose rows did not come back, reads `healthy` as long as the three core tables exist. The check only reports. It does not move, restore, quarantine, delete or write the database, and a damaged file does not stop irrigation. It opens the file read-only: SQLite then reads a write-ahead log left by a power cut without checkpointing it into the file, and may create or rebuild the shared-memory index (`-shm`), as any reader does. What a gateway does by itself with a damaged file is the owner's decision and is not settled; the manual procedure for an operator, applied on the owner's word, is [damaged-farm-database.md](damaged-farm-database.md).
 
-The bound follows two measurements. `quick_check` reads every page: about 15 ms for a 2 MB file, about 240 ms for a 300 MB file from a warm cache, 29 s for the same file from a cold cache on the measuring workstation. `deploy.sh` waits 30 s (`NODE_RED_HEALTH_TIMEOUT`) for a restarted Node-RED before it rolls back, and after a deploy the cache is warm. At a cold boot a database much larger than about 100 MB can therefore end as `not_checked_timeout`.
+The bound follows two measurements. `quick_check` reads every page: about 15 ms for a 2 MB file, about 240 ms for a 300 MB file from a warm cache, 29 s for the same file from a cold cache on the measuring workstation. The check delays Node-RED's start by up to 10 s. After a payload switch `deploy.sh` waits up to 45 s (`NODE_RED_INIT_TIMEOUT`) for schema initialisation and then 30 s (`NODE_RED_HEALTH_TIMEOUT`) for health before it rolls back; after a deploy the cache is warm. At a cold boot a database much larger than about 100 MB can end as `not_checked_timeout`.
 
 ## Where the state shows
 
 - The heartbeat's `health.health_state` carries the database health state. A fault (every state except `database_not_checked`) replaces `healthy`, `degraded` and `crash_looping`; `database_not_checked` replaces only `healthy`, so a large file that timed out never hides a crash loop. `Gather Edge Health` publishes it into `edge_health` before its first `await`, and the heartbeat tick reaches `Gather Edge Health` before `Build Heartbeat`, so the first heartbeat after a start already carries it. With a refusal no connection is attempted.
 - `GET /api/system/stats` (authenticated, as before) has a `database` object: `status`, `detail`, `check_ms`, `timeout_ms`, `driver_mode`, `driver_error` (no module paths), `native_addons`, `module_conflict` and `health_state`.
-- The gateway log has one `[osi-db-startup] ERROR` line per fault.
+- The gateway log has one `[osi-db-startup] ERROR` line per fault; for a damaged, missing or unreadable file it names [damaged-farm-database.md](damaged-farm-database.md).
+- A fault published while the regular health gather has not finished is laid over the last gathered figures (schema signature, sync counters, disk); a gateway whose file is sound but was not checked keeps sending them, and `degraded` stays `degraded`.
+
+## New settings with old helpers
+
+`deploy.sh` writes `settings.js` before it switches the payload. A deploy that is refused, cut off or rolled back leaves the new `settings.js` with helpers that lack `startup.js`. Every start then logs `[osi-db-startup] ERROR farm database start-up check did not run: Cannot find module '/srv/node-red/osi-db-helper/startup'` and Node-RED runs normally with the old payload. [damaged-farm-database.md](damaged-farm-database.md) describes that state and how to put the old `settings.js` back.
 
 ## The old boot tool
 

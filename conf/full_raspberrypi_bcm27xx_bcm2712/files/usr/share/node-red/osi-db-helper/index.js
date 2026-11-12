@@ -147,6 +147,7 @@ function enqueueOperation(executor) {
     .catch(() => undefined)
     .then(async () => {
       try {
+        farmDriver.guard();
         const database = await ensureSharedDatabase();
         const result = await executor(database);
         markHealthy();
@@ -362,8 +363,11 @@ class IndependentDatabaseFacade {
       return database;
     });
   }
-  _enqueue(executor) {
-    const scheduled = this._state.queue.catch(() => undefined).then(async () => executor(await this._state.init));
+  _enqueue(executor, { closing = false } = {}) {
+    const scheduled = this._state.queue.catch(() => undefined).then(async () => {
+      if (!closing && this._state.opener === openDatabase) farmDriver.guard();
+      return executor(await this._state.init);
+    });
     this._state.queue = scheduled.then(() => undefined, () => undefined);
     return scheduled;
   }
@@ -384,7 +388,7 @@ class IndependentDatabaseFacade {
     if (typeof executor !== 'function') return Promise.reject(new TypeError('Database.readSnapshot requires an executor function'));
     return this._enqueue(async db => { await runRaw(db, 'exec', 'BEGIN;'); try { const result = await executor(createTransactionScope(db)); await runRaw(db, 'exec', 'COMMIT;'); return result; } catch (error) { try { await runRaw(db, 'exec', 'ROLLBACK;'); } catch (rollbackError) { error.rollbackError = rollbackError; } throw error; } });
   }
-  close(callback) { const done = this._enqueue(async db => { await closeDatabase(db); this._state.database = null; this._state.init = null; independentStates.delete(this.filename); }); done.then(() => invokeCallback(callback, this, null), error => invokeCallback(callback, this, error)); return done; }
+  close(callback) { const done = this._enqueue(async db => { await closeDatabase(db); this._state.database = null; this._state.init = null; independentStates.delete(this.filename); }, { closing: true }); done.then(() => invokeCallback(callback, this, null), error => invokeCallback(callback, this, error)); return done; }
 }
 
 function getHealth() {

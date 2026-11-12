@@ -1774,14 +1774,17 @@ cleanup_failed_first_payload() {
 checkpoint_live_db() {
     if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
         echo "ERROR: failed to checkpoint $DB_PATH before migration" >&2
+        echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
         return 1
     fi
     if ! integrity="$(sqlite3 "$DB_PATH" "PRAGMA integrity_check;")"; then
         echo "ERROR: failed to run integrity_check on $DB_PATH before migration" >&2
+        echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
         return 1
     fi
     if [ "$integrity" != "ok" ]; then
         echo "ERROR: $DB_PATH integrity_check failed before migration: $integrity" >&2
+        echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
         return 1
     fi
 }
