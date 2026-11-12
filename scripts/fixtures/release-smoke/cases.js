@@ -241,6 +241,20 @@ exports.run = async function(h) {
   }
   const planFrames=minutes=>[...Array.from({length:7},(_,day)=>({port:14+day,hex:minutes?'ff8600ff06'+String(minutes)+'ff'.repeat(18):'ff'.repeat(24)})),{port:21,hex:'30'}].sort((a,b)=>a.port-b.port);
   let weeklyEui,weeklyUuid;
+  // Caught entries from the scheduler case's deliberate write failure.
+  const schedulerWriteFailures=new Set();
+  // Holds the farm database's write lock from a separate process (its own SQLite
+  // library, as another writer on a gateway) for holdMs, runs during() once the
+  // lock is held, and resolves when that process has released it and exited.
+  async function holdWriteLock(holdMs,during) {
+    const {spawn}=require('node:child_process');
+    const child=spawn(process.execPath,['-e',`const s=require(${JSON.stringify(require.resolve('sqlite3'))});const db=new s.Database(${JSON.stringify(h.DBFILE)});
+db.exec('BEGIN IMMEDIATE',e=>{if(e){console.error(e.message);process.exit(3);}process.stdout.write('LOCKED\\n');setTimeout(()=>db.exec('ROLLBACK',()=>db.close(()=>process.exit(0))),${Number(holdMs)});});`],{stdio:['ignore','pipe','inherit']});
+    const exited=new Promise((resolve,reject)=>child.on('exit',code=>code===0?resolve():reject(new Error('lock holder exited '+code))));
+    await new Promise((resolve,reject)=>{child.stdout.on('data',d=>{if(String(d).includes('LOCKED'))resolve();});child.on('exit',code=>reject(new Error('lock holder exited before locking: '+code)));});
+    during();
+    await exited;
+  }
   await test('weekly-save',async(check,e)=>{
     weeklyEui=(await device());const r=await h.http('POST',`/api/valves/${weeklyEui}/schedules`,weekly,token);httpCheck(check,r,201);await h.sleep(150);
     e.stored=(await h.sql('SELECT * FROM valve_schedules WHERE device_eui=?',weeklyEui));weeklyUuid=e.stored[0]?.schedule_uuid;const listed=await h.http('GET',`/api/valves/${weeklyEui}/schedules`,undefined,token);httpCheck(check,listed,200,'list-http');e.list=listed.json;
@@ -264,20 +278,30 @@ exports.run = async function(h) {
     // Keep the scheduler's zone independent of valves used by preceding cases.
     (await h.sql('UPDATE devices SET irrigation_zone_id=NULL WHERE irrigation_zone_id=? AND deveui NOT IN (?,?)',zone.id,valve,sensor));
     (await h.sql('INSERT INTO device_data(deveui,recorded_at,swt_wm1) VALUES (?,?,?)',sensor,new Date().toISOString(),60));
-    // A separate real SQLite writer deterministically exposes F-7. The two
-    // sqlite nodes have no product lock wait; the valve helper does. Release
-    // once both refusals arrive, or after 2.5s if a fix makes them wait. No retry.
-    const release=await h.writerLock();
-    try {
-      h.inject('a0a61f4b7dca1c2e');
-      await waitFor(()=>h.state.caught.filter(c=>c.caseId==='scheduler-irrigates'&&c.message==='Error: SQLITE_BUSY: database is locked').length>=2,2500);
-    } finally {await release();}
+    // F-7. Another process holds the farm database's write lock, as a separate
+    // writer on a gateway would. First for 2 s: longer than SQLite's default
+    // 1 s wait, shorter than the 5 s the boot node sets on the flows' connection,
+    // so both scheduler writes must wait and succeed, and exactly one frame goes out.
+    await holdWriteLock(2000,()=>h.inject('a0a61f4b7dca1c2e'));
     await h.settle();
     e.radio=radio(valve);e.stored=(await h.sql('SELECT action,reason,duration_minutes FROM irrigation_events WHERE irrigation_zone_id=?',zone.id));
-    check('radio',e.radio.some(c=>c.port===2&&c.hex==='410f'),e.radio);const persisted=e.stored.some(r=>r.action==='IRRIGATE'&&r.duration_minutes===15);
+    check('radio',e.radio.filter(c=>c.port===2&&c.hex==='410f').length===1,e.radio);const persisted=e.stored.some(r=>r.action==='IRRIGATE'&&r.duration_minutes===15);
     const triggered=!!(await h.sql('SELECT last_triggered_at FROM irrigation_schedules WHERE irrigation_zone_id=?',zone.id))[0]?.last_triggered_at;
     e.caught=h.state.caught.filter(c=>c.caseId==='scheduler-irrigates');
     check('scheduler-persistence',persisted&&triggered&&!e.caught.length,{eventStored:persisted,lastTriggered:triggered,errors:e.caught.map(({sourceId,sourceType,message})=>({sourceId,sourceType,message})).sort((a,b)=>a.sourceId.localeCompare(b.sourceId))});
+    // Then for 7 s, beyond the wait: the next tick is debounced (already fired
+    // today), so its one write is the SKIP event, which fails after 5 s. That
+    // failure must be loud: one log line naming the node and the error, the
+    // error counted for the heartbeat, and no second frame.
+    const counts=()=>Number((h.RED.nodes.getNode('record-error-fn').context().global.get('error_counts')||{}).total)||0;
+    const countBefore=counts(),caughtBefore=h.state.caught.length,logsBefore=h.state.logs.length;
+    await holdWriteLock(7000,()=>h.inject('a0a61f4b7dca1c2e'));
+    await h.settle();
+    const failed=h.state.caught.slice(caughtBefore);for(const c of failed)schedulerWriteFailures.add(c);
+    e.failedWrite={caught:failed,logged:h.state.logs.slice(logsBefore).filter(l=>l.id==='f7-scheduler-write-log'),counted:counts()-countBefore,radio:radio(valve)};
+    check('failed-write-logged',e.failedWrite.logged.length===1&&/DB: insert irrigation_events \(2cb3b5c1a3d0e5f7\): Error: SQLITE_BUSY/.test(e.failedWrite.logged[0].msg)
+      &&failed.some(c=>c.catchId==='f7-scheduler-write-catch'&&c.sourceId==='2cb3b5c1a3d0e5f7')&&e.failedWrite.counted>=1
+      &&e.failedWrite.radio.filter(c=>c.port===2&&c.hex==='410f').length===1,e.failedWrite);
     const answer=await h.http('GET','/api/irrigation/recent-actuations',undefined,token);httpCheck(check,answer,200,'read-http');
   });
   const disabled=new Set(h.flows.filter(n=>n.type==='tab'&&n.disabled).map(n=>n.id));
@@ -322,11 +346,10 @@ exports.run = async function(h) {
   });
   await test('caught-node-errors',async(check,e)=>{
     const expected=require('./expected-refusals.json');
-    const f7Sources=new Set(['2cb3b5c1a3d0e5f7','3a0d9d0f1a1b2c3d']);
     e.unexpected=h.state.caught.filter(c=>{
-      // These exact errors are asserted (and listed as F-7) by the scheduler
-      // case itself. Any BUSY elsewhere or with another signature stays red.
-      if(c.caseId==='scheduler-irrigates'&&f7Sources.has(c.sourceId)&&c.sourceType==='sqlite'&&c.message==='Error: SQLITE_BUSY: database is locked')return false;
+      // The scheduler case provokes one write failure on purpose and asserts it
+      // is logged. Any other BUSY, there or elsewhere, stays red.
+      if(schedulerWriteFailures.has(c))return false;
       return !require('./observation').isExpectedRefusal(c,expected);
     });
     check('caught-errors',e.unexpected.length===0,e.unexpected);
