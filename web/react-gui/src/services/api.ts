@@ -2048,6 +2048,8 @@ export const valvesAPI = {
   },
   // `current` is the stored schedule, used only for the hold check: re-enabling a one-time
   // schedule, or moving its start, can make it start while the open hold lasts. It is not sent.
+  // Only the write's own `enabled: false` exempts it: a cached "disabled" may be stale (the row
+  // can have been enabled meanwhile), and a patch without `enabled` leaves the gateway's value.
   updateSchedule: async (
     eui: string,
     uuid: string,
@@ -2058,7 +2060,6 @@ export const valvesAPI = {
       assertScheduleStartNotHeld(eui, {
         kind: patch.kind ?? current?.kind ?? (patch.fireAt !== undefined ? 'ONCE' : undefined),
         fireAt: patch.fireAt ?? current?.fireAt,
-        enabled: patch.enabled ?? current?.enabled,
       });
     }
     try {

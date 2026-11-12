@@ -179,6 +179,17 @@ export function assertScheduleStartNotHeld(
   if (Number.isNaN(startsAt) || startsAt <= Date.now() + remaining) throw new ValveOpenHeldError(keyOf(deviceEui));
 }
 
+/** True when an enabled one-time schedule starting at `fireAt` would be refused now. */
+export function isScheduleStartHeld(deviceEui: string, fireAt: string | null | undefined): boolean {
+  try {
+    assertScheduleStartNotHeld(deviceEui, { kind: 'ONCE', fireAt });
+    return false;
+  } catch (error) {
+    if (isValveOpenHeldError(error)) return true;
+    throw error;
+  }
+}
+
 /** Numbers a valve-list request at its start. */
 export function beginValveReading(): number {
   lastRequest += 1;

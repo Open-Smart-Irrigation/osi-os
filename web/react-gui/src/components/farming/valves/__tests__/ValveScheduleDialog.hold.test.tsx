@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 
@@ -26,13 +26,18 @@ vi.mock('react-i18next', () => ({
       'scheduleDialog.time': 'Time',
       'scheduleDialog.save': 'Save',
       'scheduleDialog.saveFailed': 'Could not save the schedule.',
+      'scheduleDialog.update': 'Update',
+      'scheduleDialog.edit': 'Edit',
+      'scheduleDialog.enabled': 'Enabled',
       'commandNoAnswer.open': NO_ANSWER_OPEN,
     } as Record<string, string>)[key] ?? key,
     i18n: { language: 'en' },
   }),
 }));
 
-const { schedulesMock, createScheduleMock } = vi.hoisted(() => ({ schedulesMock: vi.fn(), createScheduleMock: vi.fn() }));
+const { schedulesMock, createScheduleMock, updateScheduleMock } = vi.hoisted(() => ({
+  schedulesMock: vi.fn(), createScheduleMock: vi.fn(), updateScheduleMock: vi.fn(),
+}));
 
 vi.mock('../../../../services/api', async () => {
   const actual = await vi.importActual<typeof import('../../../../services/api')>('../../../../services/api');
@@ -41,7 +46,7 @@ vi.mock('../../../../services/api', async () => {
     valvesAPI: {
       schedules: schedulesMock,
       createSchedule: createScheduleMock,
-      updateSchedule: vi.fn().mockResolvedValue({ pushesQueued: 0 }),
+      updateSchedule: updateScheduleMock,
       deleteSchedule: vi.fn().mockResolvedValue({ pushesQueued: 0 }),
     },
   };
@@ -91,6 +96,7 @@ describe('ValveScheduleDialog and the open hold', () => {
     vi.clearAllMocks();
     schedulesMock.mockResolvedValue(empty);
     createScheduleMock.mockResolvedValue({ schedule: {}, pushesQueued: 0 });
+    updateScheduleMock.mockResolvedValue({ pushesQueued: 0 });
   });
 
   it('refuses a one-time irrigation due now while held, explains why, and sends nothing', async () => {
@@ -113,5 +119,58 @@ describe('ValveScheduleDialog and the open hold', () => {
     completeValveReading(beginValveReading());
     await saveOnce(0);
     await waitFor(() => expect(createScheduleMock).toHaveBeenCalledTimes(1));
+  });
+
+  // Review r3, S7: the edit form must not rely on a cached "disabled" while its write leaves
+  // the gateway's `enabled` untouched. Hold active; edit open on a disabled one-time schedule
+  // whose stored start is later; a due time typed; the row then enabled (allowed: its stored
+  // start is later). The form still believes the row is disabled.
+  async function editDisabledRowThenEnableIt() {
+    const later = new Date(Date.now() + 10 * 60_000).toISOString();
+    schedulesMock.mockReset();
+    schedulesMock.mockResolvedValueOnce({
+      ...empty,
+      schedules: [{ scheduleUuid: 'once-1', deviceEui: EUI, kind: 'ONCE', label: 'Later soak', weekdaysMask: null, startTime: null,
+        fireAt: later, durationMinutes: 5, timezone: TZ, enabled: false, onceState: 'PENDING' }],
+    });
+    let failRefresh: (error: Error) => void = () => undefined;
+    schedulesMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { failRefresh = reject; }));
+    holdValveOpen(EUI);
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+        <ValveScheduleDialog valve={valve} open onClose={vi.fn()} onChanged={vi.fn()} />
+      </SWRConfig>,
+    );
+    await screen.findByText('Later soak');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const { date, time } = localFields(0);
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: date } });
+    fireEvent.change(screen.getByLabelText('Time'), { target: { value: time } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+    await waitFor(() => expect(updateScheduleMock).toHaveBeenCalledTimes(1));
+    expect(updateScheduleMock.mock.calls[0][2]).toEqual({ enabled: true });
+    await waitFor(() => expect(schedulesMock).toHaveBeenCalledTimes(2));
+    return { failRefresh: (error: Error) => failRefresh(error) };
+  }
+
+  it('an edit that relies on a disabled row disables it in its own write, even after the refresh failed', async () => {
+    const { failRefresh } = await editDisabledRowThenEnableIt();
+    await act(async () => { failRefresh(new Error('offline')); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+
+    // Either the edit is refused, or its own patch disables the row: never a due start with
+    // `enabled` left to whatever the gateway now holds.
+    await waitFor(() => expect(updateScheduleMock.mock.calls.length > 1 || !!screen.queryByText(NO_ANSWER_OPEN)).toBe(true));
+    for (const [, , patch] of updateScheduleMock.mock.calls.slice(1)) {
+      expect(patch).toMatchObject({ enabled: false });
+    }
+  });
+
+  it('Update waits while a row change and its refresh are pending', async () => {
+    await editDisabledRowThenEnableIt();
+    expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+    expect(updateScheduleMock).toHaveBeenCalledTimes(1);
   });
 });

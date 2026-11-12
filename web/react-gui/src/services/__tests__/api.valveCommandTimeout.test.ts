@@ -146,4 +146,17 @@ describe('one-time schedules and the open hold', () => {
     expect(del).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenCalledTimes(1);
   });
+
+  // Review r3, S7: the disabled exemption holds only when the write itself disables.
+  it('does not trust a cached disabled state: a due move is refused unless its own patch sets enabled false', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
+    const cachedDisabled = { kind: 'ONCE' as const, fireAt: inSeconds(600), enabled: false };
+    holdValveOpen(eui);
+    await expect(valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5 }, cachedDisabled))
+      .rejects.toBeInstanceOf(ValveOpenHeldError);
+    expect(put).not.toHaveBeenCalled();
+    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5, enabled: false }, cachedDisabled);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][1]).toMatchObject({ fire_at: expect.any(String), enabled: false });
+  });
 });

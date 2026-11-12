@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
-import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
+import type { ValveSchedule, ValveScheduleInput, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
-import { assertScheduleStartNotHeld, isValveOpenHeldError } from '../../../services/valveCommandHold';
+import { assertScheduleStartNotHeld, isScheduleStartHeld, isValveOpenHeldError } from '../../../services/valveCommandHold';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
@@ -343,13 +343,14 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   };
 
   const saveOnce = async () => {
-    if (!isOnceValid || savingOnce) return;
+    // A row change and its list refresh settle first, so the form does not edit from a stale row.
+    if (!isOnceValid || savingOnce || rowBusyUuid !== null) return;
     const fireAt = zonedTimeToUtcIso(once.date, once.time, valve.timezone);
     if (!fireAt) return;
     setSavingOnce(true);
     setOnceError(null);
     try {
-      const onceFields = {
+      const onceFields: Pick<ValveScheduleInput, 'label' | 'fireAt' | 'durationMinutes' | 'enabled'> = {
         label: once.label.trim() || null,
         fireAt,
         durationMinutes: onceDurationNum,
@@ -357,7 +358,11 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       const current = editingOnceUuid ? data?.schedules.find((schedule) => schedule.scheduleUuid === editingOnceUuid) : undefined;
       // A one-time irrigation that would start while an earlier open of this valve has no
       // answer yet is a second open by another route: refused here and in the API layer.
-      assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: current?.enabled ?? true });
+      // An edit of a row the form believes disabled is exempt only if its own write keeps it
+      // disabled: the row may have been enabled meanwhile, and a patch without `enabled` would
+      // leave it so. If it was, this write disables it again, the safe direction.
+      if (current?.enabled === false && isScheduleStartHeld(valve.deviceEui, fireAt)) onceFields.enabled = false;
+      assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: onceFields.enabled ?? true });
       if (editingOnceUuid) {
         if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields, current);
         else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
@@ -817,7 +822,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     <button
                       type="button"
                       onClick={() => void saveOnce()}
-                      disabled={!isOnceValid || savingOnce}
+                      disabled={!isOnceValid || savingOnce || rowBusyUuid !== null}
                       className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingOnce
