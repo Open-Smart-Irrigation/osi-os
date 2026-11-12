@@ -36,6 +36,22 @@ No check exists there. The signs are in the log only. On the damaged file the on
 
 Look with: `logread | grep -E 'SQLITE_CORRUPT|malformed|osi-db-startup'`
 
+### How a damaged gateway behaves
+
+Measured on a device with two pages of a 103 MiB file overwritten, under the fixed release: the gateway kept answering. The GUI, login, the valve list, zones and schedules answered, and a valve CLOSE was accepted. Requests that read a damaged table fail: there, the device list answered `500 {"error":"device-api failed","message":"Error: SQLITE_CORRUPT: database disk image is malformed"}`. The error line came at every start and the stats answer read `"status":"damaged"`, also after a reboot. Nothing was moved, renamed, restored or deleted. Which requests fail depends on which pages are damaged.
+
+### Files beside the database
+
+| File | What it is | A backup? |
+|---|---|---|
+| `/data/db/farming.db` | the live database | no |
+| `/data/db/farming.db-wal`, `/data/db/farming.db-shm` | the live database's write-ahead log and its index; any read, also the start-up check's, creates them if missing | **never** |
+| `/data/db/farming.db.bak-<time>` | a copy taken by a migration | yes |
+| `/data/db/backups/<name>/farming.db` | pre-repair and pre-deploy copies | yes |
+| `/data/backups/migrate/farming.db.premigrate-<time>` | a copy taken by a deploy before migrating | yes |
+
+A name ending in `-wal`, `-shm` or `-journal` is never a backup, whatever it starts with. Opening a backup read-only with `sqlite3` would create such files beside it, so step 4(a) checks backups on a work copy.
+
 ### A deploy refused on a damaged file
 
 Before its migration, `deploy.sh` stops Node-RED, checkpoints the file and checks it. A damaged file ends the deploy with exit 1 and one of three lines, measured on a device as the second:
@@ -70,7 +86,7 @@ An interrupted deploy, or a rollback to an older payload, leaves the same pair (
 
    ```sh
    TS=$(date +%Y%m%d-%H%M%S)
-   BK=/data/db/backups/damaged-$TS
+   BK=/data/db/damaged-$TS   # not under /data/db/backups: this is not a backup to restore from
    mkdir -p "$BK" && echo "$BK" > /tmp/osi-damaged-backup-dir
    cp -aL /srv/node-red/settings.js "$BK/settings.js"
    cp -aL /etc/init.d/node-red "$BK/node-red.init"
@@ -141,13 +157,19 @@ Nothing leaves the gateway. Try this first.
 Backups can be in three places: `/data/db/backups/*/farming.db` (pre-repair and pre-deploy copies), `/data/db/farming.db.bak-*` (beside the database, from migrations) and `/data/backups/migrate/farming.db.premigrate-*` (from deploys that migrated). List them, newest first, and check each without changing it:
 
 ```sh
-ls -lt /data/db/backups/*/farming.db /data/db/farming.db.bak-* /data/backups/migrate/farming.db.premigrate-* 2>/dev/null
-for b in $(ls -t /data/db/backups/*/farming.db /data/db/farming.db.bak-* /data/backups/migrate/farming.db.premigrate-* 2>/dev/null); do
+backups() { ls -t /data/db/backups/*/farming.db /data/db/farming.db.bak-* /data/backups/migrate/farming.db.premigrate-* 2>/dev/null | grep -v -e '-wal$' -e '-shm$' -e '-journal$'; }
+backups | xargs ls -l
+W=/data/db/check-work-$(date +%Y%m%d-%H%M%S)
+for b in $(backups); do
+  mkdir "$W" && cp -a "$b" "$W/c.db"
   echo "== $b"
-  sqlite3 -readonly "$b" "PRAGMA integrity_check;" | head -3
-  sqlite3 -readonly "$b" "SELECT max(version) FROM schema_migrations;"
+  sqlite3 -readonly "$W/c.db" "PRAGMA integrity_check;" | head -3
+  sqlite3 -readonly "$W/c.db" "SELECT max(version) FROM schema_migrations;"
+  rm -r "$W"
 done
 ```
+
+Each backup is checked on a copy in `$W`, which is removed after it, so nothing is created beside the backup itself. A `.bak-` or `.premigrate-` file is one self-contained file; it needs no side file.
 
 Take the newest one that answers `ok`. Put it in place with Node-RED stopped:
 
@@ -178,7 +200,7 @@ sqlite3 -version
 sqlite3 :memory: "PRAGMA compile_options;" | grep -i dbpage
 ```
 
-The second command must print `ENABLE_DBPAGE_VTAB`. A file damaged by the overlapping round was recovered with 3.51.2.
+The second command must print `ENABLE_DBPAGE_VTAB`. Two files damaged by the overlapping round were recovered with 3.51.2.
 
 **Copy off.** From the workstation, with Node-RED still stopped on the gateway (`<gateway>` is its address, `$BK` the directory from step 3):
 
@@ -210,7 +232,9 @@ for t in $(sqlite3 recovered.db "SELECT name FROM sqlite_master WHERE type='tabl
 done
 ```
 
-The recovered file must have the same tables as the damaged copy's `sqlite_master`, and no table may have fewer rows than the damaged copy still shows, except tables whose damaged count is an error. On the measured file every table came back with all its rows except `actuator_log` (2 rows, both lost), the migration head stayed 70, and no `lost_and_found` table appeared. A recovered file whose counts fall well below the last backup's has not recovered: stop.
+The recovered file must have the same tables as the damaged copy's `sqlite_master`. No table may have fewer rows than the damaged copy still shows, with two exceptions: a table whose damaged count is an error, and `actuator_log`, the valve log, which may come back empty. Any other shortfall: stop. A recovered file whose counts fall well below the last backup's has not recovered either: stop.
+
+Measured on two files damaged by the overlapping round (workstation, sqlite3 3.51.2), not a rule: both came back complete in schema (103 tables, 107 indexes, 64 triggers, 1 view) and in their users, devices, zones, readings (280,528 in the larger file), run records and schedules, at migration head 70, with no `lost_and_found` table. In both the valve log came back empty (2 rows and 39 rows lost), because its table was the damaged one. The larger file (106 MB) took 22 s; its `.recover` SQL was 584 MB, so the workstation needs free space of about six times the file.
 
 **Set write-ahead mode.** A recovered file uses a rollback journal; the gateway uses write-ahead logging:
 
