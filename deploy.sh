@@ -131,6 +131,13 @@ IRRIGATION_SYSNTPD_INIT="${IRRIGATION_SYSNTPD_INIT:-/etc/init.d/sysntpd}"
 IRRIGATION_NTPD_HOTPLUG="${IRRIGATION_NTPD_HOTPLUG:-/usr/sbin/ntpd-hotplug}"
 IRRIGATION_UCI="${IRRIGATION_UCI:-uci}"
 
+# Prints a file's permission bits in octal (e.g. 755). Neither the stock base
+# nor our images have stat(1) (NEW-27); node is on every gateway the deploy
+# can run on.
+file_mode_octal() {
+    node -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o7777).toString(8))' "$1"
+}
+
 install_irrigation_clock_hook() {
     echo "--- Conditional irrigation NTP clock hook ---"
     hook_existed=0
@@ -138,7 +145,7 @@ install_irrigation_clock_hook() {
     hook_was_active=0
     if [ -e "$IRRIGATION_CLOCK_HOOK" ]; then
         hook_existed=1
-        hook_prior_mode="$(stat -c '%a' "$IRRIGATION_CLOCK_HOOK" 2>/dev/null || true)"
+        hook_prior_mode="$(file_mode_octal "$IRRIGATION_CLOCK_HOOK" 2>/dev/null || true)"
         [ -n "$hook_prior_mode" ] || {
             echo "ERROR: could not record existing clock hook mode" >&2
             return 1
@@ -470,21 +477,20 @@ report_command_ledger_activation_failure() {
 }
 
 same_fs_or_die() {
-    # BusyBox ash lacks stat; fall back to df mount-point comparison
-    if command -v stat >/dev/null 2>&1; then
-        dev_a="$(stat -c %d /srv/node-red 2>/dev/null)"
-        dev_b="$(stat -c %d "$PAYLOADS_ROOT" 2>/dev/null)"
-        if [ -n "$dev_a" ] && [ -n "$dev_b" ] && [ "$dev_a" != "$dev_b" ]; then
-            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
-            exit 1
-        fi
-    else
-        mnt_a="$(df /srv/node-red 2>/dev/null | tail -1 | awk '{print $NF}')"
-        mnt_b="$(df "$PAYLOADS_ROOT" 2>/dev/null | tail -1 | awk '{print $NF}')"
-        if [ -n "$mnt_a" ] && [ -n "$mnt_b" ] && [ "$mnt_a" != "$mnt_b" ]; then
-            echo "ERROR: $PAYLOADS_ROOT is on a different filesystem than /srv/node-red; symlink flip would not be atomic." >&2
-            exit 1
-        fi
+    # The switch is one rename, so the payloads root ($2) must be on the
+    # filesystem of /srv/node-red ($1). Neither the stock base nor our images have stat(1);
+    # node, which the deploy needs anyway, compares the device numbers. A
+    # device that cannot be read refuses: the precondition is never assumed.
+    if ! fs_devices="$(node -e '
+        const fs = require("fs");
+        process.stdout.write(process.argv.slice(1).map((p) => String(fs.statSync(p).dev)).join(" "));
+    ' "$1" "$2" 2>/dev/null)" || [ -z "$fs_devices" ]; then
+        echo "ERROR: could not read the filesystem of $1 and $2; refusing before any file is replaced" >&2
+        exit 1
+    fi
+    if [ "${fs_devices% *}" != "${fs_devices#* }" ]; then
+        echo "ERROR: $2 is on a different filesystem than $1; symlink flip would not be atomic." >&2
+        exit 1
     fi
 }
 
@@ -2331,7 +2337,7 @@ run_native_sqlite3_preflight || exit 1
 
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
-same_fs_or_die
+same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
 if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then

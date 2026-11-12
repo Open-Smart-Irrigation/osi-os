@@ -28,7 +28,7 @@ function makeFixture(options = {}) {
   fs.chmodSync(uci, 0o755);
   if (options.service !== false) {
     fs.mkdirSync(path.dirname(service), { recursive: true });
-    fs.writeFileSync(service, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$SERVICE_LOG"\ncase "$1" in\n  enabled) [ "$SERVICE_ENABLED" = "1" ] ;;\n  restart)\n    [ -f "$IRRIGATION_CLOCK_HOOK" ] || exit 21\n    [ "$(stat -c %a "$IRRIGATION_CLOCK_HOOK")" = "755" ] || exit 22\n    [ "$RESTART_OK" = "1" ] ;;\n  enable) exit 99 ;;\n  *) exit 98 ;;\nesac\n');
+    fs.writeFileSync(service, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$SERVICE_LOG"\ncase "$1" in\n  enabled) [ "$SERVICE_ENABLED" = "1" ] ;;\n  restart)\n    [ -f "$IRRIGATION_CLOCK_HOOK" ] || exit 21\n    [ -x "$IRRIGATION_CLOCK_HOOK" ] || exit 22\n    [ "$RESTART_OK" = "1" ] ;;\n  enable) exit 99 ;;\n  *) exit 98 ;;\nesac\n');
     fs.chmodSync(service, 0o755);
   }
   if (options.adapter !== false) {
@@ -78,7 +78,8 @@ printf '%s' "$?" >"$INSTALL_STATUS"
     INSTALL_STDERR: stderrFile,
     INSTALL_STATUS: statusFile,
   };
-  const child = spawnSync('bash', ['-c', script], { env, encoding: 'utf8' });
+  if (options.path) env.PATH = options.path;
+  const child = spawnSync('sh', ['-c', script], { env, encoding: 'utf8' });
   assert.equal(child.error, undefined, child.error && child.error.message);
   const status = Number(fs.readFileSync(statusFile, 'utf8'));
   return {
@@ -163,6 +164,59 @@ test('missing or disabled NTP prerequisites fail closed without enable or UCI ed
       assert.doesNotMatch(result.uciLog, /set/);
     } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
   }
+});
+
+// NEW-27: neither the stock base nor our images have stat(1). Every deploy
+// after the first meets an existing hook; the retry after a cut is one of
+// them. The installer must not need stat for any of its paths.
+function pathWithout(dir, missing) {
+  const bin = path.join(dir, 'path-without-' + missing.join('-'));
+  fs.mkdirSync(bin);
+  const sources = [path.dirname(process.execPath), ...(process.env.PATH || '').split(':')];
+  for (const source of sources) {
+    let names = [];
+    try { names = fs.readdirSync(source); } catch (_) { continue; }
+    for (const name of names) {
+      if (missing.includes(name) || fs.existsSync(path.join(bin, name))) continue;
+      fs.symlinkSync(path.join(source, name), path.join(bin, name));
+    }
+  }
+  return bin;
+}
+
+test('without stat: an existing executable hook (a second deploy, a retry) is refreshed', () => {
+  const fixture = makeFixture({ hookMode: 0o755, service: false, adapter: false });
+  try {
+    const result = runFixture(fixture, { path: pathWithout(fixture.dir, ['stat']) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /could not record existing clock hook mode/);
+    assert.equal(mode(fixture.hook), 0o755);
+    assert.equal(result.serviceLog, '');
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test('without stat: an existing inactive hook keeps its mode when the restart fails, and a retry activates it', () => {
+  const fixture = makeFixture({ hookMode: 0o640 });
+  try {
+    const bin = pathWithout(fixture.dir, ['stat']);
+    const failed = runFixture(fixture, { path: bin, restartOk: false });
+    assert.notEqual(failed.status, 0);
+    assert.doesNotMatch(failed.stderr, /could not record existing clock hook mode/);
+    assert.equal(mode(fixture.hook), 0o640);
+    const retry = runFixture(fixture, { path: bin });
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(mode(fixture.hook), 0o755);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test('without stat: the first install activates the hook', () => {
+  const fixture = makeFixture();
+  try {
+    const result = runFixture(fixture, { path: pathWithout(fixture.dir, ['stat']) });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(mode(fixture.hook), 0o755);
+    assert.match(result.serviceLog, /restart/);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
 });
 
 console.log('OK (conditional irrigation clock installer harness)');
