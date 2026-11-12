@@ -57,8 +57,8 @@ OSI_BOOTSTRAP_INIT="/etc/init.d/osi-bootstrap"
 OSI_BOOTSTRAP_STAMP="/etc/osi-bootstrap.done"
 CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
 # The image ships the bootstrap script in /usr/share/node-red; this script
-# fetches the current one to /srv/node-red. osi-bootstrap prefers the /srv copy
-# and falls back to the image copy.
+# fetches the current one to /srv/node-red. osi-bootstrap runs the copy with
+# the higher OSI_BOOTSTRAP_REVISION (none counts as 0), the /srv copy on a tie.
 BOOTSTRAP_SCRIPT_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
 BOOTSTRAP_SCRIPT_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 # Tracks whether this deploy's staged payload has already been flipped into
@@ -598,10 +598,14 @@ enable_osi_bootstrap() {
 # and rewrite the env file. "Provisioned" uses the service's own test (stamp
 # plus a sensors application UUID in the env file).
 print_bootstrap_note() {
+    pbn_script="$BOOTSTRAP_SCRIPT_ROM"
     if [ -f "$BOOTSTRAP_SCRIPT_FALLBACK" ]; then
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
-    else
-        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+        if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
+            pbn_rev_srv="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$BOOTSTRAP_SCRIPT_FALLBACK" 2>/dev/null | head -n 1)"
+            pbn_rev_rom="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$BOOTSTRAP_SCRIPT_ROM" 2>/dev/null | head -n 1)"
+            [ "${pbn_rev_srv:-0}" -ge "${pbn_rev_rom:-0}" ] || pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+        fi
     fi
     echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
     echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."

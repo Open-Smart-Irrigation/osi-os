@@ -12,6 +12,31 @@ stamp_valid() {
 	return 0
 }
 
+# The OSI_BOOTSTRAP_REVISION a bootstrap script declares; 0 without one.
+bootstrap_revision() {
+	local revision
+	revision="$(sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);.*$/\1/p' "$1" 2>/dev/null | head -n 1)"
+	echo "${revision:-0}"
+}
+
+# deploy.sh writes the current script to /srv/node-red and leaves the image
+# copy alone; a sysupgrade replaces the image copy and keeps /srv. Of the two,
+# the higher revision runs, and the deployed copy on a tie: an image from
+# before the revision mark counts as 0.
+select_bootstrap_script() {
+	if [ -f "$BOOTSTRAP_FALLBACK" ] && [ -f "$BOOTSTRAP_ROM" ]; then
+		if [ "$(bootstrap_revision "$BOOTSTRAP_FALLBACK")" -ge "$(bootstrap_revision "$BOOTSTRAP_ROM")" ]; then
+			echo "$BOOTSTRAP_FALLBACK"
+		else
+			echo "$BOOTSTRAP_ROM"
+		fi
+	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
+		echo "$BOOTSTRAP_FALLBACK"
+	elif [ -f "$BOOTSTRAP_ROM" ]; then
+		echo "$BOOTSTRAP_ROM"
+	fi
+}
+
 boot() {
 	start
 }
@@ -21,15 +46,9 @@ start() {
 		return 0
 	fi
 
-	# deploy.sh writes the current script to /srv/node-red and leaves the image
-	# copy alone, so the deployed copy wins over an older image's script.
-	local bootstrap_script=""
+	local bootstrap_script
 	local provisioned_this_boot=0
-	if [ -f "$BOOTSTRAP_FALLBACK" ]; then
-		bootstrap_script="$BOOTSTRAP_FALLBACK"
-	elif [ -f "$BOOTSTRAP_ROM" ]; then
-		bootstrap_script="$BOOTSTRAP_ROM"
-	fi
+	bootstrap_script="$(select_bootstrap_script)"
 
 	if [ -z "$bootstrap_script" ]; then
 		logger -t osi-bootstrap "bootstrap script not found, will retry next boot"

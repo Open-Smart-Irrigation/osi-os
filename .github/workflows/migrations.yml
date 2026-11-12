@@ -125,6 +125,10 @@ jobs:
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-no-stray-ddl.js
       - run: node scripts/verify-flows-size-ratchet.js
+      # osi-bootstrap runs the bootstrap copy with the higher revision, so every
+      # change to chirpstack-bootstrap.js must raise OSI_BOOTSTRAP_REVISION.
+      - run: node --test scripts/verify-bootstrap-revision.test.js
+      - run: node scripts/verify-bootstrap-revision.js
       - run: node scripts/verify-seed-replay.js
       # The bundled seed must ship stamped at head, or every fresh install
       # falls into baseline-existing-db's reference-chain rebuild on the Pi.

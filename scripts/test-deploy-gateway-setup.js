@@ -862,7 +862,7 @@ test('after an application deploy the service runs the deployed bootstrap, not t
   const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
   const fallback = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
   fs.mkdirSync(path.dirname(rom), { recursive: true }); fs.mkdirSync(path.dirname(fallback), { recursive: true });
-  fs.writeFileSync(rom, 'old permissive ROM writer'); fs.writeFileSync(fallback, 'updated guarded /srv writer');
+  fs.writeFileSync(rom, 'old permissive ROM writer'); fs.writeFileSync(fallback, '// updated guarded /srv writer\nconst OSI_BOOTSTRAP_REVISION = 1;\n');
   writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', `printf '%s\n' "$1" >> ${JSON.stringify(fx.log)}`]);
@@ -875,6 +875,36 @@ test('after an application deploy the service runs the deployed bootstrap, not t
   assert.equal(calls.includes(rom), false, 'the older image script does not run');
   assert.ok(calls.includes('restart-request request-restart chirpstack_bootstrap 60'));
   assert.ok(fs.existsSync(fx.stampFile));
+});
+
+// Which copy runs when both exist: the higher OSI_BOOTSTRAP_REVISION, the
+// deployed one on a tie, and a copy without the line counts as 0. The banner
+// must name the same copy as the service.
+test('the service and the banner pick the bootstrap copy with the higher revision', () => {
+  const mark = (n) => (n === null ? "'use strict';\n" : `'use strict';\nconst OSI_BOOTSTRAP_REVISION = ${n};\n`);
+  const cases = [
+    { name: 'old image without a mark, deployed copy marked (S-5)', rom: null, srv: 1, expect: 'srv' },
+    { name: 'newer image after a sysupgrade, older deployed copy', rom: 2, srv: 1, expect: 'rom' },
+    { name: 'marked image, deployed copy from before the mark', rom: 1, srv: null, expect: 'rom' },
+    { name: 'same revision', rom: 3, srv: 3, expect: 'srv' },
+    { name: 'deployed copy newer than the image', rom: 2, srv: 5, expect: 'srv' },
+    { name: 'neither marked', rom: null, srv: null, expect: 'srv' },
+  ];
+  const select = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('bootstrap_revision() {'), BOOTSTRAP_INIT.indexOf('boot() {'));
+  for (const c of cases) {
+    const fx = bootstrapFixture({ enabled: true });
+    const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
+    const srv = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
+    fs.mkdirSync(path.dirname(rom), { recursive: true }); fs.mkdirSync(path.dirname(srv), { recursive: true });
+    fs.writeFileSync(rom, mark(c.rom)); fs.writeFileSync(srv, mark(c.srv));
+    const expected = c.expect === 'srv' ? srv : rom;
+    const service = runShell(`BOOTSTRAP_ROM=${JSON.stringify(rom)}\nBOOTSTRAP_FALLBACK=${JSON.stringify(srv)}\n${select}\nselect_bootstrap_script`, { PATH: childPath(fx.binDir) });
+    assert.equal(service.status, 0, service.stderr);
+    assert.equal(service.stdout.trim(), expected, `service: ${c.name}`);
+    const banner = runShell(`set -eu\nOSI_BOOTSTRAP_INIT=${JSON.stringify(fx.init)}\nOSI_BOOTSTRAP_STAMP=${JSON.stringify(fx.stampFile)}\nCHIRPSTACK_ENV_FILE=${JSON.stringify(fx.envFile)}\nBOOTSTRAP_SCRIPT_ROM=${JSON.stringify(rom)}\nBOOTSTRAP_SCRIPT_FALLBACK=${JSON.stringify(srv)}\n${extractFunction('print_bootstrap_note')}\nprint_bootstrap_note`, { PATH: childPath(fx.binDir) });
+    assert.equal(banner.status, 0, banner.stderr);
+    assert.ok(banner.stdout.includes(expected) && !banner.stdout.includes(c.expect === 'srv' ? rom : srv), `banner: ${c.name}\n${banner.stdout}`);
+  }
 });
 
 // A gateway that has no /srv copy still runs the image script; whatever
