@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20.18.3'
           cache: npm
           cache-dependency-path: scripts/fixtures/release-smoke/package-lock.json
       - name: Install SQLite CLI
@@ -35,6 +35,8 @@ jobs:
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
         run: node scripts/test-release-smoke.js
+      - name: Dendro observations and control survive a real restart
+        run: node scripts/test-dendro-provider-restart.js
       - name: Refuse a release with known failures
         run: node scripts/release-smoke-gate.js --ci
       - name: Preserve runtime evidence

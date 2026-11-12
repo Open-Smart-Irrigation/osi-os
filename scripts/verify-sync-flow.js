@@ -2405,7 +2405,11 @@ expectIncludes('Daily Dendrometer Analytics', 'vpd_override_summary:vpdOverrideS
 expectIncludes('Daily Dendrometer Analytics', 'sd_vpd_summary:sdVpdSummary', 'stores SD-VPD diagnostics in recommendation_json');
 expectIncludes('Get Zone Recommendations', 'zdr.recommendation_json', 'returns recommendation_json from the zone recommendation query');
 expectIncludes('Get Zone Recommendations', 'recommendation_json:r.recommendation_json ?? null', 'exposes recommendation_json in the local recommendations API');
-expectIncludes('Daily Dendrometer Analytics', "env.get('OPENAGRI_WEATHER_RADIUS_KM')", 'supports configurable OpenAgri history search radius for edge analytics');
+expectIncludes('Daily Dendrometer Analytics', 'DA.createWeatherInputs(', 'loads the module weather-input resolver');
+expectIncludes('Daily Dendrometer Analytics', 'weatherInputs.forZone(', 'uses the module weather-input resolver for each zone');
+const dendroWeatherRoot = path.join(path.dirname(flowPath), 'node-red/osi-dendro-analytics');
+expectFileIncludes('osi-dendro-analytics/index.js', fs.readFileSync(path.join(dendroWeatherRoot, 'index.js'), 'utf8'), "require('./weather-inputs').createWeatherInputs", 'delegates weather inputs to the shipped implementation');
+expectFileIncludes('osi-dendro-analytics/weather-inputs.js', fs.readFileSync(path.join(dendroWeatherRoot, 'weather-inputs.js'), 'utf8'), "env.get('OPENAGRI_WEATHER_RADIUS_KM')", 'supports configurable OpenAgri history search radius for edge analytics');
 expectIncludes('Get Zone Environment Summary', 'CREATE TABLE IF NOT EXISTS zone_weather_cache', 'creates a local weather cache table for environment summaries');
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES')", 'supports configurable current-weather cache TTL');
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES')", 'supports configurable forecast cache TTL');

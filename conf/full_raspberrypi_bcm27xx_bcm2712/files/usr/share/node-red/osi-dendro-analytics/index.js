@@ -473,6 +473,8 @@ function requestJson(method,urlString,options){
   });
 }
 module.exports = {
+  createWeatherInputs: context => require('./weather-inputs').createWeatherInputs({ ...context, analytics: module.exports }),
+  recommendationChangedWhere: require('./weather-inputs').RECOMMENDATION_CHANGED_WHERE,
   requestJson,
   round,
   avg,

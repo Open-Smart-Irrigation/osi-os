@@ -2,9 +2,9 @@
 
 ## Current update: NEW-1
 
-On main base `b0a5e3cf` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643), remove only `dendro-weather-transport`: the earlier unchanged-list run proved it passed with 5.4 mm rain, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed output retains its historical filename; its header names the current base and candidate payload checksum.
+On main base `103e4c54` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643), remove only `dendro-weather-transport`: the earlier unchanged-list run proved it passed with 5.4 mm rain, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed output retains its historical filename; its header names the current base and candidate payload checksum.
 
-The transport also bounds dropped and stalled responses; its separate regression cases check sensor-only fallback for the current and later zones.
+The transport also bounds dropped and stalled responses. Provider control is off by default; the smoke assertion checks collected rainfall/VPD rather than the action. Separate regressions compare control outputs with the shipped main node and exercise the real startup rerun.
 
 ## Earlier baseline updates
 

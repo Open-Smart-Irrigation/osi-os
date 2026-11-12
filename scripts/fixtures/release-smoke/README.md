@@ -4,7 +4,7 @@ This suite starts the shipped flows in Node-RED and drives their HTTP API.
 A green PR result permits only the exact failures in `known-failures.json`.
 It does not permit a release while that list has entries.
 
-From the repository root, with Node 22 and the `sqlite3` CLI installed
+From the repository root, with Node 20.18.3 and the `sqlite3` CLI installed
 (on the maintainer workstation, run suites serially through `osi-heavy` and
 set `TMPDIR` to a disk-backed scratch directory):
 
@@ -13,6 +13,7 @@ npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
 node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
 node scripts/test-release-smoke-controls.js
 node scripts/test-release-smoke.js
+node scripts/test-dendro-provider-restart.js
 node scripts/test-release-smoke.js --release
 ```
 
@@ -94,6 +95,17 @@ and fire the shipped clock worker. The runtime clock and product code stay
 unchanged. These are accelerated persistence scenarios, not elapsed-time or
 hardware qualification tests.
 
+The separate restart regression runs two genuine Node-RED processes on one
+saved database, retaining the shipped 30-second startup inject. It checks both
+provider-control settings and both profiles for retained observations, action,
+scheduler duration and recommendation version. Its fixtures and temporary
+runtime trees are removed after each trial.
+
+The weather transport assertion tests collected rain/VPD, independent of the
+irrigation action. Provider control is off unless the existing per-gateway
+app_settings operator key explicitly enables it; see
+[dendrometer provider control](../../../docs/development/dendro-provider-control.md).
+
 ## Assertions
 
 | Cases | A defect is present when |
@@ -154,7 +166,7 @@ see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
-The current gate on main base `b0a5e3cf` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643) removes only NEW-1. The earlier unchanged-list run proved `dendro-weather-transport` now passes: 5.4 mm rainfall, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed baseline identifies the current base and candidate flow checksum in its header.
+The current gate on main base `103e4c54` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643) removes only NEW-1. The earlier unchanged-list run proved `dendro-weather-transport` now passes: 5.4 mm rainfall, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed baseline identifies the current base and candidate flow checksum in its header.
 
 On the original payload baseline `88f6e84bb`, strict mode reported 200 passed, 0 unexpected
 failures and 11 known failing cases, then exits 1. The original list had 26

@@ -1,9 +1,10 @@
-NEW-1 follow-up on main base b0a5e3cfa2b905256a0e6e5491230e7d663d420c.
-Candidate flow SHA-256: a998be072f979e2c6cb4f1ac3c542fd65ec4320652f9caf2523b87de20ce0fc7
+Provider collection with irrigation control default off, main base 103e4c547d431a8a49009eceb4d03aecbbe11c7e.
+Candidate flow SHA-256: 08d49306d3d25b00614314cbe08f77340e0d639ea96b1f6c8e8f6860841b370d
+Runtime: official Node 20.18.3, Node-RED 3.1.15.
 Ordinary command: node scripts/test-release-smoke.js
 Expected exit: 0 (four exact known failures remain; strict release still refuses them).
 
-PROFILE PARITY: 2891 flow/helper files byte-identical
+PROFILE PARITY: 2892 flow/helper files byte-identical
 EVIDENCE: <scratch>/osi-release-smoke
 PASS runtime-started
 PASS login-and-lists
@@ -221,4 +222,4 @@ KNOWN TO FAIL F-7 scheduler-irrigates [{"code":"scheduler-persistence","actual":
 KNOWN TO FAIL F-13 no-token:POST /api/account-link [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-13 no-token:POST /api/sync/force [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-14 startup-node-errors [{"code":"node-errors","actual":[{"id":"dendro-readings-sqlite","msg":"Sqlite database not configured"}]}]
-RESULT passed=212 failed=0 known-to-fail=4; 26.9s; peak RSS 260 MiB
+RESULT passed=212 failed=0 known-to-fail=4; 27.7s; peak RSS 239 MiB
