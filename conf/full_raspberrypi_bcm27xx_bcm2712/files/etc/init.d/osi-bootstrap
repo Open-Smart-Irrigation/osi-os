@@ -21,12 +21,14 @@ start() {
 		return 0
 	fi
 
+	# deploy.sh writes the current script to /srv/node-red and leaves the image
+	# copy alone, so the deployed copy wins over an older image's script.
 	local bootstrap_script=""
 	local provisioned_this_boot=0
-	if [ -f "$BOOTSTRAP_ROM" ]; then
-		bootstrap_script="$BOOTSTRAP_ROM"
-	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
+	if [ -f "$BOOTSTRAP_FALLBACK" ]; then
 		bootstrap_script="$BOOTSTRAP_FALLBACK"
+	elif [ -f "$BOOTSTRAP_ROM" ]; then
+		bootstrap_script="$BOOTSTRAP_ROM"
 	fi
 
 	if [ -z "$bootstrap_script" ]; then
@@ -50,7 +52,10 @@ start() {
 	fi
 
 	logger -t osi-bootstrap "running $(basename "$bootstrap_script")..."
-	if node "$bootstrap_script"; then
+	# The script writes the ChirpStack API key to .chirpstack.env. An older
+	# image's script creates that file with the process umask, so every file it
+	# creates here is owner-only.
+	if (umask 077 && exec node "$bootstrap_script"); then
 		if touch /etc/osi-bootstrap.done; then
 			provisioned_this_boot=1
 			logger -t osi-bootstrap "bootstrap completed successfully"

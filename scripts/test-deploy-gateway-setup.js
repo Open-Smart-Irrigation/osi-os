@@ -721,11 +721,13 @@ test('the header shows the download-then-run form, not a pipe into sh', () => {
   assert.match(header, /curl -fsSL http:\/\/127\.0\.0\.1:9876\/deploy\.sh -o \/tmp\/osi-os-deploy\.sh && sh \/tmp\/osi-os-deploy\.sh; rc=\$\?; rm -f \/tmp\/osi-os-deploy\.sh; exit "\$rc"/);
 });
 
-function runBootstrapNote(fx, { rom }) {
+function runBootstrapNote(fx, { rom, fallback = true }) {
   const romPath = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
   const fallbackPath = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
-  fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
-  fs.writeFileSync(fallbackPath, '');
+  if (fallback) {
+    fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
+    fs.writeFileSync(fallbackPath, '');
+  }
   if (rom) {
     fs.mkdirSync(path.dirname(romPath), { recursive: true });
     fs.writeFileSync(romPath, '');
@@ -744,11 +746,16 @@ print_bootstrap_note
 }
 
 test('the banner names the bootstrap script path the service runs on this gateway', () => {
+  // A flashed image after a deploy has both copies; the service runs the /srv one.
   const flashed = bootstrapFixture({ enabled: true, stamp: true, env: PROVISIONED_ENV });
   const { r: r1, romPath: rom1, fallbackPath: fb1 } = runBootstrapNote(flashed, { rom: true });
   assert.equal(r1.status, 0, r1.stderr);
-  assert.ok(r1.stdout.includes(rom1), r1.stdout);
-  assert.ok(!r1.stdout.includes(fb1), r1.stdout);
+  assert.ok(r1.stdout.includes(fb1), r1.stdout);
+  assert.ok(!r1.stdout.includes(rom1), r1.stdout);
+  const imageOnly = bootstrapFixture({ enabled: true, stamp: true, env: PROVISIONED_ENV });
+  const { r: r3, romPath: rom3 } = runBootstrapNote(imageOnly, { rom: true, fallback: false });
+  assert.equal(r3.status, 0, r3.stderr);
+  assert.ok(r3.stdout.includes(rom3), r3.stdout);
   const stock = bootstrapFixture({ enabled: true });
   const { r: r2, romPath: rom2, fallbackPath: fb2 } = runBootstrapNote(stock, { rom: false });
   assert.equal(r2.status, 0, r2.stderr);
@@ -757,8 +764,8 @@ test('the banner names the bootstrap script path the service runs on this gatewa
   for (const note of [
     'this deploy secures the canonical env file using the /srv/node-red bootstrap copy.',
     'the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines.',
-    'osi-bootstrap may still prefer an older ROM script; this deploy does not replace it.'
   ]) assert.ok(r2.stdout.includes(note), r2.stdout);
+  assert.doesNotMatch(r2.stdout, /older ROM script/);
 });
 
 test('the banner never tells the operator to run the bootstrap script directly', () => {
@@ -837,7 +844,20 @@ test('running the service by hand provisions and writes the stamp', () => {
   assert.ok(initCalls(fx).some((c) => c.startsWith('restart-request request-restart chirpstack_bootstrap')), initCalls(fx).join('\n'));
 });
 
-test('service still selects an old ROM bootstrap after deploy updates the fallback copy', () => {
+// The service body with every gateway path pointed into the fixture.
+function serviceBody(fx, rom, fallback) {
+  return BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
+    .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
+    .split('/usr/share/node-red/chirpstack-bootstrap.js').join(rom)
+    .split('/srv/node-red/chirpstack-bootstrap.js').join(fallback)
+    .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
+    .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
+}
+
+// v0.8.2 review, S-5: an application deploy updates only the /srv copy, so
+// the service must run that one, not the older image script.
+test('after an application deploy the service runs the deployed bootstrap, not the older image copy', () => {
   const fx = bootstrapFixture({ enabled: true, env: PROVISIONED_ENV });
   const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
   const fallback = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
@@ -848,19 +868,37 @@ test('service still selects an old ROM bootstrap after deploy updates the fallba
   writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', `printf '%s\n' "$1" >> ${JSON.stringify(fx.log)}`]);
   writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', `echo "restart-request $*" >> ${JSON.stringify(fx.log)}`]);
-  const body = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
-    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
-    .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
-    .split('/usr/share/node-red/chirpstack-bootstrap.js').join(rom)
-    .split('/srv/node-red/chirpstack-bootstrap.js').join(fallback)
-    .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
-    .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
-  const run = runShell('BOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_FALLBACK=' + JSON.stringify(fallback) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
+  const run = runShell('BOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_FALLBACK=' + JSON.stringify(fallback) + '\n' + serviceBody(fx, rom, fallback) + '\nstart', { PATH: childPath(fx.binDir) });
   assert.equal(run.status, 0, run.stderr);
   const calls = fs.readFileSync(fx.log, 'utf8').trim().split('\n');
-  assert.equal(calls[0], rom, 'the old ROM writer remains selected after the fallback is updated');
+  assert.equal(calls[0], fallback, 'the deployed /srv script runs');
+  assert.equal(calls.includes(rom), false, 'the older image script does not run');
   assert.ok(calls.includes('restart-request request-restart chirpstack_bootstrap 60'));
-  assert.equal(calls.filter(call => call === rom).length, 1);
+  assert.ok(fs.existsSync(fx.stampFile));
+});
+
+// A gateway that has no /srv copy still runs the image script; whatever
+// script runs, the credential file it creates is owner-only. The writer below
+// is the v0.8.1 image's writeEnvFile, which passes no mode; the key is made up.
+test('a credential file the service creates through an old image script is owner-only', () => {
+  const fx = bootstrapFixture({ enabled: true });
+  const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
+  fs.mkdirSync(path.dirname(rom), { recursive: true });
+  fs.writeFileSync(rom, [
+    "const fs = require('fs');",
+    `fs.writeFileSync(${JSON.stringify(fx.envFile)}, 'CHIRPSTACK_API_KEY=made-up-test-key\\nCHIRPSTACK_APP_SENSORS=0a1b2c3d-0000-4000-8000-000000000001\\n', 'utf8');`,
+  ].join('\n'));
+  writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', `exec ${JSON.stringify(process.execPath)} "$@"`]);
+  writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', 'exit 0']);
+  const missing = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
+  const run = runShell('umask 022\nBOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_FALLBACK=' + JSON.stringify(missing) + '\n' +
+    serviceBody(fx, rom, missing) + '\nstart\n[ "$(umask)" = 0022 ] || { echo "umask leaked: $(umask)" >&2; exit 9; }', { PATH: childPath(fx.binDir) });
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(fs.existsSync(fx.envFile), 'the old writer created the env file');
+  assert.equal((fs.statSync(fx.envFile).mode & 0o777).toString(8), '600');
   assert.ok(fs.existsSync(fx.stampFile));
 });
 
