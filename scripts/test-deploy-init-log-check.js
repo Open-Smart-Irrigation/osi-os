@@ -54,6 +54,10 @@ function stubs(dir, logreadMode) {
     empty: 'exit 0',
     rotated: 'printf "%s\\n" "Nov 12 12:05:00 gw kernel: later line"',
     ring: 'tail -n 3 "$LOG"',
+    // The device case (third fixture, ring full of short lines): the lines
+    // leaving the ring are longer than those entering it, so the line count
+    // FALLS across the restart; the start's lines are all still there.
+    shrunk: 'awk -v n="$BEFORE_LINES" \'NR > n\' "$LOG"',
   };
   if (logreadMode !== 'absent') write('logread', reads[logreadMode]);
   // Only the shell's own needs beside the stubs: no system logread or logger.
@@ -101,7 +105,7 @@ ${run}
 `;
   const result = spawnSync('/bin/sh', ['-c', script], {
     encoding: 'utf8',
-    env: { PATH: stubs(dir, logread), LOG: log, START: startFile, NODE_STATE: state, GUI_RC: String(gui), NODE_RED_INIT_TIMEOUT: '6', NODE_RED_HEALTH_TIMEOUT: '2' },
+    env: { PATH: stubs(dir, logread), LOG: log, START: startFile, BEFORE_LINES: String(before.split('\n').filter(Boolean).length), NODE_STATE: state, GUI_RC: String(gui), NODE_RED_INIT_TIMEOUT: '6', NODE_RED_HEALTH_TIMEOUT: '2' },
   });
   assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
   const get = (key) => ((new RegExp(`^${key}=(.*)$`, 'm').exec(result.stdout) || [])[1] || '').trim();
@@ -137,6 +141,20 @@ for (const [name, logread, start] of [
 test('a healthy start on a full ring is not judged by line position', () => {
   const r = judge({ logread: 'ring', start: { flood: 40 }, before: 'x\n'.repeat(200) });
   assert.notEqual(r.verdict, 'failed', r.reason);
+});
+
+// NEW-30, as measured on a device: a full ring whose line count falls from
+// 3,262 to 2,963 across the restart. A position taken before the restart
+// points past the end; the marker still finds the completion line.
+test('a healthy start on a ring whose line count falls across the restart is healthy', () => {
+  const before = Array.from({ length: 60 }, (_, i) => `Nov 12 11:59:00 gw kernel: a longer line from before the deploy, number ${i}`).join('\n') + '\n';
+  const r = judge({ logread: 'shrunk', before });
+  assert.equal(r.verdict, 'healthy', r.reason);
+});
+
+test('no position in the log ring is read anywhere in deploy.sh', () => {
+  assert.doesNotMatch(DEPLOY, /logread[^\n]*\|\s*wc -l/);
+  assert.doesNotMatch(DEPLOY, /tail -n "\+\$\(\(/);
 });
 
 // Observed failures: each of them fails the start.
