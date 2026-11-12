@@ -102,9 +102,9 @@ hardware qualification tests.
 | Eight accepted valve commands | HTTP is not 202, the stored action is wrong/missing, or the exact port/frame differs. Each command uses a fresh motorized valve. |
 | Eight refused commands and invalid opens | A sensor is accepted as a valve, an invalid open is accepted, or refusal changes the device/log or sends a frame. |
 | Open, OPEN report, CLOSED report, open again | Reports do not update state/settle the stored expectation, another open fails, or the second frame is missing. |
-| Lost reports, with and without the NTP marker | A three-day-old unresolved command still prevents a later open or its stored expectation. |
-| Reports without the NTP marker | CLOSED remains OPEN, close evidence is absent, or the next open is blocked. |
-| Timed close and flushing, followed by an open | A CLOSED report after three days still leaves the later open fenced. |
+| Lost reports, with and without the NTP marker | A later open is refused: after three days, or at once with no ageing, report or monitor tick (a third open too). The valve's complete call list at the radio stand-in differs from one expiry-free `2/4101` per open with no flush, or the records are not one per commanded open with its own command id and 60 seconds. |
+| Reports without the NTP marker | The last accepted report is not shown (OPEN, then CLOSED), the next open is refused, a record without a command exists although the reports belong to one open, the first open does not carry both reports as untrusted evidence, or it has an observed time or a completed state. A third open after the marker returns must be accepted and leave the earlier records as they are. |
+| Timed close and flushing, followed by an open | The open is refused: after three days and a CLOSED report, or at once behind the service command. The call list differs from the service frame followed by one expiry-free `2/4101` with no flush between, or the open has no record of its own. |
 | Safety close without the NTP marker | The close fails, is not stored/sent, or carries a queue expiry. |
 | Assign/remove device, delete device/zone | The route fails or the requested assignment, unclaim or tombstone is absent. No radio frame is expected. |
 | Weekly save/change/delete | HTTP or stored rows disagree, or any of the seven complete daily plan frames and status frame differs. Deletion must send empty plans. |
@@ -163,24 +163,19 @@ under F-7 and reaches the existing NEW-1 in a populated dendrometer weather
 case, expanding the list from 9 to 11 without a new finding ID.
 See [the per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
 for each merged fix, the single finding behind every remaining case, and the
-assertions that need changing or strengthening for stage 1. The six stage-1 valve scenarios remain unchanged.
+assertions that need changing or strengthening for stage 1.
 
-The checked-in output is `baseline-88f6e84bb.txt`. Each line below names one
-remaining case; the JSON file carries its exact signatures.
+The checked-in output of that baseline is `baseline-88f6e84bb.txt`.
+
+The valve fix (valve control as in v0.8.1, #648) removed the six F-1, F-2 and
+F-4 cases from the list, changed their assertions and added five cases that
+retry at once. With it, strict mode reports 211 passed, 0 unexpected failures
+and 5 known failing cases, then exits 1; that output is
+`after-valve-fix-648.txt`, and the mapping document says what each changed
+case asserts. Each line below names one remaining case; the JSON file carries
+its exact signatures.
 
 - F-14: `startup-node-errors`.
-
-- F-1: `open-no-report-open-later`.
-
-- F-2: `no-clock-open-report-close-open`.
-
-- F-1: `no-clock-open-no-report-open-later`.
-
-- F-4: `open-after:close-duration`.
-
-- F-4: `open-after:timed-close`.
-
-- F-4: `open-after:flushing`.
 
 - F-13: `no-token:POST /api/account-link`.
 
@@ -197,6 +192,9 @@ not qualify hardware, radio delivery, images or first boot, native ABI,
 authenticated cloud sync, provisioned credentials, real provider services,
 hardware clock/reboot behavior, conditional-owner transitions or authenticated
 cancel. Most API routes are tested only for unauthenticated refusal. Arbitrary
-internal exceptions (F-15), every future timer/data path and stage-1/v0.8.1
-differential behavior remain outside this suite. The stage-1 PR owns changes
-to the six F-1/F-2/F-4 scenarios and their stronger immediate-command assertions.
+internal exceptions (F-15) and every future timer/data path remain outside
+this suite. The comparison of valve control with v0.8.1, sequence by sequence,
+is `scripts/test-valve-v081-equivalence.js`; this suite shows the same
+decisions through the real runtime for eleven valve cases only. Two opens sent
+at once are both accepted here, as the owner decided; the suite does not show
+what the valve then does.

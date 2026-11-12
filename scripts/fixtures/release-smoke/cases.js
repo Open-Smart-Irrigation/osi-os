@@ -73,6 +73,18 @@ exports.run = async function(h) {
     await test('command-invalid:'+JSON.stringify(body),async check=>{const eui=(await device());const r=await h.http('POST','/api/valve/'+eui,body,token);httpCheck(check,r,400);check('radio',radio(eui).length===0,radio(eui));check('stored',(await logs(eui)).length===0,(await logs(eui)));});
   }
   const open=eui=>h.http('POST','/api/valve/'+eui,{action:'OPEN_FOR_DURATION',duration_minutes:1},token);
+  // Valve control as in v0.8.1 (owner decision of 2026-11-12): an ordinary open is accepted whatever
+  // came before it. The cases below assert the complete call list at the radio stand-in for the
+  // valve, not a count: every enqueue with its port, bytes and expiry, and any flush. An ordinary
+  // frame carries no queue expiry of the gateway's own. They also assert one record per commanded
+  // open, each with its own command id and its 60 seconds, and no record without a command.
+  const OPEN_FRAME={fn:'enqueue',port:2,hex:'4101',expiresAt:null};
+  const radioCalls=eui=>h.state.cs.calls.filter(c=>c.eui===eui).map(c=>c.fn==='enqueue'?{fn:c.fn,port:c.port,hex:c.hex,expiresAt:c.expiresAt}:{fn:c.fn});
+  const records=async eui=>(await h.sql('SELECT * FROM valve_actuation_expectations WHERE device_eui=? ORDER BY rowid',eui));
+  const recordSummary=rows=>rows.map(r=>({command:r.command_id!=null,seconds:Number(r.commanded_duration_seconds),state:r.reconciliation_state,trigger:r.trigger}));
+  const openRecords=rows=>rows.filter(r=>r.command_id!=null&&Number(r.commanded_duration_seconds)===60);
+  const oneRecordPerOpen=(rows,count)=>openRecords(rows).length===count&&new Set(openRecords(rows).map(r=>r.command_id)).size===count&&rows.every(r=>r.command_id!=null);
+  const evidenceOf=r=>{try{return Object.keys((JSON.parse(r.transport_json||'{}')||{}).untrusted_report||{}).sort().join('+')||null;}catch(_){return 'unreadable';}};
   await test('open-report-close-open',async(check,e)=>{
     const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
     await h.uplink(eui,1);check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
@@ -86,18 +98,44 @@ exports.run = async function(h) {
   await test('open-no-report-open-later',async(check,e)=>{
     const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
     (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
-    httpCheck(check,await open(eui),202,'later-http');e.stored=(await expectations(eui));
-    check('radio',radio(eui).length===2,radio(eui));
-    check('stored',e.stored.length===2,e.stored.map(r=>r.reconciliation_state));
+    httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
+    check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
+    check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
+  });
+  // The retry without three days of ageing, without a report and without a monitor tick: a
+  // refusal that lets go after any wait, however short, fails here. A third open is accepted too.
+  await test('open-no-report-open-at-once',async(check,e)=>{
+    const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
+    httpCheck(check,await open(eui),202,'second-http');httpCheck(check,await open(eui),202,'third-http');
+    e.stored=(await records(eui));e.radio=radioCalls(eui);
+    check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME,OPEN_FRAME]),e.radio);
+    check('stored',e.stored.length===3&&oneRecordPerOpen(e.stored,3),recordSummary(e.stored));
   });
   await test('no-clock-open-report-close-open',async(check,e)=>{
     h.setMarker(false);
     try {
+      // The valve's OPEN and CLOSED reports reach the gateway before its first time signal, as
+      // after a power cut. current_state is the last report the gateway accepted, not the valve's
+      // physical state.
       const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
       await h.uplink(eui,1);check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
       await h.uplink(eui,0);check('closed-state',(await row(eui)).current_state==='CLOSED',(await row(eui)).current_state);
       httpCheck(check,await open(eui),202,'second-http');
-      e.stored=(await expectations(eui));check('stored',e.stored.some(r=>r.observed_close_at),e.stored.map(r=>r.reconciliation_state));check('radio',radio(eui).length===2,radio(eui));
+      e.stored=(await records(eui));e.radio=radioCalls(eui);
+      check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
+      // One record per commanded open and no run without a command: the reports belong to the
+      // first open alone, so no second, unexplained record is written.
+      check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
+      // The reports are kept on the first open as evidence with an untrusted time. Without a
+      // time signal no observed time and no completion is invented for it.
+      const first=e.stored[0]||{},second=e.stored[1]||{};
+      check('report-evidence',evidenceOf(first)==='closed+open'&&evidenceOf(second)===null,e.stored.map(evidenceOf));
+      check('no-trusted-time',first.observed_open_at==null&&first.observed_close_at==null&&first.reconciliation_state==='PENDING_OBSERVATION',{observed_open_at:first.observed_open_at,observed_close_at:first.observed_close_at,state:first.reconciliation_state});
+      // The time signal arrives: a third open is accepted and the earlier records stay as they are.
+      h.setMarker(h.state.markerValue);
+      httpCheck(check,await open(eui),202,'third-http');
+      const after=(await records(eui));
+      check('earlier-records',after.length===3&&evidenceOf(after[0])==='closed+open'&&after[0].observed_close_at==null&&after[0].reconciliation_state==='PENDING_OBSERVATION'&&oneRecordPerOpen(after,3),recordSummary(after));
     } finally {h.setMarker(h.state.markerValue);}
   });
   await test('no-clock-open-no-report-open-later',async(check,e)=>{
@@ -105,8 +143,19 @@ exports.run = async function(h) {
     try {
       const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
       (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
-      httpCheck(check,await open(eui),202,'later-http');e.stored=(await expectations(eui));
-      check('stored',e.stored.length===2,e.stored.map(r=>r.reconciliation_state));check('radio',radio(eui).length===2,radio(eui));
+      httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
+      check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
+      check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
+    } finally {h.setMarker(h.state.markerValue);}
+  });
+  await test('no-clock-open-no-report-open-at-once',async(check,e)=>{
+    h.setMarker(false);
+    try {
+      const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
+      httpCheck(check,await open(eui),202,'second-http');httpCheck(check,await open(eui),202,'third-http');
+      e.stored=(await records(eui));e.radio=radioCalls(eui);
+      check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME,OPEN_FRAME]),e.radio);
+      check('stored',e.stored.length===3&&oneRecordPerOpen(e.stored,3),recordSummary(e.stored));
     } finally {h.setMarker(h.state.markerValue);}
   });
   await test('no-clock-safety-close',async(check,e)=>{
@@ -122,8 +171,21 @@ exports.run = async function(h) {
   for(const id of ['close-duration','timed-close','flushing']) {
     await test('open-after:'+id,async(check,e)=>{
       const c=commands.find(c=>c.id===id),eui=(await device());httpCheck(check,await h.http(c.method,c.url(eui),c.body,token),202,'initial-http');
+      const serviceFrame={fn:'enqueue',port:c.port,hex:c.hex,expiresAt:null};
       const beforeCount=(await expectations(eui)).length;(await age(h,eui,3*24*60));await h.uplink(eui,0);
-      httpCheck(check,await open(eui),202,'open-http');e.stored=(await expectations(eui));check('stored',e.stored.length===beforeCount+1,e.stored.map(r=>r.reconciliation_state));check('radio',radio(eui).length===2,radio(eui));
+      httpCheck(check,await open(eui),202,'open-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
+      check('stored',e.stored.length===beforeCount+1&&openRecords(e.stored).length===1,recordSummary(e.stored));
+      check('radio',isDeepStrictEqual(e.radio,[serviceFrame,OPEN_FRAME]),e.radio);
+    });
+    // The open right behind the service command: no ageing and no report in between. The call
+    // list is the service frame and the open, with no flush between them, as in v0.8.1.
+    await test('open-at-once-after:'+id,async(check,e)=>{
+      const c=commands.find(c=>c.id===id),eui=(await device());httpCheck(check,await h.http(c.method,c.url(eui),c.body,token),202,'initial-http');
+      const serviceFrame={fn:'enqueue',port:c.port,hex:c.hex,expiresAt:null};
+      const beforeCount=(await expectations(eui)).length;
+      httpCheck(check,await open(eui),202,'open-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
+      check('stored',e.stored.length===beforeCount+1&&openRecords(e.stored).length===1,recordSummary(e.stored));
+      check('radio',isDeepStrictEqual(e.radio,[serviceFrame,OPEN_FRAME]),e.radio);
     });
   }
   for(const operation of ['assign','remove','delete-device','delete-zone']) {
