@@ -54,9 +54,13 @@ function classify(result) {
     if (Number(match[1]) !== CORE_TABLES.length) return { status: 'missing_core_tables', detail: 'core tables present: ' + match[1] };
     return { status: 'healthy', detail: null };
   }
-  if (/malformed|not a database|\((?:11|26)\)/i.test(stderr)) return { status: 'damaged', detail: stderr.slice(0, 200) };
-  if (/unable to open|permission denied|disk I\/O error|\((?:10|14|23)\)/i.test(stderr)) return { status: 'unreadable', detail: stderr.slice(0, 200) };
-  return { status: 'not_checked', detail: (stderr || 'sqlite3 exited ' + result.status).slice(0, 200) };
+  // Decided by SQLite's message, never by the exit code: builds differ (the
+  // same damaged file gives exit 1 on 3.53.1 and exit 11 on 3.46.1), and the
+  // message may come on either stream.
+  const message = (stderr + '\n' + stdout).trim();
+  if (/malformed|not a database|\((?:11|26)\)/i.test(message)) return { status: 'damaged', detail: message.slice(0, 200) };
+  if (/unable to open|permission denied|disk I\/O error|\((?:10|14|23)\)/i.test(message)) return { status: 'unreadable', detail: message.slice(0, 200) };
+  return { status: 'not_checked', detail: (message || 'sqlite3 exited ' + result.status).slice(0, 200) };
 }
 
 function createStartupState({
@@ -163,10 +167,22 @@ function createStartupState({
     }
     state.check_ms = Math.round(monotonicNow() - started);
     if (state.status !== 'healthy') {
+      // Report only: the check opens the file read-only and moves or repairs
+      // nothing. A fault points to the operator document.
+      const fault = ['damaged', 'missing_core_tables', 'missing', 'unreadable'].includes(state.status);
       report('check', 'farm database start-up check: ' + state.status + (state.detail ? ' (' + state.detail + ')' : '')
-        + '; reported only, nothing was changed');
+        + '; reported only, no file was moved or repaired'
+        + (fault ? '; see docs/operations/damaged-farm-database.md (osi-os repository)' : ''));
     }
     return getHealth();
+  }
+
+  function refuseIfLatched() {
+    if (state.driver_error || state.module_conflict) {
+      const error = new Error('farm database refused: ' + healthState());
+      error.code = 'OSI_SQLITE_REFUSED';
+      throw error;
+    }
   }
 
   // Called before every native farm connection is opened. Inside Node-RED it
@@ -176,15 +192,27 @@ function createStartupState({
     if (mode === 'node_red') {
       if (!attempted) check();
       inspectModules();
+      lastInspected = monotonicNow();
     }
-    if (state.driver_error || state.module_conflict) {
-      const error = new Error('farm database refused: ' + healthState());
-      error.code = 'OSI_SQLITE_REFUSED';
-      throw error;
-    }
+    refuseIfLatched();
   }
 
-  return { check, beforeOpen, getHealth, recordDriver, driverFailed, inspectModules };
+  // Called before every operation on a farm handle, also on a handle opened
+  // before a second addon appeared: once a refusal is latched, no further
+  // statement runs through any handle. The map is read at most once a second.
+  let lastInspected = -Infinity;
+  function guard(mode) {
+    if (mode === 'node_red') {
+      const now = monotonicNow();
+      if (now - lastInspected >= 1000) {
+        lastInspected = now;
+        inspectModules();
+      }
+    }
+    refuseIfLatched();
+  }
+
+  return { check, beforeOpen, guard, getHealth, recordDriver, driverFailed, inspectModules };
 }
 
 if (!globalThis[STATE_KEY]) globalThis[STATE_KEY] = createStartupState();

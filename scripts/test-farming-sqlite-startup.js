@@ -109,7 +109,12 @@ test('standalone processes neither run the start-up check nor count addons', () 
 
 test('every unhealthy result is reported, none of them as healthy, and nothing is changed', () => {
   const cases = [
+    // A file damaged by the overlapping round, verbatim from the two gateway builds:
+    // our images' sqlite3 3.46.1 and the stock base's opkg sqlite3 3.53.1.
     [{ status: 11, stdout: '', stderr: 'Error: stepping, database disk image is malformed (11)\n' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: '', stderr: 'Error in 3rd command line argument: database disk image is malformed\n' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: 'Error in 3rd command line argument: database disk image is malformed\n', stderr: '' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: '', stderr: 'Error: no such table: sqlite_master\n' }, 'not_checked', 'database_not_checked'],
     [{ status: 0, stdout: '*** in database main ***\nPage 4: btreeInitPage() returns error code 11\ncore_tables=3\n', stderr: '' }, 'damaged', 'database_damaged'],
     [{ status: 26, stdout: '', stderr: 'Error: file is not a database (26)\n' }, 'damaged', 'database_damaged'],
     [{ status: 0, stdout: 'ok\ncore_tables=0\n', stderr: '' }, 'missing_core_tables', 'database_missing_core_tables'],
@@ -124,7 +129,9 @@ test('every unhealthy result is reported, none of them as healthy, and nothing i
     const health = f.state.check();
     assert.equal(health.status, status, JSON.stringify(result));
     assert.equal(health.health_state, healthState, JSON.stringify(result));
-    assert.match(f.logs.join('\n'), /reported only, nothing was changed/);
+    assert.match(f.logs.join('\n'), /reported only, no file was moved or repaired/);
+    if (['damaged', 'missing_core_tables', 'unreadable'].includes(status)) assert.match(f.logs.join('\n'), /see docs\/operations\/damaged-farm-database\.md/);
+    else assert.doesNotMatch(f.logs.join('\n'), /damaged-farm-database/);
     // Detection only: the helper still opens a damaged or unexamined file.
     assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
   }
@@ -224,4 +231,57 @@ test('"not checked" never hides crash_looping or degraded; a fault replaces them
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('an open handle is refused once a second addon appears, re-read at most once a second', () => {
+  let now = 0, maps = [mapsLine(11467)];
+  const state = createStartupState({
+    files: { readFileSync: () => maps.join('\n'), statSync: () => ({}) },
+    spawnSync: () => ({ status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' }),
+    monotonicNow: () => now, log: () => {},
+  });
+  state.check();
+  state.recordDriver('node_red');
+  state.beforeOpen('node_red');
+  maps = [mapsLine(11467), mapsLine(3773, '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node')];
+  now = 500;
+  assert.doesNotThrow(() => state.guard('node_red'), 'within a second the map is not read again');
+  now = 1000;
+  assert.throws(() => state.guard('node_red'), { code: 'OSI_SQLITE_REFUSED', message: /sqlite_module_conflict/ });
+  now = 1100;
+  assert.throws(() => state.guard('node_red'), { code: 'OSI_SQLITE_REFUSED' }, 'the refusal stays latched');
+});
+
+test('"not checked" keeps the gathered figures and a degraded state on every tick', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  global.set('error_counts', { total: 3 });
+  const rows = (sql) => /sqlite_master/.test(sql) ? [{ type: 'table', name: 'devices', sql: 'CREATE TABLE devices(x)' }] : [{ n: 2 }];
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'database_not_checked', module_conflict: false, driver_error: null }),
+    Database: function Database() { this.all = (sql, cb) => cb(null, rows(sql)); this.get = (sql, cb) => cb(null, rows(sql)[0]); this.close = (cb) => cb(); },
+  };
+  const options = { timeoutMs: 500, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') };
+  await refreshGlobal({ global, osiDb, options });
+  const gathered = global.get('edge_health');
+  assert.equal(gathered.health_state, 'degraded', 'degraded is not hidden by not checked');
+  assert.notEqual(gathered.disk_free_pct, null);
+  // The next tick publishes before its gather: the figures stay, so does degraded.
+  const pending = refreshGlobal({ global, osiDb, options });
+  const published = global.get('edge_health');
+  assert.equal(published.health_state, 'degraded');
+  assert.equal(published.disk_free_pct, gathered.disk_free_pct);
+  assert.equal(published.rtc_present, gathered.rtc_present);
+  await pending;
+});
+
+test('a database state survives a gather that times out (Build Heartbeat refills a null crash_count)', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  const osiDb = { startupHealth: () => ({ health_state: 'database_damaged', module_conflict: false, driver_error: null }),
+    Database: function Database() { this.all = () => {}; this.get = () => {}; this.close = (cb) => cb(); } };
+  await refreshGlobal({ global, osiDb, options: { timeoutMs: 100, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') } });
+  const health = global.get('edge_health');
+  assert.equal(health.health_state, 'database_damaged');
+  assert.notEqual(health.crash_count, null);
 });

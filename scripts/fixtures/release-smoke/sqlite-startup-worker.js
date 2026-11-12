@@ -28,10 +28,13 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
   const token=payload+'.'+crypto.createHmac('sha256','synthetic-smoke-secret').update(payload).digest('base64url');
   const statsWithout=await h.http('GET','/api/system/stats',undefined,undefined,5000);
   const stats=await h.http('GET','/api/system/stats',undefined,token,5000);
+  const radioBefore=h.state.cs.calls.length;
   const open=await h.http('POST','/api/valve/A840410000000001',{action:'OPEN_FOR_DURATION',duration_seconds:60},token,15000);
   await h.settle();
+  const openRadio=h.state.cs.calls.slice(radioBefore).filter(c=>c.eui==='A840410000000001').length;
   const report={fault,addons:addons(),heartbeats:h.state.heartbeats,statsWithout:{status:statsWithout.status},
-    stats:{status:stats.status,json:stats.json},open:{status:open.status,json:open.json},exec:h.state.exec,
+    stats:{status:stats.status,json:stats.json},open:{status:open.status,json:open.json},openRadio,
+    published:h.state.mqtt.filter(m=>/\/heartbeat$/.test(m.topic)),exec:h.state.exec,
     logs:h.state.logs,tickOrder,edgeHealth,node:process.version};
   fs.writeFileSync(path.join(h.RUN,'startup.json'),JSON.stringify(report,null,2)+'\n');
   await h.stop();clearTimeout(watchdog);
