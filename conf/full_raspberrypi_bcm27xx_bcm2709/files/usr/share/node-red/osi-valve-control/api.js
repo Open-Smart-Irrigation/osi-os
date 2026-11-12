@@ -187,9 +187,27 @@ async function ownedValve(db, eui, userId) {
   return row;
 }
 
+// Match the manual command boundary's fresh scope check, then retain ownedValve.
+// The extra owner restriction is intentional pending a separate policy decision.
+async function freshValveScope(db, auth, eui) {
+  const scope = require('../osi-scope-helper');
+  const actor = await db.get('SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1', [auth.userId, auth.username]);
+  if (!actor || !actor.user_uuid) throw unauthorized();
+  const actorScope = eui
+    ? await scope.assertFreshDeviceAccess(db, actor.user_uuid, eui, { scopedMode: true })
+    : await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true });
+  if (!scope.canMutate(actorScope.role)) throw apiError(403, 'forbidden', 'insufficient role');
+}
+
+async function authorizedValve(db, eui, auth, scopedOn) {
+  if (scopedOn) await freshValveScope(db, auth, eui);
+  return ownedValve(db, eui, auth.userId);
+}
+
 async function handleHttpRequest(options) {
   const { msg, Database } = options;
   const environment = options.environment || {};
+  const scopedOn = String(environment.scopedAccess || '') === '1';
   const warn = typeof options.warn === 'function' ? options.warn : function () {};
   const now = options.now || new Date();
   const respond = (statusCode, payload) => { msg.statusCode = statusCode; msg.payload = payload; msg.headers = HEADERS; return msg; };
@@ -211,9 +229,17 @@ async function handleHttpRequest(options) {
     let match;
 
     if (method === 'GET' && requestPath === '/api/valves') {
+      if (scopedOn) await freshValveScope(db, auth);
       const rows = await store.listValvesForUser(db, auth.userId);
       const valves = [];
       for (const row of rows) {
+        if (scopedOn) {
+          try { await authorizedValve(db, row.deveui, auth, true); }
+          catch (error) {
+            if (error.statusCode === 404) continue;
+            throw error;
+          }
+        }
         const schedules = await store.listSchedules(db, row.deveui);
         const pushes = await store.pushSummary(db, row.deveui);
         valves.push(shapeValve(row, schedules, now, tzFallback, pushes));
@@ -224,7 +250,7 @@ async function handleHttpRequest(options) {
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/schedules$/)) && (method === 'GET' || method === 'POST')) {
       const eui = match[1].toUpperCase();
       currentEui = eui;
-      const device = await ownedValve(db, eui, auth.userId);
+      const device = await authorizedValve(db, eui, auth, scopedOn);
       if (method === 'GET') {
         const schedules = await store.listSchedules(db, eui);
         const compiled = P.compileWindows(schedules);
@@ -241,7 +267,7 @@ async function handleHttpRequest(options) {
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
       }
       await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
-        const freshDevice = await ownedValve(tx, eui, auth.userId);
+        const freshDevice = await authorizedValve(tx, eui, auth, scopedOn);
         row.timezone = freshDevice.zone_timezone || tzFallback;
         await store.insertSchedule(tx, row);
         await assertScheduleModeTx(tx, eui);
@@ -256,7 +282,7 @@ async function handleHttpRequest(options) {
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/schedules\/([0-9a-fA-F-]{36})$/)) && (method === 'PUT' || method === 'DELETE')) {
       const eui = match[1].toUpperCase(); const uuid = match[2];
       currentEui = eui;
-      await ownedValve(db, eui, auth.userId);
+      await authorizedValve(db, eui, auth, scopedOn);
       const existing = await store.listSchedules(db, eui);
       const current = existing.find((s) => s.schedule_uuid === uuid);
       if (!current) return respond(404, { error: 'not_found', message: 'Schedule not found' });
@@ -266,7 +292,7 @@ async function handleHttpRequest(options) {
         // (schedule_uuid, device_eui) match keeps that true at the SQL statement itself.
         let deletedKind;
         await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
-          await ownedValve(tx, eui, auth.userId);
+          await authorizedValve(tx, eui, auth, scopedOn);
           const fresh = await tx.get('SELECT kind, deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=UPPER(?)', [uuid, eui]);
           if (!fresh || fresh.deleted_at !== null) throw apiError(404, 'not_found', 'Schedule not found');
           deletedKind = fresh.kind;
@@ -283,7 +309,7 @@ async function handleHttpRequest(options) {
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
         let changed = false;
         await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
-          await ownedValve(tx, eui, auth.userId);
+          await authorizedValve(tx, eui, auth, scopedOn);
           const fresh = await tx.get('SELECT * FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=UPPER(?) AND deleted_at IS NULL', [uuid, eui]);
           if (!fresh) throw apiError(404, 'not_found', 'Schedule not found');
           changed = scheduleBindingChanged(fresh, v.value);
@@ -306,10 +332,10 @@ async function handleHttpRequest(options) {
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/plan\/resend$/)) && method === 'POST') {
       const eui = match[1].toUpperCase();
       currentEui = eui;
-      await ownedValve(db, eui, auth.userId);
+      await authorizedValve(db, eui, auth, scopedOn);
       let q;
       await dispatch.withValveWriter(eui, async () => {
-        await ownedValve(db, eui, auth.userId);
+        await authorizedValve(db, eui, auth, scopedOn);
         q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback, resendPurpose: push.LIFECYCLE_CLEAR_RESEND_PURPOSE });
       });
       throwTransportFailure(q);
@@ -328,13 +354,16 @@ async function handleHttpRequest(options) {
       // replaced, never dropped; R5 M3: a pause never depends on plan validity; R5 N2: the
       // settings are written inside the snapshot transaction. In conditional mode the status is
       // appended with no flush (push.setSchedulerStatus).
-      const device = await ownedValve(db, eui, auth.userId);
+      const device = await authorizedValve(db, eui, auth, scopedOn);
       const tz = device.zone_timezone || tzFallback;
       const lp = P.localParts(now, tz);
       const settingsPatch = { scheduler_status: status, skip_today_date: status === 'SKIP_TODAY' ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}` : null };
       let q;
       try {
-        q = await push.setSchedulerStatus({ db, deviceEui: eui, appId: options.appId, status, settingsPatch, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
+        q = await dispatch.withValveWriter(eui, async () => {
+          await authorizedValve(db, eui, auth, scopedOn);
+          return push.setSchedulerStatus({ db, deviceEui: eui, appId: options.appId, status, settingsPatch, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
+        });
       } catch (e) {
         if (e && e.code === 'conditional_readiness_pending') throw apiError(409, 'conditional_readiness_pending', 'ACTIVE cannot resume a valve-resident schedule while conditional mode is active');
         throw e;
@@ -347,7 +376,7 @@ async function handleHttpRequest(options) {
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/settings$/)) && method === 'PUT') {
       const eui = match[1].toUpperCase();
       currentEui = eui;
-      await ownedValve(db, eui, auth.userId);
+      await authorizedValve(db, eui, auth, scopedOn);
       const b = requestBody(msg) || {};
       const patch = {};
       if (b.strega_generation !== undefined) { if (!['GEN1', 'GEN2'].includes(b.strega_generation)) return respond(422, { error: 'invalid_generation' }); patch.strega_generation = b.strega_generation; }
@@ -358,7 +387,7 @@ async function handleHttpRequest(options) {
       if (b.default_open_minutes !== undefined) { const n = Number(b.default_open_minutes); if (!Number.isInteger(n) || n < 1 || n > 255) return respond(422, { error: 'invalid_default_open_minutes' }); patch.default_open_minutes = n; }
       let generationChanged = false;
       await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
-        await ownedValve(tx, eui, auth.userId);
+        await authorizedValve(tx, eui, auth, scopedOn);
         const before = await store.getSettings(tx, eui);
         await store.upsertSettings(tx, eui, patch);
         generationChanged = Boolean(patch.strega_generation && patch.strega_generation !== before.strega_generation);
