@@ -707,6 +707,36 @@ print_bootstrap_note() {
     fi
 }
 
+# /etc/config/osi-server and its section "cloud" exist only where the image's
+# uci-defaults script 96_osi_server_config ran at first boot. On a gateway
+# installed on a stock base (README "Path B") they are missing, uci cannot
+# create a package by "uci set", and the first "uci set osi-server.cloud.*"
+# ended the deploy half configured (NEW-23). Where the section is absent the
+# deploy runs that same script, from the release, so the defaults have one
+# source; where it exists, nothing is changed. The identity it records stays
+# empty on a stock base (the identity helper is not installed yet);
+# osi-identityd, installed by this deploy, resolves and persists it at its
+# first start. firmware_version is left unset until the switch writes it.
+ensure_osi_server_config() {
+    if uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "OK: osi-server configuration present; left as it is"
+        return 0
+    fi
+    echo "--- osi-server configuration (absent: created with the image's defaults) ---"
+    osc_script="$TMP_DIR/96_osi_server_config"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "$osc_script"; then
+        echo "ERROR: could not fetch the osi-server defaults script" >&2
+        return 1
+    fi
+    if ! sh "$osc_script" || ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "ERROR: could not create the osi-server configuration section" >&2
+        return 1
+    fi
+    uci -q delete osi-server.cloud.firmware_version 2>/dev/null || true
+    uci commit osi-server
+    echo "OK: osi-server configuration created"
+}
+
 ensure_journal_media_defaults() {
     echo "--- Journal media configuration ---"
     uci -q get osi-server.cloud.journal_photo_cache_bytes >/dev/null 2>&1 || \
@@ -2759,6 +2789,10 @@ if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
 else
     echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
 fi
+
+# osi-server configuration begin
+ensure_osi_server_config || exit 1
+# osi-server configuration end
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
