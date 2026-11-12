@@ -9,6 +9,19 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+
+// Every fixture directory this file makes is removed when the run ends, so
+// repeated runs do not fill the temporary directory.
+const madeFixtureDirs = [];
+const realMkdtempSync = fs.mkdtempSync;
+fs.mkdtempSync = function (...args) {
+  const dir = realMkdtempSync.apply(this, args);
+  madeFixtureDirs.push(dir);
+  return dir;
+};
+process.on('exit', () => {
+  for (const dir of madeFixtureDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 const swap = require('./deploy-payload-swap');
 
 const REPO = path.resolve(__dirname, '..');
