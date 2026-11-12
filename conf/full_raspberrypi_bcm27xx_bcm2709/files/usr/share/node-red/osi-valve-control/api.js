@@ -234,7 +234,7 @@ async function handleHttpRequest(options) {
       const valves = [];
       for (const row of rows) {
         if (scopedOn) {
-          try { await authorizedValve(db, row.deveui, auth, true); }
+          try { await authorizedValve(db, String(row.deveui).toUpperCase(), auth, true); }
           catch (error) {
             if (error.statusCode === 404) continue;
             throw error;

@@ -498,3 +498,15 @@ for (const [condition, denied] of AUTH_CASES) {
     } finally { fixture.cleanup(); }
   });
 }
+
+
+test('A-1 GET /api/valves: a legacy lowercase identifier does not fail the entire list', async () => {
+  const fixture = await authFixture('valid grant');
+  try {
+    await fixture.db.run('DELETE FROM valve_schedules');
+    await fixture.db.run('UPDATE devices SET deveui=? WHERE deveui=?', [FIXTURE_EUI.toLowerCase(), FIXTURE_EUI]);
+    const { out } = await scopedCall(fixture, 'GET', null);
+    assert.equal(out.statusCode, 200, JSON.stringify(out.payload));
+    assert.deepEqual(out.payload.valves, [], 'the shared command policy still refuses the noncanonical device');
+  } finally { fixture.cleanup(); }
+});
