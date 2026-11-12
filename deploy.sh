@@ -93,11 +93,41 @@ COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c42
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 export SWAP_ROOT
 
+# One deploy at a time. The lock is a link in /var/run (gone after a reboot)
+# whose target is the deploy's PID: ln -s creates it or fails in one step. A
+# lock whose deploy no longer runs (killed) is taken over with a line that
+# says so.
+DEPLOY_LOCK="${DEPLOY_LOCK:-/var/run/osi-deploy.lock}"
+take_deploy_lock() {
+    if ! ln -s "$$" "$DEPLOY_LOCK" 2>/dev/null; then
+        dl_pid="$(readlink "$DEPLOY_LOCK" 2>/dev/null || true)"
+        if [ -n "$dl_pid" ] && kill -0 "$dl_pid" 2>/dev/null; then
+            echo "ERROR: another deploy is running (PID $dl_pid, $DEPLOY_LOCK); refusing before anything is changed" >&2
+            return 1
+        fi
+        echo "WARN: taking over the lock of a deploy that no longer runs (PID ${dl_pid:-unknown})" >&2
+        if ! { rm -f "$DEPLOY_LOCK" && ln -s "$$" "$DEPLOY_LOCK"; }; then
+            echo "ERROR: could not take the deploy lock $DEPLOY_LOCK; refusing before anything is changed" >&2
+            return 1
+        fi
+    fi
+}
+release_deploy_lock() {
+    [ "$(readlink "$DEPLOY_LOCK" 2>/dev/null || true)" != "$$" ] || rm -f "$DEPLOY_LOCK"
+}
+
 cleanup() {
     rm -rf "$TMP_DIR"
     rm -rf "$COMMAND_LEDGER_STAGE"
+    release_deploy_lock
 }
-trap cleanup EXIT INT TERM
+# A signal ends the deploy through its exit path; a handler that only cleaned
+# up would let the script run on without its directory. HUP too: a tunnel
+# session that dies takes the deploy down through that path, never past it.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # command check begin
 # Every external command the deploy runs, checked before it changes anything
@@ -124,7 +154,17 @@ check_gateway_commands() {
 check_gateway_commands || exit 1
 # command check end
 
+# deploy lock begin
+take_deploy_lock || exit 1
+# deploy lock end
+
 mkdir -p "$TMP_DIR" /srv/node-red "$PAYLOADS_ROOT" "$DB_DIR"
+
+# The time of a step, to the millisecond, for measuring windows from the
+# deploy's own output (BusyBox date has no sub-second field).
+deploy_time() {
+    node -e 'process.stdout.write(new Date().toISOString())' 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ
+}
 
 fetch() {
     src="$1"
@@ -1599,6 +1639,36 @@ run_owed_health_check() {
     [ "$NODE_RED_START_VERDICT" != failed ]
 }
 
+# A deploy refused after it stopped Node-RED, without having changed the
+# database or the active payload, leaves the gateway as it found it: the
+# payload that ran before runs again (it may be recorded for another schema:
+# it ran on this one seconds ago). A gateway this deploy found stopped, held
+# for example, stays stopped and keeps its state. Returns non-zero when the
+# database or the active payload changed since the stop.
+restore_as_found() {
+    [ -n "${PRE_STOP_SCHEMA:-}" ] || return 1
+    raf_schema="$(schema_compatibility_metadata 2>/dev/null || true)"
+    raf_active="$(swap_call currentStamp 2>/dev/null || true)"
+    if [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] || [ "$raf_active" != "${PRE_STOP_ACTIVE:-}" ]; then
+        return 1
+    fi
+    if [ "${PRE_STOP_RUNNING:-0}" != "1" ]; then
+        echo "OK: Node-RED was not running when this deploy began; left as found (payloads/$raf_active)" >&2
+        node_red_restart_needed=0
+        return 0
+    fi
+    if [ -n "${DEPLOY_STAMP:-}" ] && [ "$DEPLOY_STAMP" != "$raf_active" ]; then
+        swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
+    fi
+    if ! "$NODE_RED_INIT" restart || ! wait_for_node_red_health "${NODE_RED_HEALTH_TIMEOUT:-30}"; then
+        echo "ERROR: Node-RED did not come back on payloads/$raf_active as found" >&2
+        return 1
+    fi
+    node_red_restart_needed=0
+    echo "OK: the deploy was refused; payloads/$raf_active runs again as this deploy found it" >&2
+    return 0
+}
+
 deploy_exit_handler() {
     exit_status="$1"
     trap - EXIT INT TERM
@@ -1642,8 +1712,10 @@ deploy_exit_handler() {
             swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
         fi
         if [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
-            ! restart_previous_payload; then
+            ! restart_previous_payload && ! restore_as_found; then
             echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped" >&2
+            # Never stopped with nothing written: the state goes first.
+            swap_call writePayloadState "$(swap_call currentStamp 2>/dev/null || true)" held "this deploy was refused after it stopped Node-RED, and no payload is proven to fit the database as the deploy left it; run the deploy again" deploy.sh >/dev/null 2>&1 || true
             DEPLOY_HOLD_SERVICES=1
             hold_node_red_stopped || true
             hold_identityd_stopped || true
@@ -1669,6 +1741,7 @@ install_deploy_exit_trap() {
     trap 'deploy_exit_handler $?' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    trap 'exit 129' HUP
 }
 # identityd deploy lifecycle end
 
@@ -1791,6 +1864,34 @@ hold_node_red_stopped() {
     fi
     node_red_restart_needed=0
     return 1
+}
+
+# Item 3 (#636): before migrate-cli runs, the candidate's directory records
+# the ledger the migration will produce and the one it starts from. A boot
+# after a cut decides from the database's actual ledger (node-red.init,
+# bootSchemaDecision): forward to this payload when the migration completed,
+# held when it was cut part way. No record is written when nothing is
+# pending; a failed write refuses the deploy before it migrates.
+record_pending_switch() {
+    [ -n "${DEPLOY_STAMP:-}" ] || return 0
+    if ! rps_from="$(schema_compatibility_metadata)" || \
+       ! rps_target="$(node -e '
+const manifest = require(process.argv[1]).readMigrationManifest(process.argv[2])
+  .map((entry) => ({ version: Number.parseInt(entry.name, 10), checksum: entry.checksum }))
+  .sort((a, b) => a.version - b.version);
+const head = manifest.length ? manifest[manifest.length - 1].version : 0;
+process.stdout.write(`${head}|${manifest.map((m) => `${m.version}:${m.checksum}`).join(",")}`);
+' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir")"; then
+        echo "ERROR: could not read the schema ledgers for the pending switch record; refusing before migrating" >&2
+        return 1
+    fi
+    [ "$rps_target" != "$rps_from" ] || return 0
+    if ! swap_call writePendingSwitch "$DEPLOY_STAMP" "${rps_target%%|*}" "${rps_target#*|}" "${rps_from%%|*}" "${rps_from#*|}" >/dev/null || \
+       ! swap_call clearOtherPendingSwitches "$DEPLOY_STAMP" >/dev/null; then
+        echo "ERROR: could not record the pending switch to payloads/$DEPLOY_STAMP; refusing before migrating" >&2
+        return 1
+    fi
+    echo "OK: pending switch to payloads/$DEPLOY_STAMP recorded (schema ${rps_from%%|*} -> ${rps_target%%|*})"
 }
 
 schema_compatibility_metadata() {
@@ -2233,6 +2334,13 @@ run_schema_migration() {
         fi
     fi
 
+    # What a refused deploy returns to: the schema, the active payload and
+    # whether Node-RED ran, as this deploy found them (restore_as_found).
+    PRE_STOP_SCHEMA="$(schema_compatibility_metadata 2>/dev/null || true)"
+    PRE_STOP_ACTIVE="$(swap_call currentStamp 2>/dev/null || true)"
+    # Unknown counts as running: a refusal then restarts rather than leaves stopped.
+    PRE_STOP_RUNNING=1
+    [ "$(node_red_service_state 2>/dev/null || true)" != stopped ] || PRE_STOP_RUNNING=0
     node_red_restart_needed=1
 
     echo "--- Stop Node-RED for schema migration ---"
@@ -2352,9 +2460,13 @@ run_schema_migration() {
         return 1
     fi
 
+    if ! record_pending_switch; then
+        return 1
+    fi
     migration_output="$TMP_DIR/migrate-cli-output.log"
     if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$backup_dir" --migrations-dir "$migrations_dir" >"$migration_output" 2>&1; then
         cat "$migration_output"
+        echo "[migrate] applied at $(deploy_time)"
         if ! migration_applied_count="$(node -e '
 const fs = require("fs");
 const output = fs.readFileSync(process.argv[1], "utf8");
@@ -2434,7 +2546,8 @@ process.stdout.write(String(applied.length));
                 return 1
             fi
             PAYLOAD_FLIPPED=1
-            echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+            echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP at $(deploy_time)"
+            swap_call clearPendingSwitch "$DEPLOY_STAMP" >/dev/null 2>&1 || true
             # A switch ends any earlier hold; the health check decides below.
             swap_call writePayloadState "$DEPLOY_STAMP" unverified "switched in by this deploy; its health check is pending" deploy.sh >/dev/null || true
             apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
@@ -2452,6 +2565,7 @@ process.stdout.write(String(applied.length));
     # schema decision end
 
     if [ "$migration_rc" = "3" ]; then
+        swap_call writePayloadState "${PRE_STOP_ACTIVE:-}" held "the migration failed and the restore of its pre-migration copy failed its integrity check; see the deploy log" deploy.sh >/dev/null 2>&1 || true
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
         echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped" >&2
@@ -3618,7 +3732,8 @@ if [ "$PAYLOAD_FLIPPED" != "1" ]; then
         exit 1
     fi
     PAYLOAD_FLIPPED=1
-    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP at $(deploy_time)"
+    swap_call clearPendingSwitch "$DEPLOY_STAMP" >/dev/null 2>&1 || true
 else
     echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"
 fi

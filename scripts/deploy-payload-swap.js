@@ -1443,6 +1443,160 @@ function owedCheckPlan(root, schemaHead = '', schemaLedger = '') {
   return [active, fits ? '0' : '1', fits || '', others[0] || ''].join('|');
 }
 
+// Item 3 of #636's last round: a cut between the migration and the switch.
+// Before migrate-cli runs, deploy.sh records in the candidate's own directory
+// the ledger the migration will produce (schema_*) and the one it starts from
+// (from_*). The boot decides from the database's actual applied ledger, never
+// from the record alone (bootSchemaDecision).
+const PENDING_SWITCH = 'pending-switch.json';
+
+function pendingSwitchPath(root, stamp) {
+  return path.join(payloadDir(root, stamp), PENDING_SWITCH);
+}
+
+function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger) {
+  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`pending switch: payload missing: ${stamp}`);
+  return writeDurable(pendingSwitchPath(root, stamp), `${JSON.stringify({
+    format: 1,
+    payload_stamp: stamp,
+    schema_head: String(schemaHead),
+    schema_ledger: String(schemaLedger),
+    from_head: String(fromHead),
+    from_ledger: String(fromLedger),
+  })}\n`);
+}
+
+function readPendingSwitches(root) {
+  const records = [];
+  for (const stamp of listStamps(root)) {
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(pendingSwitchPath(root, stamp), 'utf8'));
+    } catch (_) {
+      continue;
+    }
+    if (record && record.format === 1 && record.payload_stamp === stamp &&
+        typeof record.schema_ledger === 'string' && typeof record.from_ledger === 'string') records.push(record);
+  }
+  return records;
+}
+
+function removeDurable(target) {
+  if (!fs.existsSync(target)) return;
+  fs.rmSync(target, { force: true });
+  const dir = fs.openSync(path.dirname(target), 'r');
+  try {
+    fs.fsyncSync(dir);
+  } finally {
+    fs.closeSync(dir);
+  }
+}
+
+function clearPendingSwitch(root, stamp) {
+  removeDurable(pendingSwitchPath(root, stamp));
+  return true;
+}
+
+// A deploy that records its own pending switch removes every older one.
+function clearOtherPendingSwitches(root, keepStamp) {
+  for (const record of readPendingSwitches(root)) {
+    if (record.payload_stamp !== keepStamp) clearPendingSwitch(root, record.payload_stamp);
+  }
+  return true;
+}
+
+function readCompatibility(root, stamp) {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(compatibilityPath(root, stamp), 'utf8'));
+    return metadata && metadata.format === 1 && metadata.payload_stamp === stamp ? metadata : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// True when ledger <a> is a proper prefix of ledger <b> ("v:c,v:c,...").
+function properPrefix(a, b) {
+  if (a === b) return false;
+  return a === '' ? b !== '' : b.startsWith(`${a},`);
+}
+
+// A candidate the boot may switch to: complete, with its modules sealed where
+// helpers are linked, never one whose health check failed.
+function forwardable(root, stamp) {
+  const record = readHealth(root, stamp);
+  if (record && record.state === 'failed') return false;
+  // Without a GUI root: verifyPair(root, stamp, guiRoot) also checks the live
+  // GUI link, which a candidate that is not active yet never matches.
+  if (!verifyPair(root, stamp)) return false;
+  if (payloadModuleLinks(root).size === 0) return true;
+  try {
+    return readModuleManifest(root, stamp) !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
+const INTERRUPTED_REASON = 'the upgrade was interrupted while the database was being updated';
+
+// node-red.init, after the switch repair and before the hold check, with the
+// database's applied ledger read read-only ("<head>|<ledger>"). Returns the
+// line node-red.init logs, or null. Decides one of:
+// - the active payload fits the database: nothing to do; pending records are
+//   moot and removed;
+// - (a) the ledger is a candidate's complete one: switch forward to it
+//   (checked by the next deploy, state "unverified");
+// - (g) the ledger lies strictly between a candidate's start and its complete
+//   one: the migration was cut part way. The old code must not start (its boot
+//   node would rewrite triggers the migration replaced, and the retry would
+//   then refuse): held, and the deploy run again completes the update;
+// - (b) any other mismatch: start what is there, state "unverified" with the
+//   reason, as before.
+function bootSchemaDecision(root, guiRoot, dbHead, dbLedger) {
+  // A hold deploy.sh wrote (a failure it observed) stands; only the boot's own
+  // hold of an interrupted update is decided again.
+  const state = readPayloadState(root);
+  if (state && state.state === 'held' && state.writer !== 'node-red.init') return null;
+  const active = activeStamp(root) || currentStamp(root);
+  const activeCompat = active ? readCompatibility(root, active) : null;
+  const records = readPendingSwitches(root);
+  if (activeCompat && activeCompat.schema_ledger === dbLedger) {
+    for (const record of records) clearPendingSwitch(root, record.payload_stamp);
+    return null;
+  }
+  const others = records.filter((record) => record.payload_stamp !== active).reverse();
+  for (const record of records) {
+    if (record.payload_stamp === active) clearPendingSwitch(root, active);
+  }
+  const forward = others.find((record) => record.schema_ledger === dbLedger && forwardable(root, record.payload_stamp));
+  if (forward) {
+    const stamp = forward.payload_stamp;
+    writeCompatibility(root, stamp, forward.schema_head, forward.schema_ledger);
+    markActivated(root, stamp);
+    flipTo(root, stamp, guiRoot, active || '');
+    const reason = `the deploy that migrated the database to schema ${forward.schema_head} was cut before its switch; the boot switched to payloads/${stamp}, the only payload that fits it; its health check is owed`;
+    writePayloadState(root, stamp, 'unverified', reason, 'node-red.init');
+    clearPendingSwitch(root, stamp);
+    return `WARN: switched forward to payloads/${stamp}: ${reason}`;
+  }
+  const interrupted = others.find((record) =>
+    properPrefix(record.from_ledger, dbLedger) && properPrefix(dbLedger, record.schema_ledger));
+  if (interrupted) {
+    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead} of ${interrupted.schema_head}, upgrade to payloads/${interrupted.payload_stamp}). Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
+    writePayloadState(root, active || interrupted.payload_stamp, 'held', `${INTERRUPTED_REASON}; run the deploy again to complete it`, 'node-red.init');
+    writeDurable(path.join(root, 'DEPLOY-HELD'), `${line}\n`);
+    return line;
+  }
+  if (activeCompat) {
+    const reason = `payloads/${active} was recorded for schema ${activeCompat.schema_head}, the database is at schema ${dbHead}`;
+    const current = readPayloadState(root);
+    if (!(current && current.active === active && current.state === 'held')) {
+      writePayloadState(root, active, 'unverified', reason, 'node-red.init');
+    }
+    return `WARN: ${reason}`;
+  }
+  return null;
+}
+
 function listStamps(root) {
   try {
     return fs.readdirSync(payloadsRoot(root))
@@ -1524,6 +1678,12 @@ module.exports = {
   readPayloadState,
   unverifiedActive,
   recordBootState,
+  writePendingSwitch,
+  readPendingSwitches,
+  clearPendingSwitch,
+  clearOtherPendingSwitches,
+  readCompatibility,
+  bootSchemaDecision,
   owedCheckPlan,
   writeCompatibility,
   compatibilityExists,
