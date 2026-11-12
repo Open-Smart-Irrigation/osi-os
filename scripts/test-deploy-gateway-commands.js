@@ -156,7 +156,7 @@ test('the gateway side uses no tr character class', () => {
 // own harnesses with only the bases' commands on PATH.
 for (const [file, pattern] of [
   ['scripts/test-conditional-irrigation-clock-install.js', ''],
-  ['scripts/deploy-payload-lifecycle.test.js', 'owed check|a retry after a kill|v0.8.1 or v0.7.0 gateway|kill after each step|after the migration commit'],
+  ['scripts/deploy-payload-lifecycle.test.js', 'owed check|a retry after a kill|v0.8.1 or v0.7.0 gateway|kill after each step|after the migration commit|held by the old positional check'],
 ]) {
   test(`with only the bases' commands on PATH: ${path.basename(file)}${pattern ? ` (${pattern})` : ''}`, () => {
     const args = ['--test', '--test-concurrency=1'];

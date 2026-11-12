@@ -1638,3 +1638,64 @@ if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
 `, killAfterSteps('echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2', '\n        fi\n')));
   }
 });
+
+// A device result on #636's earlier head: a normal upgrade on a gateway whose
+// log ring was full ended HELD by the old positional check (the payload
+// marked failed, the state held, Node-RED stopped), and the plain retry then
+// stopped at the stat step. The sequence on this head: that held gateway,
+// with the upgrade's payload still there, takes the deploy run again to the
+// end: no owed check, the rollback target the last healthy payload, nothing
+// left to migrate, the switch, a start judged healthy, and the boot starts it.
+// scripts/test-deploy-gateway-commands.js runs it with only the gateway
+// bases' commands on PATH (no stat).
+test('a gateway held by the old positional check takes the deploy run again to a healthy start', () => {
+  const owed = fragment('# owed health check begin\n', '# owed health check end');
+  const run = runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+# What the old head left: the upgrade switched in after its migration, its
+# check missed the completion line, the rollback refused, held.
+stage_new_deploy upgrade
+stop_for_migration
+commit_migration
+flip_new
+swap_call markFailed upgrade "its deploy health check failed" >/dev/null
+swap_call writePayloadState upgrade held "it failed after migrating the database" deploy.sh >/dev/null
+printf 'HELD: (old head)\\n' > "$SWAP_ROOT/DEPLOY-HELD"
+"$NODE_RED_INIT" stop
+# The deploy run again.
+${owed}
+SERVED_STAMP="$(swap_call currentStamp)"
+PREV_STAMP="$(swap_call rollbackTarget "$SERVED_STAMP" retry)"
+[ "$PREV_STAMP" = old ]
+stage_new_deploy retry
+PREV_STAMP=old
+stop_for_migration
+: nothing left to migrate
+flip_new
+mkdir -p "$SWAP_ROOT/bin-start"
+printf '#!/bin/sh\\nshift 2\\necho "$*" >> "$NODE_RED_LOG"\\n' > "$SWAP_ROOT/bin-start/logger"
+printf '#!/bin/sh\\ncat "$NODE_RED_LOG"\\n' > "$SWAP_ROOT/bin-start/logread"
+chmod 755 "$SWAP_ROOT/bin-start/logger" "$SWAP_ROOT/bin-start/logread"
+PATH="$SWAP_ROOT/bin-start:$PATH"
+mark_node_red_log
+"$NODE_RED_INIT" restart
+echo "sync-init: schema init complete" >> "$NODE_RED_LOG"
+check_node_red_start 4 2
+[ "$NODE_RED_START_VERDICT" = healthy ]
+swap_call markHealthy retry >/dev/null
+swap_call writePayloadState retry healthy "its deploy health check passed" deploy.sh >/dev/null
+rm -f "$SWAP_ROOT/DEPLOY-HELD"
+printf '%s\\n' recovered
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /recovered/);
+    assert.equal(swap.currentStamp(run.root), 'retry');
+    assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+    assert.equal(run.state('node-red.state'), '1');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@retry', 'osi-b': 'b@retry', 'osi-c': 'c@retry' });
+    assert.equal(bootStartsNodeRed(run.root), true, 'a reboot starts the recovered payload');
+  } finally {
+    run.cleanup();
+  }
+});
