@@ -1127,3 +1127,59 @@ test('stagePayload records "staged" before it copies anything into the payload',
   stagePayload(root, 'capture', fakeFlowsSrcAt(root, 'capture'), fakeGuiSrcAt(root, 'capture'));
   assert.equal(swap.payloadTrusted(root, 'capture'), true, 'the legacy capture stays trusted');
 });
+
+// Ledger item 4 (residual gap 1): a kill at each step of stagePayload leaves
+// either no complete payload or one recorded "staged", never a complete,
+// unrecorded payload that would read as "from before the record".
+test('a kill at each step of staging leaves nothing usable or a staged payload', (t) => {
+  const root = moduleRoot(t);
+  const flows = fakeFlowsSrcAt(root, 'k');
+  const gui = fakeGuiSrcAt(root, 'k');
+  const child = (killAt) => spawnSync(process.execPath, ['-e', `
+    const fs = require('fs');
+    let n = 0;
+    for (const name of ['mkdirSync', 'writeFileSync', 'openSync', 'writeSync', 'fsyncSync', 'renameSync', 'copyFileSync', 'cpSync', 'symlinkSync']) {
+      const real = fs[name];
+      fs[name] = function (...args) {
+        n += 1;
+        if (n === ${killAt}) process.kill(process.pid, 'SIGKILL');
+        return real.apply(this, args);
+      };
+    }
+    require(${JSON.stringify(path.join(__dirname, 'deploy-payload-swap.js'))})
+      .stagePayload(${JSON.stringify(root)}, 'k', ${JSON.stringify(flows)}, ${JSON.stringify(gui)}, 'staged');
+  `], { encoding: 'utf8' });
+  let killAt = 1;
+  for (; killAt < 500; killAt += 1) {
+    fs.rmSync(path.join(root, 'payloads', 'k'), { recursive: true, force: true });
+    const run = child(killAt);
+    const complete = swap.verifyPair(root, 'k');
+    const record = swap.readHealth(root, 'k');
+    assert.ok(!complete || (record && record.state === 'staged'),
+      `kill at step ${killAt}: complete=${complete} record=${JSON.stringify(record)}`);
+    if (run.signal !== 'SIGKILL') break;
+  }
+  assert.ok(killAt > 2 && killAt < 500, `the staging ran to completion after ${killAt} steps`);
+  assert.equal(swap.payloadTrusted(root, 'k'), false);
+});
+
+// Ledger item 4: on a gateway whose helper modules link into payloads, a
+// payload without modules.json (flows and GUI only, as a cut before module
+// staging left it) is never a rollback, restore or fallback target.
+test('a payload without its modules is never a target on a gateway whose helpers are linked', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, '20261101', { 'osi-a': '' });
+  flipTo(root, '20261101', guiRoot);
+  swap.writeCompatibility(root, '20261101', '70', '70:a');
+  // Newer, complete flows and GUI, no record, no modules.
+  stagePayload(root, '20261102', fakeFlowsSrcAt(root, '20261102'), fakeGuiSrcAt(root, '20261102'));
+  swap.writeCompatibility(root, '20261102', '70', '70:a');
+  stageWithModules(root, '20261103', { 'osi-a': '' });
+  swap.markActivated(root, '20261103');
+  flipTo(root, '20261103', guiRoot);
+  assert.equal(swap.verifyPair(root, '20261102'), true);
+  assert.equal(swap.payloadTrusted(root, '20261102'), true, 'no record reads as from before the record');
+  assert.equal(swap.rollbackTarget(root, '20261103', 'next'), '20261101');
+  assert.equal(swap.owedCheckPlan(root, '70', '70:a'), '20261103|0|20261101|20261101');
+});
