@@ -92,7 +92,7 @@ Error-counter heartbeat fields: catch nodes feed `Record Error` (`global.error_c
 
 A request that a token guard rejected with 401 (missing, invalid or expired token, tagged `msg._osiAuthFailure`) is not counted (#462). It leaves `errors_total` and `health_state` unchanged and shows only as a rate-limited warning in the gateway log. Untagged errors, including 401s in the cloud sync flows, still count.
 
-A farm database start-up fault overrides `health_state` with one of `sqlite_driver_unavailable`, `sqlite_module_conflict`, `database_damaged`, `database_missing_core_tables`, `database_missing`, `database_unreadable` or `database_not_checked`, from the first heartbeat after a start. `GET /api/system/stats` carries the same state in its `database` object. States and causes: [farm-database-startup-check.md](../operations/farm-database-startup-check.md).
+A farm database start-up fault overrides `health_state` with one of `sqlite_driver_unavailable`, `sqlite_module_conflict`, `database_damaged`, `database_missing_core_tables`, `database_missing`, `database_unreadable`, `database_checking` or `database_not_checked`, from the first heartbeat after a start (`checking` until the read-only check answers, then its verdict). `GET /api/system/stats` carries the same state in its `database` object. States and causes: [farm-database-startup-check.md](../operations/farm-database-startup-check.md).
 
 ## Fan telemetry/control
 

@@ -4,14 +4,16 @@
 //   none     a healthy file;
 //   damaged  the parent damaged an index page before start;
 //   conflict a stray loader maps the user-directory sqlite3 addon before
-//            Node-RED starts, so two native addons are in the process.
+//            Node-RED starts, so two native addons are in the process;
+//   damaged_late  damaged, with a stand-in sqlite3 that answers 12 s late:
+//            the flows run meanwhile and the verdict arrives afterwards.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const watchdog=setTimeout(()=>{console.error('startup runtime timeout');process.exit(2);},120000);
+const watchdog=setTimeout(()=>{console.error('startup runtime timeout');process.exit(2);},150000);
 const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n')
   .filter(line=>line.includes('node_sqlite3.node')).map(line=>line.trim().split(/\s+/).at(-1)))].sort();
 (async()=>{
   const fault=process.env.OSI_STARTUP_FAULT;
-  if(!['none','damaged','conflict'].includes(fault))throw new Error('invalid OSI_STARTUP_FAULT');
+  if(!['none','damaged','conflict','damaged_late'].includes(fault))throw new Error('invalid OSI_STARTUP_FAULT');
   // runtime.js links the fixture's modules into the user directory when it
   // loads; the stray copy needs them (bindings) before Node-RED starts.
   const runtime=require('./runtime');
@@ -32,8 +34,18 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
   const open=await h.http('POST','/api/valve/A840410000000001',{action:'OPEN_FOR_DURATION',duration_seconds:60},token,15000);
   await h.settle();
   const openRadio=h.state.cs.calls.slice(radioBefore).filter(c=>c.eui==='A840410000000001').length;
+  // A late verdict: wait for it, then the next tick's heartbeat must carry it.
+  let later=null;
+  if(fault==='damaged_late') {
+    let latest=stats;
+    for(let i=0;i<300&&latest.json?.database?.status==='checking';i++){await h.sleep(100);latest=await h.http('GET','/api/system/stats',undefined,token,5000);}
+    const index=h.state.heartbeats.length;
+    h.inject('310dfe7cfe34a448');
+    await h.settle();
+    later={stats:{status:latest.status,json:latest.json},heartbeat:h.state.heartbeats[index]?.payload??null};
+  }
   const report={fault,addons:addons(),heartbeats:h.state.heartbeats,statsWithout:{status:statsWithout.status},
-    stats:{status:stats.status,json:stats.json},open:{status:open.status,json:open.json},openRadio,
+    stats:{status:stats.status,json:stats.json},open:{status:open.status,json:open.json},openRadio,later,
     published:h.state.mqtt.filter(m=>/\/heartbeat$/.test(m.topic)),exec:h.state.exec,
     logs:h.state.logs,tickOrder,edgeHealth,node:process.version};
   fs.writeFileSync(path.join(h.RUN,'startup.json'),JSON.stringify(report,null,2)+'\n');

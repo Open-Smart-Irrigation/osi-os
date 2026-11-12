@@ -3,7 +3,8 @@
 // addon in one Node-RED process keep separate lock tables for the same file
 // and damage it under overlapping writes. This module records which SQLite
 // driver the process uses, counts the native addons it has mapped, and runs
-// one read-only integrity check before the flows start.
+// one read-only integrity check beside the flows: started from settings.js,
+// it holds back nothing, and its verdict replaces "checking" when it is known.
 //
 // Detection only: nothing here moves, restores, quarantines or deletes a
 // file. What a gateway does with an already-damaged file is the owner's
@@ -18,10 +19,13 @@ const childProcess = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 
 const FARM_DB = '/data/db/farming.db';
-// quick_check reads every page: about 15 ms for 2 MB, about 240 ms for 300 MB
-// from a warm cache, 29 s for 300 MB from a cold one (workstation, 2026-11).
-// deploy.sh gives a restarted Node-RED 30 s; this bound keeps 20 s of that.
-const CHECK_TIMEOUT_MS = 10000;
+// quick_check reads every page. A 103 MiB file took 1.1 to 1.2 s cold on the
+// emulated Pi 5; the production gateway's SD card read about ten times slower
+// (18 s for a copy the emulator makes in 1 to 2 s), so about 12 s per 100 MB
+// there, a minute for 500 MB. Ten minutes leaves a verdict for files many
+// times today's size. The check runs beside the flows, so the bound delays
+// nothing; it only ends a read that will not finish.
+const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 const CORE_TABLES = ['users', 'devices', 'irrigation_zones'];
 const CHECK_SQL = 'PRAGMA quick_check(1); SELECT \'core_tables=\' || count(*) FROM sqlite_master'
   + " WHERE type='table' AND name IN (" + CORE_TABLES.map((name) => "'" + name + "'").join(',') + ');';
@@ -38,10 +42,10 @@ const HEALTH_STATES = {
   unreadable: 'database_unreadable',
   not_checked_timeout: 'database_not_checked',
   not_checked: 'database_not_checked',
+  checking: 'database_checking',
 };
 
 function classify(result) {
-  if (result.error && result.error.code === 'ETIMEDOUT') return { status: 'not_checked_timeout', detail: 'check exceeded ' + CHECK_TIMEOUT_MS + ' ms' };
   if (result.error) return { status: 'not_checked', detail: String(result.error.code || result.error.message || result.error) };
   const stdout = String(result.stdout || '').trim();
   const stderr = String(result.stderr || '').trim();
@@ -65,13 +69,15 @@ function classify(result) {
 
 function createStartupState({
   files = fs,
-  spawnSync = childProcess.spawnSync,
+  spawn = childProcess.spawn,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
   monotonicNow = () => performance.now(),
   log = (message) => console.error(message),
   farmPath = FARM_DB,
 } = {}) {
   const state = {
-    status: 'pending', // healthy | damaged | missing_core_tables | missing | unreadable | not_checked_timeout | not_checked
+    status: 'pending', // checking | healthy | damaged | missing_core_tables | missing | unreadable | not_checked_timeout | not_checked
     detail: null,
     check: 'quick_check',
     check_ms: null,
@@ -142,29 +148,9 @@ function createStartupState({
     report('driver', 'native SQLite driver unavailable: ' + state.driver_error + '; farm database connections refused');
   }
 
-  // Read-only and bounded by a monotonic timer; runs once per process.
-  function check(filename = farmPath) {
-    if (attempted) return getHealth();
-    attempted = true;
-    const started = monotonicNow();
-    try {
-      let present = true;
-      try {
-        files.statSync(filename);
-      } catch (error) {
-        present = false;
-        Object.assign(state, error && error.code === 'ENOENT'
-          ? { status: 'missing', detail: 'file is missing' }
-          : { status: 'unreadable', detail: String(error && error.code || error) });
-      }
-      if (present) {
-        Object.assign(state, classify(spawnSync('sqlite3', ['-readonly', filename, CHECK_SQL], {
-          encoding: 'utf8', timeout: CHECK_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
-        })));
-      }
-    } catch (error) {
-      Object.assign(state, { status: 'not_checked', detail: String(error && error.message ? error.message : error).slice(0, 200) });
-    }
+  function finish(started, result) {
+    if (state.status !== 'checking') return;
+    Object.assign(state, result);
     state.check_ms = Math.round(monotonicNow() - started);
     if (state.status !== 'healthy') {
       // Report only: the check opens the file read-only and moves or repairs
@@ -174,6 +160,47 @@ function createStartupState({
         + '; reported only, no file was moved or repaired'
         + (fault ? '; see docs/operations/damaged-farm-database.md (osi-os repository)' : ''));
     }
+  }
+
+  // Starts the read-only check in a child process and returns at once: the
+  // state reads "checking" until the child answers. Runs once per process.
+  // Node's timers run on the monotonic clock; the wall clock plays no part.
+  function check(filename = farmPath) {
+    if (attempted) return getHealth();
+    attempted = true;
+    const started = monotonicNow();
+    state.status = 'checking';
+    try {
+      files.statSync(filename);
+    } catch (error) {
+      finish(started, error && error.code === 'ENOENT'
+        ? { status: 'missing', detail: 'file is missing' }
+        : { status: 'unreadable', detail: String(error && error.code || error) });
+      return getHealth();
+    }
+    let child;
+    try {
+      child = spawn('sqlite3', ['-readonly', filename, CHECK_SQL], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) });
+      return getHealth();
+    }
+    let stdout = '', stderr = '';
+    const timer = setTimer(() => {
+      try { child.kill('SIGKILL'); } catch (error) { report('kill', 'start-up check could not be stopped: ' + String(error && error.message || error)); }
+      finish(started, { status: 'not_checked_timeout', detail: 'check exceeded ' + CHECK_TIMEOUT_MS + ' ms' });
+    }, CHECK_TIMEOUT_MS);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+    if (child.stdout) child.stdout.on('data', (chunk) => { if (stdout.length < 65536) stdout += chunk; });
+    if (child.stderr) child.stderr.on('data', (chunk) => { if (stderr.length < 65536) stderr += chunk; });
+    child.on('error', (error) => {
+      clearTimer(timer);
+      finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) });
+    });
+    child.on('close', (code) => {
+      clearTimer(timer);
+      finish(started, classify({ status: code, stdout, stderr }));
+    });
     return getHealth();
   }
 
@@ -186,8 +213,9 @@ function createStartupState({
   }
 
   // Called before every native farm connection is opened. Inside Node-RED it
-  // is the second line behind settings.js: it runs the start-up check if
-  // settings.js could not. Standalone processes (tests, tools) skip both.
+  // is the second line behind settings.js: it starts the start-up check if
+  // settings.js could not, and never waits for it. Standalone processes
+  // (tests, tools) skip both.
   function beforeOpen(mode) {
     if (mode === 'node_red') {
       if (!attempted) check();

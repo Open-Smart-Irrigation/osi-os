@@ -35,9 +35,10 @@ function loadChirpstackEnvFile(filePath) {
 
 loadChirpstackEnvFile(chirpstackEnvPath);
 
-// Read-only check of the farm database before any flow opens it (NEW-15). It
-// reports only and changes no file. If it cannot load, Node-RED still starts
-// and osi-db-helper runs the check before its first connection.
+// Read-only check of the farm database (NEW-15), started here in a child
+// process beside the flows, which do not wait for it. It reports only. If it
+// cannot load, Node-RED still starts and osi-db-helper starts the check at
+// its first connection.
 try {
     require('/srv/node-red/osi-db-helper/startup').check();
 } catch (error) {
