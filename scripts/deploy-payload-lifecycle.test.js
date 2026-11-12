@@ -632,7 +632,7 @@ ${staging}
 # Node-RED stopped for the migration, as run_schema_migration does.
 stop_for_migration() { node_red_restart_needed=1; "$NODE_RED_INIT" stop; }
 commit_migration() { sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (78, 'main', 'applied');"; DB_MIGRATION_COMMITTED=1; }
-flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "\${PREV_STAMP:-}" >/dev/null; PAYLOAD_FLIPPED=1; }
+flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call markActivated "$DEPLOY_STAMP" >/dev/null; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "\${SERVED_STAMP:-\${PREV_STAMP:-}}" >/dev/null; PAYLOAD_FLIPPED=1; }
 quiesce_identityd_for_deploy
 ${scenario}
 `;
@@ -693,6 +693,68 @@ printf '%s\\n' deployed
     assert.deepEqual(run.markers('node_modules'), { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' });
     assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'new', gui: 'new', compatible: true });
     assert.deepEqual(run.nodeRedLog(), ['stop', 'start'], 'the switch happens while Node-RED is stopped');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// v0.8.2 review, S-1 follow-up: a deploy killed after its switch and before
+// its health check leaves a complete payload that never passed one. The retry
+// must not take it as its rollback target: when the retry fails, the gateway
+// ends on the last payload that was healthy.
+test('a retry after a kill between the switch and the health check rolls back to the last healthy payload', () => {
+  const target = fragment('# rollback target begin\n', '# rollback target end');
+  const run = runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+stage_new_deploy first
+${target}
+stop_for_migration
+flip_new
+restart_node_red
+# Killed here: no health check, no health record.
+[ "$(swap_call currentStamp)" = first ]
+stage_new_deploy second
+[ "$PREV_STAMP" = first ]
+${target}
+[ "$SERVED_STAMP" = first ] && [ "$PREV_STAMP" = old ]
+stop_for_migration
+flip_new
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' retry-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /retry-rolled-back/);
+    assert.match(run.result.stderr, /payloads\/first never passed a health check or changed since; a failed deploy returns to payloads\/old/);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' },
+      'the healthy v0.8.1 set, not the never-checked first attempt');
+    assert.equal(run.state('node-red.state'), '1');
+    assert.equal(swap.payloadTrusted(run.root, 'first'), false);
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a committed deploy records its payload healthy, and the next deploy returns to it', () => {
+  const target = fragment('# rollback target begin\n', '# rollback target end');
+  const run = runModuleDeploy(`
+stage_new_deploy first
+${target}
+stop_for_migration
+flip_new
+restart_node_red
+swap_call markHealthy first >/dev/null
+stage_new_deploy second
+${target}
+[ "$PREV_STAMP" = first ]
+printf '%s\\n' healthy-target
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /healthy-target/);
+    assert.doesNotMatch(run.result.stderr, /never passed a health check/);
   } finally {
     run.cleanup();
   }

@@ -1097,6 +1097,90 @@ function verifyCompatibility(root, stamp, schemaHead, schemaLedger) {
     metadata.schema_ledger === String(schemaLedger);
 }
 
+// Health record (v0.8.2 review, S-1 follow-up). A rollback target must be a
+// payload that passed deploy.sh's health check. payloads/<stamp>/health.json
+// says "activated" from just before a deploy switches to the payload, and
+// "healthy" once its health check passed, with the digests of the flows, the
+// GUI and each module as they were then. A payload without the file predates
+// the record (or is a capture of what was running) and is trusted.
+function healthPath(root, stamp) {
+  return path.join(payloadDir(root, stamp), 'health.json');
+}
+
+function writeHealth(root, stamp, record) {
+  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`health record: payload missing: ${stamp}`);
+  const target = healthPath(root, stamp);
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify({ format: 1, payload_stamp: stamp, ...record })}\n`, { flag: 'wx' });
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+  return target;
+}
+
+function payloadDigests(root, stamp) {
+  const manifest = readModuleManifest(root, stamp);
+  const modules = {};
+  for (const name of manifest ? manifest.modules : []) modules[name] = hashModule(moduleTarget(root, stamp, name));
+  return {
+    flows_sha256: hashFile(path.join(payloadDir(root, stamp), 'flows.json')),
+    gui_sha256: isDirectory(guiPayloadDir(root, stamp)) ? hashTree(guiPayloadDir(root, stamp), { followLinks: true }) : null,
+    modules,
+  };
+}
+
+function markActivated(root, stamp) {
+  return writeHealth(root, stamp, { state: 'activated' });
+}
+
+function markHealthy(root, stamp) {
+  return writeHealth(root, stamp, { state: 'healthy', ...payloadDigests(root, stamp) });
+}
+
+// True for a payload without a health record, and for one recorded healthy
+// whose files still match the digests. An "activated" payload never passed
+// its health check; files changed since (an older deploy.sh writes helper
+// modules in place, through the module links) make it a set that did not.
+function payloadTrusted(root, stamp) {
+  const file = healthPath(root, stamp);
+  if (!fs.existsSync(file)) return true;
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    return false;
+  }
+  if (!record || record.format !== 1 || record.payload_stamp !== stamp || record.state !== 'healthy' ||
+      !record.modules || typeof record.modules !== 'object') return false;
+  // The files recorded healthy must be unchanged. A module captureModules()
+  // copied into the payload later is a copy of what its flows ran with.
+  try {
+    const dir = payloadDir(root, stamp);
+    if (hashFile(path.join(dir, 'flows.json')) !== record.flows_sha256) return false;
+    const gui = isDirectory(guiPayloadDir(root, stamp)) ? hashTree(guiPayloadDir(root, stamp), { followLinks: true }) : null;
+    if (gui !== record.gui_sha256) return false;
+    return Object.entries(record.modules).every(([name, digest]) =>
+      MODULE_NAME.test(name) && isDirectory(moduleTarget(root, stamp, name)) && hashModule(moduleTarget(root, stamp, name)) === digest);
+  } catch (_) {
+    return false;
+  }
+}
+
+// The payload a failed deploy returns to: the served one when it is trusted,
+// else the newest other complete, trusted payload, else the served one (a
+// complete set is better than none; deploy.sh warns).
+function rollbackTarget(root, servedStamp, deployStamp = '') {
+  if (!servedStamp) return '';
+  if (payloadTrusted(root, servedStamp)) return servedStamp;
+  const candidates = listStamps(root).filter((stamp) => stamp !== servedStamp && stamp !== deployStamp).reverse();
+  for (const stamp of candidates) {
+    if (verifyPair(root, stamp) && payloadTrusted(root, stamp)) return stamp;
+  }
+  return servedStamp;
+}
+
 function listStamps(root) {
   try {
     return fs.readdirSync(payloadsRoot(root))
@@ -1130,6 +1214,9 @@ function prunePayloads(root, keepN) {
     keep.add(current);
   }
   if (activeStamp(root)) keep.add(activeStamp(root));
+  // The payload the next deploy would roll back to.
+  const trusted = [...stamps].reverse().find((stamp) => verifyPair(root, stamp) && payloadTrusted(root, stamp));
+  if (trusted) keep.add(trusted);
   for (const linked of payloadModuleLinks(root).values()) keep.add(linked);
   const removed = [];
   for (const stamp of stamps) {
@@ -1162,6 +1249,10 @@ module.exports = {
   switchPreflight,
   clearLegacyCapture,
   verifyPair,
+  markActivated,
+  markHealthy,
+  payloadTrusted,
+  rollbackTarget,
   writeCompatibility,
   compatibilityExists,
   verifyCompatibility,

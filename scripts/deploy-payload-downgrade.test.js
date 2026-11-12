@@ -81,6 +81,7 @@ function convertedGateway(t) {
   }
   stageCurrent(root, '20261110T000000Z', ['osi-a', 'osi-b', 'osi-new']);
   swap.flipTo(root, '20261110T000000Z', guiRoot);
+  swap.markHealthy(root, '20261110T000000Z');
   assert.equal(fs.readlinkSync(path.join(root, 'payloads', 'active')), '20261110T000000Z');
   return { root, guiRoot };
 }
@@ -116,6 +117,8 @@ test('a v0.8.1 deploy.sh on a converted gateway ends on a complete v0.8.1 and ke
   }
   assert.match(readOr(path.join(root, 'payloads', '20261110T000000Z', 'modules', 'osi-a', 'index.js'), ''), /osi-a@v0\.8\.1/,
     'the in-place write lands in the payload that was active');
+  assert.equal(swap.payloadTrusted(root, '20261110T000000Z'), false,
+    'a payload an older deploy.sh wrote into is no longer the set that passed its health check');
   const src = sources(root, '20261115T000000Z');
   old.stagePayload(root, '20261115T000000Z', src.flows, src.gui);
   assert.equal(old.currentStamp(root), '20261110T000000Z');
