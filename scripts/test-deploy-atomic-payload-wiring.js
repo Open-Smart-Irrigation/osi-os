@@ -463,3 +463,10 @@ test('the image seed leaves payload-linked helper modules alone and seeds the re
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('an unverified start is the last line the deploy prints, and the deploy exits 0', () => {
+  const tail = deploy.trimEnd().split('\n').slice(-4).join('\n');
+  assert.match(tail, /^if \[ "\$PROBE_OK" = "unverified" \]; then\n    echo "UNVERIFIED: payloads\/\$DEPLOY_STAMP runs/m);
+  const branch = deploy.indexOf('elif [ "$PROBE_OK" = "unverified" ]; then');
+  assert.doesNotMatch(deploy.slice(branch, deploy.indexOf('\nelse\n', branch)), /\bexit\b/);
+});

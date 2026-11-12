@@ -3910,3 +3910,7 @@ if [ "$soil_profile_repair_failed" = 1 ]; then
     echo ""
 fi
 print_bootstrap_note
+# An unverified start is the deploy's last line (exit 0: the new release runs).
+if [ "$PROBE_OK" = "unverified" ]; then
+    echo "UNVERIFIED: payloads/$DEPLOY_STAMP runs, but its start could not be confirmed: $NODE_RED_START_REASON. The next deploy checks it again."
+fi

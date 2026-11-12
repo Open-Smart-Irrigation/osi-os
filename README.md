@@ -222,6 +222,8 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
+If the SSH session drops, the deploy ends through its exit path: before the database is changed the gateway runs as before, and after a cut the next boot either completes the switch or holds the gateway with the line "run the deploy again" in `/srv/node-red/DEPLOY-HELD`. In every case, run the same command again. On a link that drops often, use the offline bundle (below), which runs detached and writes its log to `/data/deploy-<time>.log`. The deploy ends with `OK`, with an `UNVERIFIED` payload line (the new release runs, and the next deploy checks it again), or with `ERROR`/`HELD` and its reason.
+
 The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed and enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
