@@ -1593,6 +1593,9 @@ deploy_exit_handler() {
             :
         else
             echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2
+            # The state goes first: node-red.init reads only the state file,
+            # so a cut during the steps below still leaves a hold.
+            swap_call writePayloadState "${DEPLOY_STAMP:-}" held "it failed after migrating the database and no payload that passed its health check fits it; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null 2>&1 || true
             DEPLOY_HOLD_SERVICES=1
             hold_node_red_stopped || true
             if [ -n "${DEPLOY_STAMP:-}" ] && [ "${PAYLOAD_FLIPPED:-0}" != "1" ]; then
@@ -1603,7 +1606,6 @@ deploy_exit_handler() {
             if [ "${PAYLOAD_FLIPPED:-0}" = "1" ]; then
                 swap_call markFailed "${DEPLOY_STAMP:-}" "its deploy failed after migrating the database" >/dev/null 2>&1 || true
             fi
-            swap_call writePayloadState "${DEPLOY_STAMP:-}" held "it failed after migrating the database and no payload that passed its health check fits it; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null 2>&1 || true
         fi
     elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
         { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
@@ -2509,8 +2511,11 @@ if [ -n "$owed_plan" ]; then
         echo "WARN: payloads/$owed_payload stays active and unverified: $NODE_RED_START_REASON" >&2
     else
         echo "ALERT: payloads/$owed_payload failed its owed health check: $NODE_RED_START_REASON" >&2
-        swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
         if [ "$owed_migrated" = "1" ] || [ -z "$owed_fallback" ]; then
+            # The state goes first: node-red.init reads only the state file,
+            # so a cut during the steps below still leaves a hold.
+            swap_call writePayloadState "$owed_payload" held "its owed health check failed and only it matches the migrated database; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null || true
+            swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
             hold_node_red_stopped || true
             # The restore command replaces the database: nothing may hold it open.
             hold_identityd_stopped || true
@@ -2519,11 +2524,11 @@ if [ -n "$owed_plan" ]; then
             DEPLOY_STAMP="$owed_payload"
             PREV_STAMP="$owed_restore"
             record_deploy_hold
-            swap_call writePayloadState "$owed_payload" held "its owed health check failed and only it matches the migrated database; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null || true
             DEPLOY_STAMP="$owed_saved_deploy"
             PREV_STAMP="$owed_saved_prev"
             exit 1
         fi
+        swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
         echo "WARN: payloads/$owed_payload failed its owed health check; returning to payloads/$owed_fallback, which fits the database" >&2
         # The owed check started Node-RED on the failed payload: stop it
         # before the links change under it.

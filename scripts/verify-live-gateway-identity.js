@@ -237,7 +237,7 @@ const identityReadyAt = deploySource.lastIndexOf('wait_for_identityd_ready');
 const activationPrerequisites = [
   ['chmod 755 /usr/libexec/osi-gateway-identity.sh', 'gateway identity helper installation'],
   ['chmod 755 /usr/libexec/osi-identityd.sh', 'identity daemon installation'],
-  ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" >/dev/null', 'paired flows+GUI payload staging'],
+  ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null', 'paired flows+GUI payload staging'],
   ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null', 'paired flows+GUI payload activation'],
   ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],
 ];

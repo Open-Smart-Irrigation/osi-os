@@ -651,7 +651,7 @@ ${scenario}
 `;
 }
 
-function runModuleDeploy(scenario) {
+function runModuleDeploy(scenario, transform = (script) => script) {
   const root = fakeRoot();
   const dbPath = path.join(root, 'farming.db');
   const guiRoot = path.join(root, 'gui');
@@ -663,7 +663,7 @@ case "$1" in
   *) exec ${nodePathForShell()} "$@" ;;
 esac
 `, { mode: 0o755 });
-  const result = spawnSync('sh', ['-c', moduleDeployScript(root, dbPath, guiRoot, scenario)], {
+  const result = spawnSync('sh', ['-c', transform(moduleDeployScript(root, dbPath, guiRoot, scenario))], {
     encoding: 'utf8',
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -886,7 +886,7 @@ printf '%s\\n' s7-rolled-back
 // The S-1 ruling: a deploy cut between its switch and its health check.
 // The next deploy runs deploy.sh's owed health check first. A logread stub
 // stands for the boot node's log line.
-function owedCheckScenario({ migrate, health }) {
+function owedCheckScenario({ migrate, health, transform }) {
   const owed = fragment('# owed health check begin\n', '# owed health check end');
   return runModuleDeploy(`
 swap_call markHealthy old >/dev/null
@@ -911,7 +911,7 @@ mkdir -p "$backup_dir"
 cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
 ${owed}
 printf '%s\\n' owed-done
-`);
+`, transform);
 }
 
 test('owed check: a migrated, unchecked payload that passes becomes healthy and keeps running', () => {
@@ -1551,5 +1551,79 @@ test('every shipped helper module loads through the payload links as it does fro
     assert.ok(Object.values(repo).filter((value) => value === 'ok').length > 150, 'the comparison must exercise loadable modules');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Ledger item 4 (residual gap 2): each hold path writes the state "held"
+// first, since node-red.init reads only the state file. A kill after any
+// step of a hold path, then a reboot: Node-RED does not start.
+const NODE_RED_INIT_SOURCE = fs.readFileSync(path.join(REPO, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'), 'utf8');
+
+function bootStartsNodeRed(root) {
+  const begin = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair end');
+  assert.ok(begin >= 0 && end > begin);
+  const block = NODE_RED_INIT_SOURCE.slice(begin, end).split('/srv/$PACKAGE_NAME').join(root);
+  const bin = path.join(root, 'boot-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'logger'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const run = spawnSync('sh', ['-c', `${block}\nif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`],
+    { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout.includes('NODE_RED_STARTS');
+}
+
+// Inserts a kill after each step of the hold branch that begins at <from>
+// and ends at <to> (both texts of deploy.sh). The kill hits the shell that
+// runs the step (the exit handler runs in a subshell; $$ would name its
+// parent and let the subshell finish the hold).
+function killAfterSteps(from, to) {
+  return (script) => {
+    const a = script.indexOf(from);
+    const b = script.indexOf(to, a);
+    assert.ok(a >= 0 && b > a, `hold branch not found: ${from}`);
+    const branch = script.slice(a, b).split('\n').map((line) =>
+      (/(\|\| true|^\s*record_deploy_hold|^\s*hold_identityd_stopped.*|^\s*DEPLOY_HOLD_SERVICES=1)$/.test(line) ? `${line}; step_done` : line)).join('\n');
+    return `step_n=0\nstep_done() { step_n=$((step_n + 1)); if [ "$step_n" = "$KILL_AT" ]; then : > "$SWAP_ROOT/killed"; sh -c 'kill -9 $PPID'; fi; }\n${script.slice(0, a)}${branch}${script.slice(b)}`;
+  };
+}
+
+function everyKill(makeRun) {
+  let killAt = 1;
+  for (; killAt < 30; killAt += 1) {
+    process.env.KILL_AT = String(killAt);
+    const run = makeRun();
+    try {
+      if (!fs.existsSync(path.join(run.root, 'killed'))) break;
+      assert.equal(bootStartsNodeRed(run.root), false, `kill after step ${killAt}: a reboot starts Node-RED`);
+    } finally {
+      run.cleanup();
+    }
+  }
+  delete process.env.KILL_AT;
+  assert.ok(killAt > 3, `the hold path ran out after ${killAt} steps`);
+}
+
+test('the owed check\'s hold: a kill after each step, then a reboot, stays held', () => {
+  everyKill(() => owedCheckScenario({
+    migrate: true,
+    health: 'fail',
+    transform: killAfterSteps('# The state goes first: node-red.init reads only the state file,\n            # so a cut during the steps below still leaves a hold.\n            swap_call writePayloadState "$owed_payload" held', 'exit 1'),
+  }));
+});
+
+test('the exit handler\'s hold: a kill after each step, then a reboot, stays held', () => {
+  for (const flipped of [true, false]) {
+    everyKill(() => runModuleDeploy(`
+backup_dir="$SWAP_ROOT/backups"
+mkdir -p "$backup_dir"
+cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
+stage_new_deploy new
+stop_for_migration
+commit_migration
+${flipped ? 'flip_new' : ': failure between the commit and the flip'}
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+`, killAfterSteps('echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2', '\n        fi\n')));
   }
 });
