@@ -264,7 +264,9 @@ test('profile decoder preserves absent and malformed report times as untrusted a
   malformed.runtimeContext = trustedObservationRuntime('2026-10-18T10:00:02.000Z');
   await invoke(stregaSql, fixture.db, null, malformed, events);
   assert.equal((await fixture.db.get('SELECT COUNT(*) AS count FROM device_data WHERE deveui=?', [EUI])).count, 2);
-  assert.equal((await fixture.db.get('SELECT current_state FROM devices WHERE deveui=?', [EUI])).current_state, 'OPEN');
+  // v0.8.2 fix, stage 1 (F-2): the state shown follows the newest report received, also when its
+  // time cannot be trusted. It credits or ends no run: the CLOSED evidence is still refused.
+  assert.equal((await fixture.db.get('SELECT current_state FROM devices WHERE deveui=?', [EUI])).current_state, 'CLOSED');
   assert.ok(events.some((entry) => entry[0] === 'warn' && String(entry[1]).includes('CLOSED evidence')));
   fixture.cleanup();
 });

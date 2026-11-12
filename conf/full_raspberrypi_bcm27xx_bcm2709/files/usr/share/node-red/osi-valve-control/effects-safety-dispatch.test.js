@@ -211,3 +211,29 @@ test('accepted and unknown owners release only at qualified horizon, with timezo
   assert.equal(accounting.runs[0].days['2026-10-19'], 1);
   assert.equal(transport.effect_snapshot.anchor_at, snapshot.anchor_at);
 });
+
+// v0.8.2 fix, stage 1 removes the gateway's own cutoff from the claim of an ordinary command
+// (composition-4c2.test.js). For a conditional occurrence it stays: nothing is handed over once
+// the occurrence's queue cutoff has passed.
+test('a conditional occurrence is not handed over at or after its queue cutoff', async (t) => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  await f.db.run("INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, expires_at, requested_duration_minutes, reservation_start_at, reservation_end_at, reserved_minutes) VALUES (?,?,?,?,?,?,?,?,?,?,?)", [
+    'cutoff-kept', '2026-10-18', '10:00', EUI, '2026-10-18T10:00:00.000Z', 'PENDING', '2026-10-18T10:30:55.000Z', 5, '2026-10-18T10:00:00.000Z', '2026-10-18T10:36:00.000Z', 5,
+  ]);
+  const qualificationProvider = () => ({ qualified: true, identity: 'fixture/gen1', margin_seconds: 5 });
+  const reservation = await dispatch.reserveValveCommand({ db: f.db, effectContext: { qualificationProvider }, command: {
+    device_eui: EUI, command_id: 'cutoff-kept', action: 'OPEN_FOR_DURATION_CONDITIONAL', duration_minutes: 5,
+    occurrence: { schedule_uuid: 'cutoff-kept', local_date: '2026-10-18', local_time: '10:00' }, timezone: 'UTC',
+  }, now: '2026-10-18T10:00:00.000Z' });
+  const owner = { type: 'expectation', id: reservation.expectation.expectation_id };
+  await dispatch.captureEffectSnapshot({ db: f.db, deviceEui: EUI, owner, frame: FRAME_FIVE_MINUTES, qualificationProvider, now: '2026-10-18T10:01:00.000Z' });
+  const sent = [];
+  const at = Date.parse('2026-10-18T10:30:55.000Z');
+  await assert.rejects(dispatch.enqueueValveCommand({
+    db: f.db, deviceEui: EUI, owner, item: { devEui: EUI, ...FRAME_FIVE_MINUTES },
+    transport: { async enqueueDownlink(item) { sent.push(item); return { id: 'must-not-happen' }; } },
+    now: new Date(at), trustedContext: { runtimeNow: () => at, qualificationProvider },
+  }), (error) => error && error.code === 'command_expired');
+  assert.equal(sent.length, 0);
+});

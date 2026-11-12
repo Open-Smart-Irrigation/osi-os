@@ -156,7 +156,10 @@ async function resolveTarget(db, eui, expectationId) {
   // A permanent CLOSE owner (commanded_duration_seconds 0, reserved so fresh CLOSED evidence can
   // settle it) is not an open: a cancel never targets or flushes it, and it never makes an
   // id-less cancel of the one real open ambiguous (D04: cancel deletes a pending open).
-  const cancellable = active.filter((row) => !dispatch.isReportOnlyExpectation(row) && Number(row.commanded_duration_seconds) > 0);
+  // v0.8.2 fix, stage 1: nor is an open whose run was reported over while the clock was not
+  // synchronised. A cancel has nothing to delete for it, and it must not make the cancel of a
+  // later open ambiguous on a gateway without a time signal (dispatch.cancellableOpen).
+  const cancellable = active.filter((row) => dispatch.cancellableOpen(row));
   if (expectationId) {
     const named = await db.get(
       'SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations ' +
@@ -319,14 +322,16 @@ async function flushForCancel({ db, eui, target, transport, now }) {
 // Takes the target's open out of the device queue and puts plan pushes and configuration
 // back. Another actuation's open is never queued again: ChirpStack may have sent it after
 // the queue read, and queueing it again would water twice. Each one is reported instead.
-async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue, enqueue, transport, db, now, warn }) {
+async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue, enqueue, transport, db, now, warn, knownItems, targetItemId }) {
   // The accepted Task 4 core owns every STREGA queue mutation.  A queue
   // snapshot cannot prove that an item has not already crossed the radio
   // handoff, so the transport path deliberately flushes and reports the
   // resulting UNKNOWN owners instead of rebuilding plan/configuration items.
   if (transport) return flushForCancel({ db, eui, target, transport, now });
-  let items = null;
-  if (typeof readQueue === 'function' && typeof enqueue === 'function') {
+  // knownItems, targetItemId: the queue reading and the exact item onlyQueuedOpen() found the
+  // target by. The same reading decides what is queued again; the queue is not read twice.
+  let items = Array.isArray(knownItems) && typeof enqueue === 'function' ? knownItems : null;
+  if (!items && typeof readQueue === 'function' && typeof enqueue === 'function') {
     try {
       items = await readQueue(eui);
       if (!Array.isArray(items)) throw new Error('device queue is not a list');
@@ -339,7 +344,9 @@ async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue
     const flushed = await flushQueue(eui);
     return { scope: 'full_flush', flushed, kept: 0, lost: 0, dropped: null };
   }
-  const index = targetQueueIndex(items, active, target);
+  const index = targetItemId != null
+    ? items.findIndex((item) => String(item.id) === String(targetItemId))
+    : targetQueueIndex(items, active, target);
   if (index < 0) {
     // The target's open cannot be told apart in the queue (its duration gives no known
     // downlink, or the queue holds more opens than the active actuations account for):
@@ -391,7 +398,56 @@ async function cancelActuation(args) {
   return cancelActuationLocked(args);
 }
 
-async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason, flushQueue, readQueue, enqueue, transport, now, warn }) {
+// A cancel involves conditional irrigation when its target is the open of an occurrence, or when
+// the valve holds an occurrence that is reserved, attempted, sent or unknown.
+async function involvesConditional(db, eui, target) {
+  const row = await db.get(
+    "SELECT 1 AS x FROM irrigation_occurrences WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL " +
+    "AND (command_id=? OR state IN ('RESERVED','ATTEMPTED','SENT','UNKNOWN')) LIMIT 1",
+    [eui, target && target.command_id != null ? target.command_id : '']
+  );
+  return Boolean(row);
+}
+
+// A cancel that names no open while several are active. A record whose run was not attributed
+// stays active for about an hour (one report that fits two opens, a lost OPEN report), where
+// v0.8.1 ended it on the next CLOSED report, and the control panel never names an open. Such a
+// record must not stop the operator from cancelling the open that is still waiting.
+//
+// The target is identified exactly: one queue reading, and the single active open whose queue
+// id, stored when ChirpStack accepted its frame, is still listed unsent in that reading. Nothing
+// is inferred from the state shown, and no target is picked by recency (#428). With none or
+// several, an unreadable queue, or conditional irrigation involved, there is no target and the
+// caller refuses as before with the reason. The race of 0.8.1 remains: a frame ChirpStack
+// delivers between this reading and the flush is answered "cancelled" and runs.
+function storedQueueId(row) {
+  try { const id = (JSON.parse((row && row.transport_json) || '{}') || {}).queue_id; return id == null || id === '' ? null : String(id); }
+  catch (_) { return null; }
+}
+async function onlyQueuedOpen({ db, eui, candidates, readQueue, warn }) {
+  for (const row of candidates) {
+    if (await involvesConditional(db, eui, row)) return { target: null, why: 'conditional_irrigation' };
+  }
+  if (typeof readQueue !== 'function') return { target: null, why: 'queue_unreadable' };
+  let items;
+  try {
+    items = await readQueue(eui);
+    if (!Array.isArray(items)) throw new Error('device queue is not a list');
+  } catch (e) {
+    warn && warn('[valve-control] cancelActuation: device queue unreadable, no open named and several active for ' + eui + ': ' + (e && e.message ? e.message : e));
+    return { target: null, why: 'queue_unreadable' };
+  }
+  const unsent = new Set(items.filter((item) => item && !item.isPending && item.id != null).map((item) => String(item.id)));
+  const queued = candidates.filter((row) => { const id = storedQueueId(row); return id != null && unsent.has(id); });
+  if (queued.length !== 1) return { target: null, why: queued.length ? 'several_queued' : 'none_queued' };
+  return { target: queued[0], items, itemId: storedQueueId(queued[0]) };
+}
+
+async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason, flushQueue: givenFlushQueue, readQueue: givenReadQueue, enqueue: givenEnqueue, transport: givenTransport, wholeQueue, now, warn }) {
+  let transport = givenTransport;
+  let flushQueue = givenFlushQueue;
+  let readQueue = givenReadQueue;
+  let enqueue = givenEnqueue;
   // Fail closed BEFORE any write. The cloud CANCEL_VALVE_ACTUATION path (Valve Cloud
   // Command Bridge) builds flushQueue inside its own try/catch and passes null when
   // createProvisioningClientFromEnv throws - without this guard, a broken ChirpStack
@@ -415,12 +471,39 @@ async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason
   if (String(device.type_id || '') !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve', downlinks: [] };
 
   const named = expectationId === undefined || expectationId === null ? '' : String(expectationId).trim();
-  const resolved = all === true ? await resolveTarget(db, eui, '') : await resolveTarget(db, eui, named);
+  let resolved = all === true ? await resolveTarget(db, eui, '') : await resolveTarget(db, eui, named);
+  // No open is named and several are active: the target is the one open still in the queue, if
+  // there is exactly one (onlyQueuedOpen). Otherwise the refusal of 0.8.1 stands, with its reason.
+  let queuedTarget = null;
+  if (all !== true && wholeQueue !== true && resolved.error === 'ambiguous_actuation') {
+    const client = transport;
+    const reader = typeof readQueue === 'function' ? readQueue
+      : (client ? (target) => (typeof client.getDeviceQueue === 'function' ? client.getDeviceQueue(target) : client.getQueue(target)) : null);
+    queuedTarget = await onlyQueuedOpen({ db, eui, candidates: resolved.active, readQueue: reader, warn });
+    if (!queuedTarget.target) {
+      return { ok: false, error: 'ambiguous_actuation', permanent: true, ambiguity: queuedTarget.why, downlinks: [] };
+    }
+    resolved = { target: queuedTarget.target, active: resolved.active };
+  }
   if (resolved.error && !(all === true && resolved.error === 'ambiguous_actuation')) {
     return { ok: false, error: resolved.error, permanent: !!resolved.permanent, downlinks: [] };
   }
   const targets = all === true ? resolved.active : [resolved.target];
   const active = targets[targets.length - 1];
+
+  // v0.8.2 fix, stage 1 (CTO ruling of 2026-11-12): the whole-queue flush of owner decision
+  // D19/Q01 holds where conditional irrigation is involved, and for a valve that leaves the
+  // gateway. The cancel of an ordinary open behaves as in v0.8.1: the open is taken out, plan
+  // pushes, settings and a CLOSE are queued again, and the actuation is marked CANCELLED. Its
+  // known weakness is v0.8.1's: an item ChirpStack sent between the read and the flush is sent
+  // twice, and a CLOSE queued again can reach the valve after a later open.
+  if (transport && !(all === true || wholeQueue === true || await involvesConditional(db, eui, active))) {
+    const client = transport;
+    if (typeof flushQueue !== 'function') flushQueue = (target) => client.flushDeviceQueue(target);
+    if (typeof readQueue !== 'function') readQueue = (target) => (typeof client.getDeviceQueue === 'function' ? client.getDeviceQueue(target) : client.getQueue(target));
+    if (typeof enqueue !== 'function') enqueue = (item) => (client.enqueueDownlink || client.enqueue).call(client, item);
+    transport = null;
+  }
 
   const normalizedReason = normalizeReason(reason);
   const cancelReason = truncateWithMarker(normalizedReason, CANCEL_REASON_MAX_LENGTH);
@@ -445,7 +528,8 @@ async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason
       // the transport path).
       ? await dispatch.flushValveQueue({ db, deviceEui: eui, reason: 'unclaim', transport, now }).then((flushed) => ({ scope: flushed.ok ? 'full_flush' : 'flush_uncertain', flushed, kept: 0, lost: 0, dropped: null, ...flushed }))
       : { scope: 'full_flush', flushed: await flushQueue(eui), kept: 0, lost: 0, dropped: null })
-    : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, transport, db, now, warn });
+    : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, transport, db, now, warn,
+      knownItems: queuedTarget && !transport ? queuedTarget.items : null, targetItemId: queuedTarget && !transport ? queuedTarget.itemId : null });
   const base = {
     downlinks: [],
     expectationId: active.expectation_id,
@@ -596,7 +680,7 @@ async function cancelForUnclaim({ db, deviceEui, transport, now, warn } = {}) {
   for (const row of active.filter((item) => item.reconciliation_state !== 'OBSERVED_RUNNING')) {
     let out;
     try {
-      out = await cancelActuation({ db, deviceEui: eui, expectationId: row.expectation_id, reason: 'device_unclaimed', transport, now, warn });
+      out = await cancelActuation({ db, deviceEui: eui, expectationId: row.expectation_id, reason: 'device_unclaimed', transport, wholeQueue: true, now, warn });
     } catch (error) {
       out = { ok: false, outcome: 'uncertain', error: String(error && error.message || error) };
     }
@@ -620,7 +704,9 @@ function cancelHttpResponse(result, deveui) {
   const collateral = Array.isArray(r.collateral) ? r.collateral : null;
   if (!r.ok) {
     const refuse = (statusCode, message, extra) => ({ statusCode, payload: { message, error: r.error || null, ...(extra || {}) } });
-    if (r.error === 'ambiguous_actuation') return refuse(409, 'More than one actuation is active; name the one to cancel (expectation_id)');
+    // ambiguity: why the queue did not single out one open (onlyQueuedOpen); absent for a caller
+    // that could not have it read.
+    if (r.error === 'ambiguous_actuation') return refuse(409, 'More than one actuation is active; name the one to cancel (expectation_id)', r.ambiguity ? { ambiguity: r.ambiguity } : null);
     if (r.error === 'actuation_not_active') return refuse(409, 'That actuation is no longer active');
     if (r.error === 'no_active_actuation') return refuse(404, 'No active actuation to cancel');
     if (r.error === 'not_found') return refuse(404, 'Valve not found in devices table');

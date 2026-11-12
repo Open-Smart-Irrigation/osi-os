@@ -490,7 +490,7 @@ test('untrusted clock leaves no claim, restart recovery dispatches once, and the
   });
 });
 
-test('pending timed owner blocks destructive queue flush, manual races stay fenced, and replay does not enqueue twice', async () => {
+test('pending timed owner blocks destructive queue flush, a second manual open is accepted as in v0.8.1, and replay does not enqueue twice', async () => {
   const value = await tempDb();
   const openTransport = transportRecorder({ label: 'manual-open' });
   const clearTransport = transportRecorder({ label: 'clear-with-pending-open' });
@@ -510,11 +510,14 @@ test('pending timed owner blocks destructive queue flush, manual races stay fenc
     });
     assert.equal(replay.replayed, true);
     assert.equal(openTransport.calls.enqueue.length, 1);
-    await assert.rejects(() => dispatch.executeValveAttempt({
+    // v0.8.2 fix, stage 1: an ordinary open is not fenced by an earlier ordinary open.
+    const second = await dispatch.executeValveAttempt({
       db: value.db, deviceEui: DEVICE,
       command: { device_eui: DEVICE, command_id: 'manual-race-2', action: 'OPEN_FOR_DURATION', duration_minutes: 5 },
       frame, transport: openTransport, now: NOW, trustedContext: trustedAttemptContext(),
-    }), (error) => error && error.code === 'valve_busy');
+    });
+    assert.equal(second.accepted, true);
+    assert.equal(openTransport.calls.enqueue.length, 2);
     const prepared = await push.prepareClearRevision({ db: value.db, deviceEui: DEVICE, generation: 'GEN2', now: NOW, reason: 'pending-owner-clear' });
     const cleared = await push.sendPreparedRevision({ db: value.db, deviceEui: DEVICE, revision: prepared.revision, transport: clearTransport, now: NOW });
     assert.equal(cleared.sent, 0);

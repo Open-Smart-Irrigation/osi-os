@@ -335,6 +335,26 @@ async function updateLegacyTx(tx, state, patch, at, input = {}) {
     ]);
     return tx.get('SELECT * FROM irrigation_schedules WHERE id=?', [current.id]);
   }
+  // irrigation_zone_id is UNIQUE, so a zone keeps one schedule row for good. A soft-deleted row is
+  // revived, as v0.8.1 did with INSERT ... ON CONFLICT(irrigation_zone_id) DO UPDATE ... deleted_at
+  // = NULL; a plain INSERT fails on the constraint. The row's version counts: a save without a
+  // version goes one above it. A command that names a version must be strictly newer than the
+  // soft-deleted row: the row's own version already stands for "deleted" at the cloud, and a
+  // different content at an equal version is a conflict there.
+  const softDeleted = await tx.get('SELECT * FROM irrigation_schedules WHERE irrigation_zone_id=? AND deleted_at IS NOT NULL', [state.zone.id]);
+  if (softDeleted) {
+    const deletedVersion = Number(softDeleted.sync_version || 0);
+    const named = versionInput(input);
+    if (named != null && named <= deletedVersion) {
+      throw versionConflict(named < deletedVersion ? 'stale_sync_version' : 'version_conflict',
+        named < deletedVersion ? 'legacy schedule version is stale' : 'legacy schedule version is the one of the deleted schedule', deletedVersion, named);
+    }
+    const syncVersion = named == null ? deletedVersion + 1 : named;
+    await tx.run('UPDATE irrigation_schedules SET trigger_metric=?, threshold_kpa=?, duration_minutes=?, enabled=?, response_mode=?, deleted_at=NULL, sync_version=?, updated_at=? WHERE id=?', [
+      patch.trigger_metric || null, patch.threshold_kpa == null ? null : patch.threshold_kpa, patch.duration_minutes == null ? 0 : patch.duration_minutes, enabled, patch.response_mode || 'proportional', syncVersion, at, softDeleted.id,
+    ]);
+    return tx.get('SELECT * FROM irrigation_schedules WHERE id=?', [softDeleted.id]);
+  }
   await tx.run('INSERT INTO irrigation_schedules(irrigation_zone_id,trigger_metric,threshold_kpa,duration_minutes,enabled,response_mode,sync_version,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?, ?,?,NULL,?,?)', [
     state.zone.id, patch.trigger_metric || null, patch.threshold_kpa == null ? null : patch.threshold_kpa, patch.duration_minutes == null ? 0 : patch.duration_minutes, enabled, patch.response_mode || 'proportional', requestedSyncVersion(input, null), at, at,
   ]);

@@ -15,6 +15,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   free, and the normal reading write is never blocked by it.
 
 ### Fixed
+- **Valves are no longer blocked after an open, a timed close, flushing, a
+  power cut or an upgrade: valve control decides as in 0.8.1.** 0.8.2 refused
+  a new open (`valve_busy`) while an earlier command of that valve was
+  unresolved, and for the shipped hardware that state never ended: after one
+  open whose OPEN report was not received, after "close for N minutes", a
+  timed close or flushing, after a report that arrived before the gateway's
+  first time signal, and for a run left by 0.8.0 or 0.8.1 at upgrade. The
+  0.8.2 entry "a new open of that valve is refused `valve_busy` until the
+  first open's bounded duration has passed" described a bound the shipped
+  configuration did not have. Now every command that is not a
+  conditional-irrigation occurrence (manual, cloud, scheduler, one-time and
+  service commands) is accepted and sent as 0.8.1 did;
+  `scripts/test-valve-v081-equivalence.js` runs 56 sequences on the code of
+  tag `v0.8.1` and on this code and compares what the caller is told, the
+  frames, what the valve does and the state shown. In detail:
+  - The gateway puts no queue expiry of its own on a valve frame. 0.8.2 gave
+    every open and CLOSE 31 minutes, after which ChirpStack discarded it, a
+    CLOSE included. A cloud `OPEN_FOR_DURATION` that carries its own
+    `expires_at` keeps it, by the gateway's clock.
+  - A manual CLOSE is always sent, with or without a time signal.
+  - Without a time signal the state shown follows the newest report received.
+    A report received in that state is attached to the one open it can belong
+    to, as evidence without an observed time; 0.8.2 booked it as a second run
+    with trigger `unexplained`. A report that fits no open, or more than one,
+    is still booked as a run without a command, and the record says which.
+  - The cancel of an ordinary open works as in 0.8.1: the open is taken out
+    of the queue, settings and a CLOSE are queued again. The whole-queue flush
+    of 0.8.2 applies where conditional irrigation is involved. One addition:
+    a cancel that names no open while several are active (the control panel
+    never names one) reads the queue and takes the one active open whose
+    queue id is still listed unsent there. 0.8.1 refused it as ambiguous and
+    the valve ran the open. With none or several still queued it is refused
+    as before, and the answer says why (`ambiguity`).
+  - The control panel and the runtime sent to the cloud no longer show a
+    CLOSE, or a run the valve has reported over, as a pending open. On a
+    gateway without a time signal the tile showed "Cancel queued open" in
+    place of Open for about an hour after every run.
+  - A timed open for a valve whose last report said OPEN is sent, and the
+    answer carries `warning: valve_last_reported_open`: an open valve ignores
+    a timed open and is not closed by it. A refusal by a conditional
+    occurrence is answered 409 `valve_busy`, not 503.
+  - A zone schedule save on a zone that holds a soft-deleted schedule row
+    revives the row as 0.8.1 did, instead of failing on the unique
+    constraint. A cloud command that names a version must be newer than the
+    deleted row's; an equal version is answered 409.
+  - Not protected, as in 0.8.1: two opens sent one after the other can both
+    run when the valve's state-change report between them is lost; an open
+    for a valve that is out of reach runs when the valve returns, hours or
+    days later; a valve left open without a timer stays open until a CLOSE
+    reaches it; a cancel does not stop an open the valve has already fetched,
+    and one that names no open is still refused while two opens wait in the
+    queue. Without a time signal a run started at the valve itself can be
+    booked to a commanded open that is still waiting.
+    Frames a 0.8.2 gateway queued before the upgrade keep the 31-minute expiry
+    0.8.2 gave them.
+    A time-bounded protection for ordinary commands is a later project.
 - **A rejected API token no longer marks the gateway `degraded` until
   Node-RED restarts (#462).** Record Error counted every 401 from a token
   guard as a gateway error, and `health_state` stays `degraded` while that

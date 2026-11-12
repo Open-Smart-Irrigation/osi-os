@@ -51,7 +51,9 @@ async function listValvesForUser(db, userId) {
       "SELECT expectation_id, reconciliation_state, commanded_at, expected_close_at, commanded_duration_seconds AS duration_seconds, trigger, command_id, transport_json FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY commanded_at DESC",
       [row.deveui]
     );
-    const active = candidates.find((candidate) => !dispatch.isReportOnlyExpectation(candidate));
+    // The cancel's own rule (dispatch.cancellableOpen): a CLOSE owner and a run already reported
+    // over are not shown as a pending open.
+    const active = candidates.find((candidate) => dispatch.cancellableOpen(candidate));
     if (!active) {
       row.active_expectation_id = null;
       row.active_reconciliation_state = null;
@@ -868,7 +870,7 @@ async function activeActuation(db, deviceEui) {
   const dispatch = require('./dispatch');
   for (const row of rows) {
     const expectation = await db.get('SELECT command_id, transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [row.expectation_id]);
-    if (!dispatch.isReportOnlyExpectation(expectation || row)) return row;
+    if (dispatch.cancellableOpen({ ...row, ...(expectation || {}) })) return row;
   }
   return null;
 }

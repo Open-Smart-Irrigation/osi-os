@@ -13507,7 +13507,7 @@
     "type": "function",
     "z": "valve-control-tab",
     "name": "Observe valve-fired opens + trigger backfill",
-    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const o = await VC.runObserveTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });\n    const b = await VC.runTriggerBackfill({ db: db, warn: function(m) { node.warn(m); } });\n    if (o.created || b.updated) node.status({ fill: 'green', shape: 'dot', text: 'observed ' + o.created + ' backfilled ' + b.updated });\n  } catch (e) { node.error('valve-observe: ' + (e && e.message ? e.message : e)); }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n  return null;\n})();",
+    "func": "/* adapter inventory: runObserveTick, runTriggerBackfill */\nconst live=osiLib.require('osi-valve-control');\nif(!live.ok){node.error('valve control unavailable: '+live.error,msg);return null;}\nreturn live.value.liveValveObserve({msg,node,osiLib});",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,

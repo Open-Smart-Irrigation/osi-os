@@ -1444,15 +1444,12 @@ for (const scoped of [false, true]) {
       await rt.runUntil('A', ID.valveDeviceDb);
       await rt.run('B');
       await rt.run('A');
-      // One open per valve at a time (the dispatch reservation fence): B, which reached the
-      // transport first, opens for its own 3 minutes; A is refused and never borrows B's
-      // duration or writes a log line. Neither request's values cross.
+      // v0.8.2 fix, stage 1: an ordinary open is not fenced by an earlier ordinary open, as in
+      // v0.8.1. B reached the transport first; both are sent, each with its own duration, and
+      // neither request's values cross.
       assertValveAccepted(rt, 'B', { eui: VALVE_A, minutes: 3 });
-      const refused = onlyResponse(rt, 'A');
-      assert.equal(refused.statusCode, 503, 'A status: ' + JSON.stringify(refused.payload));
-      assert.equal(refused.payload.error, 'valve_busy', 'A refused by the reservation fence');
-      assert.equal(rt.lane('A').sql.filter((entry) => entry.node === ID.valveWriteDb).length, 0, 'A writes no log line');
-      assert.deepEqual(actuatorLog(db), [VALVE_A + ':3'], 'only B\'s open is logged, with its own duration');
+      assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12 });
+      assert.deepEqual(actuatorLog(db), [VALVE_A + ':3', VALVE_A + ':12'], 'each open is logged with its own duration');
     });
   });
 
@@ -1657,16 +1654,20 @@ for (const scoped of [false, true]) {
     });
   }
   test(`manual STREGA busy ACK has no A owner and preserves accepted B (scoped ${mode})`, async () => {
-    await withRuntime({ scoped, directAckLanes: new Set(['A', 'B']) }, async (rt) => {
+    await withRuntime({ scoped, directAckLanes: new Set(['A', 'B']) }, async (rt, db) => {
+      // v0.8.2 fix, stage 1: only a conditional-irrigation occurrence makes a valve busy for an
+      // ordinary open. Valve A carries an active one; valve B does not.
+      db.prepare('INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, command_id) VALUES (?,?,?,?,?,?,?)')
+        .run('isolation-conditional', '2026-10-18', '06:00', VALVE_A, '2026-10-18T06:00:00.000Z', 'SENT', 'isolation-conditional-command');
       rt.inject('A', ID.valveHttp, valveMsg('A', { eui: VALVE_A, minutes: 12 }));
-      rt.inject('B', ID.valveHttp, valveMsg('B', { eui: VALVE_A, minutes: 3 }));
+      rt.inject('B', ID.valveHttp, valveMsg('B', { eui: VALVE_B, minutes: 3 }));
       await rt.runUntil('A', ID.valveDeviceDb);
       await rt.run('B');
       await rt.run('A');
-      assert.equal(onlyResponse(rt, 'A').statusCode, 503);
+      assert.equal(onlyResponse(rt, 'A').statusCode, 409);
       assert.equal(onlyResponse(rt, 'A').payload.error, 'valve_busy');
       assertManualFailureAckEvidence(rt, 'A', 'busy');
-      assertValveAccepted(rt, 'B', { eui: VALVE_A, minutes: 3, actorUuid: scoped ? USERS.res1.uuid : null });
+      assertValveAccepted(rt, 'B', { eui: VALVE_B, minutes: 3, actorUuid: scoped ? USERS.res1.uuid : null });
       assert.equal(rt.lane('A').sql.filter((entry) => entry.node === ID.valveWriteDb).length, 0,
         'busy A emits no log write');
     });
@@ -1691,16 +1692,16 @@ test('valve open and cancel interleaved on different valves', async () => {
     await rt.run('A');
     assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12 });
     const cancel = onlyResponse(rt, 'cancel');
-    // Owner decision 2026-10-24 (fail closed): B's open was handed to ChirpStack, so the cancel
-    // flushes B's queue and answers handed_off; it must still answer for valve B only.
-    assert.equal(cancel.statusCode, 409, JSON.stringify(cancel.payload));
-    assert.equal(cancel.payload.outcome, 'handed_off');
+    // The cancel of an ordinary open works as in 0.8.1: B's actuation is cancelled. It must
+    // answer for valve B only.
+    assert.equal(cancel.statusCode, 200, JSON.stringify(cancel.payload));
+    assert.equal(cancel.payload.outcome, 'cancelled');
     const bRow = db.prepare('SELECT expectation_id FROM valve_actuation_expectations WHERE device_eui=?').get(VALVE_B);
     assert.equal(String(cancel.payload.expectation_id), String(bRow.expectation_id), 'the cancel answers for valve B');
     const states = db.prepare(
       'SELECT device_eui, reconciliation_state FROM valve_actuation_expectations ORDER BY created_at, rowid'
     ).all().map((row) => row.device_eui + ':' + row.reconciliation_state);
-    assert.ok(states.includes(VALVE_B + ':PENDING_OBSERVATION'), 'valve B expectation stays observed: ' + states);
+    assert.ok(states.includes(VALVE_B + ':CANCELLED'), 'valve B expectation is cancelled: ' + states);
     assert.ok(states.some((state) => state.startsWith(VALVE_A + ':') && !state.endsWith('CANCELLED')),
       'valve A expectation untouched: ' + states);
   });

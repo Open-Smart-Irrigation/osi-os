@@ -341,6 +341,9 @@ if (data.commandId && db) {
     await db.run('UPDATE applied_commands SET result=?, result_detail=?, last_error=? WHERE command_id=?', [ledgerResult, JSON.stringify(detail), detail.error, String(data.commandId)]);
   }
 }
+// (F-10) valve_busy is a decision, not a transport fault: an unresolved conditional irrigation
+// run holds the valve. The local answer says so; the cloud ACK is left as it was.
+const valveBusy = Boolean(transportResult && transportResult.phase === 'valve_busy');
 if (!transportResult || transportResult.phase !== 'ACCEPTED') {
   const detail = transportResult && transportResult.error ? String(transportResult.error.message || transportResult.error) : 'STREGA transport did not accept the command';
   node.warn('STREGA downlink not accepted for ' + devEui + ': ' + detail);
@@ -400,6 +403,25 @@ if (msg._stregaHttpResponse) {
   if (transportResult && transportResult.phase === 'ACCEPTED') {
     localResponse.statusCode = 202;
     localResponse.payload = Object.assign({}, localResponse.payload || {}, { status: 'queued', transportPhase: 'ACCEPTED', queue_id: transportResult.queue_id || null });
+    // A timed open for a valve whose last received report said OPEN is accepted and sent, as in
+    // v0.8.1; the vendor manuals say an open valve ignores it and is not closed afterwards. The
+    // caller is told what the valve last reported instead of being refused: a refusal here could
+    // only end with a report, and that report may be the one that was lost.
+    const timedOpenSent = action === 'OPEN_FOR_DURATION' || (action === 'TIMED_ACTION' && valveAction === 'OPEN');
+    if (timedOpenSent && db) {
+      try {
+        const reported = await db.get('SELECT current_state, updated_at FROM devices WHERE UPPER(deveui)=UPPER(?)', [devEui]);
+        if (reported && String(reported.current_state || '').toUpperCase() === 'OPEN') {
+          localResponse.payload.warning = 'valve_last_reported_open';
+          localResponse.payload.valve_last_report = { state: 'OPEN', since: reported.updated_at || null };
+        }
+      } catch (e) {
+        node.warn('STREGA last-report lookup failed for ' + devEui + ': ' + (e && e.message ? e.message : e));
+      }
+    }
+  } else if (valveBusy) {
+    localResponse.statusCode = 409;
+    localResponse.payload = { error: 'valve_busy', message: 'A conditional irrigation run on this valve is not resolved yet' };
   } else {
     localResponse.statusCode = transportResult && transportResult.phase === 'enqueue_rejected' ? 422 : 503;
     localResponse.payload = { error: transportResult && transportResult.phase || 'UNKNOWN', message: 'STREGA transport did not accept the command' };
@@ -539,6 +561,30 @@ return (async () => {
 })().then(function(msgs) { return msgs.length ? [msgs] : null; });
 }
 
+// The 60 s tick behind "Observe valve-fired opens + trigger backfill": moved here unchanged from
+// the flow node, which now only loads this module.
+function liveValveObserve({ msg, node, osiLib }) {
+const dbLoad = osiLib.require('osi-db-helper');
+const vcLoad = osiLib.require('osi-valve-control');
+if (!dbLoad.ok || !vcLoad.ok) {
+  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');
+  node.error('Valve control helpers unavailable: ' + detail, msg);
+  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };
+  return null;
+}
+const dbHelper = dbLoad.value; const VC = vcLoad.value;
+return (async () => {
+  const db = new dbHelper.Database('/data/db/farming.db');
+  try {
+    const o = await VC.runObserveTick({ db: db, now: new Date(), warn: function(m) { node.warn(m); } });
+    const b = await VC.runTriggerBackfill({ db: db, warn: function(m) { node.warn(m); } });
+    if (o.created || b.updated) node.status({ fill: 'green', shape: 'dot', text: 'observed ' + o.created + ' backfilled ' + b.updated });
+  } catch (e) { node.error('valve-observe: ' + (e && e.message ? e.message : e)); }
+  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }
+  return null;
+})();
+}
+
 function liveCloudCommand({ msg, node, env, chirpstack, osiLib }) {
 // Applies the cloud valve commands (schedules, settings, CANCEL_VALVE_ACTUATION) through
 // osi-valve-control applyCloudCommand, as the REST routes do. They carry only a
@@ -620,5 +666,6 @@ module.exports = {
   liveValveApiRouter,
   liveValveOnce,
   liveValveClock,
+  liveValveObserve,
   liveCloudCommand
 };

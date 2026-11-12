@@ -20,6 +20,7 @@ const extractedAdapters = {
   'valve-api-router-fn': ['liveValveApiRouter', /handleHttpRequest/],
   'valve-once-fn': ['liveValveOnce', /runOnceTick/],
   'valve-clock-fn': ['liveValveClock', /runValveTick/],
+  'valve-observe-fn': ['liveValveObserve', /runObserveTick/],
   'b1bc51c1d156de8b': ['liveCloudCommand', /applyCloudCommand/],
   'strega-sql-fn': ['liveStregaSql', /observeClosedEvidence/],
 };

@@ -869,6 +869,10 @@ test('R5 M3: SET_VALVE_SCHEDULER_STATUS is not refused by a plan_conflict in the
 // outcome and the flush collateral in the ACK detail, and a handed-off open is a permanent
 // refusal rather than a success.
 async function seedTransportCancel(db) {
+  // v0.8.2 fix, stage 1: the whole-queue flush of D19/Q01 holds where conditional irrigation is
+  // involved; the cancel of an ordinary open behaves as in v0.8.1. An active occurrence on the
+  // valve keeps these tests on the flush path.
+  await db.run("INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, command_id) VALUES ('cancel-test-conditional','2026-10-19','07:00',?,?,'SENT','cancel-test-conditional-command')", [EUI, '2026-10-19T07:00:00.000Z']);
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }), 'e1']);
   await db.run("INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, transport_json) VALUES ('p-mon', ?, 'WEEKDAY_PLAN', 1, 15, '00', 'h', 'QUEUED', ?)",

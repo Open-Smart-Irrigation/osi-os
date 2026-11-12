@@ -107,6 +107,50 @@ owner-confirmed stage-1 work; this baseline update changes no scenario or
 assertion. Conditional-owner classification in both directions, the stage-1
 cancel rule, reboots and clock interleavings are not established by these cases.
 
+## After the valve fix (#648)
+
+The owner decided on 12 November 2026 that valves behave as in v0.8.1: an
+ordinary open is not refused because of an earlier command. The pull request
+that makes it so changes the six valve cases with the fix, as the assessment
+above assigned to it. The untouched-list run on that change exited 1 with 200
+passed, 6 failed and 5 known-to-fail: five listed cases passed, and
+`no-clock-open-report-close-open` failed only its old `stored` assertion,
+which required an observed close time without a trusted clock. The six entries
+were then removed and the assertions changed. No other entry was touched; the
+scheduler case (F-7) is unchanged.
+
+| Case | Finding | What it asserts now |
+|---|---|---|
+| `open-no-report-open-later` | F-1 | As before (open, three days, monitor tick, open: 202), with the valve's complete call list at the radio stand-in: two `enqueue 2/4101` without expiry and no flush. Two records, each with its own command id and 60 seconds, and no record without a command. |
+| `open-no-report-open-at-once` | F-1, new | Open, then two more opens at once: no ageing, no report, no monitor tick. Three times 202, three expiry-free `2/4101` and no flush, three records with their own command ids. A refusal that lets go after any wait fails here. |
+| `no-clock-open-no-report-open-later` | F-1 | The same as the first case with the NTP marker absent. |
+| `no-clock-open-no-report-open-at-once` | F-1, new | The same as the second case with the NTP marker absent. |
+| `no-clock-open-report-close-open` | F-2 | Marker absent: open, OPEN report, CLOSED report, open. `current_state` follows the last report the gateway accepted (OPEN, then CLOSED). The second open is 202 and the call list is two expiry-free `2/4101`. Exactly two records, one per commanded open, and no record without a command. The first record carries both reports as untrusted evidence (`transport_json.untrusted_report`), has no observed open or close time and stays `PENDING_OBSERVATION`; the old requirement of an observed close time is gone. Then the marker returns: a third open is 202 and the first record is unchanged. |
+| `open-after:close-duration`, `:timed-close`, `:flushing` | F-4 | As before (service command, three days, CLOSED report, open: 202), with the call list: the service frame, then one expiry-free `2/4101`, no flush. One record for the open, with a command id and 60 seconds. |
+| `open-at-once-after:close-duration`, `:timed-close`, `:flushing` | F-4, new | The open right behind the service command, with no ageing and no report: 202, the same call list, one record for the open. |
+
+On `main` at `5040db091`, without the fix, the eleven cases above all fail
+(`503 valve_busy`, and for the F-2 case also CLOSED shown as OPEN and a second
+run without a command).
+
+Not established by these cases, as before: conditional owners in either
+direction, the cancel, reboots and clock corrections. They are covered by
+`scripts/test-valve-v081-equivalence.js` and the module tests of
+`osi-valve-control`, outside the real runtime.
+
+Remaining after the fix, five cases over four findings:
+
+| Case | Finding |
+|---|---|
+| `startup-node-errors` | F-14 |
+| `no-token:POST /api/account-link` | F-13 |
+| `no-token:POST /api/sync/force` | F-13 |
+| `scheduler-irrigates` | F-7 |
+| `dendro-weather-transport` | NEW-1 |
+
+`after-valve-fix-648.txt` is the strict output on that change: 211 passed, 0
+unexpected failures, 5 known failing cases, exit 1.
+
 ## Evidence
 
 `baseline-88f6e84bb.txt` replaces the old payload-baseline output. The base

@@ -255,19 +255,28 @@ for (const name of PROFILES) {
     });
   }
 
-  test(`${name}: a second open while the first is pending is refused, and both are answered once`, async () => {
+  // Since the return to the 0.8.1 rule an earlier ordinary open does not refuse a later one.
+  test(`${name}: a second open while the first is pending is accepted, and both are answered once`, async () => {
     const db = seedDb();
     try {
       const first = await send(p, db, 'dde8e1ef265e96d7', valveRequest('OPEN_FOR_DURATION', 2));
       const second = await send(p, db, 'dde8e1ef265e96d7', valveRequest('OPEN_FOR_DURATION', 2));
       assert.deepEqual(first.answers.map((a) => a.statusCode), [202]);
-      assert.equal(second.enqueued.length, 0, 'the busy valve gets no second frame');
-      assert.equal(second.answers.length, 1, 'errors: ' + second.errors.join('; '));
-      // The status code of a busy refusal belongs to the valve-busy design
-      // (it is 409 from the expectation writer, 503 from the transport gate);
-      // this suite pins only that the refusal is answered, once.
-      assert.ok(second.answers[0].statusCode >= 400);
-      assert.equal(second.answers[0].payload.error, 'valve_busy');
+      assert.equal(second.enqueued.length, 1, 'the second open is handed over as well');
+      assert.deepEqual(second.answers.map((a) => a.statusCode), [202], 'errors: ' + second.errors.join('; '));
+    } finally { db.close(); }
+  });
+
+  // What still refuses an ordinary open as busy: a stored conditional-irrigation occurrence.
+  test(`${name}: an open for a valve held by a conditional occurrence is refused as busy and answered once`, async () => {
+    const db = seedDb();
+    try {
+      db.prepare("INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, command_id) VALUES ('reply-once-conditional','2026-01-01','06:00',?,'2026-01-01T06:00:00.000Z','SENT','reply-once-conditional-command')").run(VALVE);
+      const refused = await send(p, db, 'dde8e1ef265e96d7', valveRequest('OPEN_FOR_DURATION', 2));
+      assert.equal(refused.enqueued.length, 0, 'the busy valve gets no frame');
+      assert.equal(refused.answers.length, 1, 'errors: ' + refused.errors.join('; '));
+      assert.equal(refused.answers[0].statusCode, 409);
+      assert.equal(refused.answers[0].payload.error, 'valve_busy');
     } finally { db.close(); }
   });
 }
