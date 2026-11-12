@@ -9,6 +9,14 @@ const http = require('node:http');
 const repo = path.resolve(__dirname, '..');
 const profile = path.join(repo, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
 const helper = path.join(profile, 'usr/libexec/osi-image-safety.js');
+const missingImageNode = '/__osi_fixture_missing_node__/node';
+function portableInterpreter(text) {
+  // Optional masking proves no copied script can accidentally use this host's
+  // /usr/bin/node. Change only the interpreter token, never product behavior.
+  const imageNode = process.env.OSI_TEST_IMAGE_NODE || '/usr/bin/node';
+  return text.replaceAll('/usr/bin/node', imageNode)
+    .replaceAll(imageNode, process.execPath).replaceAll(missingImageNode, process.execPath);
+}
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-image-safety-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -24,18 +32,35 @@ function db(root, accounts = 1, head = 70) {
   const result = spawnSync('sqlite3', [dest, sql]); assert.equal(result.status, 0, String(result.stderr)); return dest;
 }
 function rewrite(text, root) {
-  return text.replaceAll("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`)
+  return portableInterpreter(text).replaceAll("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`)
     .replace(/\/(?:usr\/libexec|usr\/share|etc\/osi-|srv\/node-red|data\/db)[^\s'";)]*/g, match => root + match);
 }
 function installFixtureHelper(root) {
-  put(root, 'usr/libexec/osi-image-safety.js', fs.readFileSync(helper, 'utf8').replace("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`));
+  put(root, 'usr/libexec/osi-image-safety.js', portableInterpreter(fs.readFileSync(helper, 'utf8')).replace("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`));
   put(root, 'etc/osi-image-initialization.required', '1\n');
 }
 function shellSeed(root, name) {
   const file = put(root, `test-${name}`, rewrite(fs.readFileSync(path.join(profile, 'etc/uci-defaults', name), 'utf8'), root));
   return spawnSync('/bin/sh', [file], { encoding: 'utf8' });
 }
-function safety() { return require(helper); }
+function safety(root) { return require(root ? path.join(root, 'usr/libexec/osi-image-safety.js') : helper); }
+
+test('copied scripts substitute the test interpreter even when the image path is unavailable', t => {
+  const root = fixture(t); installFixtureHelper(root);
+  put(root, 'srv/chirpstack/chirpstack.sqlite', 'made-up-radio-state');
+  put(root, 'usr/share/db/farming.db', 'must not seed');
+  const source = fs.readFileSync(path.join(profile, 'etc/uci-defaults/97_osi_db_seed'), 'utf8')
+    .replaceAll('/usr/bin/node', missingImageNode);
+  const unavailable = put(root, 'missing-interpreter-control', source);
+  const control = spawnSync('/bin/sh', [unavailable], { encoding: 'utf8' });
+  assert.equal(control.status, 127, 'negative control must prove the image interpreter is unavailable');
+  const copied = put(root, 'portable-seed', rewrite(source, root));
+  const result = spawnSync('/bin/sh', [copied], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(safety().readStatus(root).phase, 'held');
+  assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db')), false);
+  t.diagnostic('missing interpreter control exit 127; copied script using process.execPath exit 0');
+});
 
 test('an image with retained radio state never silently seeds an empty farm', t => {
   const root = fixture(t);
@@ -153,7 +178,7 @@ test('old application evidence and orphaned sidecars hold even without a farm DB
 test('source wrappers cover CLI, LuCI/rpcd exec and direct procd validation before stock code', t => {
   const root = fixture(t); installFixtureHelper(root);
   for (const name of ['sbin/sysupgrade', 'usr/libexec/validate_firmware_image']) put(root, name, '#!/bin/sh\nprintf "stock:%s\\n" "$*"\n', 0o755);
-  const s = safety(); s.install(root); s.install(root);
+  const s = safety(root); s.install(root); s.install(root);
   let result = spawnSync(path.join(root, 'sbin/sysupgrade'), ['image.bin'], { encoding: 'utf8' });
   assert.equal(result.status, 0); assert.match(result.stdout, /stock:image.bin/);
   db(root);
@@ -174,7 +199,7 @@ test('real OpenWrt upgrade and validator scripts are stopped before any stock in
     const stock = fs.readFileSync(path.join(repo, 'openwrt/package/base-files/files', name));
     put(root, name, stock, 0o755);
   }
-  safety().install(root);
+  safety(root).install(root);
   for (const [name, args] of [['sbin/sysupgrade', ['image.bin']], ['sbin/sysupgrade', ['-b', '/tmp/backup.tgz']], ['usr/libexec/validate_firmware_image', ['image.bin']]]) {
     const result = spawnSync(path.join(root, name), args, { encoding: 'utf8' });
     assert.equal(result.status, 1);
@@ -185,7 +210,7 @@ test('real OpenWrt upgrade and validator scripts are stopped before any stock in
 
 test('wrapper installer refuses conflicting originals and recovers a cut after preserving stock', t => {
   const root = fixture(t); installFixtureHelper(root);
-  const s = safety();
+  const s = safety(root);
   for (const name of ['sbin/sysupgrade', 'usr/libexec/validate_firmware_image']) {
     put(root, name, '#!/bin/sh\nexit 0\n', 0o755);
     fs.copyFileSync(path.join(root, name), path.join(root, name + '.osi-stock'));
@@ -201,7 +226,7 @@ test('application deploy installs both source guards through its real shell frag
   const source = fs.readFileSync(path.join(repo, 'deploy.sh'), 'utf8');
   const fragment = source.split('# image upgrade guard begin\n')[1].split('# image upgrade guard end')[0]
     .replace(/(?<=[ \t"'])\/(usr\/libexec|usr\/sbin)/g, match => root + match);
-  const prepared = put(root, 'prepared-helper.js', fs.readFileSync(helper, 'utf8').replace("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`));
+  const prepared = put(root, 'prepared-helper.js', portableInterpreter(fs.readFileSync(helper, 'utf8')).replace("const LIVE_ROOT = '/';", `const LIVE_ROOT = ${JSON.stringify(root)};`));
   fs.mkdirSync(path.join(root, 'tmp'), { recursive: true });
   const stub = `fetch_required() { case "$2" in */osi-image-safety.js) cp '${prepared}' "$3";; *) cp '${repo}/'"$2" "$3";; esac; }\nTMP_DIR='${root}/tmp'\n`;
   const result = spawnSync('/bin/sh', ['-ec', stub + fragment], { encoding: 'utf8' });
