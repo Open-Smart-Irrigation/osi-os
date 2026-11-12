@@ -67,6 +67,15 @@ return VC.clearValveOnUnclaim({
 }
 
 function liveEncoder({ msg, node, env, osiLib, chirpstack }) {
+// The answer to a local HTTP request: the reply data in _stregaHttpResponse
+// with the request's top-level req/res (see carryHttpReply in live-authorize.js).
+// Every path below returns it at most once, on output 4.
+function localHttpReply(fields) {
+  if (!msg._stregaHttpResponse) return null;
+  const reply = Object.assign({}, msg._stregaHttpResponse, fields || {});
+  if (msg.res) { reply.req = msg.req; reply.res = msg.res; }
+  return reply;
+}
 return (async () => {
 let db = null;
 const closeDb = function () { return db ? new Promise(function (resolve) { db.close(function () { resolve(); }); }) : Promise.resolve(); };
@@ -119,10 +128,10 @@ function inferAckState() {
 }
 
 function completeFailure(error, message, statusCode, result) {
-  const localResponse = msg._stregaHttpResponse ? Object.assign({}, msg._stregaHttpResponse, {
+  const localResponse = localHttpReply({
     statusCode: Number(statusCode) || 503,
     payload: { error: error, message: message }
-  }) : null;
+  });
   return [null, null, msg._stregaHttpResponse ? null : ack(result || 'FAILED', message), localResponse];
 }
 
@@ -173,7 +182,7 @@ if (!action) {
 
 if (msg._stregaDispatchError) {
   const dispatchError = msg._stregaDispatchError;
-  const localFailure = msg._stregaHttpResponse ? Object.assign({}, msg._stregaHttpResponse, { statusCode: Number(dispatchError.statusCode) || (dispatchError.code === 'valve_busy' ? 409 : 503), payload: { error: dispatchError.code, message: dispatchError.message || dispatchError.code } }) : null;
+  const localFailure = localHttpReply({ statusCode: Number(dispatchError.statusCode) || (dispatchError.code === 'valve_busy' ? 409 : 503), payload: { error: dispatchError.code, message: dispatchError.message || dispatchError.code } });
   const terminal = dispatchError.code === 'valve_busy' || dispatchError.code === 'scope_actor_required' || dispatchError.code === 'scope_denied' || dispatchError.code === 'missing_or_invalid_expectation_duration';
   return [null, null, msg._stregaHttpResponse ? null : ack(terminal ? 'REJECTED_PERMANENT' : 'FAILED', dispatchError.code, { transportPhase: 'REJECTED' }), localFailure];
 }
@@ -387,7 +396,7 @@ if (action && transportResult && transportResult.phase === 'ACCEPTED' && transpo
 
 let localResponse = null;
 if (msg._stregaHttpResponse) {
-  localResponse = Object.assign({}, msg._stregaHttpResponse);
+  localResponse = localHttpReply();
   if (transportResult && transportResult.phase === 'ACCEPTED') {
     localResponse.statusCode = 202;
     localResponse.payload = Object.assign({}, localResponse.payload || {}, { status: 'queued', transportPhase: 'ACCEPTED', queue_id: transportResult.queue_id || null });
@@ -401,7 +410,7 @@ return [null, logMsg, ackMsg, localResponse];
 } finally { await closeDb(); }
 })().catch((error) => {
   node.error('STREGA dispatch failed: ' + String(error && error.message ? error.message : error), msg);
-  const localResponse = msg._stregaHttpResponse ? Object.assign({}, msg._stregaHttpResponse, { statusCode: 503, payload: { error: error && error.code ? error.code : 'write_failed', message: String(error && error.message ? error.message : error) } }) : null;
+  const localResponse = localHttpReply({ statusCode: 503, payload: { error: error && error.code ? error.code : 'write_failed', message: String(error && error.message ? error.message : error) } });
   const errorMessage = String(error && error.message ? error.message : error);
   const errorData = msg.payload && msg.payload.data ? msg.payload.data : {};
   const cloudAck = !msg._stregaHttpResponse && errorData.commandId ? {

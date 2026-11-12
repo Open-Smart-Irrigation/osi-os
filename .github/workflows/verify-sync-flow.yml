@@ -168,6 +168,12 @@ jobs:
       # stop commands still run with the gateway clock ahead of their expiry.
       - name: Valve command safety path
         run: node --test scripts/test-valve-command-safety-path.js
+      # The eight local STREGA commands that answer after the transport decides
+      # (valve CLOSE/CLOSE_FOR_DURATION/OPEN_FOR_DURATION, interval, timed action,
+      # magnet, partial opening, flushing) answer exactly once, through a link in
+      # with several receivers, cloned the way Node-RED 3.1.15 clones.
+      - name: Valve HTTP reply once
+        run: node --test --test-concurrency=1 scripts/test-valve-http-reply-once.js
       # WATERMARK protected configuration commands (SET/DELETE_WATERMARK_CALIBRATION,
       # SET_CHAMELEON_CONFIG, UPSERT_DEVICE_SOIL_DEPTHS): the receiver and the command
       # ledger on the seed schema, including a rejected or conflicting command that

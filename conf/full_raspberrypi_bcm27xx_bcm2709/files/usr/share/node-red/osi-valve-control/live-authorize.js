@@ -1,5 +1,21 @@
 'use strict';
 
+// Node-RED gives every receiver after the first a clone of the message, and a
+// clone keeps only a top-level msg.req/msg.res by reference (util.cloneMessage);
+// a reply object nested deeper is deep-copied and can no longer answer. So the
+// actuator message carries the request's req/res at its top level, and
+// _stregaHttpResponse holds only the reply's data. live-transport.js puts the
+// two together again when the encoder answers.
+function carryHttpReply(actuatorMsg, responseMsg) {
+  const reply = Object.assign({}, responseMsg);
+  actuatorMsg.req = reply.req;
+  actuatorMsg.res = reply.res;
+  delete reply.req;
+  delete reply.res;
+  actuatorMsg._stregaHttpResponse = reply;
+  return actuatorMsg;
+}
+
 function liveSimulationCommand({ msg }) {
 msg.payload = {
   type: "actuator_command",
@@ -58,7 +74,7 @@ responseMsg.payload = {
   payload_hex: msg._strega_payload_hex || null,
   f_port: Number(msg._strega_fport || 0) || 11
 };
-actuatorMsg._stregaHttpResponse = responseMsg;
+carryHttpReply(actuatorMsg, responseMsg);
 return [null, actuatorMsg, null];
 }
 
@@ -204,7 +220,7 @@ if (msg._strega_local_action === 'TIMED_ACTION') {
   responseMsg.payload.payload_hex = msg._strega_payload_hex || null;
   responseMsg.payload.f_port = Number(msg._strega_fport || 0) || 28;
 }
-actuatorMsg._stregaHttpResponse = responseMsg;
+carryHttpReply(actuatorMsg, responseMsg);
 return [null, actuatorMsg, null, null];
 }
 
