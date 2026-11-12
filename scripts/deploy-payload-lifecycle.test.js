@@ -888,6 +888,9 @@ printf '%s\\n' rolled-back
 test('a failure after the migration commit still refuses the old payload and keeps Node-RED stopped', () => {
   for (const flipped of [true, false]) {
     const run = runModuleDeploy(`
+backup_dir="$SWAP_ROOT/backups"
+mkdir -p "$backup_dir"
+cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
 stage_new_deploy new
 stop_for_migration
 commit_migration
@@ -900,6 +903,13 @@ printf '%s\\n' held
       assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
       assert.match(run.result.stderr, /recorded for a different schema head\/ledger/);
       assert.match(run.result.stderr, /keeping Node-RED stopped/);
+      // One line the operator finds without a log search: the deploy's last
+      // output, and /srv/node-red/DEPLOY-HELD.
+      const held = fs.readFileSync(path.join(run.root, 'DEPLOY-HELD'), 'utf8').trim();
+      assert.equal(held.split('\n').length, 1);
+      assert.equal(run.result.stderr.trim().split('\n').pop(), held, 'the hold line is the last thing the deploy prints');
+      assert.match(held, /^HELD: Node-RED stopped\. payloads\/new failed after migrating .*farming\.db, and payloads\/old does not fit the new schema\./);
+      assert.ok(held.includes(path.join(run.root, 'backups', 'farming.db.premigrate-20261112T000000Z')), 'names the pre-migration backup');
       assert.equal(run.state('node-red.state'), '0');
       assert.doesNotMatch(run.result.stderr, /rollback Node-RED readiness confirmed/);
       const expected = flipped
@@ -907,6 +917,14 @@ printf '%s\\n' held
         : { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' };
       assert.deepEqual(run.markers(), expected, 'flows and modules stay one set while held');
       assert.equal(swap.currentStamp(run.root), flipped ? 'new' : 'old');
+      // The command restores the backup and returns to payloads/old (the
+      // service starts are left out here: they are /etc/init.d scripts).
+      const command = held.slice(held.indexOf(' with: ') + 7).replace(/ && \/etc\/init\.d\/osi-identityd start && .*$/, '');
+      fs.copyFileSync(path.join(__dirname, 'deploy-payload-swap.js'), path.join(run.root, '.payload-swap.js'));
+      const restore = spawnSync('sh', ['-c', command], { encoding: 'utf8' });
+      assert.equal(restore.status, 0, restore.stderr);
+      assert.equal(swap.currentStamp(run.root), 'old');
+      assert.equal(swap.verifyPair(run.root, 'old', run.guiRoot), true);
     } finally {
       run.cleanup();
     }

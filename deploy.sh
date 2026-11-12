@@ -1406,6 +1406,23 @@ restore_identityd_prior_state() {
     echo "OK"
 }
 
+# A deploy that migrated the database and cannot return to a payload proven
+# to fit it holds Node-RED stopped (DD10). The operator gets one line, as the
+# deploy's last output and in /srv/node-red/DEPLOY-HELD, naming the payload
+# that failed, the pre-migration backup and the command that restores it and
+# returns to the last healthy payload. A committed deploy removes the file.
+DEPLOY_HELD_FILE="${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD"
+record_deploy_hold() {
+    rdh_db="${DB_PATH:-/data/db/farming.db}"
+    rdh_root="${SWAP_ROOT:-/srv/node-red}"
+    rdh_backup_dir="${backup_dir:-${MIGRATE_BACKUP_DIR:-/data/backups/migrate}}"
+    rdh_backup="$(ls -1t "$rdh_backup_dir"/"$(basename "$rdh_db")".premigrate-* 2>/dev/null | head -n 1)"
+    [ -n "$rdh_backup" ] || rdh_backup="<newest $rdh_backup_dir/$(basename "$rdh_db").premigrate-*>"
+    rdh_line="HELD: Node-RED stopped. payloads/${DEPLOY_STAMP:-?} failed after migrating $rdh_db, and payloads/${PREV_STAMP:-?} does not fit the new schema. Restore the pre-migration backup and return to payloads/${PREV_STAMP:-?} with: cp '$rdh_backup' '$rdh_db.restore' && mv '$rdh_db.restore' '$rdh_db' && rm -f '$rdh_db-wal' '$rdh_db-shm' && node -e \"require('$rdh_root/.payload-swap.js').flipTo('$rdh_root','${PREV_STAMP:-?}','${GUI_ROOT:-/usr/lib/node-red/gui}')\" && /etc/init.d/osi-identityd start && ${NODE_RED_INIT:-/etc/init.d/node-red} start"
+    printf '%s\n' "$rdh_line" > "${DEPLOY_HELD_FILE:-$rdh_root/DEPLOY-HELD}" 2>/dev/null || true
+    printf '%s\n' "$rdh_line" >&2
+}
+
 deploy_exit_handler() {
     exit_status="$1"
     trap - EXIT INT TERM
@@ -1431,6 +1448,7 @@ deploy_exit_handler() {
                 swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
             fi
             hold_identityd_stopped || true
+            record_deploy_hold
         fi
     elif [ "$exit_status" -ne 0 ] && [ -z "${PREV_STAMP:-}" ] && [ -n "${DEPLOY_STAMP:-}" ] && \
         { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
@@ -3464,6 +3482,7 @@ fi
 
 if [ "$PROBE_OK" = "0" ]; then
     echo "OK: committing payload $DEPLOY_STAMP"
+    rm -f "${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD"
     if ! swap_call markHealthy "$DEPLOY_STAMP" >/dev/null; then
         echo "WARN: could not record payloads/$DEPLOY_STAMP as healthy; the next deploy will not return to it" >&2
     fi
