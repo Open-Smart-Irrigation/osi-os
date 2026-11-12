@@ -389,3 +389,14 @@ describe('ValveControlPanel', () => {
     warnSpy.mockRestore();
   });
 });
+
+it('A-3 shows saved scheduler status with unconfirmed delivery and refreshes the list', async () => {
+  vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+  vi.mocked(valvesAPI.setSchedulerStatus).mockResolvedValueOnce({ saved: true, deliveryUnconfirmed: true });
+  const onUpdate = vi.fn();
+  render(<ValveControlPanel onUpdate={onUpdate} canWrite />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Pause-' + makeValve().deviceEui }));
+  expect(await screen.findByText('saveOutcome.deliveryUnconfirmed')).toBeInTheDocument();
+  await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+  expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+});

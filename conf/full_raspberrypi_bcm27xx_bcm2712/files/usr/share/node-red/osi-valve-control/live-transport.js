@@ -443,7 +443,7 @@ const dbLoad = osiLib.require('osi-db-helper');
 const vcLoad = osiLib.require('osi-valve-control');
 if (!dbLoad.ok || !vcLoad.ok) {
   const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');
-  node.error('Valve control helpers unavailable: ' + detail, msg);
+  node.error('Valve control helpers unavailable: ' + detail);
   msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };
   return [msg, null];
 }
@@ -479,7 +479,7 @@ return Promise.resolve().then(function() {
   const downlinks = appId ? pushes.map(function(p) { return { topic: p.topic, payload: p.payload }; }) : [];
   return [out, downlinks];
 }).catch(function(e) {
-  node.error('valve-api: ' + (e && e.message ? e.message : e), msg);
+  node.error('valve-api: ' + (e && e.message ? e.message : e));
   return [Object.assign(msg, { statusCode: 500, payload: { error: 'internal_error', message: 'Valve request failed' } }), null];
 }).finally(function() {
   if (!transport.built()) return;

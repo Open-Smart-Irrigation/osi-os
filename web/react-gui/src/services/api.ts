@@ -1995,6 +1995,16 @@ function rethrowValveError(error: unknown): never {
   throw error;
 }
 
+export interface ValveSaveOutcome {
+  saved?: true;
+  deliveryUnconfirmed?: boolean;
+}
+
+function normaliseValveSaveOutcome(value: unknown): ValveSaveOutcome {
+  if (!value || typeof value !== 'object' || !('saved' in value) || value.saved !== true) return {};
+  return { saved: true, deliveryUnconfirmed: 'delivery_status' in value && value.delivery_status === 'unconfirmed' };
+}
+
 export const valvesAPI = {
   list: async (): Promise<ValveSummary[]> => {
     const r = await api.get<{ valves: unknown[] }>('/api/valves');
@@ -2004,26 +2014,26 @@ export const valvesAPI = {
     const r = await api.get(`/api/valves/${eui}/schedules`);
     return normaliseValveSchedules(r.data);
   },
-  createSchedule: async (eui: string, input: ValveScheduleInput): Promise<{ schedule: ValveSchedule; pushesQueued: number }> => {
+  createSchedule: async (eui: string, input: ValveScheduleInput): Promise<ValveSaveOutcome & { schedule: ValveSchedule; pushesQueued: number | null }> => {
     try {
       const r = await api.post(`/api/valves/${eui}/schedules`, toScheduleBody(input));
-      return { schedule: normaliseValveSchedule(r.data.schedule), pushesQueued: Number(r.data.pushes_queued ?? 0) };
+      return { ...normaliseValveSaveOutcome(r.data), schedule: normaliseValveSchedule(r.data.schedule), pushesQueued: r.data.pushes_queued == null ? null : Number(r.data.pushes_queued) };
     } catch (error) {
       return rethrowValveError(error);
     }
   },
-  updateSchedule: async (eui: string, uuid: string, patch: Partial<ValveScheduleInput>): Promise<{ pushesQueued: number }> => {
+  updateSchedule: async (eui: string, uuid: string, patch: Partial<ValveScheduleInput>): Promise<ValveSaveOutcome & { pushesQueued: number | null }> => {
     try {
       const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(patch));
-      return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+      return { ...normaliseValveSaveOutcome(r.data), pushesQueued: r.data.pushes_queued == null ? null : Number(r.data.pushes_queued) };
     } catch (error) {
       return rethrowValveError(error);
     }
   },
-  deleteSchedule: async (eui: string, uuid: string): Promise<{ pushesQueued: number }> => {
+  deleteSchedule: async (eui: string, uuid: string): Promise<ValveSaveOutcome & { pushesQueued: number | null }> => {
     try {
       const r = await api.delete(`/api/valves/${eui}/schedules/${uuid}`);
-      return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
+      return { ...normaliseValveSaveOutcome(r.data), pushesQueued: r.data.pushes_queued == null ? null : Number(r.data.pushes_queued) };
     } catch (error) {
       return rethrowValveError(error);
     }
@@ -2036,9 +2046,10 @@ export const valvesAPI = {
       return rethrowValveError(error);
     }
   },
-  setSchedulerStatus: async (eui: string, status: ValveSchedulerStatus): Promise<void> => {
+  setSchedulerStatus: async (eui: string, status: ValveSchedulerStatus): Promise<ValveSaveOutcome> => {
     try {
-      await api.post(`/api/valves/${eui}/scheduler-status`, { status });
+      const response = await api.post(`/api/valves/${eui}/scheduler-status`, { status });
+      return normaliseValveSaveOutcome(response.data);
     } catch (error) {
       // A conditional valve refuses Resume while its conditional clear is not confirmed (the
       // valve may still hold a resident plan). Tag it so the panel can explain the refusal.
@@ -2058,13 +2069,14 @@ export const valvesAPI = {
   updateSettings: async (
     eui: string,
     patch: { stregaGeneration?: StregaGeneration; flowRateLpm?: number | null; flowRateSource?: 'measured' | 'estimated'; defaultOpenMinutes?: number },
-  ): Promise<void> => {
-    await api.put(`/api/valves/${eui}/settings`, {
+  ): Promise<ValveSaveOutcome> => {
+    const response = await api.put(`/api/valves/${eui}/settings`, {
       strega_generation: patch.stregaGeneration,
       flow_rate_lpm: patch.flowRateLpm,
       flow_rate_source: patch.flowRateSource,
       default_open_minutes: patch.defaultOpenMinutes,
     });
+    return normaliseValveSaveOutcome(response.data);
   },
 };
 

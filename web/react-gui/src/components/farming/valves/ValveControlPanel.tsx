@@ -3,7 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import { devicesAPI, valvesAPI } from '../../../services/api';
 import { useSessionFence } from '../../../contexts/AuthSessionDataBoundary';
-import type { ValveSchedule, ValveSummary } from '../../../types/farming';
+import type { ValveSchedule, ValveSummary, ValveSchedulerStatus } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
 import { ValveTile } from './ValveTile';
 import { ValveOpenDialog } from './ValveOpenDialog';
@@ -63,6 +63,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
   const [dialogEui, setDialogEui] = useState<string | null>(null);
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [actionBusyEui, setActionBusyEui] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<'saved' | 'deliveryUnconfirmed' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelNotice, setCancelNotice] = useState<{ name: string; result: ValveCancelResult } | null>(null);
 
@@ -147,6 +148,24 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     }
   };
 
+  const runSchedulerAction = async (eui: string, status: ValveSchedulerStatus) => {
+    setActionBusyEui(eui);
+    setActionError(null);
+    setCancelNotice(null);
+    setSaveNotice(null);
+    try {
+      const outcome = await valvesAPI.setSchedulerStatus(eui, status);
+      setSaveNotice(outcome?.deliveryUnconfirmed ? 'deliveryUnconfirmed' : 'saved');
+      try { await refresh(); }
+      catch (refreshError) {
+        console.warn('Failed to refresh valve status after saving', refreshError);
+        setActionError(t('saveOutcome.refreshFailed'));
+      }
+    } catch (error) {
+      setActionError(t(actionErrorKey(error)));
+    } finally { setActionBusyEui(null); }
+  };
+
   const runAction = async (eui: string, action: () => Promise<unknown>) => {
     setActionBusyEui(eui);
     setActionError(null);
@@ -209,6 +228,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
 
       {cancelNotice && <ValveCancelOutcome valveName={cancelNotice.name} result={cancelNotice.result} />}
 
+      {saveNotice && <p role="status" className="text-sm text-[var(--text)]">{t(`saveOutcome.${saveNotice}`)}</p>}
       {actionError && (
         <p className="mt-3 rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-xs text-[var(--warn-text)]">
           {actionError}
@@ -249,9 +269,9 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
               onSettings={() => { setDialogEui(valve.deviceEui); setDialogKind('settings'); }}
               onService={() => { setDialogEui(valve.deviceEui); setDialogKind('service'); }}
               onCancel={() => handleCancel(valve)}
-              onSkipToday={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'SKIP_TODAY'))}
-              onPause={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'DEACTIVATED'))}
-              onResume={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'ACTIVE'))}
+              onSkipToday={() => runSchedulerAction(valve.deviceEui, 'SKIP_TODAY')}
+              onPause={() => runSchedulerAction(valve.deviceEui, 'DEACTIVATED')}
+              onResume={() => runSchedulerAction(valve.deviceEui, 'ACTIVE')}
               onResend={() => runAction(valve.deviceEui, () => valvesAPI.resendPlan(valve.deviceEui))}
               onDelete={() => runAction(valve.deviceEui, () => devicesAPI.remove(valve.deviceEui))}
               canEdit={canWrite}

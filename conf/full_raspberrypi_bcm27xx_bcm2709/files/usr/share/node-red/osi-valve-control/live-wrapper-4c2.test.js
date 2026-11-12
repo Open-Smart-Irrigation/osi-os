@@ -333,3 +333,50 @@ test('actual wrapper rolls back raw telemetry when its transaction rejects', asy
   assert.ok(errors.some((value) => String(value).includes('persistence failed')));
   fixture.cleanup();
 });
+
+// F-15: inject an exception before the module wrapper starts. Follow the shipped
+// catch graph; switch/change are standard Node-RED nodes, checked explicitly here.
+for (const entry of flow.filter(n => n.z === 'valve-control-tab' && n.type === 'http in')) {
+  test(`F-15 ${entry.method} ${entry.url}: router exception reaches one HTTP 500`, async () => {
+    const router = flow.find(n => n.id === entry.wires[0][0]);
+    const catcher = flow.find(n => n.type === 'catch' && n.z === router.z && Array.isArray(n.scope) && n.scope.includes(router.id));
+    assert.ok(catcher, 'the HTTP router needs a scoped catch node');
+    assert.deepEqual(catcher.scope, [router.id], 'do not catch workers or the response node');
+    const msg = { req: { method: entry.method, url: entry.url }, res: {} };
+    let thrown;
+    try {
+      await new Function('msg', 'node', 'env', 'context', 'chirpstack', 'osiLib', router.func)(msg, {}, {}, {}, {}, { require() { throw new Error('injected private exception'); } });
+    } catch (error) { thrown = error; }
+    assert.ok(thrown);
+    msg.error = { message: thrown.message, source: { id: router.id } };
+    const guard = flow.find(n => n.id === catcher.wires[0][0]);
+    assert.equal(guard.type, 'switch');
+    assert.equal(guard.property, 'res');
+    assert.equal(guard.propertyType, 'msg');
+    assert.deepEqual(guard.rules, [{ t: 'nnull' }]);
+    const formatter = flow.find(n => n.id === guard.wires[0][0]);
+    assert.equal(formatter.type, 'change');
+    for (const rule of formatter.rules) {
+      assert.equal(rule.t, 'set'); assert.equal(rule.pt, 'msg');
+      assert.ok(['num', 'json'].includes(rule.tot));
+      msg[rule.p] = JSON.parse(rule.to);
+    }
+    assert.deepEqual(formatter.wires, [['valve-api-response']]);
+    assert.equal(flow.find(n => n.id === 'valve-api-response').type, 'http response');
+    assert.equal(msg.statusCode, 500);
+    assert.deepEqual(msg.payload, { error: 'internal_error', message: 'Valve request failed' });
+    assert.equal(msg.headers['Content-Type'], 'application/json; charset=utf-8');
+    assert.ok(!JSON.stringify(msg.payload).includes('private'));
+    assert.equal(guard.outputs, 1, 'messages without res have no response path');
+  });
+}
+
+test('F-15 helper failures that already return HTTP responses do not also emit catch messages', async () => {
+  const router = flow.find(n => n.id === 'valve-api-router-fn');
+  const catches = [];
+  const node = { warn() {}, error(_error, msg) { if (msg && msg.res) catches.push(msg); } };
+  const msg = { req: {}, res: {} };
+  const result = await new Function('msg', 'node', 'env', 'context', 'chirpstack', 'osiLib', router.func)(msg, node, {}, {}, {}, { require() { return { ok: false, error: 'missing helper' }; } });
+  assert.equal(result[0].statusCode, 503);
+  assert.deepEqual(catches, [], 'handled errors must not trigger a second HTTP response');
+});

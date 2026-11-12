@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
-import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
+import { valvesAPI, ValvePlanConflictError, type ValveSaveOutcome } from '../../../services/api';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
@@ -196,6 +196,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const [rowBusyUuid, setRowBusyUuid] = useState<string | null>(null);
   const [editingWeeklyUuid, setEditingWeeklyUuid] = useState<string | null>(null);
   const [editingOnceUuid, setEditingOnceUuid] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<'saved' | 'deliveryUnconfirmed' | null>(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   // A delete is never sent on the row's first tap: the row opens a confirmation bound to
   // the displayed valve EUI + schedule UUID, and only an explicit confirmation dispatches.
@@ -223,6 +225,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     if (open) {
       setWeekly(EMPTY_WEEKLY);
       setOnce(EMPTY_ONCE);
+      setSaveNotice(null);
+      setRefreshFailed(false);
       setWeeklyError(null);
       setOnceError(null);
       setRowError(null);
@@ -287,9 +291,16 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const deleteConfirmTitleId = `valve-schedule-delete-title-${valve.deviceEui}`;
   const deleteConfirmBodyId = `valve-schedule-delete-body-${valve.deviceEui}`;
 
-  const afterMutation = async () => {
-    await mutate();
-    onChanged();
+  const afterMutation = async (outcome?: ValveSaveOutcome) => {
+    setSaveNotice(outcome?.deliveryUnconfirmed ? 'deliveryUnconfirmed' : 'saved');
+    setRefreshFailed(false);
+    try {
+      await mutate();
+      await onChanged();
+    } catch (error) {
+      console.warn('Failed to refresh schedules after saving', error);
+      setRefreshFailed(true);
+    }
   };
 
   const toggleWeekday = (day: number) => {
@@ -322,18 +333,19 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         startTime: weekly.startTime,
         durationMinutes: weeklyDurationNum,
       };
+      let outcome: ValveSaveOutcome;
       if (editingWeeklyUuid) {
         // The server re-validates and re-runs the plan-conflict check against the OTHER
         // schedules with this row swapped in, so an edit that would collide is rejected the
         // same way a create would be — `enabled` is deliberately not sent, so the row keeps
         // whatever the enable toggle last set.
-        await valvesAPI.updateSchedule(valve.deviceEui, editingWeeklyUuid, weeklyFields);
+        outcome = await valvesAPI.updateSchedule(valve.deviceEui, editingWeeklyUuid, weeklyFields);
       } else {
-        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'WEEKLY', ...weeklyFields, enabled: true });
+        outcome = await valvesAPI.createSchedule(valve.deviceEui, { kind: 'WEEKLY', ...weeklyFields, enabled: true });
       }
       setWeekly(EMPTY_WEEKLY);
       setEditingWeeklyUuid(null);
-      await afterMutation();
+      await afterMutation(outcome);
     } catch (err) {
       setWeeklyError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
@@ -353,14 +365,15 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         fireAt,
         durationMinutes: onceDurationNum,
       };
+      let outcome: ValveSaveOutcome;
       if (editingOnceUuid) {
-        await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
+        outcome = await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
       } else {
-        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
+        outcome = await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
       }
       setOnce(EMPTY_ONCE);
       setEditingOnceUuid(null);
-      await afterMutation();
+      await afterMutation(outcome);
     } catch (err) {
       setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
@@ -412,8 +425,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setRowBusyUuid(schedule.scheduleUuid);
     setRowError(null);
     try {
-      await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
-      await afterMutation();
+      const outcome = await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      await afterMutation(outcome);
     } catch (err) {
       setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
     } finally {
@@ -425,12 +438,12 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setRowBusyUuid(schedule.scheduleUuid);
     setRowError(null);
     try {
-      await valvesAPI.deleteSchedule(valve.deviceEui, schedule.scheduleUuid);
+      const outcome = await valvesAPI.deleteSchedule(valve.deviceEui, schedule.scheduleUuid);
       // Otherwise the form stays bound to a schedule_uuid the server has soft-deleted, and
       // saving would 404 against a row the list no longer shows.
       if (editingWeeklyUuid === schedule.scheduleUuid) cancelWeeklyEdit();
       if (editingOnceUuid === schedule.scheduleUuid) cancelOnceEdit();
-      await afterMutation();
+      await afterMutation(outcome);
     } catch (err) {
       setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.deleteFailed'));
     } finally {
@@ -496,6 +509,8 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         </div>
 
         <div className="overflow-y-auto px-5 py-4">
+          {saveNotice && <p role="status" className="mb-3 text-sm text-[var(--text)]">{t(`saveOutcome.${saveNotice}`)}</p>}
+          {refreshFailed && <p role="alert" className="mb-3 text-sm text-[var(--warn-text)]">{t('saveOutcome.refreshFailed')}</p>}
           {!data && !error && (
             <p className="text-sm text-[var(--text-tertiary)]">{tc('loading')}</p>
           )}
