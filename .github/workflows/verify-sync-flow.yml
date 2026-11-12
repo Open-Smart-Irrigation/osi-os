@@ -245,6 +245,12 @@ jobs:
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js
+      # Only the commands both gateway bases carry (NEW-27: no stat on
+      # either): deploy.sh's command check, no absent command or tr
+      # character class on the gateway side, and the second-deploy and
+      # retry paths run with a PATH holding only the bases' commands.
+      - name: Gateway base commands
+        run: node --test --test-concurrency=1 scripts/test-deploy-gateway-commands.js
       # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
       # on the Kiwi profile and gives the Clover its own profile with it instead
       # of aliasing the codec-less field-tester profile; --repair-soil-profiles
