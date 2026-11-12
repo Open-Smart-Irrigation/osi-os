@@ -29,7 +29,24 @@ and a known row that is not such a target answers 409
 answers 404 `no_active_actuation`, two or more answer 409
 `ambiguous_actuation`. The route never picks the newest row.
 
-The outcome follows the target's transport evidence:
+Which of two paths a cancel takes depends on conditional irrigation. An
+ordinary open (manual, cloud, scheduler, one-time) on a valve without an active
+conditional occurrence is cancelled as in 0.8.1: the gateway reads the queue,
+flushes it, queues every item again except timed opens, flushing and
+partial-opening frames, marks the row `CANCELLED` and answers 200 `cancelled`.
+`queue_scope` says what happened: `target_only` (the open was still queued and
+is gone), `not_queued` (it had already left the queue; the valve finishes its
+run and nothing closes it), `full_flush` (the queue could not be read, so
+everything was flushed). Other queued opens are taken out too and listed in
+`dropped_opens`. Two weaknesses are 0.8.1's and remain: an item ChirpStack
+delivers between the read and the flush is sent twice, and a CLOSE queued again
+can reach the valve after a later open.
+
+The rest of this section describes the other path, the whole-queue flush. It
+applies when the target is the open of a conditional occurrence, when the valve
+holds an occurrence that is reserved, attempted, sent or unknown, and when a
+valve leaves the gateway. There the outcome follows the target's transport
+evidence:
 
 - `cancelled` (200): the open provably never reached ChirpStack (a local
   reservation, or an enqueue that failed or was rejected before acceptance).

@@ -538,6 +538,18 @@ active/reserved/unresolved returns valve_busy. This deliberately changes manual
 semantics: a second conflicting manual open is rejected and shown to the user.
 Cancellation remains available. It is not a hidden change to existing behavior.
 
+Amended 2026-11-12 (owner decision, v0.8.2 review findings F-1 to F-4): the
+paragraph above holds for conditional occurrences only. The exclusion had no
+end for ordinary commands, because the horizon that releases it needs a
+hardware qualification and no shipped gateway has one. Ordinary commands
+(manual, cloud, scheduler, one-time and service commands) are decided and sent
+as in 0.8.1: an ordinary command is refused `valve_busy` only by a stored
+conditional occurrence, a conditional command keeps every rule of this
+section, and the gateway puts no queue expiry of its own on an ordinary frame.
+The cancel of an ordinary open follows 0.8.1 as well; the whole-queue flush of
+§7.1 applies where a conditional occurrence is involved. A time-bounded
+exclusion for ordinary commands is a separate, later project.
+
 For conditional commands, claim the occurrence, recheck authority/revisions/time,
 condition evidence, readiness, exclusions and limits, and reserve the expectation
 inside one BEGIN IMMEDIATE transaction. RESERVED can advance to ATTEMPTED only
