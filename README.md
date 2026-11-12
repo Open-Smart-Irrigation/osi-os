@@ -157,6 +157,12 @@ Output images are in `openwrt/bin/targets/bcm27xx/bcm2712/`.
 
 ## Device Setup
 
+An image upgrade over a gateway in use erases the farm's data. Never upgrade
+a gateway in use by image: use `deploy.sh` as described under
+[Re-deploying after changes](#re-deploying-after-changes), or the
+[bundle path over a flaky link](docs/operations/deploying-over-a-flaky-link.md).
+Flash an image only for a new device or a deliberate reset.
+
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
 |                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |

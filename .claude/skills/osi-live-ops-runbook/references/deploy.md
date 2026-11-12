@@ -377,6 +377,13 @@ installer or the probe names the cause.
 
 ### Rollback capture check
 
+**An image upgrade over a gateway in use erases the farm's data. Never upgrade
+a gateway in use by image.** Use `deploy.sh`, or the
+[bundle path over a flaky link](../../../../docs/operations/deploying-over-a-flaky-link.md),
+for supported upgrades. An image is for a new device or a deliberate reset.
+The post-sysupgrade states below describe recovery from unsupported operations;
+they do not authorize performing such an upgrade.
+
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the
 target. Otherwise (a gateway the payload layout has not reached, or after a
@@ -497,11 +504,12 @@ stopped:
   `npm install` needs every `file:` dependency on disk. A switch back to the
   previous payload removes that link again.
 
-The image seed (`98_osi_node_red_seed`) copies a module from the image only
-where `/srv/node-red/<module>` is not a symlink, so a sysupgrade keeps the
-deployed flows and modules together. Images up to v0.8.1 copy their helpers
-over the links too; the next deploy then refuses (see "Rollback capture
-check"). Each retained payload carries its module
+The image seed (`98_osi_node_red_seed`) initializes code on first boot; it
+does not provide a state-preserving upgrade for a gateway in use. Skipping a
+module symlink does not preserve the farm database. Images up to v0.8.1 can
+copy helpers over deployed links, while the v0.8.2 seed can stop at a
+directory/link collision. These are operator recovery cases (see "Rollback
+capture check"), not supported upgrade paths. Each retained payload carries its module
 copy: about 3 MB staged, up to about 5 MB for a capture of seed-installed
 modules (they include test files), times `PAYLOAD_KEEP_N`.
 

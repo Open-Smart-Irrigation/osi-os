@@ -1,5 +1,10 @@
 # Raspberry Pi Full OSI OS Image Build
 
+Images are for new devices or deliberate resets. An image upgrade over a
+gateway in use erases the farm's data; never use that path for an existing
+installation. Upgrade it with `deploy.sh`, or the
+[bundle path over a flaky link](../operations/deploying-over-a-flaky-link.md).
+
 This is the release workflow for fresh OSI OS Raspberry Pi factory images. It
 builds:
 
