@@ -181,6 +181,37 @@ and a failed post-flip self-check, which either auto-rolls back the flows+GUI
 pair and exits 1, or — when there is no previous payload — removes the
 first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
 
+**A deploy that is cut or refused, and what the gateway does next.** The
+state is in `/srv/node-red/payload-state.json` (`healthy`, `unverified` or
+`held`, with a reason); a held gateway's one line is in
+`/srv/node-red/DEPLOY-HELD`. In every case the first answer is to run the
+deploy again, the same way.
+
+- Refused before Node-RED was stopped: nothing changed.
+- Refused after the stop, with the database and the active payload
+  unchanged: the payload that ran before runs again. A gateway the deploy
+  found stopped stays stopped. Otherwise the state says `held` with its
+  reason; no refusal ends with services stopped and nothing written.
+- Cut during the migration (power, KILL): at the next boot the database
+  ledger lies between the old payload's and the new one's. The gateway is
+  held: "the upgrade was interrupted while the database was being updated".
+  The old code is not started, so the gateway does not irrigate until the
+  deploy is run again. The deploy run again applies the rest and switches.
+- Cut after the last migration and before the switch: the boot switches
+  forward to the new payload (`unverified`, its health check owed to the
+  next deploy).
+- The health check of the new payload saw no failure but could not see the
+  boot node's completion line (a full log ring): the payload keeps running,
+  `unverified`; the next deploy checks it again. Only an observed failure
+  (an error line of the start, the service not running, `/gui` not
+  answering) rolls back or holds.
+- A dropped SSH session (HUP), Ctrl-C (INT) or TERM ends the deploy through
+  its exit path, as one of the cases above. On a link that drops, use the
+  bundle path, which runs detached.
+- A second deploy while one runs is refused (`/var/run/osi-deploy.lock`).
+  The lock of a deploy that no longer runs is taken over, with a line that
+  says so.
+
 After a failed command-ledger activation (`references/deploy.md`, "Failed command-ledger activation"), the fourth outcome is a hold:
 
 - otherwise: Node-RED and identityd are held **stopped**, as in the script's
