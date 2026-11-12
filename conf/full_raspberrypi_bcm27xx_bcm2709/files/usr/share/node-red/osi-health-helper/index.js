@@ -498,9 +498,9 @@ function recordError(msg, state = {}) {
 }
 
 // Gather Edge Health (inject every 60 s, once at start). A farm database
-// start-up fault is published synchronously, before the first await, so the
-// heartbeat built from the same tick carries it. When the helper refuses farm
-// connections no connection is attempted.
+// state is published synchronously, before the first await, so the heartbeat
+// built from the same tick carries it. Only when the driver could not be
+// obtained (connections refused) is no connection attempted.
 // A database fault replaces the gathered state; "not checked" (a 10 s
 // timeout on a large file, say) only replaces "healthy", so it never hides
 // crash_looping or degraded.
@@ -545,7 +545,9 @@ async function refreshGlobal({ global, osiDb, options = {} }) {
     global.set('edge_health', Object.assign(allNullHealth(), sample || {}, meta, crash, {
       health_state: withDatabaseState(baseState(crash, errorsTotal, sample), database.health_state)
     }));
-    if (database.driver_error || database.module_conflict) return null;
+    // Only an unavailable driver refuses connections; a conflict is reported
+    // and the gather goes on.
+    if (database.driver_error) return null;
   }
   const _db = new osiDb.Database('/data/db/farming.db');
   try {
