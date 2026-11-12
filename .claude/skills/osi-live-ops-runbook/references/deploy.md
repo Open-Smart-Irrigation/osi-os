@@ -155,6 +155,13 @@ dev workstation unless noted.
    `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
    and exits 1 — treat that as a stop, with the service down.
 
+   When the deploy migrated the database and no payload that passed its health
+   check fits the new schema, it holds Node-RED stopped and ends with one line,
+   kept in `/srv/node-red/DEPLOY-HELD` until a deploy commits:
+   `HELD: Node-RED stopped. payloads/<failed> failed after migrating ... Restore the pre-migration backup and return to payloads/<healthy> with: <command>`.
+   The command restores the named `/data/backups/migrate/farming.db.premigrate-*`
+   backup, switches back to that payload and starts identityd and Node-RED.
+
    Restarting Node-RED by hand right after a green deploy doesn't make it any
    safer — it only obscures which restart (migration, flip, or yours) produced
    the state you're looking at. If something looks wrong, re-read the deploy
