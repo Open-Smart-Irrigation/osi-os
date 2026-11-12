@@ -1,6 +1,6 @@
 'use strict';
-// Derived from the v0.8.2 review's full-flow harness. No function source, wiring,
-// timer configuration, helper implementation or sandbox binding is rewritten.
+// Derived from the v0.8.2 review's full-flow harness. Ordinary runs keep all
+// function source, wiring, timer configuration, helpers and sandbox bindings.
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const os = require('node:os'), net = require('node:net'), dns = require('node:dns');
 const Module = require('node:module');
@@ -10,7 +10,7 @@ const RUN = process.env.OSI_SMOKE_RUN;
 if (!RUN || !path.isAbsolute(RUN)) throw new Error('OSI_SMOKE_RUN must name an isolated absolute scratch directory');
 const DBFILE = path.join(RUN, 'data/db/farming.db');
 const MARKER_PATH = '/var/run/osi-irrigation-clock.json';
-const state = { marker: true, markerOverride: null, cs: { queue: {}, calls: [] }, mqtt: [], logs: [], exec: [] };
+const state = { marker: true, markerOverride: null, cs: { queue: {}, calls: [] }, mqtt: [], logs: [], exec: [], caught: [], received: [], sweep: [], sqlitePending: 0 };
 fs.mkdirSync(path.dirname(DBFILE), {recursive:true});
 fs.mkdirSync(path.join(RUN, 'var/run'), {recursive:true});
 const nr = path.join(SRC, 'usr/share/node-red');
@@ -30,6 +30,15 @@ fs.copyFileSync(path.join(nr,'edge-channels.json'),path.join(RUN,'edge-channels.
 for (const name of ['bcryptjs','sqlite3']) dependencies[name] = require('./package.json').dependencies[name];
 fs.writeFileSync(path.join(RUN,'package.json'),JSON.stringify({private:true,dependencies}));
 fs.copyFileSync(path.join(SRC,'usr/share/flows.json'),path.join(RUN,'flows.json'));
+// Negative controls alter only this disposable copy, never either image profile.
+const controls={late:'valve-observe-fn',caught:'sync-outbox-build'};
+const control=process.env.OSI_SMOKE_CONTROL;
+if(control) {
+  if(!controls[control])throw new Error('invalid smoke negative control');
+  const flows=JSON.parse(fs.readFileSync(path.join(RUN,'flows.json'),'utf8'));
+  flows.find(n=>n.id===controls[control]).func='smokeNegativeControlIdentifier;\n'+flows.find(n=>n.id===controls[control]).func;
+  fs.writeFileSync(path.join(RUN,'flows.json'),JSON.stringify(flows));
+}
 Object.assign(process.env, {
   OSI_LIB_BASE: RUN, AUTH_TOKEN_SECRET: 'synthetic-smoke-secret', OSI_SCOPED_ACCESS:'0', TZ:'UTC',
   CHIRPSTACK_APP_ACTUATORS:'synthetic-actuators-app', CHIRPSTACK_APP_SENSORS:'synthetic-sensors-app',
@@ -129,6 +138,22 @@ for (const fn of ['writeFileSync', 'renameSync', 'unlinkSync', 'mkdirSync', 'exi
 // Keep the actual sqlite3 binding. Only absolute image paths are relocated.
 const nativeSqlite = require('sqlite3');
 const NativeDatabase = nativeSqlite.Database;
+let observation;
+// Observe completion of native operations that already have callbacks. Keep
+// the product's binding, arguments, lock policy and callback result unchanged.
+for(const method of ['all','get','run','exec','close']) {
+  const original=NativeDatabase.prototype[method];
+  NativeDatabase.prototype[method]=function(...args) {
+    const index=args.length-1,callback=args[index];
+    if(typeof callback!=='function')return original.apply(this,args);
+    state.sqlitePending++;
+    args[index]=function(...values) {
+      state.sqlitePending--;observation?.touch();
+      return callback.apply(this,values);
+    };
+    try{return original.apply(this,args);}catch(error){state.sqlitePending--;throw error;}
+  };
+}
 class RelocatedDatabase extends NativeDatabase {
   constructor(filename, ...args) { super(remap(filename), ...args); }
 }
@@ -153,6 +178,16 @@ async function start() {
   await new Promise(r=>mqttServer.listen(0,'127.0.0.1',r));
   mqttPort=mqttServer.address().port;
   broker.on('publish',(packet,client)=>{if(client) state.mqtt.push({topic:packet.topic,payload:packet.payload.toString()});});
+  const weather=http.createServer((req,res)=>{
+    state.weatherRequests=(state.weatherRequests||0)+1;
+    if(req.method!=='POST'||req.url!=='/api/v1/history/hourly/') {res.writeHead(404);res.end();return;}
+    req.resume();
+    res.setHeader('content-type','application/json');
+    res.end(JSON.stringify({data:Array.from({length:24},()=>({values:{temperature_2m:25,relative_humidity_2m:50,precipitation:0.225}}))}));
+  });
+  await new Promise(r=>weather.listen(0,'127.0.0.1',r));
+  process.env.OPENAGRI_WEATHER_URL='http://127.0.0.1:'+weather.address().port;
+  process.env.OPENAGRI_WEATHER_BEARER_TOKEN='synthetic-weather';
   const radio = await require('./radio').start(state);
   process.env.CHIRPSTACK_API_URL=radio.url;
   const RED=require('node-red'), express=require('express');
@@ -169,14 +204,42 @@ async function start() {
   // These third-party adapters are the outer LoRaWAN event boundary, not product logic.
   RED.nodes.registerType('osi-smoke','device event',function(n){RED.nodes.createNode(this,n);this.on('input',(msg,send,done)=>{send(msg);done();});});
   RED.nodes.registerType('osi-smoke','field_tester_service',function(n){RED.nodes.createNode(this,n);this.on('input',(msg,send,done)=>done());});
+  observation=require('./observation').observe(RED,state);
   await RED.start();
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await sleep(2500);
+  const flows=JSON.parse(fs.readFileSync(path.join(RUN,'flows.json'),'utf8'));
+  // Initialization keeps its normal first 2.5 seconds. Later ticks are driven
+  // explicitly, independent of host speed; no schedule or flow bytes change.
+  require('./observation').pauseInjectTimers(RED,flows);
+  await observation.settle(sleep);
   const client=require('mqtt').connect('mqtt://127.0.0.1:'+mqttPort);
   await new Promise((resolve,reject)=>{client.once('connect',resolve);client.once('error',reject);});
   const h={RED,state,RUN,DBFILE,sleep,
-    flows:JSON.parse(fs.readFileSync(path.join(RUN,'flows.json'),'utf8')),
+    flows,
+    settle:()=>observation.settle(sleep),
+    async sweepInjects(before=async()=>{},after=async()=>{}) {
+      for(const config of require('./observation').enabledInjects(flows)) {
+        await before(config);
+        const index=state.received.length;
+        h.inject(config.id,{});
+        await observation.settle(sleep);
+        const received=state.received.slice(index);
+        const targets=config.wires.flat().filter(id=>RED.nodes.getNode(id));
+        if(!targets.every(id=>received.includes(id)))throw new Error('inject did not reach targets: '+config.id);
+        state.sweep.push({id:config.id,targets,received:[...new Set(received)]});
+        await after(config);
+      }
+    },
+    async writerLock() {
+      const db=await new Promise((resolve,reject)=>{const d=new nativeSqlite.Database(DBFILE,e=>e?reject(e):resolve(d));});
+      await new Promise((resolve,reject)=>db.run('BEGIN IMMEDIATE',e=>e?reject(e):resolve()));
+      return async()=>{
+        await new Promise((resolve,reject)=>db.run('ROLLBACK',e=>e?reject(e):resolve()));
+        await new Promise((resolve,reject)=>db.close(e=>e?reject(e):resolve()));
+      };
+    },
     async sql(q,...params) {
       // One SQLite library owns every connection in this process. Mixing the
       // Node builtin and sqlite3 gives them separate in-process lock registries.
@@ -202,7 +265,7 @@ async function start() {
       const timer=setTimeout(()=>{finish({timeout:true});request.destroy();},timeout);
       request.on('error',e=>finish({error:e.message}));request.end(data);
     });},
-    async stop(){await new Promise(r=>client.end(true,r));await RED.stop();server.closeAllConnections();await new Promise(r=>server.close(r));await radio.stop();await new Promise(r=>broker.close(r));await new Promise(r=>mqttServer.close(r));}
+    async stop(){await new Promise(r=>client.end(true,r));await RED.stop();server.closeAllConnections();await new Promise(r=>server.close(r));await radio.stop();await new Promise(r=>weather.close(r));await new Promise(r=>broker.close(r));await new Promise(r=>mqttServer.close(r));}
   };
   return h;
 }

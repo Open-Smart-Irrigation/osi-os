@@ -51,3 +51,13 @@ test('each known case names exactly one finding',()=>{
     assert.equal(classify([failed],[{...known[0],finding}]).knownToFail.length,1);
   }
 });
+
+const {isExpectedRefusal}=require('./fixtures/release-smoke/observation');
+test('expected refusals are exact by scenario, source, type and full message',()=>{
+  const refusal={caseId:'no-token:GET /example',sourceId:'auth',sourceType:'function',message:'Error: Unauthorized'};
+  assert.equal(isExpectedRefusal(refusal,[refusal]),true);
+  for(const changed of [{caseId:'boot'},{sourceId:'late-handler'},{sourceType:'sqlite'},{message:'Unauthorized: ReferenceError'}]) {
+    assert.equal(isExpectedRefusal({...refusal,...changed},[refusal]),false);
+  }
+  assert.equal(isExpectedRefusal({...refusal,message:'SQLITE_BUSY: database is locked'},[refusal]),false);
+});

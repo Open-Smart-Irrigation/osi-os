@@ -51,7 +51,7 @@ function parity() {
   compare('flows.json');compare('node-red');
   console.log('PROFILE PARITY:',count,'flow/helper files byte-identical');
 }
-function main(argv) {
+function main(argv,options={}) {
   if(argv.some(a=>!['--release','--strict'].includes(a)))throw new Error('usage: node scripts/test-release-smoke.js [--release|--strict]');
   parity();
   const expected=/PKG_VERSION:=(\S+)/.exec(fs.readFileSync(path.join(ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/Makefile'),'utf8'))[1];
@@ -70,7 +70,7 @@ function main(argv) {
   const runtimeLog=path.join(run,'runtime.log');
   const fd=fs.openSync(runtimeLog,'w');
   let child;
-  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',UV_THREADPOOL_SIZE:'2',OSI_SMOKE_RUN:run},stdio:['ignore',fd,fd]});}
+  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',UV_THREADPOOL_SIZE:'2',OSI_SMOKE_RUN:run,OSI_SMOKE_CONTROL:options.control||''},stdio:['ignore',fd,fd]});}
   finally {fs.closeSync(fd);}
   if(child.status!==0)throw new Error('runtime failed: '+fs.readFileSync(runtimeLog,'utf8'));
   const evidence=JSON.parse(fs.readFileSync(path.join(run,'results.json'),'utf8'));
@@ -83,6 +83,7 @@ function main(argv) {
   for(const c of summary.failed)console.error('FAIL',c.id,c.reason||'',JSON.stringify(c.failures.map(signature)));
   console.log(`RESULT passed=${summary.passed.length} failed=${summary.failed.length} known-to-fail=${summary.knownToFail.length}; ${evidence.seconds.toFixed(1)}s; peak RSS ${(evidence.maxRSSKiB/1024).toFixed(0)} MiB`);
   fs.writeFileSync(path.join(run,'summary.json'),JSON.stringify(summary,null,2)+'\n');
+  options.onSummary?.(summary,evidence,run);
   if(summary.failed.length)return 1;
   if((argv.includes('--release')||argv.includes('--strict'))&&known.length){console.error('RELEASE REFUSED:',known.length,'known failing cases remain');return 1;}
   return 0;

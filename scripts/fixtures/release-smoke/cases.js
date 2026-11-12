@@ -8,6 +8,7 @@ const { isDeepStrictEqual } = require('node:util');
 exports.run = async function(h) {
   const results=[];
   async function test(id,fn) {
+    h.state.caseId=id;
     const failures=[], evidence={};
     const check=(code,ok,actual)=>{if(!ok)failures.push({code,actual});};
     await fn(check,evidence);
@@ -24,7 +25,6 @@ exports.run = async function(h) {
     check('started',startup.some(l=>l.msg==='Started flows'),startup);
     check('missing-types',!startup.some(l=>/missing types|already registered|Error loading|Failed to register/.test(l.msg)),startup);
   });
-  await test('startup-node-errors',async check=>check('node-errors',!startup.some(l=>l.level==='error'),startup.filter(l=>l.level==='error').map(l=>({id:l.id,msg:l.msg}))));
   let token,user,zone;
   await test('login-and-lists',async(check,e)=>{
     const reg=await h.http('POST','/auth/register',{username:'smoke',password:'Synthetic-pass-1'});httpCheck(check,reg,201,'register');
@@ -180,9 +180,20 @@ exports.run = async function(h) {
     // Keep the scheduler's zone independent of valves used by preceding cases.
     (await h.sql('UPDATE devices SET irrigation_zone_id=NULL WHERE irrigation_zone_id=? AND deveui NOT IN (?,?)',zone.id,valve,sensor));
     (await h.sql('INSERT INTO device_data(deveui,recorded_at,swt_wm1) VALUES (?,?,?)',sensor,new Date().toISOString(),60));
-    h.inject('a0a61f4b7dca1c2e');await waitFor(()=>radio(valve).length>0);await h.sleep(120);
+    // A separate real SQLite writer deterministically exposes F-7. The two
+    // sqlite nodes have no product lock wait; the valve helper does. Release
+    // once both refusals arrive, or after 2.5s if a fix makes them wait. No retry.
+    const release=await h.writerLock();
+    try {
+      h.inject('a0a61f4b7dca1c2e');
+      await waitFor(()=>h.state.caught.filter(c=>c.caseId==='scheduler-irrigates'&&c.message==='Error: SQLITE_BUSY: database is locked').length>=2,2500);
+    } finally {await release();}
+    await h.settle();
     e.radio=radio(valve);e.stored=(await h.sql('SELECT action,reason,duration_minutes FROM irrigation_events WHERE irrigation_zone_id=?',zone.id));
-    check('radio',e.radio.some(c=>c.port===2&&c.hex==='410f'),e.radio);check('stored',e.stored.some(r=>r.action==='IRRIGATE'&&r.duration_minutes===15),e.stored);
+    check('radio',e.radio.some(c=>c.port===2&&c.hex==='410f'),e.radio);const persisted=e.stored.some(r=>r.action==='IRRIGATE'&&r.duration_minutes===15);
+    const triggered=!!(await h.sql('SELECT last_triggered_at FROM irrigation_schedules WHERE irrigation_zone_id=?',zone.id))[0]?.last_triggered_at;
+    e.caught=h.state.caught.filter(c=>c.caseId==='scheduler-irrigates');
+    check('scheduler-persistence',persisted&&triggered&&!e.caught.length,{eventStored:persisted,lastTriggered:triggered,errors:e.caught.map(({sourceId,sourceType,message})=>({sourceId,sourceType,message})).sort((a,b)=>a.sourceId.localeCompare(b.sourceId))});
     const answer=await h.http('GET','/api/irrigation/recent-actuations',undefined,token);httpCheck(check,answer,200,'read-http');
   });
   const disabled=new Set(h.flows.filter(n=>n.type==='tab'&&n.disabled).map(n=>n.id));
@@ -203,6 +214,39 @@ exports.run = async function(h) {
       check('http',isPublic?r.status>=200&&r.status<300:method==='OPTIONS'?(r.status>=200&&r.status<300||r.status>=400&&r.status<500):r.status>=400&&r.status<500,r);
     });
   }
+  // Do not let the later manual/cron scheduler injects water the scenario's
+  // synthetic zone again. Their handlers still run against an explicit empty
+  // eligible set, while the scheduler case above owns the populated case.
+  await h.sql('UPDATE irrigation_schedules SET enabled=0');
+  const dendro=await device('DRAGINO_LSN50');
+  await h.sql('UPDATE devices SET dendro_enabled=1 WHERE deveui=?',dendro);
+  const weatherLogStart=h.state.logs.length;
+  await test('enabled-inject-sweep',async(check,e)=>{
+    await h.sweepInjects(async config=>{
+      if(config.id==='dendro-daily-inject')await h.sql('UPDATE irrigation_zones SET latitude=0,longitude=0 WHERE id=?',zone.id);
+    },async config=>{
+      if(config.id==='dendro-daily-inject')await h.sql('UPDATE irrigation_zones SET latitude=NULL,longitude=NULL WHERE id=?',zone.id);
+    });
+    e.sweep=h.state.sweep;
+    check('injects',e.sweep.length===require('./observation').enabledInjects(h.flows).length,e.sweep);
+  });
+  await test('dendro-weather-transport',async(check,e)=>{
+    e.warnings=h.state.logs.slice(weatherLogStart).filter(l=>l.id==='dendro-compute-fn'&&l.level==='warn').map(l=>l.msg);
+    check('weather-transport',e.warnings.length===0,e.warnings);
+    e.daily=await h.sql('SELECT rainfall_mm,vpd_source FROM zone_daily_recommendations WHERE zone_id=? ORDER BY date DESC LIMIT 1',zone.id);
+    check('weather-output',e.daily.length===1&&e.daily[0].rainfall_mm===5.4&&e.daily[0].vpd_source==='openagri',e.daily);
+  });
+  await test('caught-node-errors',async(check,e)=>{
+    const expected=require('./expected-refusals.json');
+    const f7Sources=new Set(['2cb3b5c1a3d0e5f7','3a0d9d0f1a1b2c3d']);
+    e.unexpected=h.state.caught.filter(c=>{
+      // These exact errors are asserted (and listed as F-7) by the scheduler
+      // case itself. Any BUSY elsewhere or with another signature stays red.
+      if(c.caseId==='scheduler-irrigates'&&f7Sources.has(c.sourceId)&&c.sourceType==='sqlite'&&c.message==='Error: SQLITE_BUSY: database is locked')return false;
+      return !require('./observation').isExpectedRefusal(c,expected);
+    });
+    check('caught-errors',e.unexpected.length===0,e.unexpected);
+  });
   await test('network-contained',async check=>check('network',!h.state.logs.some(l=>l.level==='NET_REFUSED'),h.state.logs.filter(l=>l.level==='NET_REFUSED')));
   const source=path.join(__dirname,'../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
   await test('flows-unchanged',async check=>check('bytes',fs.readFileSync(source).equals(fs.readFileSync(path.join(h.RUN,'flows.json'))),'Node-RED rewrote the flow file'));
@@ -216,7 +260,14 @@ exports.run = async function(h) {
     const changed=fs.readdirSync(source).filter(name=>(name.startsWith('osi-')||name==='codecs')&&!same(name));
     check('bytes',changed.length===0,changed);
   });
-  // Check after all scenarios too: delayed startup injects must not escape the gate.
+  await h.settle();
+  // All error-level events are checked, including non-function nodes. Keep the
+  // established F-14 node error separate from unhandled function errors.
+  await test('startup-node-errors',async check=>{
+    const errors=h.state.logs.filter(l=>l.level==='error'&&l.type!=='function').map(l=>({id:l.id,msg:l.msg}));
+    check('node-errors',errors.length===0,errors);
+  });
+  // Check after scenarios and the explicit sweep, including late handlers.
   await test('startup-function-errors',async check=>check('function-errors',!h.state.logs.some(l=>l.type==='function'&&l.level==='error'),h.state.logs.filter(l=>l.type==='function'&&l.level==='error')));
   await test('database-integrity',async check=>{const rows=await h.sql('PRAGMA quick_check');check('quick-check',rows.length===1&&rows[0].quick_check==='ok',rows);});
   return results;

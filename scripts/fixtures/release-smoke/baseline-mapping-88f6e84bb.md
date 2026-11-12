@@ -1,8 +1,12 @@
 # Smoke baseline after the sandbox and HTTP-reply fixes
 
-The known-to-fail list shrank from 26 to 9 cases after rebasing onto
+The first baseline update reduced the list from 26 to 9 cases after rebasing onto
 `88f6e84bb251a03034dc4a6e8fa8e3a10992a2e4` (#631, #632 and #634 included).
-The stage-1-sensitive sequences and all expected outcomes were not changed.
+The council follow-up expands it from 9 to 11: one scheduler case now has
+controlled writer contention (F-7), and a populated dendrometer weather case
+reproduces NEW-1. The payload base stays the same, so the evidence filename
+stays `baseline-88f6e84bb.txt`. The six stage-1 valve scenarios and all their
+expected outcomes remain unchanged.
 
 The first real-runtime run kept the original 26 entries. It exited 1 with
 182 passed, 23 failed and 3 known-to-fail: 17 listed cases now passed and
@@ -13,8 +17,10 @@ HTTP reply. The remaining database/radio failures were already present.
 
 ## Removed cases
 
-Each case below passed its HTTP, stored-state and radio assertions in the
-unchanged-list run. The merged fix is shown per case.
+Each case below passed its original HTTP, stored-state and radio assertions
+in the unchanged-list run. The merged fix is shown per case. The scheduler's
+crypto/save failure remains fixed by #631; its new contention precondition
+now exposes the separate F-7 persistence defect.
 
 | Case | Fix |
 |---|---|
@@ -43,8 +49,8 @@ and did not itself fix a smoke case.
 
 Every remaining case has exactly one finding ID from
 [tracking issue #637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637).
-Several cases exercise variants of the same finding. No new finding was
-needed. The classifier also rejects entries that combine finding IDs.
+The eleven cases cover seven findings. The two added cases map to existing
+F-7 and NEW-1, so no new finding ID was needed. The classifier also rejects entries that combine finding IDs.
 
 | Case | Finding | Observed failure |
 |---|---|---|
@@ -57,6 +63,8 @@ needed. The classifier also rejects entries that combine finding IDs.
 | `open-after:flushing` | F-4 | Open after the service command is refused; no new open frame or commanded record. |
 | `no-token:POST /api/account-link` | F-13 | Unauthenticated request gives no HTTP answer. |
 | `no-token:POST /api/sync/force` | F-13 | Unauthenticated request gives no HTTP answer. |
+| `scheduler-irrigates` | F-7 | Under one held native SQLite writer lock, both legacy SQLite nodes report exactly `Error: SQLITE_BUSY: database is locked`; the irrigation event and last-triggered timestamp are absent although the exact open frame arrives. |
+| `dendro-weather-transport` | NEW-1 | The enabled daily inject reaches a populated dendro zone. Both weather warnings say `require is not defined`; stored rain is NULL and VPD source is unavailable. |
 
 `no-clock-open-no-report-open-later` belongs to F-1: the marker is absent,
 but no OPEN report arrives, so it does not reproduce the report-attribution
@@ -106,3 +114,26 @@ name follows the main commit whose shipped payload runs, rather than this
 PR's test-only head. Evidence paths in that file use `<scratch>`; only the
 local scratch-directory spelling was normalized. The JSON result and logs
 retain the original absolute path outside the repository.
+
+## Council blocker coverage
+
+The final sweep invokes all 29 enabled injects once through their real nodes,
+including manual, delayed, repeat-only and cron-only sources. Timer handles
+are paused after the normal boot initialization window, making coverage
+independent of host speed. Function completions and native SQLite callbacks
+must settle, followed by 250 ms without message activity; an unfinished flow
+fails after 15 seconds. Each inject's wired targets must appear among its
+recorded recipients. This does not qualify arbitrary delayed callbacks inside
+handlers, elapsed schedule behavior or every branch of those handlers.
+
+All catch-node deliveries retain their source id/type and exact message.
+The 33 expected refusal tuples apply only to named unauthenticated scenarios
+and source nodes. F-13 still fails its HTTP answer assertion. The two exact
+scheduler BUSY errors belong to the F-7 case; any other BUSY, source, message,
+or scenario fails the final catch check. No product write is retried.
+
+The two repository negative controls alter only scratch flow copies. They
+must fail the late-handler error check and the catch-delivery check,
+respectively; byte-integrity or HTTP failures alone do not satisfy them.
+The release procedure requires strict hosted success on the release SHA
+before tag creation and the tag's own success before image builds.
