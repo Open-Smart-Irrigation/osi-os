@@ -254,15 +254,15 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
 });
 
 test('schema-init completion is required before the bounded /gui health gate', () => {
-  const initBegin = indexOf('# init log check begin');
-  const healthCall = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
-  const initResult = deploy.indexOf('sync-init: schema init complete', initBegin);
-  assert.ok(initBegin < initResult && initResult < healthCall,
+  const checkStart = indexOf('check_node_red_start() {');
+  const checkEnd = deploy.indexOf('\n}\n', checkStart);
+  const check = deploy.slice(checkStart, checkEnd);
+  assert.ok(check.indexOf('sync-init: schema init complete') < check.indexOf('wait_for_node_red_health'),
     'schema-init completion must be checked before /gui readiness');
-  const healthHelper = deploy.slice(deploy.indexOf('wait_for_node_red_health() {'), healthCall);
+  const healthHelper = deploy.slice(indexOf('wait_for_node_red_health() {'), indexOf('# node-red health wait end'));
   assert.ok(healthHelper.indexOf('node_red_state="$(node_red_service_state)"') < healthHelper.indexOf('127.0.0.1:1880/gui'),
     'the health helper proves named service state before /gui');
-  assert.match(deploy, /NODE_RED_HEALTH_TIMEOUT:-30/);
+  assert.ok(indexOf('# init log check begin') < deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}" "${NODE_RED_HEALTH_TIMEOUT:-30}"', indexOf('# init log check begin')));
   assert.match(deploy, /sleep 1/);
 });
 
