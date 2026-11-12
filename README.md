@@ -163,6 +163,15 @@ a gateway in use by image: use `deploy.sh` as described under
 [bundle path over a flaky link](docs/operations/deploying-over-a-flaky-link.md).
 Flash an image only for a new device or a deliberate reset.
 
+Until the next release, a gateway that was installed from an OSI OS image and
+has never been upgraded by script must not be upgraded by script either: the
+upgrade stops at the payload switch, after the database migration, and leaves
+the gateway stopped (NEW-13 in
+[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
+the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
+directory (`d`) and not a link (`l`), leave the gateway on its current version
+until that release.
+
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
 |                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |
@@ -294,6 +303,10 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 ---
 
 ### Re-deploying after changes
+
+Read the caution under [Device Setup](#device-setup) first: until the next
+release, a gateway whose `/usr/lib/node-red/gui` is still a directory must not
+be upgraded by script.
 
 Re-run `deploy.sh` to update application components. It is safe to re-run on live devices because it preserves `/data/db/farming.db` and only seeds the DB on devices where that file is absent:
 
