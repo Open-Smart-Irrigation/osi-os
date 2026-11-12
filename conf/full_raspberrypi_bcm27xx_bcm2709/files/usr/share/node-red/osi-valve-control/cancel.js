@@ -146,6 +146,11 @@ function droppedOpens(items, removed, active, target, eui, warn) {
   return { count, expectationIds: ids };
 }
 
+function runReportedOver(row) {
+  try { const seen = (JSON.parse(row.transport_json || '{}') || {}).untrusted_report; return Boolean(seen && seen.open && seen.closed); }
+  catch (_) { return false; }
+}
+
 async function resolveTarget(db, eui, expectationId) {
   const active = await db.all(
     'SELECT expectation_id, reconciliation_state, commanded_duration_seconds, command_id, transport_json FROM valve_actuation_expectations ' +
@@ -156,7 +161,11 @@ async function resolveTarget(db, eui, expectationId) {
   // A permanent CLOSE owner (commanded_duration_seconds 0, reserved so fresh CLOSED evidence can
   // settle it) is not an open: a cancel never targets or flushes it, and it never makes an
   // id-less cancel of the one real open ambiguous (D04: cancel deletes a pending open).
-  const cancellable = active.filter((row) => !dispatch.isReportOnlyExpectation(row) && Number(row.commanded_duration_seconds) > 0);
+  // v0.8.2 fix, stage 1: an open whose OPEN and CLOSED reports arrived while the clock was not
+  // synchronised keeps its record pending (workers.js attachUntrustedReportTx), where v0.8.1
+  // ended it on the CLOSED report. Its run is over: a cancel has nothing to delete for it, and it
+  // must not make the cancel of a later open ambiguous on a gateway without a time signal.
+  const cancellable = active.filter((row) => !dispatch.isReportOnlyExpectation(row) && Number(row.commanded_duration_seconds) > 0 && !runReportedOver(row));
   if (expectationId) {
     const named = await db.get(
       'SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations ' +
@@ -391,7 +400,22 @@ async function cancelActuation(args) {
   return cancelActuationLocked(args);
 }
 
-async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason, flushQueue, readQueue, enqueue, transport, now, warn }) {
+// A cancel involves conditional irrigation when its target is the open of an occurrence, or when
+// the valve holds an occurrence that is reserved, attempted, sent or unknown.
+async function involvesConditional(db, eui, target) {
+  const row = await db.get(
+    "SELECT 1 AS x FROM irrigation_occurrences WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL " +
+    "AND (command_id=? OR state IN ('RESERVED','ATTEMPTED','SENT','UNKNOWN')) LIMIT 1",
+    [eui, target && target.command_id != null ? target.command_id : '']
+  );
+  return Boolean(row);
+}
+
+async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason, flushQueue: givenFlushQueue, readQueue: givenReadQueue, enqueue: givenEnqueue, transport: givenTransport, wholeQueue, now, warn }) {
+  let transport = givenTransport;
+  let flushQueue = givenFlushQueue;
+  let readQueue = givenReadQueue;
+  let enqueue = givenEnqueue;
   // Fail closed BEFORE any write. The cloud CANCEL_VALVE_ACTUATION path (Valve Cloud
   // Command Bridge) builds flushQueue inside its own try/catch and passes null when
   // createProvisioningClientFromEnv throws - without this guard, a broken ChirpStack
@@ -421,6 +445,20 @@ async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason
   }
   const targets = all === true ? resolved.active : [resolved.target];
   const active = targets[targets.length - 1];
+
+  // v0.8.2 fix, stage 1 (CTO ruling of 2026-11-12): the whole-queue flush of owner decision
+  // D19/Q01 holds where conditional irrigation is involved, and for a valve that leaves the
+  // gateway. The cancel of an ordinary open behaves as in v0.8.1: the open is taken out, plan
+  // pushes, settings and a CLOSE are queued again, and the actuation is marked CANCELLED. Its
+  // known weakness is v0.8.1's: an item ChirpStack sent between the read and the flush is sent
+  // twice, and a CLOSE queued again can reach the valve after a later open.
+  if (transport && !(all === true || wholeQueue === true || await involvesConditional(db, eui, active))) {
+    const client = transport;
+    if (typeof flushQueue !== 'function') flushQueue = (target) => client.flushDeviceQueue(target);
+    if (typeof readQueue !== 'function') readQueue = (target) => (typeof client.getDeviceQueue === 'function' ? client.getDeviceQueue(target) : client.getQueue(target));
+    if (typeof enqueue !== 'function') enqueue = (item) => (client.enqueueDownlink || client.enqueue).call(client, item);
+    transport = null;
+  }
 
   const normalizedReason = normalizeReason(reason);
   const cancelReason = truncateWithMarker(normalizedReason, CANCEL_REASON_MAX_LENGTH);
@@ -596,7 +634,7 @@ async function cancelForUnclaim({ db, deviceEui, transport, now, warn } = {}) {
   for (const row of active.filter((item) => item.reconciliation_state !== 'OBSERVED_RUNNING')) {
     let out;
     try {
-      out = await cancelActuation({ db, deviceEui: eui, expectationId: row.expectation_id, reason: 'device_unclaimed', transport, now, warn });
+      out = await cancelActuation({ db, deviceEui: eui, expectationId: row.expectation_id, reason: 'device_unclaimed', transport, wholeQueue: true, now, warn });
     } catch (error) {
       out = { ok: false, outcome: 'uncertain', error: String(error && error.message || error) };
     }

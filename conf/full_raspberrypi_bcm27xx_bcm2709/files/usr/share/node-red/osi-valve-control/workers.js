@@ -151,7 +151,7 @@ async function ensureObservationIncidentTx(tx, deviceEui, control, physicalRunId
   });
 }
 
-async function syntheticObservationTx(tx, deviceEui, reportAt, proof, control, { trusted, reason, conditionalConfigured = false, anchorAt } = {}) {
+async function syntheticObservationTx(tx, deviceEui, reportAt, proof, control, { trusted, reason, conditionalConfigured = false, anchorAt, unattributed } = {}) {
   const storedAt = anchorAt || reportAt;
   const observation = observationState(control);
   let physicalRunId = observation.physical_run_id || null;
@@ -167,7 +167,9 @@ async function syntheticObservationTx(tx, deviceEui, reportAt, proof, control, {
     row = { expectation_id: physicalRunId };
     const transport = {
       physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null },
-      observation: { source: 'explicit_report', proof: trusted ? proof : null, untrusted: trusted ? null : reason },
+      // unattributed: why no command got this report. 'no_owner': no open of this valve fits it.
+      // 'ambiguous_owner': more than one fits it, and the gateway does not choose.
+      observation: { source: 'explicit_report', proof: trusted ? proof : null, untrusted: trusted ? null : reason, unattributed: unattributed || null },
     };
     await tx.run("INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,effect_key,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,observed_open_at,reconciliation_state,created_at,trigger,transport_json) SELECT ?,UPPER(d.deveui),d.irrigation_zone_id,NULL,NULL,?,?,?,'unknown',?,?,?,'unexplained',? FROM devices d WHERE UPPER(d.deveui)=UPPER(?)", [physicalRunId, storedAt, -1, '', trusted ? reportAt : null, 'OBSERVED_RUNNING', storedAt, JSON.stringify(transport), deviceEui]);
     row = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [physicalRunId]);
@@ -250,6 +252,47 @@ async function emitObservationRuntimeTx(tx, deviceEui, expectationId, warn) {
   catch (error) { if (typeof warn === 'function') warn('[valve-control] observation archive emit failed: ' + String(error && error.message ? error.message : error)); }
 }
 
+// v0.8.2 fix, stage 1: a report received while the clock is not synchronised is attached to the
+// ordinary command it uniquely belongs to. The row keeps its state and gets no observed time: the
+// report is evidence with an untrusted time, not a trusted observation and not a completion.
+//   OPEN after a state other than OPEN: the one timed open of this valve that was handed over,
+//     has no observation yet and has no report attached. None or several: not attached, and the
+//     caller books it as a run without a command (unattributed 'no_owner' / 'ambiguous_owner').
+//   OPEN again, with no CLOSED report between: no new run. It stays with the command that holds
+//     the first OPEN report, or with the run without a command that is already booked.
+//   CLOSED: the one command that holds an OPEN report and no CLOSED report. Also called for a
+//     CLOSED report with a synchronised clock, so that the run is not offered to a later report.
+// Returns { id, fits }: the expectation the report was attached to (or null), and how many
+// commands it fits.
+async function attachUntrustedReportTx(tx, deviceEui, state, { anchorAt, proof, reason, event_identity } = {}) {
+  const rows = await tx.all("SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL AND reconciliation_state='PENDING_OBSERVATION' AND observed_open_at IS NULL ORDER BY rowid", [deviceEui]);
+  const conditional = new Set((await tx.all('SELECT command_id FROM irrigation_occurrences WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL', [deviceEui])).map((row) => row.command_id));
+  const candidates = [];
+  for (const row of rows) {
+    if (conditional.has(row.command_id) || !(Number(row.commanded_duration_seconds) > 0)) continue;
+    const transport = persistedTransport(row);
+    if (!transport || !['ATTEMPTED', 'UNKNOWN', 'ACCEPTED'].includes(transport.phase)) continue;
+    if (!transport.effect_snapshot || transport.effect_snapshot.effect_class !== dispatch.effects.EFFECTS.SELF_CLOSING_OPEN) continue;
+    const seen = transport.untrusted_report || {};
+    if (seen.closed) continue;
+    candidates.push({ row, transport, seen });
+  }
+  const running = candidates.filter((item) => item.seen.open);
+  if (state === 'OPEN' && running.length === 1) return { id: running[0].row.expectation_id, fits: 1 };
+  let fitting = running;
+  if (state === 'OPEN') {
+    const shown = await tx.get("SELECT COALESCE(UPPER(current_state), '') AS state FROM devices WHERE UPPER(deveui)=UPPER(?)", [deviceEui]);
+    if (shown && shown.state === 'OPEN') return { id: null, fits: 0 };
+    fitting = candidates.filter((item) => !item.seen.open);
+  }
+  if (fitting.length !== 1) return { id: null, fits: fitting.length };
+  const { row, transport, seen } = fitting[0];
+  const entry = { received_at: anchorAt, boot_id: proof ? proof.boot_id : null, uptime_ms: proof ? proof.uptime_ms : null, reason: reason || null, event_identity: event_identity || null };
+  transport.untrusted_report = state === 'OPEN' ? { ...seen, open: entry } : { ...seen, closed: entry };
+  await tx.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify(transport), row.expectation_id]);
+  return { id: row.expectation_id, fits: 1 };
+}
+
 async function recordValveObservationTx(tx, deviceEui, { observedState, observedAt, event_identity, checked, warn } = {}) {
   const state = String(observedState || '').trim().toUpperCase();
   const reportMs = observationInstant(observedAt);
@@ -269,8 +312,12 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
   const watermarkMs = observationInstant(observation.last_reported_at);
   if (!trusted) {
     appendUntrustedObservation(observation, raw);
-    if (state === 'OPEN') {
-      const synthetic = await syntheticObservationTx(tx, deviceEui, reportAt || anchorAt, proof, control, { trusted: false, reason, conditionalConfigured, anchorAt });
+    // Conditional irrigation keeps its own rule: there every untrusted OPEN is an incident.
+    const attached = conditionalConfigured ? { id: null, fits: 0 }
+      : await attachUntrustedReportTx(tx, deviceEui, state, { anchorAt, proof, reason, event_identity });
+    const attributedTo = attached.id;
+    if (state === 'OPEN' && !attributedTo) {
+      const synthetic = await syntheticObservationTx(tx, deviceEui, reportAt || anchorAt, proof, control, { trusted: false, reason, conditionalConfigured, anchorAt, unattributed: attached.fits > 1 ? 'ambiguous_owner' : 'no_owner' });
       if (synthetic.blocked) {
         observation.uncertain = true;
         observation.blocked_reason = synthetic.reason;
@@ -285,8 +332,13 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
       await writeObservationControlTx(tx, deviceEui, synthetic.incident ? { ...control, incident: synthetic.incident } : control, observation);
       return { kind: 'untrusted', physical_run_id: synthetic.physicalRunId, incident: synthetic.incident };
     }
+    // v0.8.2 fix, stage 1 (F-2): the state shown follows the newest report received, as in
+    // v0.8.1, also while the clock is not synchronised. It is the last received report with an
+    // untrusted time (kept in untrusted_reports), not proof of the valve's state: no run is
+    // credited or ended by it.
+    await updateAuthoritativeStateTx(tx, deviceEui, state, anchorAt);
     await writeObservationControlTx(tx, deviceEui, control, observation);
-    return { kind: 'untrusted', state };
+    return attributedTo ? { kind: 'untrusted', state, owner_id: attributedTo } : { kind: 'untrusted', state };
   }
   if (watermarkMs != null && reportMs < watermarkMs) {
     appendUntrustedObservation(observation, { ...raw, reason: 'stale_report' });
@@ -341,7 +393,7 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
     const owners = await tx.all('SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) ORDER BY rowid', [deviceEui]);
     const occurrences = await tx.all('SELECT * FROM irrigation_occurrences WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL', [deviceEui]);
     const occurrenceByCommand = new Map(occurrences.map((item) => [item.command_id, item]));
-    const eligible = owners.map((owner) => ({ owner, result: dispatch.observationOwnerEligibility(owner, occurrenceByCommand.get(owner.command_id), deviceEui, reportAt) })).filter((item) => item.result.eligible);
+    const eligible = owners.map((owner) => ({ owner, result: dispatch.observationOwnerEligibility(owner, occurrenceByCommand.get(owner.command_id), deviceEui, reportAt, checked && checked.receipt) })).filter((item) => item.result.eligible);
     if (eligible.length === 1) {
       const owner = eligible[0].owner;
       const transport = owner.transport_json ? JSON.parse(owner.transport_json) : {};
@@ -353,7 +405,7 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
       await writeObservationControlTx(tx, deviceEui, control, observation);
       return { kind: 'owner', owner_id: owner.expectation_id, physical_run_id: owner.expectation_id };
     }
-    const synthetic = await syntheticObservationTx(tx, deviceEui, reportAt, proof, control, { trusted: true, reason: eligible.length ? 'ambiguous_owner' : 'no_owner', conditionalConfigured });
+    const synthetic = await syntheticObservationTx(tx, deviceEui, reportAt, proof, control, { trusted: true, reason: eligible.length ? 'ambiguous_owner' : 'no_owner', conditionalConfigured, unattributed: eligible.length ? 'ambiguous_owner' : 'no_owner' });
     if (synthetic.blocked) {
       observation.uncertain = true;
       observation.blocked_reason = synthetic.reason;
@@ -367,6 +419,9 @@ async function recordValveObservationTx(tx, deviceEui, { observedState, observed
   }
   const physicalRunId = observation.physical_run_id || null;
   let controlToWrite = control;
+  // A command whose OPEN report came before the clock was synchronised gets this CLOSED report as
+  // the end of its evidence; without it the command would stay on offer for the next run's report.
+  if (!conditionalConfigured) await attachUntrustedReportTx(tx, deviceEui, 'CLOSED', { anchorAt, proof, reason: 'clock_synchronised', event_identity });
   if (physicalRunId) {
     const linked = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=? AND UPPER(device_eui)=UPPER(?)', [physicalRunId, deviceEui]);
     if (linked && linked.observed_close_at == null) {
@@ -727,7 +782,11 @@ function commandObservationDeadline(row) {
   let transport;
   try { transport = row.transport_json ? JSON.parse(row.transport_json) : null; } catch (_) { return null; }
   const snapshot = transport && transport.effect_snapshot;
-  const deadline = snapshot && observationInstant(snapshot.future_effect_end);
+  // A row written by 0.8.0 or 0.8.1 has no snapshot. Its deadline is its expected close, as in
+  // the 0.8.1 monitor, so it leaves the active states after an upgrade instead of staying
+  // PENDING_OBSERVATION for good.
+  const deadline = snapshot ? observationInstant(snapshot.future_effect_end)
+    : (!(transport && transport.phase) && Number(row.commanded_duration_seconds) > 0 ? observationInstant(row.expected_close_at) : null);
   return Number.isFinite(deadline) ? deadline : null;
 }
 

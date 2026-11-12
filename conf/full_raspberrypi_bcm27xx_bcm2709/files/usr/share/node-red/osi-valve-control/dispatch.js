@@ -172,7 +172,7 @@ function validatePersistedOwnerRelation(row, occurrence, snapshot, deviceEui, { 
 // Observation attribution uses the same persisted snapshot contract as the
 // dispatch path.  This helper deliberately accepts only rows read from the
 // database; callers cannot provide a substitute snapshot or trusted flag.
-function observationOwnerEligibility(row, occurrence, deviceEui, observedAt) {
+function observationOwnerEligibility(row, occurrence, deviceEui, observedAt, runtimeReceipt) {
   try {
     if (!row || String(row.device_eui || '').toUpperCase() !== String(deviceEui || '').toUpperCase() || !row.command_id) return { eligible: false, reason: 'owner_shape' };
     if (row.observed_open_at != null || row.reconciliation_state === 'OBSERVED_COMPLETE') return { eligible: false, reason: 'already_observed' };
@@ -183,10 +183,25 @@ function observationOwnerEligibility(row, occurrence, deviceEui, observedAt) {
     const snapshot = transport.effect_snapshot;
     effects.validateEffectSnapshot(snapshot, { device_eui: deviceEui });
     if (snapshot.effect_class !== effects.EFFECTS.SELF_CLOSING_OPEN) return { eligible: false, reason: 'effect_class' };
+    // A run that reported OPEN and CLOSED while the clock was not synchronised has had its
+    // reports (workers.js attachUntrustedReportTx); a later report belongs to a later command.
+    if (transport.untrusted_report && transport.untrusted_report.closed) return { eligible: false, reason: 'untrusted_run_reported' };
     const reportMs = instantMs(observedAt);
     const attemptMs = instantMs(transport.attempt_trusted_at || transport.attempted_at);
     const endMs = instantMs(snapshot.future_effect_end);
-    if (!Number.isFinite(reportMs) || !Number.isFinite(attemptMs) || !Number.isFinite(endMs) || reportMs < attemptMs || reportMs > endMs) return { eligible: false, reason: 'effect_window' };
+    if (!Number.isFinite(reportMs) || !Number.isFinite(attemptMs) || !Number.isFinite(endMs)) return { eligible: false, reason: 'effect_window' };
+    // v0.8.2 fix, stage 1: the wall times of an ordinary command are those of the clock at its
+    // reservation. After a clock correction (the first time signal, or a later one) a report would
+    // fall outside its window by hours and be booked as a run nobody commanded. Within the boot of
+    // the attempt the window is therefore measured by uptime: its length is the snapshot's own.
+    const receipt = transport.attempt_receipt;
+    const byUptime = !occurrence && receipt && runtimeReceipt
+      && receipt.boot_id === runtimeReceipt.boot_id && Number.isInteger(receipt.uptime_ms) && Number.isInteger(runtimeReceipt.uptime_ms);
+    if (byUptime) {
+      const elapsed = runtimeReceipt.uptime_ms - receipt.uptime_ms;
+      const anchorMs = instantMs(snapshot.anchor_at);
+      if (!Number.isFinite(anchorMs) || elapsed < 0 || elapsed > endMs - anchorMs) return { eligible: false, reason: 'effect_window' };
+    } else if (reportMs < attemptMs || reportMs > endMs) return { eligible: false, reason: 'effect_window' };
     validatePersistedOwnerRelation(row, occurrence, snapshot, deviceEui);
     return { eligible: true, snapshot, transport, attempt_at: new Date(attemptMs).toISOString() };
   } catch (error) {
@@ -377,9 +392,19 @@ async function findConflict(tx, deviceEui, id, nowMs, effectContext = {}) {
   const occurrenceRows = await tx.all("SELECT * FROM irrigation_occurrences WHERE UPPER(device_eui)=UPPER(?) AND command_id IS NOT NULL", [deviceEui]);
   const occurrences = new Map(occurrenceRows.map((row) => [row.command_id, row]));
   const linkedIds = new Set(expectations.map((row) => row.command_id).filter(Boolean));
+  // v0.8.2 fix, stage 1: the fence of #515 exists for conditional irrigation. An ordinary command
+  // (manual, gateway scheduler, cloud, one-time) is fenced only by a stored conditional owner, that
+  // is an expectation linked to an irrigation occurrence or an active occurrence without one.
+  // Ordinary owners (timed opens, CLOSE, service frames, rows of 0.8.x, runs nobody commanded) do
+  // not refuse it: v0.8.1 had no such refusal, and without a hardware qualification none of them
+  // would ever release. A conditional candidate keeps the full rule of #515 against every owner,
+  // and so does every caller that does not ask for the ordinary rule: only executeValveAttempt,
+  // the one seam all ordinary commands pass, sets ordinary_candidate.
+  const ordinaryCandidate = effectContext.ordinary_candidate === true;
   for (const row of expectations) {
     if (row.command_id === id) continue;
     const occurrence = occurrences.get(row.command_id);
+    if (!occurrence && ordinaryCandidate) continue;
     if (occurrence) {
       if (!['RESERVED', 'ATTEMPTED', 'SENT', 'UNKNOWN'].includes(occurrence.state)) continue;
       const finite = row.transport_json ? (() => {
@@ -413,6 +438,7 @@ async function findConflict(tx, deviceEui, id, nowMs, effectContext = {}) {
   // and the policy worker). (R13-m4) The push rows are therefore not read here any more, and the
   // reconciled-predecessor set the push loop used is gone; effectContext.reconciledPushIds is
   // accepted and ignored. A malformed push transport_json no longer refuses an open.
+  if (ordinaryCandidate) return null;
   const settings = await tx.get('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?', [deviceEui]);
   const control = parseControlJson(settings && settings.conditional_control_json);
   const opaque = control.opaque;
@@ -530,7 +556,8 @@ async function reserveValveCommandTx(tx, commandInput, nowInput, effectContext =
   // settle that exact owner later.
   const isClose = action === 'CLOSE';
   if (!isClose) {
-    const conflict = await findConflict(tx, deviceEui, id, nowMs, effectContext);
+    const conditionalCandidate = action === 'OPEN_FOR_DURATION_CONDITIONAL' || Boolean(command.occurrence || command.occurrence_key || command.occurrenceKey);
+    const conflict = await findConflict(tx, deviceEui, id, nowMs, { ...effectContext, ordinary_candidate: effectContext.ordinary_candidate === true && !conditionalCandidate });
     if (conflict) throw errorWithCode('valve_busy', 'valve has an active or unresolved command', { device_eui: deviceEui, conflicting_command_id: conflict.command_id || null });
   }
 
@@ -582,7 +609,9 @@ async function reserveValveCommandTx(tx, commandInput, nowInput, effectContext =
     reconciliation_state: 'PENDING_OBSERVATION',
     cancel_reason: null,
     created_at: now,
-    trigger: command.trigger || (command.conditional ? 'conditional' : 'manual'),
+    // As in v0.8.1, a command that names no trigger is stored without one and labelled by
+    // runTriggerBackfill from actuator_log (a scheduler run becomes trigger_based, not manual).
+    trigger: command.trigger || (command.conditional ? 'conditional' : null),
     transport_json: requestedExpiry == null ? null : json({ explicit_expiry_at: requestedExpiry }),
   };
   const columns = Object.keys(expectation);
@@ -905,13 +934,17 @@ async function claimOwnerAttemptTx(tx, owner, deviceEui, now, item, effectContex
     effects.validateEffectSnapshot(snapshot, { device_eui: deviceEui });
     effects.assertSnapshotMatchesFrame(snapshot, item);
     if (snapshot.timing_contract === effects.UNBOUNDED_SAFE_CLOSE_V1) {
-      const receipt = effectContext.receipt;
-      if (!receipt || receipt.boot_id !== snapshot.reservation_receipt.boot_id
-          || !Number.isInteger(receipt.uptime_ms) || receipt.uptime_ms < snapshot.reservation_receipt.uptime_ms) {
-        throw errorWithCode('close_receipt_unproven', 'safe CLOSE attempt receipt is missing or out of order');
-      }
+      // v0.8.2 fix, stage 1: a CLOSE is sent whatever the receipts say. An attempt receipt that is
+      // missing or from another boot (a CLOSE resumed after a restart) only means that later
+      // CLOSED evidence is not credited to this owner (observeClosedEvidence checks it again).
     } else {
-      const cutoff = instantMs(snapshot.queue_expires_at);
+      // v0.8.2 fix, stage 1: the cutoff in the snapshot is one the gateway generated (anchor plus
+      // 31 minutes by its own wall clock). It decides for a conditional occurrence only. An
+      // ordinary command is refused by a cutoff only when its sender put an expiry on it; a clock
+      // correction between reservation and claim must not turn an open or a CLOSE into
+      // command_expired, which v0.8.1 would have sent.
+      const cutoff = occurrence ? instantMs(snapshot.queue_expires_at)
+        : (snapshot.explicit_expiry_at == null ? null : instantMs(snapshot.explicit_expiry_at));
       if (cutoff != null && instantMs(now) >= cutoff) throw errorWithCode('command_expired', 'immutable queue cutoff has elapsed');
       if (snapshot.qualification && snapshot.qualification.qualified === true) {
         const current = effectContext.currentQualification;
@@ -1011,7 +1044,11 @@ async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now,
       expiresAt = occurrence.expires_at;
       if (!Number.isFinite(instantMs(expiresAt))) throw errorWithCode('conditional_expiry_missing', 'linked conditional occurrence has no valid expiry');
     } else if (beforeClaim.transport && beforeClaim.transport.effect_snapshot) {
-      expiresAt = beforeClaim.transport.effect_snapshot.queue_expires_at || undefined;
+      // v0.8.2 fix, stage 1: an ordinary frame is queued as v0.8.1 queued it, without a queue
+      // expiry of the gateway's own. The 31-minute cutoff assumes a 10-minute reporting interval
+      // the gateway neither sets nor knows, and it dropped a CLOSE the valve had not fetched. Only
+      // an expiry the caller put on the command itself is passed on.
+      expiresAt = beforeClaim.transport.effect_snapshot.explicit_expiry_at || undefined;
     }
     try {
       const enqueue = transport.enqueueDownlink || transport.enqueue;
@@ -1077,12 +1114,12 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
     const firstContext = runtimeAttemptContext(trustedContext, now);
     const reservationNow = firstContext.now;
     const explicitExpiry = normalizedCommand.expires_at != null || normalizedCommand.expiresAt != null;
-    const unboundedClose = effectClass === effects.EFFECTS.CLOSE_ONLY && !explicitExpiry && firstContext.clock.trusted !== true;
     // Owner decision 2026-10-24: a timed OPEN no longer requires an NTP sync since boot; the
     // runtime clock status stays diagnostic (attempt_trusted_at) and decides only the CLOSE variant.
-    if (effectClass === effects.EFFECTS.CLOSE_ONLY && unboundedClose && !firstContext.receipt) {
-      throw errorWithCode('clock_untrusted', 'safe CLOSE requires an internal runtime receipt');
-    }
+    // v0.8.2 fix, stage 1: a CLOSE is never refused for want of a runtime receipt; without one it
+    // takes the wall-anchored snapshot and is sent all the same.
+    const unboundedClose = effectClass === effects.EFFECTS.CLOSE_ONLY && !explicitExpiry && firstContext.clock.trusted !== true
+      && Boolean(firstContext.receipt);
     const prepared = await transaction(db, async (tx) => {
       if (onceScheduleUuid) {
         const once = await tx.get("SELECT i.state, i.command_id, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui WHERE i.schedule_uuid=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [onceScheduleUuid]);
@@ -1101,6 +1138,7 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
       const reserved = await reserveValveCommandTx(tx, normalizedCommand, reservationNow, {
         policy, delivery_settings, interval_source, interval_minutes, minimum_gap_minutes,
         qualificationProvider, qualificationContext, current_state: liveState, current_state_at: liveStateAt,
+        ordinary_candidate: true,
       });
       const expectation = reserved.expectation;
       if (!expectation) throw errorWithCode('reservation_required', 'valve reservation did not create an expectation');
