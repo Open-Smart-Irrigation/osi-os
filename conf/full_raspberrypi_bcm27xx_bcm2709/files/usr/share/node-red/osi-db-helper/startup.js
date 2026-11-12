@@ -171,7 +171,11 @@ function createStartupState({
   }
 
   // Starts the read-only check in a child process and returns at once: the
-  // state reads "checking" until the child answers. Runs once per process.
+  // state reads "checking" until the child answers. Runs once per process,
+  // on the live farm file only. A read-only open of a write-ahead-log file
+  // that has no side files creates its -shm (32 KB) and an empty -wal; the
+  // live file has them anyway once Node-RED opens it. Never point this at a
+  // backup or a copy: it would leave those two beside it.
   // Node's timers run on the monotonic clock; the wall clock plays no part.
   function check(filename = farmPath) {
     if (attempted) return getHealth();
