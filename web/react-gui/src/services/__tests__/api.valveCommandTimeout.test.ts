@@ -139,7 +139,7 @@ describe('one-time schedules and the open hold', () => {
     expect(put).not.toHaveBeenCalled();
 
     await valvesAPI.updateSchedule(eui, 's1', { enabled: false }, { ...due, enabled: true });
-    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(300), durationMinutes: 5 });
+    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(300), durationMinutes: 5 }, { ...due, enabled: true });
     await valvesAPI.deleteSchedule(eui, 's1');
     await valvesAPI.resendPlan(eui);
     expect(put).toHaveBeenCalledTimes(2);
@@ -147,16 +147,98 @@ describe('one-time schedules and the open hold', () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
-  // Review r3, S7: the disabled exemption holds only when the write itself disables.
-  it('does not trust a cached disabled state: a due move is refused unless its own patch sets enabled false', async () => {
+  // Review r3/r4, S7: during a hold the body carries both fields and alone decides. A due move
+  // of a row cached as disabled goes out disabled; with no cached row it cannot be completed.
+  it('a due move goes out with both fields from the cached row, or is refused when they cannot be filled', async () => {
     const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
     const cachedDisabled = { kind: 'ONCE' as const, fireAt: inSeconds(600), enabled: false };
     holdValveOpen(eui);
-    await expect(valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5 }, cachedDisabled))
+    await expect(valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5 }))
       .rejects.toBeInstanceOf(ValveOpenHeldError);
     expect(put).not.toHaveBeenCalled();
-    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5, enabled: false }, cachedDisabled);
+    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(0), durationMinutes: 5 }, cachedDisabled);
     expect(put).toHaveBeenCalledTimes(1);
     expect(put.mock.calls[0][1]).toMatchObject({ fire_at: expect.any(String), enabled: false });
+  });
+});
+
+// Review r4: the invariant itself. While the hold is active, every update of a one-time
+// schedule that leaves carries both `enabled` and `fire_at`, and never `enabled: true` with a
+// due or held start, whatever the cached row says. Outside a hold, updates stay partial.
+describe('one-time schedule updates during a hold: the body alone decides', () => {
+  const eui = '0016C001F1000001';
+  const inSeconds = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
+  const holdEnd = () => Date.now() + 60_000;
+  afterEach(() => { vi.restoreAllMocks(); resetValveCommandHoldsForTest(); });
+
+  const cachedRows = {
+    'enabled, future': { kind: 'ONCE' as const, fireAt: inSeconds(600), enabled: true },
+    'enabled, due': { kind: 'ONCE' as const, fireAt: inSeconds(0), enabled: true },
+    'disabled, future': { kind: 'ONCE' as const, fireAt: inSeconds(600), enabled: false },
+    'disabled, due': { kind: 'ONCE' as const, fireAt: inSeconds(0), enabled: false },
+  };
+  const patches = {
+    'edit start to due': { fireAt: inSeconds(0), durationMinutes: 5, label: null },
+    'edit start to later': { fireAt: inSeconds(900), durationMinutes: 5, label: null },
+    'duration only': { durationMinutes: 7 },
+    'label only': { label: 'Renamed' },
+    enable: { enabled: true },
+    disable: { enabled: false },
+  };
+
+  it('every request that leaves has both fields and never enables a due or held start', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
+    const outcomes: string[] = [];
+    for (const [rowName, row] of Object.entries(cachedRows)) {
+      for (const [patchName, patch] of Object.entries(patches)) {
+        resetValveCommandHoldsForTest();
+        holdValveOpen(eui);
+        put.mockClear();
+        let refused = false;
+        try { await valvesAPI.updateSchedule(eui, 's1', patch, row); } catch (error) {
+          expect(error).toBeInstanceOf(ValveOpenHeldError);
+          refused = true;
+        }
+        const label = `${rowName} / ${patchName}`;
+        if (refused) { expect(put, label).not.toHaveBeenCalled(); outcomes.push(label + ': refused'); continue; }
+        expect(put, label).toHaveBeenCalledTimes(1);
+        const body = put.mock.calls[0][1] as Record<string, unknown>;
+        expect(typeof body.enabled, label).toBe('boolean');
+        expect(typeof body.fire_at, label).toBe('string');
+        if (body.enabled === true) expect(Date.parse(body.fire_at as string), label).toBeGreaterThan(holdEnd() - 1_000);
+        outcomes.push(label + ': sent');
+      }
+    }
+    // Not trivially refusing everything: disabling always goes out, and so does an edit that
+    // keeps a cached-enabled row's start after the hold.
+    expect(outcomes).toContain('enabled, due / disable: sent');
+    expect(outcomes).toContain('enabled, future / label only: sent');
+    expect(outcomes).toContain('disabled, future / enable: sent');
+    expect(outcomes).toContain('enabled, future / edit start to due: refused');
+    expect(outcomes).toContain('disabled, due / enable: refused');
+  });
+
+  it('a body that cannot be completed is refused unless it only disables', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
+    holdValveOpen(eui);
+    await expect(valvesAPI.updateSchedule(eui, 's1', { enabled: true })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(valvesAPI.updateSchedule(eui, 's1', { durationMinutes: 5 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await valvesAPI.updateSchedule(eui, 's1', { enabled: false });
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put.mock.calls[0][1]).toEqual({ enabled: false });
+  });
+
+  it('weekly updates and every update outside a hold stay partial', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
+    holdValveOpen(eui);
+    await valvesAPI.updateSchedule(eui, 'w1', { label: 'Weekly', weekdaysMask: 2, startTime: '06:00', durationMinutes: 5 });
+    await valvesAPI.updateSchedule(eui, 'w1', { enabled: true }, { kind: 'WEEKLY', fireAt: null, enabled: false });
+    resetValveCommandHoldsForTest();
+    await valvesAPI.updateSchedule(eui, 's1', { durationMinutes: 7 }, cachedRows['disabled, due']);
+    expect(put.mock.calls.map(([, body]) => body)).toEqual([
+      { label: 'Weekly', weekdays_mask: 2, start_time: '06:00', duration_minutes: 5 },
+      { enabled: true },
+      { duration_minutes: 7 },
+    ]);
   });
 });

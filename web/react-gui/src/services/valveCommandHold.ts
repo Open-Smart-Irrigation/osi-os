@@ -179,15 +179,48 @@ export function assertScheduleStartNotHeld(
   if (Number.isNaN(startsAt) || startsAt <= Date.now() + remaining) throw new ValveOpenHeldError(keyOf(deviceEui));
 }
 
-/** True when an enabled one-time schedule starting at `fireAt` would be refused now. */
-export function isScheduleStartHeld(deviceEui: string, fireAt: string | null | undefined): boolean {
-  try {
-    assertScheduleStartNotHeld(deviceEui, { kind: 'ONCE', fireAt });
-    return false;
-  } catch (error) {
-    if (isValveOpenHeldError(error)) return true;
-    throw error;
+interface ScheduleUpdateFields { kind?: string; fireAt?: string | null; enabled?: boolean; weekdaysMask?: number; startTime?: string }
+
+/**
+ * The body of a schedule update while this valve's open hold is active (review S7).
+ *
+ * The guard decides from the outgoing body alone, and for a one-time schedule that body
+ * carries both `enabled` and `fireAt`, so after the write the gateway's two values are
+ * exactly the ones checked here, whatever they were before. Values the operator did not
+ * change are filled from `current` (the row as the GUI last read it); `current` only fills
+ * the body and never decides. The request is refused when the body says enabled and its
+ * start is due, past, unreadable or inside the hold. A body that cannot be completed is
+ * refused unless it only disables.
+ *
+ * `current.kind` selects the rule: the gateway keeps a schedule's kind on every update, so a
+ * cached kind cannot be stale. Weekly schedules are exempt. Outside a hold the patch goes
+ * out unchanged, as a partial update.
+ *
+ * Known effect: a stale `current` can write an older start or an older enabled state over a
+ * newer one during a hold; that can only make the schedule later or disabled relative to what
+ * was checked, and the operator sees it after the next refresh.
+ */
+export function scheduleUpdateWhileHeld<T extends ScheduleUpdateFields>(
+  deviceEui: string,
+  patch: T,
+  current?: { kind?: string; fireAt?: string | null; enabled?: boolean },
+): T {
+  if (!isValveOpenHeld(deviceEui)) return patch;
+  const kind = current?.kind ?? patch.kind
+    ?? (patch.fireAt !== undefined ? 'ONCE' : (patch.weekdaysMask !== undefined || patch.startTime !== undefined ? 'WEEKLY' : undefined));
+  if (kind === 'WEEKLY') return patch;
+  const enabled = patch.enabled !== undefined ? patch.enabled : current?.enabled;
+  const fireAt = patch.fireAt !== undefined ? patch.fireAt : current?.fireAt;
+  if (enabled === false) {
+    // Disabling cannot open; the start goes along when it is known.
+    return (fireAt !== undefined && fireAt !== null ? { ...patch, enabled: false, fireAt } : { ...patch, enabled: false });
   }
+  if (kind !== 'ONCE' || enabled === undefined || fireAt === undefined || fireAt === null) {
+    // Kind, enabled state or start cannot be completed: the write could enable a due start.
+    throw new ValveOpenHeldError(keyOf(deviceEui));
+  }
+  assertScheduleStartNotHeld(deviceEui, { kind: 'ONCE', fireAt, enabled: true });
+  return { ...patch, enabled: true, fireAt };
 }
 
 /** Numbers a valve-list request at its start. */

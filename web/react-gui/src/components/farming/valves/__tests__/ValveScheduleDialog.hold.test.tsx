@@ -148,7 +148,8 @@ describe('ValveScheduleDialog and the open hold', () => {
     fireEvent.change(screen.getByLabelText('Time'), { target: { value: time } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
     await waitFor(() => expect(updateScheduleMock).toHaveBeenCalledTimes(1));
-    expect(updateScheduleMock.mock.calls[0][2]).toEqual({ enabled: true });
+    // During the hold the enable carries the start it was checked against.
+    expect(updateScheduleMock.mock.calls[0][2]).toEqual({ enabled: true, fireAt: later });
     await waitFor(() => expect(schedulesMock).toHaveBeenCalledTimes(2));
     return { failRefresh: (error: Error) => failRefresh(error) };
   }
@@ -172,5 +173,58 @@ describe('ValveScheduleDialog and the open hold', () => {
     expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Update' }));
     expect(updateScheduleMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Review r4, S7 (reverse order): the due edit goes first and is saved with enabled false;
+  // its list refresh is pending or fails, so the list still shows the row disabled with its
+  // old, later start; the row is then enabled from that stale list. The enabling write must
+  // carry the start it was checked against, so the gateway cannot end enabled and due.
+  async function dueEditThenStaleList() {
+    const later = new Date(Date.now() + 10 * 60_000).toISOString();
+    schedulesMock.mockReset();
+    schedulesMock.mockResolvedValueOnce({
+      ...empty,
+      schedules: [{ scheduleUuid: 'once-1', deviceEui: EUI, kind: 'ONCE', label: 'Later soak', weekdaysMask: null, startTime: null,
+        fireAt: later, durationMinutes: 5, timezone: TZ, enabled: false, onceState: 'PENDING' }],
+    });
+    let failRefresh: (error: Error) => void = () => undefined;
+    schedulesMock.mockImplementationOnce(() => new Promise((_resolve, reject) => { failRefresh = reject; }));
+    holdValveOpen(EUI);
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+        <ValveScheduleDialog valve={valve} open onClose={vi.fn()} onChanged={vi.fn()} />
+      </SWRConfig>,
+    );
+    await screen.findByText('Later soak');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const { date, time } = localFields(0);
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: date } });
+    fireEvent.change(screen.getByLabelText('Time'), { target: { value: time } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(updateScheduleMock).toHaveBeenCalledTimes(1));
+    // The due edit of a row the form believes disabled keeps it disabled in its own write.
+    expect(updateScheduleMock.mock.calls[0][2]).toMatchObject({ enabled: false, fireAt: expect.any(String) });
+    await waitFor(() => expect(schedulesMock).toHaveBeenCalledTimes(2));
+    return { later, failRefresh: (error: Error) => failRefresh(error) };
+  }
+
+  it('reverse order, refresh pending: the row cannot be enabled from the stale list', async () => {
+    await dueEditThenStaleList();
+    const enabled = screen.getByRole('checkbox', { name: 'Enabled' });
+    expect(enabled).toBeDisabled();
+    fireEvent.click(enabled);
+    expect(updateScheduleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reverse order, refresh failed: enabling from the stale list writes the start it was checked against', async () => {
+    const { later, failRefresh } = await dueEditThenStaleList();
+    await act(async () => { failRefresh(new Error('offline')); });
+    const enabled = screen.getByRole('checkbox', { name: 'Enabled' });
+    await waitFor(() => expect(enabled).toBeEnabled());
+    fireEvent.click(enabled);
+    await waitFor(() => expect(updateScheduleMock).toHaveBeenCalledTimes(2));
+    // The gateway ends with exactly this pair: enabled, starting at the later time that was
+    // checked, not the due start the edit wrote.
+    expect(updateScheduleMock.mock.calls[1][2]).toEqual({ enabled: true, fireAt: later });
   });
 });

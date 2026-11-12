@@ -46,7 +46,7 @@ import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import { historySourceChoicesFromSeries } from '../history/sourceSelection';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
 import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
-import { assertScheduleStartNotHeld, assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout } from './valveCommandHold';
+import { assertScheduleStartNotHeld, assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout, scheduleUpdateWhileHeld } from './valveCommandHold';
 import type {
   Device,
   LoginRequest,
@@ -2046,24 +2046,18 @@ export const valvesAPI = {
       return rethrowValveError(error);
     }
   },
-  // `current` is the stored schedule, used only for the hold check: re-enabling a one-time
-  // schedule, or moving its start, can make it start while the open hold lasts. It is not sent.
-  // Only the write's own `enabled: false` exempts it: a cached "disabled" may be stale (the row
-  // can have been enabled meanwhile), and a patch without `enabled` leaves the gateway's value.
+  // `current` is the row as the GUI last read it. While the valve's open hold is active it only
+  // completes the body of a one-time update (both `enabled` and `fireAt`), and the body alone
+  // decides (services/valveCommandHold.ts scheduleUpdateWhileHeld). It is never sent itself.
   updateSchedule: async (
     eui: string,
     uuid: string,
     patch: Partial<ValveScheduleInput>,
     current?: Pick<ValveSchedule, 'kind' | 'fireAt' | 'enabled'>,
   ): Promise<{ pushesQueued: number }> => {
-    if (patch.enabled !== false) {
-      assertScheduleStartNotHeld(eui, {
-        kind: patch.kind ?? current?.kind ?? (patch.fireAt !== undefined ? 'ONCE' : undefined),
-        fireAt: patch.fireAt ?? current?.fireAt,
-      });
-    }
+    const body = scheduleUpdateWhileHeld(eui, patch, current);
     try {
-      const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(patch));
+      const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(body));
       return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
     } catch (error) {
       return rethrowValveError(error);

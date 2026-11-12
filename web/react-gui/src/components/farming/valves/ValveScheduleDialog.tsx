@@ -3,7 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveScheduleInput, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
-import { assertScheduleStartNotHeld, isScheduleStartHeld, isValveOpenHeldError } from '../../../services/valveCommandHold';
+import { assertScheduleStartNotHeld, isValveOpenHeldError, scheduleUpdateWhileHeld } from '../../../services/valveCommandHold';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
@@ -358,15 +358,15 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       const current = editingOnceUuid ? data?.schedules.find((schedule) => schedule.scheduleUuid === editingOnceUuid) : undefined;
       // A one-time irrigation that would start while an earlier open of this valve has no
       // answer yet is a second open by another route: refused here and in the API layer.
-      // An edit of a row the form believes disabled is exempt only if its own write keeps it
-      // disabled: the row may have been enabled meanwhile, and a patch without `enabled` would
-      // leave it so. If it was, this write disables it again, the safe direction.
-      if (current?.enabled === false && isScheduleStartHeld(valve.deviceEui, fireAt)) onceFields.enabled = false;
-      assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: onceFields.enabled ?? true });
+      // While the hold lasts, an edit sends both `enabled` and `fireAt` and the body alone
+      // decides (services/valveCommandHold.ts scheduleUpdateWhileHeld); the API applies the
+      // same rule again. Outside a hold the edit stays a partial update.
       if (editingOnceUuid) {
-        if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields, current);
-        else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
+        const body = scheduleUpdateWhileHeld(valve.deviceEui, onceFields, current);
+        if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body, current);
+        else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body);
       } else {
+        assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: true });
         await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
       }
       setOnce(EMPTY_ONCE);
@@ -422,15 +422,20 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   };
 
   const toggleEnabled = async (schedule: ValveSchedule) => {
+    // A form save and its refresh settle first (convenience; the body rule below is the safety).
+    if (rowBusyUuid !== null || savingOnce || savingWeekly) return;
     setRowBusyUuid(schedule.scheduleUuid);
     setRowError(null);
     try {
-      // Re-enabling a one-time schedule that is due while the open hold lasts is refused;
-      // disabling never is.
-      const reenablingOnce = !schedule.enabled && schedule.kind === 'ONCE';
-      if (reenablingOnce) assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt: schedule.fireAt, enabled: true });
-      if (reenablingOnce) await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: true }, schedule);
-      else await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      // While the hold lasts, a one-time toggle sends the start it knows with the new enabled
+      // state, so the gateway ends with exactly what was checked: enabling a due start is
+      // refused, disabling never is. Weekly toggles are exempt and stay partial.
+      if (schedule.kind === 'ONCE') {
+        const body = scheduleUpdateWhileHeld(valve.deviceEui, { enabled: !schedule.enabled }, schedule);
+        await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, body, schedule);
+      } else {
+        await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      }
       await afterMutation();
     } catch (err) {
       setRowError(isValveOpenHeldError(err)
@@ -622,7 +627,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                                 <input
                                   type="checkbox"
                                   checked={schedule.enabled}
-                                  disabled={rowBusyUuid === schedule.scheduleUuid}
+                                  disabled={rowBusyUuid === schedule.scheduleUuid || savingOnce || savingWeekly}
                                   onChange={() => void toggleEnabled(schedule)}
                                   className="h-4 w-4"
                                 />
