@@ -15,10 +15,27 @@ case failed. Only after that run were the 17 entries removed and the six
 signatures narrowed: #632 now exposes `503 valve_busy` instead of losing the
 HTTP reply. The remaining database/radio failures were already present.
 
+## F-13/F-14 wiring follow-up
+
+Rebased onto main `b0a5e3cfa2b905256a0e6e5491230e7d663d420c`, #649 makes
+both no-token POSTs answer 401 and removes the unconfigured SQLite node. The
+earlier unchanged-list run on `23bfda61` rejected exactly those three
+now-passing allowances. Main #648 removed its six valve cases. After rebasing
+and removing only the three F-13/F-14 entries,
+ordinary mode reports 214 passed, zero unexpected failures and two known
+failures. The historical baseline filename is retained; its header identifies
+the new base and candidate flow checksum.
+
+The new scoped catches add deliveries for `al-link-validate` and
+`sync-force-build`, beside the existing recording catches. Their respective
+messages remain `Error: Unauthorized` and `Error: Missing bearer token`.
+The matcher checks case, source, type and message, so the 33 expected-refusal
+entries need no change. No other refusal is permitted.
+
 ## Removed cases
 
 Each case below passed its original HTTP, stored-state and radio assertions
-in the unchanged-list run. The merged fix is shown per case. The scheduler's
+in the unchanged-list run. The fix is shown per case. The scheduler's
 crypto/save failure remains fixed by #631; its new contention precondition
 now exposes the separate F-7 persistence defect.
 
@@ -41,28 +58,28 @@ now exposes the separate F-7 persistence defect.
 | `no-token:DELETE /api/devices/:deveui` | [#631](https://github.com/Open-Smart-Irrigation/osi-os/pull/631) |
 | `no-token:PUT /api/irrigation-zones/:id/devices/:deveui` | [#631](https://github.com/Open-Smart-Irrigation/osi-os/pull/631) |
 | `no-token:DELETE /api/irrigation-zones/:id/devices/:deveui` | [#631](https://github.com/Open-Smart-Irrigation/osi-os/pull/631) |
+| `no-token:POST /api/account-link` | [#649](https://github.com/Open-Smart-Irrigation/osi-os/pull/649) |
+| `no-token:POST /api/sync/force` | [#649](https://github.com/Open-Smart-Irrigation/osi-os/pull/649) |
+| `startup-node-errors` | [#649](https://github.com/Open-Smart-Irrigation/osi-os/pull/649) |
 
 #631 fixed seven cases; #632 fixed ten. #634 grants a size-ratchet exception
 and did not itself fix a smoke case.
 
-## Remaining cases
+## Earlier remaining cases before #648
 
 Every remaining case has exactly one finding ID from
 [tracking issue #637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637).
-The eleven cases cover seven findings. The two added cases map to existing
+The eight remaining cases cover five findings. The two added cases map to existing
 F-7 and NEW-1, so no new finding ID was needed. The classifier also rejects entries that combine finding IDs.
 
 | Case | Finding | Observed failure |
 |---|---|---|
-| `startup-node-errors` | F-14 | Startup SQLite node has no configured database. |
 | `open-no-report-open-later` | F-1 | Later ordinary open is refused; its frame and commanded record are absent. |
 | `no-clock-open-report-close-open` | F-2 | CLOSED stays OPEN; later open is refused; untrusted reporting leaves the command pending and a separate run. |
 | `no-clock-open-no-report-open-later` | F-1 | Later ordinary open is refused; its frame and commanded record are absent. |
 | `open-after:close-duration` | F-4 | Open after the service command is refused; no new open frame or commanded record. |
 | `open-after:timed-close` | F-4 | Open after the service command is refused; no new open frame or commanded record. |
 | `open-after:flushing` | F-4 | Open after the service command is refused; no new open frame or commanded record. |
-| `no-token:POST /api/account-link` | F-13 | Unauthenticated request gives no HTTP answer. |
-| `no-token:POST /api/sync/force` | F-13 | Unauthenticated request gives no HTTP answer. |
 | `scheduler-irrigates` | F-7 | Under one held native SQLite writer lock, both legacy SQLite nodes report exactly `Error: SQLITE_BUSY: database is locked`; the irrigation event and last-triggered timestamp are absent although the exact open frame arrives. |
 | `dendro-weather-transport` | NEW-1 | The enabled daily inject reaches a populated dendro zone. Both weather warnings say `require is not defined`; stored rain is NULL and VPD source is unavailable. |
 
@@ -138,13 +155,10 @@ direction, the cancel, reboots and clock corrections. They are covered by
 `scripts/test-valve-v081-equivalence.js` and the module tests of
 `osi-valve-control`, outside the real runtime.
 
-Remaining after the fix, five cases over four findings:
+Remaining after #648 and this F-13/F-14 fix, two cases over two findings:
 
 | Case | Finding |
 |---|---|
-| `startup-node-errors` | F-14 |
-| `no-token:POST /api/account-link` | F-13 |
-| `no-token:POST /api/sync/force` | F-13 |
 | `scheduler-irrigates` | F-7 |
 | `dendro-weather-transport` | NEW-1 |
 
@@ -153,9 +167,8 @@ unexpected failures, 5 known failing cases, exit 1.
 
 ## Evidence
 
-`baseline-88f6e84bb.txt` replaces the old payload-baseline output. The base
-name follows the main commit whose shipped payload runs, rather than this
-PR's test-only head. Evidence paths in that file use `<scratch>`; only the
+`baseline-88f6e84bb.txt` replaces the old payload-baseline output. The historical filename is retained; its header names the current main base
+and candidate payload checksum. Evidence paths in that file use `<scratch>`; only the
 local scratch-directory spelling was normalized. The JSON result and logs
 retain the original absolute path outside the repository.
 
@@ -172,7 +185,7 @@ handlers, elapsed schedule behavior or every branch of those handlers.
 
 All catch-node deliveries retain their source id/type and exact message.
 The 33 expected refusal tuples apply only to named unauthenticated scenarios
-and source nodes. F-13 still fails its HTTP answer assertion. The two exact
+and source nodes. F-13 now passes its HTTP answer assertion, including both scoped catch deliveries. The two exact
 scheduler BUSY errors belong to the F-7 case; any other BUSY, source, message,
 or scenario fails the final catch check. No product write is retried.
 

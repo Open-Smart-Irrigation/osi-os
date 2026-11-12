@@ -1,40 +1,5 @@
 [
   {
-    "id": "startup-node-errors",
-    "finding": "F-14",
-    "failures": [
-      {
-        "code": "node-errors",
-        "actual": [
-          {
-            "id": "dendro-readings-sqlite",
-            "msg": "Sqlite database not configured"
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "no-token:POST /api/account-link",
-    "finding": "F-13",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
-    "id": "no-token:POST /api/sync/force",
-    "finding": "F-13",
-    "failures": [
-      {
-        "code": "http",
-        "symptom": "http-timeout"
-      }
-    ]
-  },
-  {
     "id": "scheduler-irrigates",
     "finding": "F-7",
     "failures": [

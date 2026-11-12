@@ -154,6 +154,14 @@ see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
+On main base `b0a5e3cf` with #649, both no-token POSTs answer 401 and
+startup has no node errors. Remove only those three allowances. The new scoped
+catches preserve the exact case/source/type/message tuples, so all 33 entries
+in `expected-refusals.json` remain unchanged. The current run reports 214
+passed, zero unexpected failures and two known failures (F-7 and NEW-1).
+The refreshed `baseline-88f6e84bb.txt` retains its historical filename; its
+header identifies the current base and candidate flow checksum.
+
 On payload baseline `88f6e84bb`, strict mode reports 200 passed, 0 unexpected
 failures and 11 known failing cases, then exits 1. The original list had 26
 entries. The untouched-list run proved 17 cases now pass before those entries
@@ -174,12 +182,6 @@ and 5 known failing cases, then exits 1; that output is
 `after-valve-fix-648.txt`, and the mapping document says what each changed
 case asserts. Each line below names one remaining case; the JSON file carries
 its exact signatures.
-
-- F-14: `startup-node-errors`.
-
-- F-13: `no-token:POST /api/account-link`.
-
-- F-13: `no-token:POST /api/sync/force`.
 
 - F-7: `scheduler-irrigates`.
 
