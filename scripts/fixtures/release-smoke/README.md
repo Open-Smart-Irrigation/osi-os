@@ -234,13 +234,13 @@ see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
-On main base `49e93560` with #649, both no-token POSTs answer 401 and
-startup has no node errors. Those three allowances are removed from both
-runtime lists. The scoped catches preserve the exact case/source/type/message
-tuples, so all 33 entries in `expected-refusals.json` remain unchanged.
-The image runtime (Node-RED 3.1.15) and stock runtime (Node-RED 4.0.9), both
-under Node 20.18.3, each report 218 passed, 0 unexpected failures and 1 known
-failure (NEW-1).
+No case is known to fail on main base `d464fb30` with #643, on either the
+image or stock runtime. `dendro-weather-transport` (NEW-1) passes with
+5.4 mm rain, provider VPD and no weather warning. Both known-failure lists
+are empty and byte-identical. F-13/F-14 were removed by #649 and F-7 by #656;
+#643 removes only NEW-1. Provider observations remain separate from
+irrigation control, which is off by default.
+
 The archived `baseline-88f6e84bb.txt` retains its historical filename; its
 header records the earlier `b0a5e3cf` base and candidate flow checksum.
 
@@ -260,10 +260,8 @@ F-4 cases from the list, changed their assertions and added five cases that
 retry at once. With it, strict mode reported 211 passed, 0 unexpected failures
 and 5 known failing cases, then exited 1; that output is
 `after-valve-fix-648.txt`, and the mapping document says what each changed
-case asserts. F-7 left both runtime lists with #656. The only remaining case
-is below; both JSON files carry its exact signatures.
-
-- NEW-1: `dendro-weather-transport`.
+case asserts. F-7 left both runtime lists with #656; #643 removes the last
+entry, NEW-1. Both current lists are empty.
 
 ## What a green run does not show
 

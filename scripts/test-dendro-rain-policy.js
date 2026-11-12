@@ -60,6 +60,7 @@ function stubHttp(answer, calls) {
         process.nextTick(() => {
           const weather = answer(String(url));
           const res = new EventEmitter();
+          res.destroy = () => res.emit('close');
           res.statusCode = weather.status;
           onResponse(res);
           if (weather.body != null) res.emit('data', JSON.stringify(weather.body));

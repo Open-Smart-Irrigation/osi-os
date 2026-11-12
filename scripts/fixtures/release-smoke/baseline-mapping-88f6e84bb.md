@@ -1,5 +1,10 @@
 # Smoke baseline after the sandbox and HTTP-reply fixes
 
+## Current update: NEW-1 on both runtimes
+
+On main base `d464fb30` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643), both runtime lists are empty. The weather case collects 5.4 mm rain and provider VPD without a warning; irrigation control stays off by default. Main already contains #656 and #649, so neither F-7 nor F-13/F-14 returns to the lists. The sections below retain the historical baseline stages and their observations.
+
+
 The first baseline update reduced the list from 26 to 9 cases after rebasing onto
 `88f6e84bb251a03034dc4a6e8fa8e3a10992a2e4` (#631, #632 and #634 included).
 The council follow-up expands it from 9 to 11: one scheduler case now has
@@ -167,7 +172,7 @@ unexpected failures, 5 known failing cases, exit 1.
 
 ## Evidence
 
-`baseline-88f6e84bb.txt` replaces the old payload-baseline output. The historical filename is retained; its header names the current main base
+`baseline-88f6e84bb.txt` replaces the old payload-baseline output. The historical filename is retained; its header names the earlier snapshot base
 and candidate payload checksum. Evidence paths in that file use `<scratch>`; only the
 local scratch-directory spelling was normalized. The JSON result and logs
 retain the original absolute path outside the repository.

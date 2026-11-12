@@ -1,100 +1,13 @@
-# Dendrometer weather transport repair
+# Weather transport completion repair
 
-Restore default Open-Meteo and configured OpenAgri weather requests in `dendro-compute-fn` by moving its HTTP transport into the existing `osi-dendro-analytics` module. The node already obtains that module through `osiLib.require('dendro-analytics')`.
+Repair S1 from the review of #643 at d163172c. The restored weather values reach scheduled and conditional valve decisions, so this is an actuation risk-class change. The steward has instructed implementation first, then one council with a gate runner and independent lead sign-off on the pushed head. This child starts no delegates and claims no review approval.
 
-This implements the CTO's W1 ruling and issue #629. Base: `fix/function-sandbox-bindings` at `9c0495a71`; #631 is still open, so this is a separate stacked PR. No changes to #631 beyond its ruled description and risk corrections belong here.
+Keep the current provider and sensor fallback calculations. In the existing registered dendro-analytics module, settle requestJson once on response error, aborted, premature close, request error, socket inactivity, HTTP/JSON failure, and success. Use a 15-second wall-clock deadline beginning before request creation; retain the existing 10-second socket inactivity timeout. Clear the timer on completion, disable the socket timeout, and destroy request/response on failure. Slow responses can progress for more than 10 seconds while finishing within 15 seconds. The bound is per provider request; credential lookup and a configured-provider fallback remain separate requests.
 
-## Risk and review
+Add real loopback HTTP regressions to the existing rolling-rain suite. Run the shipped sandbox function and real per-profile helper with two zones and real sensor rows. Check disconnect after partial JSON, a connection with no response, slow progress completing after 11 seconds, and endless progress exceeding the overall deadline. Every failed-weather zone must warn and store sensor-only daily analytics and recommendation; the later zone must also complete. Slow successful weather must remain available and must not warn for that zone. Run these first at d163172c, then after the fix. The test watchdog is separate from the production deadline and exists only to make the original hang fail the test.
 
-Risk classes: `flows` and `field-history`. This changes a non-trivial function node and restores weather inputs written into daily analytics. It does not change actuator commands, schema, auth, provider selection or rain/VPD calculations. Independent review and any required council/lead sign-off remain with the steward before merge. The campaign prohibits implementation subagents; this file claims no independent approval.
+Fetch and rebase the task branch onto origin/main after the failing-first run. Re-read readiness and AGENTS.md. Mirror the helper byte-for-byte. No additional function-node or weather-policy changes belong to S1. S2 physical-range policy and S3 unusable-200 warnings remain recorded as waits unless they fit without another policy choice or function-node growth.
 
-## Failing evidence
+Rebase onto current main, b0a5e3cf, preserving its valve-reply node. Inspect the flow arrays rather than resolving any serialized JSON conflict by hand. The unchanged-list smoke run on 5040db091 proved that dendro-weather-transport now passes; remove only that entry and refresh the README, mapping and baseline evidence. The rebased ordinary smoke gate must report 212 passed, zero unexpected failures and four known failures.
 
-`node --test --test-name-pattern='sandbox transport' scripts/test-dendro-rolling-7d-rain.js` fails four tests, default HTTPS Open-Meteo and configured HTTP OpenAgri in each profile, with `require is not defined`. The tested node is byte-identical to `origin/main` at `1bdd49d5`. Both existing weather harnesses now use a VM without `require` and stub the HTTP/HTTPS request functions; they open only an in-memory database.
-
-## Implementation
-
-In both maintained `flows.json` profiles, replace the complete `requestJson` function below with `const requestJson = DA.requestJson;`. Append that function, unchanged, to `osi-dendro-analytics/index.js` before its exports and add `requestJson` to the exports object. Mirror the module file byte-for-byte to bcm2709. This uses an existing registered module and deployed filename, so it needs no registry, deployment-script or runtime dependency change.
-
-```js
-function requestJson(method,urlString,options){
-  const opts=options||{};
-  const headers=Object.assign({},opts.headers||{});
-  const body=opts.body!=null?String(opts.body):null;
-  return new Promise((res,rej)=>{
-    const lib=urlString.startsWith('https:')?require('https'):require('http');
-    const req=lib.request(urlString,{method,headers},r=>{
-      let d='';
-      r.on('data',c=>d+=c);
-      r.on('end',()=>{
-        const status=Number(r.statusCode||0);
-        if(status<200||status>=300){
-          return rej(new Error('HTTP '+status+(d?': '+String(d).slice(0,160):'')));
-        }
-        if(!d)return res(null);
-        try{res(JSON.parse(d));}catch(e){rej(e);}
-      });
-    });
-    req.on('error',rej);
-    req.setTimeout(10000,()=>{req.destroy(new Error('timeout'));});
-    if(body!=null)req.write(body);
-    req.end();
-  });
-}
-
-```
-
-In the same node, replace its two `catch(_){}` blocks in order with:
-
-```js
-catch(error){node.warn('Dendro baseline VPD failed: '+String(error&&error.message?error.message:error));}
-catch(error){node.warn('Dendro SD-VPD comparison failed: '+String(error&&error.message?error.message:error));}
-```
-
-Replace the error-cleanup `catch(e){}` with:
-
-```js
-catch(error){node.warn('Dendro error cleanup failed: '+String(error&&error.message?error.message:error));}
-```
-
-Make no other change to the node. Use a scratch Node editor that asserts both profiles roundtrip byte-identically and agree before mutation, asserts the exact replacements and absence of remaining empty catches, writes both profiles, then checks the roundtrip again. The extracted transport removes more code than the catch warnings add; the size gate must pass without an exception.
-
-The silent-catch verifier requires its baseline to equal the live count even
-when the count shrinks. Ratchet both maintained counts in
-`scripts/fixtures/silent-catch-baseline.json` from 77 to 74, append the reason
-to its existing provenance, and update the count assertion in
-`scripts/verify-live-gateway-identity.js`. Preserve the prior provenance and
-all gateway-identity checks. This is verifier metadata, not a gateway change.
-
-Remove only the `dendro-compute-fn` entry from `scripts/flows-sandbox-exceptions.json` and remove its corresponding documented exception. Leave the other three reviewed exceptions intact. Update the documented exception count to three.
-
-The existing `test-dendro-rolling-7d-rain.js` provider suite includes the new sandbox regression tests. Update `test-dendro-rain-policy.js` to stub the helper's actual builtin requests as well, retaining every policy assertion. Both files are already run in hosted checks; no workflow change is needed.
-
-## Verification and delivery
-
-Run one suite at a time:
-
-```sh
-node --test --test-name-pattern='sandbox transport' scripts/test-dendro-rolling-7d-rain.js
-node --test scripts/test-dendro-rolling-7d-rain.js
-node --test scripts/test-dendro-rain-policy.js
-node --test scripts/verify-flows-sandbox.test.js
-node scripts/verify-flows-sandbox.js
-node --test scripts/test-dendro-contract.js
-node scripts/capture-dendro-analytics-vectors.js --verify
-node scripts/verify-flows-size-ratchet.js
-node scripts/verify-no-new-silent-catch.js
-node scripts/test-flows-wiring.js
-node scripts/verify-flows-fn-parse.js
-node scripts/verify-no-stray-ddl.js
-node scripts/verify-helper-registration.js
-node scripts/verify-module-file-deploy-coverage.js
-node scripts/verify-profile-parity.js
-node scripts/verify-doc-hygiene.js
-node scripts/verify-test-inventory.js
-node scripts/verify-sync-flow.js
-```
-
-Expect exit 0 for each, the four sandbox transport tests passing, no dendrometer sandbox exception printed, lower embedded JavaScript size, and `All parity checks passed.` from the full flow gate. Golden analytics outputs must remain unchanged. Run prose and diff checks before committing.
-
-Commit the transport repair, tests, exception removal and this plan in one `fix:` commit. Open a separate stacked PR against `fix/function-sandbox-bindings`, naming #631 as its dependency. The operator gets weather rainfall in daily dendrometer analytics and weather VPD when no local humidity sensor supplies it. Keep both PRs open for the steward; do not merge or deploy.
+The steward's latest ruling replaces the long local workflow lists with targeted local tests, smoke policy/controls/runtime, size against origin/main, parity and the sandbox check. Run weather regressions in both profiles, the rain policy, contract/golden vectors and the changed valve-reply integration test. Include wiring, parser, silent-catch and prose checks. Run the list serially through the revised light-run.sh lane with a declared bound of 2 GiB, worker concurrency at most two, and a private TMPDIR under w1/tmp removed after each command. The hosted workflows on the pushed head are the evidence for their complete command lists. G1/B3 remain hosted-only because root is unavailable by owner instruction. Use the existing sqlite3 CLI instead of Ubuntu package setup. Compare cross-repo contracts against a named local snapshot of server main and record its SHA. Record exact commands, exits, head and root-only exclusions. Then force-with-lease push only this branch, link the PR immediately, update its body with the risk class and current evidence, and hand review to the steward without merging.
