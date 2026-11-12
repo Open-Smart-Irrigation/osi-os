@@ -159,6 +159,26 @@ export function assertValveOpenNotHeld(deviceEui: string): void {
   if (isValveOpenHeld(deviceEui)) throw new ValveOpenHeldError(keyOf(deviceEui));
 }
 
+/**
+ * A one-time schedule that starts while the hold lasts (due now, or before the hold can end)
+ * is an open by another route and is refused like one. A one-time schedule that starts after
+ * the hold can end, every weekly schedule, and disabling, deleting or re-sending a schedule
+ * are not held: planning ahead is not a second press of Open.
+ */
+export function assertScheduleStartNotHeld(
+  deviceEui: string,
+  schedule: { kind?: string; fireAt?: string | null; enabled?: boolean },
+): void {
+  if (schedule.kind !== 'ONCE' || schedule.enabled === false) return;
+  const hold = holds.get(keyOf(deviceEui));
+  if (!hold) return;
+  const remaining = hold.deadline - monotonicNow();
+  if (remaining <= 0) return;
+  const startsAt = schedule.fireAt ? Date.parse(schedule.fireAt) : NaN;
+  // An unreadable start time is treated as due now: the gateway decides when it fires.
+  if (Number.isNaN(startsAt) || startsAt <= Date.now() + remaining) throw new ValveOpenHeldError(keyOf(deviceEui));
+}
+
 /** Numbers a valve-list request at its start. */
 export function beginValveReading(): number {
   lastRequest += 1;

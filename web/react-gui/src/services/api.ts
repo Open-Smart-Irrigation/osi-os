@@ -46,7 +46,7 @@ import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import { historySourceChoicesFromSeries } from '../history/sourceSelection';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
 import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
-import { assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout } from './valveCommandHold';
+import { assertScheduleStartNotHeld, assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout } from './valveCommandHold';
 import type {
   Device,
   LoginRequest,
@@ -2035,7 +2035,10 @@ export const valvesAPI = {
     const r = await api.get(`/api/valves/${eui}/schedules`);
     return normaliseValveSchedules(r.data);
   },
+  // A one-time schedule that would start while the valve's open hold lasts is refused here,
+  // before anything is sent (services/valveCommandHold.ts assertScheduleStartNotHeld).
   createSchedule: async (eui: string, input: ValveScheduleInput): Promise<{ schedule: ValveSchedule; pushesQueued: number }> => {
+    assertScheduleStartNotHeld(eui, input);
     try {
       const r = await api.post(`/api/valves/${eui}/schedules`, toScheduleBody(input));
       return { schedule: normaliseValveSchedule(r.data.schedule), pushesQueued: Number(r.data.pushes_queued ?? 0) };
@@ -2043,7 +2046,21 @@ export const valvesAPI = {
       return rethrowValveError(error);
     }
   },
-  updateSchedule: async (eui: string, uuid: string, patch: Partial<ValveScheduleInput>): Promise<{ pushesQueued: number }> => {
+  // `current` is the stored schedule, used only for the hold check: re-enabling a one-time
+  // schedule, or moving its start, can make it start while the open hold lasts. It is not sent.
+  updateSchedule: async (
+    eui: string,
+    uuid: string,
+    patch: Partial<ValveScheduleInput>,
+    current?: Pick<ValveSchedule, 'kind' | 'fireAt' | 'enabled'>,
+  ): Promise<{ pushesQueued: number }> => {
+    if (patch.enabled !== false) {
+      assertScheduleStartNotHeld(eui, {
+        kind: patch.kind ?? current?.kind ?? (patch.fireAt !== undefined ? 'ONCE' : undefined),
+        fireAt: patch.fireAt ?? current?.fireAt,
+        enabled: patch.enabled ?? current?.enabled,
+      });
+    }
     try {
       const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(patch));
       return { pushesQueued: Number(r.data.pushes_queued ?? 0) };

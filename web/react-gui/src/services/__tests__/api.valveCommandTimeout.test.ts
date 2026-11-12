@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import api, { VALVE_COMMAND_TIMEOUT_MS, devicesAPI, stregaAPI } from '../api';
-import { ValveOpenHeldError, holdValveOpen, isValveOpenHeld, resetValveCommandHoldsForTest } from '../valveCommandHold';
+import api, { VALVE_COMMAND_TIMEOUT_MS, devicesAPI, stregaAPI, valvesAPI } from '../api';
+import { ValveOpenHeldError, beginValveReading, completeValveReading, holdValveOpen, isValveOpenHeld, resetValveCommandHoldsForTest } from '../valveCommandHold';
 
 // Valve commands are answered only after the radio transport decides, so they wait 30 s;
 // every other request keeps the instance default.
@@ -89,5 +89,61 @@ describe('dispatch guard for commands that open', () => {
     vi.spyOn(api, 'post').mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 409'), { code: 'ERR_BAD_REQUEST', response: { status: 409 } }));
     await expect(devicesAPI.controlValve(eui, { action: 'OPEN_FOR_DURATION', duration_seconds: 300 })).rejects.toBeTruthy();
     expect(isValveOpenHeld(eui)).toBe(false);
+  });
+});
+
+// A one-time schedule that starts while the hold lasts is an open by another route (S7).
+// Planning ahead, weekly schedules, and disabling, deleting or re-sending are never held.
+describe('one-time schedules and the open hold', () => {
+  const eui = '0016C001F1000001';
+  const inSeconds = (seconds: number) => new Date(Date.now() + seconds * 1000).toISOString();
+  const okSchedule = { data: { schedule: { schedule_uuid: 's1', kind: 'ONCE' }, pushes_queued: 0 } };
+  afterEach(() => { vi.restoreAllMocks(); resetValveCommandHoldsForTest(); });
+
+  it('refuses a due one-time schedule while held, without sending', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okSchedule);
+    holdValveOpen(eui);
+    await expect(valvesAPI.createSchedule(eui, { kind: 'ONCE', fireAt: inSeconds(0), durationMinutes: 5, enabled: true }))
+      .rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(valvesAPI.createSchedule(eui, { kind: 'ONCE', fireAt: inSeconds(-120), durationMinutes: 5, enabled: true }))
+      .rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(valvesAPI.createSchedule(eui, { kind: 'ONCE', fireAt: inSeconds(50), durationMinutes: 5, enabled: true }))
+      .rejects.toBeInstanceOf(ValveOpenHeldError);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('accepts a one-time schedule that starts after the hold can end, and a weekly schedule', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okSchedule);
+    holdValveOpen(eui);
+    await valvesAPI.createSchedule(eui, { kind: 'ONCE', fireAt: inSeconds(120), durationMinutes: 5, enabled: true });
+    await valvesAPI.createSchedule(eui, { kind: 'WEEKLY', weekdaysMask: 127, startTime: '06:00', durationMinutes: 5, enabled: true });
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts the same due one-time schedule once the hold has ended', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okSchedule);
+    holdValveOpen(eui);
+    completeValveReading(beginValveReading());
+    await valvesAPI.createSchedule(eui, { kind: 'ONCE', fireAt: inSeconds(0), durationMinutes: 5, enabled: true });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses re-enabling or moving a one-time schedule into the hold; disabling, deleting and re-sending go through', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: { pushes_queued: 0 } });
+    const del = vi.spyOn(api, 'delete').mockResolvedValue({ data: { pushes_queued: 0 } });
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { pushes_queued: 0 } });
+    const due = { kind: 'ONCE' as const, fireAt: inSeconds(0), enabled: false };
+    holdValveOpen(eui);
+    await expect(valvesAPI.updateSchedule(eui, 's1', { enabled: true }, due)).rejects.toBeInstanceOf(ValveOpenHeldError);
+    await expect(valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(10), durationMinutes: 5 })).rejects.toBeInstanceOf(ValveOpenHeldError);
+    expect(put).not.toHaveBeenCalled();
+
+    await valvesAPI.updateSchedule(eui, 's1', { enabled: false }, { ...due, enabled: true });
+    await valvesAPI.updateSchedule(eui, 's1', { fireAt: inSeconds(300), durationMinutes: 5 });
+    await valvesAPI.deleteSchedule(eui, 's1');
+    await valvesAPI.resendPlan(eui);
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
+import { assertScheduleStartNotHeld, isValveOpenHeldError } from '../../../services/valveCommandHold';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
@@ -353,8 +354,13 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         fireAt,
         durationMinutes: onceDurationNum,
       };
+      const current = editingOnceUuid ? data?.schedules.find((schedule) => schedule.scheduleUuid === editingOnceUuid) : undefined;
+      // A one-time irrigation that would start while an earlier open of this valve has no
+      // answer yet is a second open by another route: refused here and in the API layer.
+      assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: current?.enabled ?? true });
       if (editingOnceUuid) {
-        await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
+        if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields, current);
+        else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
       } else {
         await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
       }
@@ -362,7 +368,9 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setEditingOnceUuid(null);
       await afterMutation();
     } catch (err) {
-      setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
+      setOnceError(isValveOpenHeldError(err)
+        ? t('commandNoAnswer.open')
+        : err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
       setSavingOnce(false);
     }
@@ -412,10 +420,17 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     setRowBusyUuid(schedule.scheduleUuid);
     setRowError(null);
     try {
-      await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      // Re-enabling a one-time schedule that is due while the open hold lasts is refused;
+      // disabling never is.
+      const reenablingOnce = !schedule.enabled && schedule.kind === 'ONCE';
+      if (reenablingOnce) assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt: schedule.fireAt, enabled: true });
+      if (reenablingOnce) await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: true }, schedule);
+      else await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
       await afterMutation();
     } catch (err) {
-      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
+      setRowError(isValveOpenHeldError(err)
+        ? t('commandNoAnswer.open')
+        : err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
     } finally {
       setRowBusyUuid(null);
     }
