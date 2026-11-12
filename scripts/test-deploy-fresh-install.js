@@ -148,11 +148,15 @@ fetch_required() {
 # Not schema: the Node-RED service and the payload symlink flip.
 restart_node_red() { echo "STUB restart_node_red"; return 0; }
 swap_call() { echo "STUB swap_call $*"; return 0; }
+mark_node_red_log() { echo "STUB mark_node_red_log"; }
 write_payload_compatibility() { echo "STUB write_payload_compatibility $*"; return 0; }
 apply_release_firmware_version() { echo "STUB apply_release_firmware_version $*"; return 0; }
 fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 0; }
 
 ${extractFunction('checkpoint_live_db')}
+${extractFunction('schema_compatibility_metadata')}
+${extractFunction('deploy_time')}
+${extractFunction('record_pending_switch')}
 ${extractFunction('seed_db_if_missing')}
 ${extractFunction('fetch_migration_runner')}
 ${extractFunction('stage_command_ledger_dependency')}

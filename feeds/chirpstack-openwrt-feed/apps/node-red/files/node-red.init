@@ -358,12 +358,41 @@ payload_switch_repair() {
     fi
 }
 
+# The active payload against the database, read-only, before Node-RED
+# starts (swap helper bootSchemaDecision). A deploy cut after its migration
+# and before its switch is completed forward to the payload that fits the
+# database; one cut part way through the migration is held, so the old code
+# never starts on a half-updated database and the deploy run again completes
+# it; any other mismatch is recorded "unverified" and Node-RED starts.
+OSI_DB_PATH="${OSI_DB_PATH:-/data/db/farming.db}"
+payload_schema_check() {
+    local helper="/srv/$PACKAGE_NAME/.payload-swap.js"
+    local schema report
+    [ -f "$helper" ] && [ -f "$OSI_DB_PATH" ] || return 0
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        logger -t node-red.init "WARN: sqlite3 is unavailable; the payload was not checked against the database"
+        return 0
+    fi
+    if ! schema="$(sqlite3 -readonly "$OSI_DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
+        logger -t node-red.init "WARN: could not read the database's schema ledger; the payload was not checked against it"
+        return 0
+    fi
+    if report="$(node -e '
+      const swap = require(process.argv[1]);
+      const line = swap.bootSchemaDecision(process.argv[2], process.argv[3], process.argv[4], process.argv[5]);
+      if (line) process.stdout.write(line);
+    ' "$helper" "/srv/$PACKAGE_NAME" "/usr/lib/node-red/gui" "${schema%%|*}" "${schema#*|}" 2>&1)"; then
+        [ -z "$report" ] || logger -t node-red.init "$report"
+    else
+        logger -t node-red.init "WARN: payload schema check failed: $report"
+    fi
+}
+
 # A gateway deploy.sh held stopped (payload-state.json says "held"): Node-RED
 # does not start, after a reboot or a manual start either. It would run code
-# whose health check failed, or older code on a migrated database. The hold
-# ends with the command in /srv/node-red/DEPLOY-HELD (restore the
-# pre-migration backup, switch back, record that payload healthy) or with a
-# deploy that switches in a payload.
+# whose health check failed, or older code on a migrated or half-updated
+# database. The hold ends with a deploy that switches in a payload, or with
+# the last-resort command in /srv/node-red/DEPLOY-HELD.
 payload_hold_check() {
     local state="/srv/$PACKAGE_NAME/payload-state.json"
     grep -q '"state":"held"' "$state" 2>/dev/null || return 0
@@ -375,6 +404,7 @@ payload_hold_check() {
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
     payload_switch_repair
+    payload_schema_check
     payload_hold_check || return 0
 
     ensure_persistent_syslog_sink
