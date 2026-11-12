@@ -457,11 +457,11 @@ function captureModules(root, prevStamp, deployStamp) {
   const lines = [];
   let changed = !prev;
   fs.mkdirSync(dir, { recursive: true });
-  // The new payload's modules, and every module the running flows' payload
-  // links that the new payload drops: a switch back must restore it too.
-  const served = currentStamp(root);
+  // The new payload's modules, and every module served from another payload
+  // that the new payload drops (through the flows' payload, payloads/active,
+  // or a link an older deploy.sh made): a switch back must restore it too.
   const names = new Set(next.modules);
-  for (const [name, linked] of payloadModuleLinks(root)) if (served && linked === served) names.add(name);
+  for (const [name, linked] of payloadModuleLinks(root)) if (linked !== deployStamp) names.add(name);
   for (const name of [...names].sort()) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
@@ -661,15 +661,16 @@ function baseMismatch(root, base, stamp, guiRoot, entries) {
     if (!stat || !statOrNull(entry.link)) continue;
     if (!stat.isSymbolicLink()) return `the live ${entry.label} is a directory payloads/${base} does not hold`;
     const into = moduleLinkStamp(root, entry.name);
-    if (into && into === currentStamp(root) && into !== base) {
-      return `the live ${entry.label} belongs to payloads/${into}, which the flows run from, and payloads/${base} does not hold it`;
+    if (into && into !== base && (into === currentStamp(root) || into === activeStamp(root))) {
+      return `the live ${entry.label} belongs to payloads/${into}, which the gateway runs from, and payloads/${base} does not hold it`;
     }
   }
   return null;
 }
 
+// No flows are served: Node-RED runs nothing a switch could break.
 function nothingServed(entries) {
-  return entries.every((entry) => !statOrNull(entry.link));
+  return !statOrNull(entries[0].link);
 }
 
 // The entry paths a switch can move aside or leave a temporary link for.
@@ -813,6 +814,12 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     }
     if (base !== stamp) pointActive(root, stamp);
   } else {
+    // With no flows served, the links are made before payloads/active, and a
+    // link left from an earlier payload must not bring its flows back first.
+    if (!statOrNull(flowsLink(root))) {
+      fs.rmSync(activeLink(root), { force: true });
+      fs.rmSync(legacyActiveLink(root), { force: true });
+    }
     const switched = [];
     try {
       for (const entry of entries) {

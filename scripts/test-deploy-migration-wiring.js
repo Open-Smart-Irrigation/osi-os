@@ -286,7 +286,9 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   const defaultDeclIdx = deploy.indexOf('PAYLOAD_FLIPPED=0');
   const runSchemaMigrationDefIdx = indexOf('run_schema_migration() {');
   assert.ok(defaultDeclIdx >= 0 && defaultDeclIdx < runSchemaMigrationDefIdx, 'PAYLOAD_FLIPPED must default to 0 before run_schema_migration is defined');
-  assert.match(successBlock, /if ! swap_call flipTo "\$DEPLOY_STAMP" "\$GUI_ROOT"/,
+  // The health record is written just before the switch; both are one
+  // explicitly checked condition, so a failure of either is caught here.
+  assert.match(successBlock, /if ! swap_call markActivated "\$DEPLOY_STAMP" >\/dev\/null \|\| \\\n\s*! swap_call flipTo "\$DEPLOY_STAMP" "\$GUI_ROOT" "\$\{SERVED_STAMP:-\}" >\/dev\/null; then/,
     'paired activation must be checked explicitly while errexit is disabled by the migration call site');
   assert.match(successBlock, /if \[ ! -d "\$PAYLOADS_ROOT\/\$DEPLOY_STAMP" \]; then[\s\S]*leaving Node-RED stopped/,
     'a missing staged payload must abort before restarting on an older payload');
