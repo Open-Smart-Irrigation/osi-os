@@ -2,8 +2,12 @@
 set -eu
 
 # Retained state must hold before code copying or payload repair.
-if ! /usr/bin/node /usr/libexec/osi-image-safety.js prepare; then
-    exit 0
+if /usr/bin/node /usr/libexec/osi-image-safety.js prepare; then
+    :
+else
+    prepare_rc=$?
+    [ "$prepare_rc" -eq 2 ] && exit 0
+    exit "$prepare_rc"
 fi
 trap 'rc=$?; /usr/bin/node /usr/libexec/osi-image-safety.js failed "$rc" || :; exit "$rc"' EXIT
 /usr/bin/node /usr/libexec/osi-image-safety.js step copy-image-code

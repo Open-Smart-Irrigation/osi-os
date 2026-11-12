@@ -9,7 +9,7 @@ const LIVE_ROOT = '/';
 const STATUS = 'etc/osi-image-initialization.json';
 const REQUIRED = 'etc/osi-image-initialization.required';
 const DB = 'data/db/farming.db';
-const REFUSAL = 'Image upgrade refused: an image erases this gateway\'s farm data and radio devices/keys. Use deploy.sh for a supported application upgrade. Before any deliberate reset, stop all database writers, take a verified SQLite .backup, copy the backup and required credentials/media off the device, and verify that copy; sysupgrade -b is not a consistent farm backup. See docs/operations/image-upgrade-safety.md. A deliberate console reset is osi-factory-reset --erase-farm-and-radio-state; it erases farm data, accounts, radio devices/keys and local configuration.';
+const REFUSAL = 'Image upgrade refused: an image upgrade can erase this gateway\'s farm data. Use deploy.sh for a supported application upgrade. Before any deliberate reset, stop all database writers, take a verified SQLite .backup, copy the backup and required credentials/media off the device, and verify that copy; sysupgrade -b is not a consistent farm backup. See docs/operations/image-upgrade-safety.md. A deliberate console reset is osi-factory-reset --erase-farm-and-radio-state; it erases farm data, accounts, radio devices/keys and local configuration.';
 const at = (root, name) => path.join(root, name);
 function present(file) {
   try { fs.lstatSync(file); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
@@ -157,8 +157,19 @@ function main(args, root) {
   if (action === 'guard') guard(root, rest[0], rest.slice(1));
   else if (action === 'image-entry') imageEntry(root);
   else if (action === 'install') install(root);
-  else if (action === 'seed') seed(root);
-  else if (action === 'prepare') { if (!begin(root)) process.exitCode = 1; }
+  else if (action === 'seed') {
+    seed(root);
+    const state = readStatus(root);
+    if (state && state.phase === 'failed') process.exitCode = 1;
+  }
+  else if (action === 'prepare') {
+    if (!begin(root)) {
+      const state = readStatus(root);
+      // 2 is a deliberate hold/already-complete disposition. A retryable
+      // failure must keep the defaults script pending in OpenWrt.
+      process.exitCode = state && state.phase === 'failed' ? 1 : 2;
+    }
+  }
   else if (action === 'complete') complete(root);
   else if (action === 'runtime') { if (!runtimeAllowed(root)) process.exitCode = 1; }
   else if (action === 'step') {

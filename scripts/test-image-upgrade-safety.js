@@ -20,6 +20,9 @@ function portableInterpreter(text) {
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-image-safety-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The image package ships this file before defaults run; it is not, by
+  // itself, evidence of a restored application. Match the factory layout.
+  put(root, 'srv/node-red/settings.js', fs.readFileSync(path.join(repo, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js')));
   return root;
 }
 function put(root, name, value, mode = 0o644) {
@@ -112,11 +115,11 @@ test('fresh seeding is atomic, resumable and ready only after code initializatio
 });
 
 test('corrupt or unproven failure status never grants fresh initialization', t => {
-  for (const content of ['broken JSON', JSON.stringify({ schema: 1, phase: 'failed', step: 'inspect', reason: 'cannot inspect', origin: 'unproven' })]) {
+  for (const [content, expectedExit] of [['broken JSON', 0], [JSON.stringify({ schema: 1, phase: 'failed', step: 'inspect', reason: 'cannot inspect', origin: 'unproven' }), 1]]) {
     const root = fixture(t); installFixtureHelper(root);
     put(root, 'etc/osi-image-initialization.json', content);
     put(root, 'usr/share/db/farming.db', 'seed');
-    assert.equal(shellSeed(root, '97_osi_db_seed').status, 0);
+    assert.equal(shellSeed(root, '97_osi_db_seed').status, expectedExit);
     assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db')), false);
     assert.equal(safety().runtimeAllowed(root), false);
   }
@@ -134,6 +137,36 @@ test('new image entry distrusts a ready receipt carried in a manually extended a
   assert.equal(safety().runtimeAllowed(root), false);
   const defaults = fs.readFileSync(path.join(profile, 'etc/uci-defaults/93_osi_image_upgrade_guard'), 'utf8');
   assert.ok(defaults.indexOf(' image-entry') < defaults.indexOf(' install'));
+});
+
+test('OpenWrt retains fresh initialization defaults after guard install fails, then retry completes', t => {
+  const root = fixture(t); installFixtureHelper(root);
+  const seedRoot = fixture(t); put(root, 'usr/share/db/farming.db', fs.readFileSync(db(seedRoot, 0, 80)));
+  put(root, 'usr/share/flows.json', 'new flows');
+  put(root, 'sbin/sysupgrade', '#!/bin/sh\nexit 0\n', 0o755);
+  const names = ['93_osi_image_upgrade_guard', '97_osi_db_seed', '98_osi_node_red_seed'];
+  for (const name of names) {
+    let source = fs.readFileSync(path.join(profile, 'etc/uci-defaults', name), 'utf8');
+    if (name.startsWith('98_')) source = source.replace(/# BEGIN native sqlite3 seed[\s\S]*?# END native sqlite3 seed/, '# BEGIN native sqlite3 seed\n:\n# END native sqlite3 seed');
+    put(root, 'etc/uci-defaults/' + name, rewrite(source, root));
+  }
+  function applyDefaults() {
+    return names.map(name => {
+      const file = path.join(root, 'etc/uci-defaults', name);
+      const result = spawnSync('/bin/sh', [file], { encoding: 'utf8' });
+      // Match uci_apply_defaults: only an exit-0 defaults script is deleted.
+      if (result.status === 0) fs.unlinkSync(file);
+      return result.status;
+    });
+  }
+  assert.deepEqual(applyDefaults(), [1, 1, 1], 'a missing validator leaves all three scripts pending');
+  assert.equal(safety().readStatus(root).step, 'install');
+  for (const name of names) assert.equal(fs.existsSync(path.join(root, 'etc/uci-defaults', name)), true);
+  assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db')), false);
+  put(root, 'usr/libexec/validate_firmware_image', '#!/bin/sh\nexit 0\n', 0o755);
+  assert.deepEqual(applyDefaults(), [0, 0, 0]);
+  assert.equal(safety().readStatus(root).phase, 'ready');
+  for (const name of names) assert.equal(fs.existsSync(path.join(root, 'etc/uci-defaults', name)), false);
 });
 
 test('fresh code initialization repairs a directory/link collision and records a failed native step', t => {
