@@ -730,7 +730,8 @@ restart_node_red
 [ "$(swap_call currentStamp)" = first ]
 mkdir -p "$SWAP_ROOT/bin-owed"
 printf '#!/bin/sh\ncat "$NODE_RED_LOG"\necho "devices rebuild ABORTED"\n' > "$SWAP_ROOT/bin-owed/logread"
-chmod 755 "$SWAP_ROOT/bin-owed/logread"
+printf '#!/bin/sh\nshift 2\necho "$*" >> "$NODE_RED_LOG"\n' > "$SWAP_ROOT/bin-owed/logger"
+chmod 755 "$SWAP_ROOT/bin-owed/logread" "$SWAP_ROOT/bin-owed/logger"
 PATH="$SWAP_ROOT/bin-owed:$PATH"
 NODE_RED_INIT_TIMEOUT=2
 ${owed}
@@ -898,8 +899,12 @@ restart_node_red
 # Cut here: no health check ran.
 mkdir -p "$SWAP_ROOT/bin-owed"
 # The boot node's line follows each Node-RED start in the log.
-printf '#!/bin/sh\ncat "$NODE_RED_LOG"\necho "%s"\n' "${health === 'pass' ? 'sync-init: schema init complete' : 'devices rebuild ABORTED'}" > "$SWAP_ROOT/bin-owed/logread"
-chmod 755 "$SWAP_ROOT/bin-owed/logread"
+${health === 'unseen'
+    ? `# A full ring: the start's marker and lines are evicted.
+printf '#!/bin/sh\\necho "kernel: later line"\\n' > "$SWAP_ROOT/bin-owed/logread"`
+    : `printf '#!/bin/sh\\ncat "$NODE_RED_LOG"\\necho "%s"\\n' "${health === 'pass' ? 'sync-init: schema init complete' : 'devices rebuild ABORTED'}" > "$SWAP_ROOT/bin-owed/logread"`}
+printf '#!/bin/sh\nshift 2\necho "$*" >> "$NODE_RED_LOG"\n' > "$SWAP_ROOT/bin-owed/logger"
+chmod 755 "$SWAP_ROOT/bin-owed/logread" "$SWAP_ROOT/bin-owed/logger"
 PATH="$SWAP_ROOT/bin-owed:$PATH"
 NODE_RED_INIT_TIMEOUT=2
 backup_dir="$SWAP_ROOT/backups"
@@ -934,11 +939,34 @@ test('owed check: a migrated, unchecked payload that fails is held with the one-
     const held = fs.readFileSync(path.join(run.root, 'DEPLOY-HELD'), 'utf8').trim();
     assert.match(held, /^HELD: Node-RED stopped\. payloads\/cut failed .* return to payloads\/old with: /);
     assert.equal(run.result.stderr.trim().split('\n').pop(), held);
+    // The retry comes first; the restore is the last resort and says what it loses.
+    assert.ok(held.indexOf('First: run the deploy again') < held.indexOf('Last resort'), held);
+    assert.match(held, /premigrate-20261112T000000Z \(taken 20261112T000000Z\) loses everything written to the database since it was taken/);
+    assert.doesNotMatch(held.slice(0, held.indexOf('Last resort')), /[Rr]estore/);
     const state = swap.readPayloadState(run.root);
     assert.equal(state.state, 'held');
     assert.equal(state.active, 'cut');
     assert.equal(swap.readHealth(run.root, 'cut').state, 'failed');
     assert.equal(run.state('identityd.state'), '0', 'identityd is stopped: the restore command replaces the database');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// Item 1 of the ledger: a migrated, unchecked payload whose start cannot be
+// confirmed (its log lines evicted) but shows no failure is not held.
+test('owed check: a migrated, unchecked payload whose start cannot be seen keeps running, unverified and still owed', () => {
+  const run = owedCheckScenario({ migrate: true, health: 'unseen' });
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /owed-done/);
+    assert.match(run.result.stderr, /payloads\/cut stays active and unverified/);
+    assert.equal(fs.existsSync(path.join(run.root, 'DEPLOY-HELD')), false);
+    assert.equal(run.state('node-red.state'), '1');
+    assert.equal(swap.currentStamp(run.root), 'cut');
+    const state = swap.readPayloadState(run.root);
+    assert.equal(state.state, 'unverified');
+    assert.equal(swap.readHealth(run.root, 'cut').state, 'activated', 'the check stays owed');
   } finally {
     run.cleanup();
   }

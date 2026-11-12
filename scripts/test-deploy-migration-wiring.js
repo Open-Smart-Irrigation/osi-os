@@ -325,19 +325,17 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   // listener, so /gui reachability alone cannot prove schema init succeeded.
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
-  const logMarkIdx = deploy.indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"', healthCheckHeaderIdx);
-  const probeCallIdx = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
-  // The owed health check (run_owed_health_check) gates on the same line
-  // earlier in deploy.sh; this test is about the deploy's own check.
-  const grepIdx = deploy.indexOf('grep -q "devices rebuild ABORTED"', healthCheckHeaderIdx);
-  const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
+  const markIdx = deploy.indexOf('mark_node_red_log', healthCheckHeaderIdx);
+  const checkCallIdx = deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}"', healthCheckHeaderIdx);
+  const failedIdx = deploy.indexOf('PROBE_OK=1', checkCallIdx);
   const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
 
-  assert.ok(logMarkIdx >= 0 && logMarkIdx < restartIdx, 'the log line count must be captured BEFORE the restart, so only new lines from this restart are considered');
-  assert.ok(restartIdx < grepIdx, 'restart still precedes the schema-init log gate');
-  assert.ok(grepIdx < probeCallIdx, 'the abort-log check must run before the /gui reachability wait');
-  assert.ok(grepIdx < overrideIdx && overrideIdx < commitDecisionIdx, 'a found abort log line must flip PROBE_OK back to failing BEFORE the commit/rollback decision');
-  assert.match(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK \+ 1\)\)"/, 'must only scan log lines appended since the mark (busybox tail -n +N), never the whole ring including stale prior aborts');
+  assert.ok(markIdx >= 0 && markIdx < restartIdx, 'the start marker is written BEFORE the restart, so only lines from this restart are considered');
+  assert.ok(restartIdx < checkCallIdx, 'restart still precedes the start check');
+  assert.ok(checkCallIdx < failedIdx && failedIdx < commitDecisionIdx, 'a failed start sets PROBE_OK=1 BEFORE the commit/rollback decision');
+  const lines = deploy.slice(indexOf("NODE_RED_START_FAILURE_LINES='"), indexOf('node_red_log_marks=0'));
+  assert.match(lines, /devices rebuild ABORTED/, 'the boot node abort is an observed failure');
+  assert.doesNotMatch(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK/, 'never by line position in the ring');
 });
 
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {
