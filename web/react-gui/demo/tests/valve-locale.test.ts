@@ -11,7 +11,7 @@ test('demo-only machine Luganda fills valve fallback strings and preserves inter
   // Conditional irrigation and CMD-04 valve text waits for a human Luganda pass
   // (docs/i18n/pending-luganda-translations.md). The demo shows the English source
   // text for it, never machine Luganda; a human pass drops the key from this list.
-  const pendingPrefixes=['irrigationPolicy.','irrigationPreference.','cancelOutcome.','cancelCollateral.'];
+  const pendingPrefixes=['irrigationPolicy.','irrigationPreference.','cancelOutcome.','cancelCollateral.','commandNoAnswer.'];
   const pendingKeys=new Set(['planLost','schedulerStatusLost','scheduleDialog.push.LOST','resumeRefusedClearPending','cancelHelp','cancelHelpLabel','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton','settingsDialog.title','settingsDialog.flowFromZone']);
   const pendingHuman=(key:string)=>pendingKeys.has(key)||pendingPrefixes.some((prefix)=>key.startsWith(prefix));
   assert.deepEqual(Object.keys(copy).sort(),Object.keys(english).sort());

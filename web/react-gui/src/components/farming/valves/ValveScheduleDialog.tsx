@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
-import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
+import type { ValveSchedule, ValveScheduleInput, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
+import { assertScheduleStartNotHeld, isValveOpenHeldError, scheduleUpdateWhileHeld } from '../../../services/valveCommandHold';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
@@ -342,27 +343,39 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   };
 
   const saveOnce = async () => {
-    if (!isOnceValid || savingOnce) return;
+    // A row change and its list refresh settle first, so the form does not edit from a stale row.
+    if (!isOnceValid || savingOnce || rowBusyUuid !== null) return;
     const fireAt = zonedTimeToUtcIso(once.date, once.time, valve.timezone);
     if (!fireAt) return;
     setSavingOnce(true);
     setOnceError(null);
     try {
-      const onceFields = {
+      const onceFields: Pick<ValveScheduleInput, 'label' | 'fireAt' | 'durationMinutes' | 'enabled'> = {
         label: once.label.trim() || null,
         fireAt,
         durationMinutes: onceDurationNum,
       };
+      const current = editingOnceUuid ? data?.schedules.find((schedule) => schedule.scheduleUuid === editingOnceUuid) : undefined;
+      // A one-time irrigation that would start while an earlier open of this valve has no
+      // answer yet is a second open by another route: refused here and in the API layer.
+      // While the hold lasts, an edit sends both `enabled` and `fireAt` and the body alone
+      // decides (services/valveCommandHold.ts scheduleUpdateWhileHeld); the API applies the
+      // same rule again. Outside a hold the edit stays a partial update.
       if (editingOnceUuid) {
-        await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, onceFields);
+        const body = scheduleUpdateWhileHeld(valve.deviceEui, onceFields, current);
+        if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body, current);
+        else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body);
       } else {
+        assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: true });
         await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
       }
       setOnce(EMPTY_ONCE);
       setEditingOnceUuid(null);
       await afterMutation();
     } catch (err) {
-      setOnceError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
+      setOnceError(isValveOpenHeldError(err)
+        ? t('commandNoAnswer.open')
+        : err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
       setSavingOnce(false);
     }
@@ -409,13 +422,25 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   };
 
   const toggleEnabled = async (schedule: ValveSchedule) => {
+    // A form save and its refresh settle first (convenience; the body rule below is the safety).
+    if (rowBusyUuid !== null || savingOnce || savingWeekly) return;
     setRowBusyUuid(schedule.scheduleUuid);
     setRowError(null);
     try {
-      await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      // While the hold lasts, a one-time toggle sends the start it knows with the new enabled
+      // state, so the gateway ends with exactly what was checked: enabling a due start is
+      // refused, disabling never is. Weekly toggles are exempt and stay partial.
+      if (schedule.kind === 'ONCE') {
+        const body = scheduleUpdateWhileHeld(valve.deviceEui, { enabled: !schedule.enabled }, schedule);
+        await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, body, schedule);
+      } else {
+        await valvesAPI.updateSchedule(valve.deviceEui, schedule.scheduleUuid, { enabled: !schedule.enabled });
+      }
       await afterMutation();
     } catch (err) {
-      setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
+      setRowError(isValveOpenHeldError(err)
+        ? t('commandNoAnswer.open')
+        : err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.updateFailed'));
     } finally {
       setRowBusyUuid(null);
     }
@@ -602,7 +627,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                                 <input
                                   type="checkbox"
                                   checked={schedule.enabled}
-                                  disabled={rowBusyUuid === schedule.scheduleUuid}
+                                  disabled={rowBusyUuid === schedule.scheduleUuid || savingOnce || savingWeekly}
                                   onChange={() => void toggleEnabled(schedule)}
                                   className="h-4 w-4"
                                 />
@@ -802,7 +827,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                     <button
                       type="button"
                       onClick={() => void saveOnce()}
-                      disabled={!isOnceValid || savingOnce}
+                      disabled={!isOnceValid || savingOnce || rowBusyUuid !== null}
                       className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingOnce

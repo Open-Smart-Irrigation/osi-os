@@ -8,6 +8,7 @@ import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown'
 import { formatTime } from '../../../utils/datetime';
 import { EditableName } from '../shared/EditableName';
 import { ValveControlHelp } from '../shared/ValveControlHelp';
+import { useValveOpenHeld } from '../../../services/valveCommandHold';
 
 export interface ValveTileProps {
   valve: ValveSummary;
@@ -236,6 +237,10 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const primaryAction = isPendingCommand
     ? { label: t('cancelQueuedOpen'), onClick: onCancel }
     : { label: t('open'), onClick: onOpen };
+  // An open that got no answer may have reached the valve: Open stays unavailable until the
+  // next valve reading or one minute (services/valveCommandHold.ts). Cancel is never held.
+  const openHeld = useValveOpenHeld(valve.deviceEui);
+  const primaryDisabled = busy || (!isPendingCommand && openHeld);
   // D04 (owner decision 2026-10-18): the cancel control carries the verbatim help text. It is
   // the button's accessible description and also sits in a help button beside it, which a tap
   // pins open and keyboard focus or hover shows.
@@ -300,7 +305,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           <button
             type="button"
             onClick={primaryAction.onClick}
-            disabled={busy}
+            disabled={primaryDisabled}
             aria-describedby={isPendingCommand ? cancelHelpId : undefined}
             className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >

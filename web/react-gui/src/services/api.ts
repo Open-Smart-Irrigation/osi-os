@@ -46,6 +46,7 @@ import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import { historySourceChoicesFromSeries } from '../history/sourceSelection';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
 import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
+import { assertScheduleStartNotHeld, assertValveOpenNotHeld, holdValveOpen, isNoAnswerTimeout, scheduleUpdateWhileHeld } from './valveCommandHold';
 import type {
   Device,
   LoginRequest,
@@ -171,6 +172,25 @@ function toRenameError(error: unknown, fallback: string): EntityRenameError {
     }
   }
   return mapped;
+}
+
+/** Timeout for valve commands (POST /api/valve/:deveui, the STREGA command PUTs); other requests keep the default. */
+export const VALVE_COMMAND_TIMEOUT_MS = 30_000;
+
+/**
+ * The one dispatch point for a command that opens a valve. It refuses to send
+ * while an earlier opening command for the valve got no answer, and starts that
+ * hold when this one times out (services/valveCommandHold.ts). Every GUI caller
+ * goes through it, whatever control it comes from.
+ */
+async function sendOpeningValveCommand(deveui: string, send: () => Promise<unknown>): Promise<void> {
+  assertValveOpenNotHeld(deveui);
+  try {
+    await send();
+  } catch (error) {
+    if (isNoAnswerTimeout(error)) holdValveOpen(deveui);
+    throw error;
+  }
 }
 
 // Create axios instance with base configuration
@@ -613,8 +633,14 @@ export const devicesAPI = {
     return response.data;
   },
 
+  // The gateway answers a valve command only after the radio transport has decided, which can
+  // take longer than other requests; a timeout here does not mean the command was not sent
+  // (services/valveCommandHold.ts).
   controlValve: async (deveui: string, action: ValveActionRequest): Promise<void> => {
-    await api.post(`/api/valve/${deveui}`, action);
+    const send = () => api.post(`/api/valve/${deveui}`, action, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    // Close is never held: closing twice does no harm.
+    if (action.action === 'CLOSE') await send();
+    else await sendOpeningValveCommand(deveui, send);
   },
 
   // Resolves with the cancel outcome and its flush collateral (null when the reply has none). A
@@ -1415,7 +1441,7 @@ export const stregaAPI = {
     openedMinutes?: number;
     tamperDisabled?: boolean;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/interval`, payload);
+    await api.put(`/api/devices/${deveui}/strega/interval`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setModel: async (deveui: string, model: StregaModel): Promise<void> => {
     await api.put(`/api/devices/${deveui}/strega/model`, { model });
@@ -1425,22 +1451,27 @@ export const stregaAPI = {
     unit: 'seconds' | 'minutes' | 'hours';
     amount: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/timed-action`, payload);
+    const send = () => api.put(`/api/devices/${deveui}/strega/timed-action`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    if (payload.action === 'OPEN') await sendOpeningValveCommand(deveui, send);
+    else await send();
   },
   setMagnetEnabled: async (deveui: string, enabled: boolean): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled });
+    await api.put(`/api/devices/${deveui}/strega/magnet`, { enabled }, { timeout: VALVE_COMMAND_TIMEOUT_MS });
   },
   setPartialOpening: async (deveui: string, payload: {
     action: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/partial-opening`, payload);
+    const send = () => api.put(`/api/devices/${deveui}/strega/partial-opening`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS });
+    if (payload.action === 'OPEN') await sendOpeningValveCommand(deveui, send);
+    else await send();
   },
   setFlushing: async (deveui: string, payload: {
     returnPosition: 'OPEN' | 'CLOSE';
     percentage: number;
   }): Promise<void> => {
-    await api.put(`/api/devices/${deveui}/strega/flushing`, payload);
+    // A flush opens the valve, whatever position it returns to.
+    await sendOpeningValveCommand(deveui, () => api.put(`/api/devices/${deveui}/strega/flushing`, payload, { timeout: VALVE_COMMAND_TIMEOUT_MS }));
   },
 };
 
@@ -2004,7 +2035,10 @@ export const valvesAPI = {
     const r = await api.get(`/api/valves/${eui}/schedules`);
     return normaliseValveSchedules(r.data);
   },
+  // A one-time schedule that would start while the valve's open hold lasts is refused here,
+  // before anything is sent (services/valveCommandHold.ts assertScheduleStartNotHeld).
   createSchedule: async (eui: string, input: ValveScheduleInput): Promise<{ schedule: ValveSchedule; pushesQueued: number }> => {
+    assertScheduleStartNotHeld(eui, input);
     try {
       const r = await api.post(`/api/valves/${eui}/schedules`, toScheduleBody(input));
       return { schedule: normaliseValveSchedule(r.data.schedule), pushesQueued: Number(r.data.pushes_queued ?? 0) };
@@ -2012,9 +2046,18 @@ export const valvesAPI = {
       return rethrowValveError(error);
     }
   },
-  updateSchedule: async (eui: string, uuid: string, patch: Partial<ValveScheduleInput>): Promise<{ pushesQueued: number }> => {
+  // `current` is the row as the GUI last read it. While the valve's open hold is active it only
+  // completes the body of a one-time update (both `enabled` and `fireAt`), and the body alone
+  // decides (services/valveCommandHold.ts scheduleUpdateWhileHeld). It is never sent itself.
+  updateSchedule: async (
+    eui: string,
+    uuid: string,
+    patch: Partial<ValveScheduleInput>,
+    current?: Pick<ValveSchedule, 'kind' | 'fireAt' | 'enabled'>,
+  ): Promise<{ pushesQueued: number }> => {
+    const body = scheduleUpdateWhileHeld(eui, patch, current);
     try {
-      const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(patch));
+      const r = await api.put(`/api/valves/${eui}/schedules/${uuid}`, toScheduleBody(body));
       return { pushesQueued: Number(r.data.pushes_queued ?? 0) };
     } catch (error) {
       return rethrowValveError(error);

@@ -14,6 +14,8 @@ import { ValveServiceDialog } from './ValveServiceDialog';
 import { ValveControlHelp } from '../shared/ValveControlHelp';
 import { ValveCancelOutcome } from './ValveCancelOutcome';
 import { valveCancelResultFromError, type ValveCancelResult } from '../../../services/valveCancel';
+import { holdValveOpen, isNoAnswerTimeout, isUnknownValveOutcome, isValveOpenHeld } from '../../../services/valveCommandHold';
+import { fetchValveReading } from '../../../services/valveReading';
 
 // The heading's information button. Hover and keyboard focus show the tip; a tap
 // pins it (focus fires before click on touch, so the first tap opens and a second
@@ -39,7 +41,7 @@ export interface ValveControlPanelProps {
 
 type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
-const valvesFetcher = () => valvesAPI.list();
+const valvesFetcher = fetchValveReading;
 
 // A refused Resume on a conditional valve whose clear is not confirmed gets its own explanation;
 // every other failure keeps the generic actionFailed.
@@ -107,9 +109,29 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     refresh().catch((err) => console.warn('Failed to refresh the valve list after a rename', err));
   };
 
+  // No answer is not "not sent": an open may have reached the valve. Say so, keep opening
+  // held on this valve until the next reading (requested now) or one minute, and close the
+  // dialog so a second press cannot send a second open unseen.
+  const reportUnknownOpen = () => {
+    setCancelNotice(null);
+    setActionError(t('commandNoAnswer.open'));
+    mutate().catch((refreshErr) => console.warn('Failed to refresh the valve list after an unanswered open', refreshErr));
+  };
+
   const handleOpenSubmit = async (minutes: number) => {
     if (!selectedValve) return;
-    await devicesAPI.controlValve(selectedValve.deviceEui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 });
+    // A dialog that was already open when another surface's open timed out must not send.
+    if (isValveOpenHeld(selectedValve.deviceEui)) { reportUnknownOpen(); return; }
+    try {
+      await devicesAPI.controlValve(selectedValve.deviceEui, { action: 'OPEN_FOR_DURATION', duration_seconds: minutes * 60 });
+    } catch (err) {
+      if (!isUnknownValveOutcome(err)) throw err;
+      // The API starts the hold on a timeout; doing it here as well keeps the panel right
+      // when the API layer is replaced (tests) and costs nothing when it is not.
+      if (isNoAnswerTimeout(err)) holdValveOpen(selectedValve.deviceEui);
+      reportUnknownOpen();
+      return;
+    }
     // The open command already succeeded at this point — a failure saving the "remember this
     // duration" preference is not worth surfacing as an open failure (which would keep the
     // dialog open and imply the valve didn't actually open).

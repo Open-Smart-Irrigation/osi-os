@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { StregaModel, ValveSummary } from '../../../types/farming';
 import { devicesAPI, stregaAPI } from '../../../services/api';
+import { holdValveOpen, isNoAnswerTimeout, isUnknownValveOutcome, isValveOpenHeld, useValveOpenHeld } from '../../../services/valveCommandHold';
 import { getRecognizedStregaModel, normaliseStregaModel } from './valveCardHelpers';
 
 export interface ValveServiceDialogProps {
@@ -40,6 +41,9 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
   // in devices.json for every locale, ported from the cloud) -- kept there rather than
   // minting a near-duplicate string in valves.json.
   const { t: td } = useTranslation('devices');
+  // Commands that open (timed OPEN, partial OPEN, flushing) share the open hold of every other
+  // valve surface (services/valveCommandHold.ts); their closing counterparts are never held.
+  const openHeld = useValveOpenHeld(valve.deviceEui);
 
   // strega_model lives on `devices`, not on ValveSummary (GET /api/valves does not carry
   // it) -- see spec §3b on the two-capability-flag split. devicesAPI.getAll() is the same
@@ -131,7 +135,14 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
   const flushPercentage = Number(flushPercentageInput);
   const isFlushPercentageValid = Number.isInteger(flushPercentage) && flushPercentage >= 1 && flushPercentage <= 100;
 
-  const runCommand = async (key: CommandKey, action: () => Promise<void>, pendingMessage: string, failedMessage: string) => {
+  const runCommand = async (key: CommandKey, opens: boolean, action: () => Promise<void>, pendingMessage: string, failedMessage: string) => {
+    // Re-checked at the moment of sending: a control enabled a moment ago must not send.
+    if (opens && isValveOpenHeld(valve.deviceEui)) {
+      setError(t('commandNoAnswer.open'));
+      setInfo(null);
+      setConfirmCommand(null);
+      return;
+    }
     setBusyCommand(key);
     setError(null);
     setInfo(null);
@@ -139,8 +150,15 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
       await action();
       setInfo(pendingMessage);
       onChanged();
-    } catch {
-      setError(failedMessage);
+    } catch (err) {
+      if (isUnknownValveOutcome(err)) {
+        // No answer is not "not sent". After a command that opens, opening stays held.
+        if (opens && isNoAnswerTimeout(err)) holdValveOpen(valve.deviceEui);
+        setError(t(opens ? 'commandNoAnswer.open' : 'commandNoAnswer.other'));
+        onChanged();
+      } else {
+        setError(failedMessage);
+      }
     } finally {
       setBusyCommand(null);
       setConfirmCommand(null);
@@ -154,6 +172,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     }
     void runCommand(
       'interval',
+      false,
       () => stregaAPI.setUplinkInterval(valve.deviceEui, { closedMinutes, openedMinutes, tamperDisabled }),
       t('serviceDialog.interval.pending'),
       t('serviceDialog.interval.failed'),
@@ -164,6 +183,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     if (busyCommand) return;
     void runCommand(
       'model',
+      false,
       () => stregaAPI.setModel(valve.deviceEui, modelInput),
       t('serviceDialog.model.pending'),
       t('serviceDialog.model.failed'),
@@ -177,6 +197,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     }
     void runCommand(
       'timed',
+      timedAction === 'OPEN',
       () => stregaAPI.setTimedAction(valve.deviceEui, { action: timedAction, unit: timedUnit, amount: timedAmount }),
       t('serviceDialog.timed.pending'),
       t('serviceDialog.timed.failed'),
@@ -187,6 +208,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     if (busyCommand) return;
     void runCommand(
       'magnet',
+      false,
       () => stregaAPI.setMagnetEnabled(valve.deviceEui, magnetEnabled),
       t('serviceDialog.magnet.pending'),
       t('serviceDialog.magnet.failed'),
@@ -200,6 +222,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     }
     void runCommand(
       'partial',
+      partialAction === 'OPEN',
       () => stregaAPI.setPartialOpening(valve.deviceEui, { action: partialAction, percentage: partialPercentage }),
       partialAction === 'OPEN'
         ? t('serviceDialog.partial.pendingOpen', { percentage: partialPercentage })
@@ -215,6 +238,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
     }
     void runCommand(
       'flush',
+      true,
       () => stregaAPI.setFlushing(valve.deviceEui, { returnPosition: flushReturnPosition, percentage: flushPercentage }),
       t('serviceDialog.flush.pending', {
         percentage: flushPercentage,
@@ -429,7 +453,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                 <button
                   type="button"
                   onClick={sendTimedAction}
-                  disabled={busy}
+                  disabled={busy || (timedAction === 'OPEN' && openHeld)}
                   className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'timed' && <Spinner />}
@@ -449,7 +473,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             <button
               type="button"
               onClick={() => setConfirmCommand('timed')}
-              disabled={busy}
+              disabled={busy || (timedAction === 'OPEN' && openHeld)}
               className="mt-2 min-h-[44px] rounded-lg border border-[var(--warn-border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--warn-text)] transition-colors hover:bg-[var(--warn-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('serviceDialog.timed.send')}
@@ -498,7 +522,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                 <button
                   type="button"
                   onClick={sendPartialOpening}
-                  disabled={busy}
+                  disabled={busy || (partialAction === 'OPEN' && openHeld)}
                   className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'partial' && <Spinner />}
@@ -518,7 +542,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             <button
               type="button"
               onClick={() => setConfirmCommand('partial')}
-              disabled={busy || !isMotorized}
+              disabled={busy || !isMotorized || (partialAction === 'OPEN' && openHeld)}
               className="mt-2 min-h-[44px] rounded-lg border border-[var(--warn-border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--warn-text)] transition-colors hover:bg-[var(--warn-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('serviceDialog.partial.send')}
@@ -572,7 +596,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                 <button
                   type="button"
                   onClick={sendFlushing}
-                  disabled={busy}
+                  disabled={busy || openHeld}
                   className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'flush' && <Spinner />}
@@ -592,7 +616,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             <button
               type="button"
               onClick={() => setConfirmCommand('flush')}
-              disabled={busy || !isMotorized}
+              disabled={busy || !isMotorized || openHeld}
               className="mt-2 min-h-[44px] rounded-lg border border-[var(--warn-border)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold text-[var(--warn-text)] transition-colors hover:bg-[var(--warn-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {t('serviceDialog.flush.send')}
