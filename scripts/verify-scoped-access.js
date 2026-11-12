@@ -548,6 +548,7 @@ const NODE_TYPES = new Map([
   ['debug', 'internal'],
   ['split', 'internal'],
   ['switch', 'internal'],
+  ['change', 'internal: transforms messages, has no input of its own'],
   ['tab', 'configuration'],
   ['group', 'configuration'],
   ['global-config', 'configuration'],
