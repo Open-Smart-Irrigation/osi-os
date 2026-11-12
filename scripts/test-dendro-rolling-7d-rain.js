@@ -17,6 +17,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
 const { facadeDb, loadNode } = require('./lib/flow-node-harness');
 
@@ -157,13 +158,19 @@ async function runDendro(db, { weather = { status: 500, body: null }, profile = 
     },
   };
   const http = stubHttp(weather, calls);
-  const fakeRequire = (name) => (name === 'http' || name === 'https' ? http : require(name)); // eslint-disable-line global-require
   const env = { get: (key) => (Object.prototype.hasOwnProperty.call(envVars, key) ? envVars[key] : '') };
-  // eslint-disable-next-line no-new-func
-  const fn = new Function('osiDb', 'osiLib', 'env', 'node', 'msg', 'require', 'Date', node.func);
-  const result = await fn(osiDb, osiLib, env, fakeNode, {}, fakeRequire, makeFixedDate(now));
-  assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
-  return { result, calls, warnings };
+  const context = vm.createContext({ osiDb, osiLib, env, node: fakeNode, msg: {}, Buffer, Date: makeFixedDate(now) });
+  assert.equal(vm.runInContext('typeof require', context), 'undefined', 'the function sandbox has no require');
+  // Stub the real built-ins used by the extracted helper, rather than granting
+  // the function node a CommonJS loader that Node-RED does not provide.
+  const requests = ['node:http', 'node:https'].map((name) => test.mock.method(require(name), 'request', http.request));
+  try {
+    const result = await vm.runInContext('(async function(){\n' + node.func + '\n})()', context);
+    assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
+    return { result, calls, warnings };
+  } finally {
+    for (const request of requests) request.mock.restore();
+  }
 }
 
 function recommendation(db, date) {
@@ -174,6 +181,39 @@ function recommendation(db, date) {
 
 for (const profile of PROFILES) {
   const tag = profile.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+
+  test(`[${tag}] sandbox transport restores default Open-Meteo rainfall and VPD`, async (t) => {
+    const db = seedDb();
+    t.after(() => db.close());
+    const { calls, warnings } = await runDendro(db, { weather: openMeteoDay(5.4), profile });
+    assert.ok(!warnings.some((value) => /require is not defined/.test(value)), warnings.join('; '));
+    assert.equal(calls.length, 1, 'the stubbed default weather transport was called');
+    assert.ok(calls[0].startsWith('https://archive-api.open-meteo.com/'));
+    const { row, json } = recommendation(db, '2026-10-08');
+    assert.equal(row.rainfall_mm, 5.4);
+    assert.equal(json.rain.source, 'open_meteo');
+    assert.equal(row.vpd_source, 'open_meteo');
+    assert.ok(row.vpd_max_kpa > 0, 'weather VPD fills the missing local humidity source');
+  });
+
+  test(`[${tag}] sandbox transport restores configured HTTP OpenAgri rainfall and VPD`, async (t) => {
+    const db = seedDb();
+    t.after(() => db.close());
+    const weather = { status: 200, body: { data: Array.from({ length: 24 }, (_, hour) => ({
+      values: { temperature_2m: 18, relative_humidity_2m: 70, precipitation: hour === 0 ? 5.4 : 0 },
+    })) } };
+    const { calls, warnings } = await runDendro(db, {
+      weather, profile,
+      envVars: { OPENAGRI_WEATHER_URL: 'http://weather.example.invalid', OPENAGRI_WEATHER_BEARER_TOKEN: 'fixture-token' },
+    });
+    assert.ok(!warnings.some((value) => /require is not defined/.test(value)), warnings.join('; '));
+    assert.deepEqual(calls, ['http://weather.example.invalid/api/v1/history/hourly/']);
+    const { row, json } = recommendation(db, '2026-10-08');
+    assert.equal(row.rainfall_mm, 5.4);
+    assert.equal(json.rain.source, 'openagri');
+    assert.equal(row.vpd_source, 'openagri');
+    assert.ok(row.vpd_max_kpa > 0);
+  });
 
   test(`[${tag}] seven prior 1 mm days plus a 1 mm analytics day sum to 7 mm over seven calendar days`, async () => {
     const db = seedDb();

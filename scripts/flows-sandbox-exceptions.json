@@ -37,22 +37,5 @@
     ],
     "sha256": "cd6d8659bdc2156ac9833f8e1a1d11f67139521fff087bb7ed614628fb5708a4",
     "reason": "Unreachable expression after unconditional return; retained outside the declaration-fix scope."
-  },
-  {
-    "id": "dendro-compute-fn",
-    "field": "func",
-    "identifier": "require",
-    "locations": [
-      [
-        140,
-        46
-      ],
-      [
-        140,
-        63
-      ]
-    ],
-    "sha256": "1547096ad74d76f88b11265998a5496697367605be292eea4d6560d935c2cec9",
-    "reason": "KNOWN DEFECT: default Open-Meteo and configured OpenAgri weather fetches use bare require, losing weather rainfall and VPD fallback. Also present in v0.8.1. Needs transport bindings or extraction; tracked in #629."
   }
 ]

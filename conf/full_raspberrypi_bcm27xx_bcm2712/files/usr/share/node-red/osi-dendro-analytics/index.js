@@ -425,7 +425,33 @@ const CONSTANTS = {
   CALIBRATIONS,
 };
 
+// Weather transport runs in this Node module, outside the function sandbox.
+function requestJson(method,urlString,options){
+  const opts=options||{};
+  const headers=Object.assign({},opts.headers||{});
+  const body=opts.body!=null?String(opts.body):null;
+  return new Promise((res,rej)=>{
+    const lib=urlString.startsWith('https:')?require('https'):require('http');
+    const req=lib.request(urlString,{method,headers},r=>{
+      let d='';
+      r.on('data',c=>d+=c);
+      r.on('end',()=>{
+        const status=Number(r.statusCode||0);
+        if(status<200||status>=300){
+          return rej(new Error('HTTP '+status+(d?': '+String(d).slice(0,160):'')));
+        }
+        if(!d)return res(null);
+        try{res(JSON.parse(d));}catch(e){rej(e);}
+      });
+    });
+    req.on('error',rej);
+    req.setTimeout(10000,()=>{req.destroy(new Error('timeout'));});
+    if(body!=null)req.write(body);
+    req.end();
+  });
+}
 module.exports = {
+  requestJson,
   round,
   avg,
   percentile,

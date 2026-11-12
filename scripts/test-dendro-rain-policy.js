@@ -19,6 +19,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
 const { executeFunction, facadeDb, loadNode, makeAuthHeader, seedTestDb } = require('./lib/flow-node-harness');
 
@@ -140,13 +141,17 @@ async function runDendro(db, { weather = FAILED, profile = PROFILES[0], envVars 
   };
   const answer = typeof weather === 'function' ? weather : () => weather;
   const http = stubHttp(answer, calls);
-  const fakeRequire = (name) => (name === 'http' || name === 'https' ? http : require(name)); // eslint-disable-line global-require
   const env = { get: (key) => (Object.prototype.hasOwnProperty.call(envVars, key) ? envVars[key] : '') };
-  // eslint-disable-next-line no-new-func
-  const fn = new Function('osiDb', 'osiLib', 'env', 'node', 'msg', 'require', 'Date', node.func);
-  const result = await fn(osiDb, osiLib, env, fakeNode, {}, fakeRequire, makeFixedDate(NOW_ISO));
-  assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
-  return { result, calls, warnings };
+  const context = vm.createContext({ osiDb, osiLib, env, node: fakeNode, msg: {}, Buffer, Date: makeFixedDate(NOW_ISO) });
+  assert.equal(vm.runInContext('typeof require', context), 'undefined', 'the function sandbox has no require');
+  const requests = ['node:http', 'node:https'].map((name) => test.mock.method(require(name), 'request', http.request));
+  try {
+    const result = await vm.runInContext('(async function(){\n' + node.func + '\n})()', context);
+    assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
+    return { result, calls, warnings };
+  } finally {
+    for (const request of requests) request.mock.restore();
+  }
 }
 
 function recommendation(db, date = DAY) {
