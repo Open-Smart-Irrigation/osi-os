@@ -398,3 +398,35 @@ test('rollback uses retained verification only when the migration runner was una
   assert.match(deploy, /rollback_verify_mode="retained"/);
   assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP" "\$rollback_verify_mode"/);
 });
+
+// Item 1 of #636's last round: copies earlier migrations left (the
+// pre-migration copy and the runner's .bak- copies, each about the database's
+// size) are named and counted by the disk preflight, so an operator who is
+// short of space knows what can go.
+test('deploy migration wiring: the disk preflight counts and names earlier database copies', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const start = deploy.indexOf('    db_bytes=$(ls -ln "$DB_PATH"');
+  const end = deploy.indexOf('    if [ -n "${PREV_STAMP:-}" ]; then', start);
+  assert.ok(start > 0 && end > start);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-disk-copies-'));
+  try {
+    const db = path.join(dir, 'farming.db');
+    const backups = path.join(dir, 'backups');
+    fs.mkdirSync(backups);
+    fs.writeFileSync(db, Buffer.alloc(10 * 1024));
+    fs.writeFileSync(path.join(backups, 'farming.db.premigrate-20261112T000000Z'), Buffer.alloc(10 * 1024));
+    fs.writeFileSync(`${db}.bak-2026-11-12T00-00-00-000Z`, Buffer.alloc(10 * 1024));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    // df reports less than twice the database plus the margin.
+    fs.writeFileSync(path.join(bin, 'df'), '#!/bin/sh\necho "Filesystem 1K-blocks Used Available Use% Mounted"\necho "/dev/x 100 50 50 50% /data"\n', { mode: 0o755 });
+    const script = `run() {\nDB_PATH=${JSON.stringify(db)}\nbackup_dir=${JSON.stringify(backups)}\n${deploy.slice(start, end)}\nreturn 0\n}\nrun`;
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, MIGRATE_MIN_FREE_MARGIN_MB: '1' } });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /earlier database copies take 20KB/);
+    assert.match(result.stderr, /premigrate-20261112T000000Z .*farming\.db\.bak-2026-11-12T00-00-00-000Z; removing the ones no longer needed frees that space/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1496,7 +1496,8 @@ record_deploy_hold() {
         rdh_backup="<newest $rdh_backup_dir/$(basename "$rdh_db").premigrate-*>"
         rdh_taken="taken before the migration"
     fi
-    rdh_line="HELD: Node-RED stopped. payloads/${DEPLOY_STAMP:-?} failed after migrating $rdh_db, and payloads/${PREV_STAMP:-?} does not fit the new schema. State: held (${rdh_root}/payload-state.json); the database and payloads/${DEPLOY_STAMP:-?} are kept as they are. First: run the deploy again, the same way; it checks payloads/${DEPLOY_STAMP:-?} again and keeps all data. Last resort, only when the retry cannot bring the gateway up: the backup $rdh_backup ($rdh_taken) loses everything written to the database since it was taken; restore it and return to payloads/${PREV_STAMP:-?} with: cp '$rdh_backup' '$rdh_db.restore' && mv '$rdh_db.restore' '$rdh_db' && rm -f '$rdh_db-wal' '$rdh_db-shm' && node -e \"const s=require('$rdh_root/.payload-swap.js'); s.flipTo('$rdh_root','${PREV_STAMP:-?}','${GUI_ROOT:-/usr/lib/node-red/gui}'); s.writePayloadState('$rdh_root','${PREV_STAMP:-?}','healthy','restored from the pre-migration backup by the operator','operator')\" && rm -f '$rdh_root/DEPLOY-HELD' && /etc/init.d/osi-identityd start && ${NODE_RED_INIT:-/etc/init.d/node-red} start"
+    rdh_prev="${PREV_STAMP:-?}"
+    rdh_line="HELD: Node-RED stopped. payloads/${DEPLOY_STAMP:-?} failed after migrating $rdh_db, and payloads/$rdh_prev does not fit the new schema. State: held (${rdh_root}/payload-state.json); the database and payloads/${DEPLOY_STAMP:-?} are kept as they are. First: run the deploy again, the same way; it checks payloads/${DEPLOY_STAMP:-?} again and keeps all data. Last resort, only when the retry cannot bring the gateway up: the backup $rdh_backup ($rdh_taken) loses everything written to the database since it was taken; nothing more is lost while the gateway stays held, since Node-RED is stopped. The command puts back the release version recorded with payloads/$rdh_prev (left as it is when none was recorded) and leaves the copies $rdh_backup and $rdh_db.bak-* on disk, each about the size of the database: remove them once the gateway runs well. Restore it and return to payloads/$rdh_prev with: cp '$rdh_backup' '$rdh_db.restore' && mv '$rdh_db.restore' '$rdh_db' && rm -f '$rdh_db-wal' '$rdh_db-shm' && node -e \"const s=require('$rdh_root/.payload-swap.js'); s.flipTo('$rdh_root','$rdh_prev','${GUI_ROOT:-/usr/lib/node-red/gui}'); s.writePayloadState('$rdh_root','$rdh_prev','healthy','restored from the pre-migration backup by the operator','operator')\" && { v=\"\$(cat '$rdh_root/payloads/$rdh_prev/release-version' 2>/dev/null)\"; [ -z \"\$v\" ] || { uci set osi-server.cloud.firmware_version=\"\$v\" && uci commit osi-server; }; } && rm -f '$rdh_root/DEPLOY-HELD' && /etc/init.d/osi-identityd start && ${NODE_RED_INIT:-/etc/init.d/node-red} start"
     printf '%s\n' "$rdh_line" > "${DEPLOY_HELD_FILE:-$rdh_root/DEPLOY-HELD}" 2>/dev/null || true
     printf '%s\n' "$rdh_line" >&2
 }
@@ -2314,9 +2315,25 @@ run_schema_migration() {
             echo "WARNING: could not parse available disk space for $backup_dir; proceeding without a disk preflight gate" >&2
             ;;
         *)
+            # Copies earlier migrations left: each about the database's size.
+            # They already use the space df reports; listed so an operator
+            # who is short knows what can go.
+            copies_kb=0
+            copies=""
+            for copy in "$backup_dir"/"$(basename "$DB_PATH")".premigrate-* "$DB_PATH".bak-*; do
+                [ -f "$copy" ] || continue
+                copy_bytes=$(ls -ln "$copy" | awk '{print $5}')
+                case "$copy_bytes" in ''|*[!0-9]*) continue ;; esac
+                copies_kb=$((copies_kb + (copy_bytes + 1023) / 1024))
+                copies="$copies $copy"
+            done
+            echo "Disk: need ~${req_kb}KB (twice the database plus ${margin_mb}MB) on $backup_dir, have ${avail_kb}KB; earlier database copies take ${copies_kb}KB"
             if [ "$avail_kb" -lt "$req_kb" ]; then
                 echo "ERROR: insufficient disk for a safe schema migration on $backup_dir: need ~${req_kb}KB, have ${avail_kb}KB" >&2
-                echo "Free space (prune old $backup_dir/*.premigrate-*, /data/db/backups/*, check DB growth/logs) and re-deploy" >&2
+                if [ -n "$copies" ]; then
+                    echo "Earlier database copies (${copies_kb}KB):$copies; removing the ones no longer needed frees that space" >&2
+                fi
+                echo "Free space (prune old $backup_dir/*.premigrate-*, $DB_PATH.bak-*, /data/db/backups/*, check DB growth/logs) and re-deploy" >&2
                 return 1
             fi
             ;;
@@ -2765,6 +2782,9 @@ tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
 # rollback target until its health check passes, also when a cut leaves it
 # half copied.
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null
+# The release each payload belongs to, for the HELD restore command, which
+# puts osi-server.cloud.firmware_version back with the payload it returns to.
+[ -z "${DEPLOY_FIRMWARE_VERSION:-}" ] || printf '%s\n' "$DEPLOY_FIRMWARE_VERSION" > "$PAYLOADS_ROOT/$DEPLOY_STAMP/release-version"
 PREV_STAMP="$(swap_call currentStamp || true)"
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
@@ -2790,6 +2810,7 @@ if { [ -z "${PREV_STAMP:-}" ] || [ "$PREV_GUI_STAMP" != "$PREV_STAMP" ]; } && [ 
             PREV_STAMP="${DEPLOY_STAMP}-previous"
             swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT" >/dev/null
             PREV_CAPTURED=1
+            [ "${FW_PREV_SET:-0}" != 1 ] || printf '%s\n' "$FW_PREV" > "$PAYLOADS_ROOT/$PREV_STAMP/release-version"
             echo "OK: captured existing flows+GUI pair as payloads/$PREV_STAMP"
         fi
     else
@@ -3569,6 +3590,11 @@ if [ -n "$SERVED_STAMP" ]; then
         echo "WARN: payloads/$SERVED_STAMP never passed a health check or changed since; a failed deploy returns to payloads/$PREV_STAMP" >&2
     elif ! swap_call payloadTrusted "$SERVED_STAMP" >/dev/null; then
         echo "WARN: payloads/$SERVED_STAMP never passed a health check and no healthy payload is retained; it stays the rollback target" >&2
+    fi
+    # The version in UCI is the served payload's (a payload staged before
+    # release-version records existed has none).
+    if [ "${FW_PREV_SET:-0}" = 1 ] && [ ! -e "$PAYLOADS_ROOT/$SERVED_STAMP/release-version" ]; then
+        printf '%s\n' "$FW_PREV" > "$PAYLOADS_ROOT/$SERVED_STAMP/release-version" || true
     fi
 fi
 # rollback target end
