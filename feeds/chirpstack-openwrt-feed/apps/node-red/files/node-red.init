@@ -332,8 +332,32 @@ journal_media_invalid_reason() {
     esac
 }
 
+# payload switch repair begin
+# deploy.sh routes flows.json, the GUI and the helper modules through
+# /srv/node-red/payloads/active and keeps a copy of its payload swap helper
+# beside them. A directory cannot be replaced by a link in one rename, so a
+# power cut while a deploy converts the image GUI or a v0.8.1 module directory
+# leaves that directory beside its absent path. Before Node-RED starts, the
+# helper links it into the active payload again, so the start serves the
+# complete payload without a deploy.
+payload_switch_repair() {
+    local helper="/srv/$PACKAGE_NAME/.payload-swap.js"
+    local report
+    [ -f "$helper" ] || return 0
+    if report="$(node -e '
+      const out = require(process.argv[1]).resumeInterruptedSwitch(process.argv[2], process.argv[3]);
+      if (out) process.stdout.write(out);
+    ' "$helper" "/srv/$PACKAGE_NAME" "/usr/lib/node-red/gui" 2>&1)"; then
+        [ -z "$report" ] || logger -t node-red.init "$report"
+    else
+        logger -t node-red.init "WARN: payload switch repair failed: $report"
+    fi
+}
+# payload switch repair end
+
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
+    payload_switch_repair
 
     ensure_persistent_syslog_sink
 

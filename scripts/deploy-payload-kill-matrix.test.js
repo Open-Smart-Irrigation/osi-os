@@ -39,9 +39,34 @@ function stage(root, stamp, modules) {
   swap.sealModules(root, stamp);
 }
 
+const NODE_RED_INIT = fs.readFileSync(path.join(__dirname, '..', 'feeds', 'chirpstack-openwrt-feed', 'apps', 'node-red', 'files', 'node-red.init'), 'utf8');
+
+// A reboot: node-red.init's repair step, which runs before Node-RED starts,
+// on this root and GUI path, with logger writing to a file.
+function bootRepair({ root, guiRoot }) {
+  const begin = NODE_RED_INIT.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT.indexOf('# payload switch repair end');
+  assert.ok(begin >= 0 && end > begin, 'node-red.init must keep its payload switch repair block');
+  const block = NODE_RED_INIT.slice(begin, end)
+    .split('/srv/$PACKAGE_NAME').join(root)
+    .split('/usr/lib/node-red/gui').join(guiRoot);
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'boot-bin-'));
+  try {
+    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(root, 'boot.log'))}\n`, { mode: 0o755 });
+    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair`], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+    assert.equal(run.status, 0, run.stderr);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+  return readOr(path.join(root, 'boot.log'), '');
+}
+
 function baseRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srv-node-red-kill-'));
   fs.mkdirSync(path.join(root, 'payloads'));
+  // deploy.sh keeps its swap helper here for node-red.init.
+  fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
   writeModule(path.join(root, 'osi-command-ledger'), 'ledger-live');
   fs.mkdirSync(path.join(root, 'osi-watermark-binding'));
   fs.mkdirSync(path.join(root, 'codecs'));
@@ -227,6 +252,17 @@ for (const [name, { build, windows }] of Object.entries(FIXTURES)) {
         const complete = sameOld(state, before) || window ? 'old'
           : JSON.stringify(state) === JSON.stringify(after) ? 'new' : null;
         assert.ok(complete, `kill after change ${k} of ${steps} leaves a mixed payload: ${JSON.stringify(state)}`);
+
+        // A reboot before any deploy: the start serves a complete payload.
+        const log = bootRepair(env);
+        const booted = served(env);
+        if (window) {
+          assert.ok(sameOld(booted, before), `k=${k}: the start after a reboot serves the old payload: ${JSON.stringify(booted)}`);
+          assert.match(log, /an interrupted switch left the/);
+        } else {
+          assert.deepEqual(booted, state, `k=${k}: the boot repair leaves a complete payload alone`);
+          assert.doesNotMatch(log, /WARN/);
+        }
 
         // The retry: deploy.sh stages a new attempt and picks its rollback payload.
         stage(env.root, 'retry', ['osi-a', 'osi-new']);
