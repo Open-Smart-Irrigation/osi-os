@@ -2271,6 +2271,13 @@ run_native_sqlite3_preflight || exit 1
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
 same_fs_or_die
+# node-red.init runs this copy at start to finish a switch a power cut
+# interrupted; it is in place before this deploy changes any live link.
+if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
+    rm -f /srv/node-red/.payload-swap.js.tmp
+    echo "ERROR: could not keep the payload swap helper for node-red.init; refusing before any file is replaced" >&2
+    exit 1
+fi
 echo "OK"
 
 # legacy capture preflight begin
