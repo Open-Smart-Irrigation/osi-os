@@ -6,12 +6,18 @@ const fs = require('node:fs'), path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 exports.run = async function(h) {
-  const results=[];
+  const results=[],rechecks=[];
   async function test(id,fn) {
     h.state.caseId=id;
     const failures=[], evidence={};
     const check=(code,ok,actual)=>{if(!ok)failures.push({code,actual});};
-    await fn(check,evidence);
+    const defer=assertAgain=>rechecks.push(async()=>{
+      h.state.caseId=id;
+      let completed=false;
+      try {await assertAgain();completed=true;}
+      finally {console.log('RECHECK',id,completed&&!failures.length?'PASS':'FAIL');}
+    });
+    await fn(check,evidence,defer);
     results.push({id,failures,evidence});
     console.log('CASE',id,failures.length?JSON.stringify(failures):'PASS');
   }
@@ -55,18 +61,28 @@ exports.run = async function(h) {
     {id:'flushing',method:'PUT',url:e=>'/api/devices/'+e+'/strega/flushing',body:{returnPosition:'CLOSE',percentage:50},port:28,hex:'3032'},
   ];
   for(const c of commands) {
-    await test('command-accepted:'+c.id,async(check,e)=>{
-      const eui=(await device());const r=await h.http(c.method,c.url(eui),c.body,token);await h.sleep(120);httpCheck(check,r,202);
-      e.radio=radio(eui);e.stored=(await logs(eui));
-      check('radio',isDeepStrictEqual(e.radio.map(x=>({port:x.port,hex:x.hex})),[{port:c.port,hex:c.hex}]),e.radio);
+    await test('command-accepted:'+c.id,async(check,e,recheck)=>{
+      const eui=(await device());const r=await h.http(c.method,c.url(eui),c.body,token);
+      await waitFor(async()=>(await logs(eui)).length>0);
+      httpCheck(check,r,202);
       const action={close:'CLOSE','close-duration':'CLOSE_FOR_DURATION','open-duration':'OPEN_FOR_DURATION',interval:'SET_INTERVAL','timed-close':'TIMED_ACTION',magnet:'SET_MAGNET_MODE','partial-close':'SET_PARTIAL_OPENING 50%',flushing:'SET_FLUSHING 50% -> CLOSE'}[c.id];
-      check('stored',e.stored.length===1&&e.stored[0].action===action,e.stored);
+      const assertOutcome=async()=>{
+        e.radio=radio(eui);e.stored=(await logs(eui));
+        check('radio',isDeepStrictEqual(e.radio.map(x=>({port:x.port,hex:x.hex})),[{port:c.port,hex:c.hex}]),e.radio);
+        check('stored',e.stored.length===1&&e.stored[0].action===action,e.stored);
+      };
+      await assertOutcome();recheck(assertOutcome);
     });
-    await test('command-refused:'+c.id,async(check,e)=>{
+    await test('command-refused:'+c.id,async(check,e,recheck)=>{
       const eui=(await device('KIWI_SENSOR'));const before=JSON.stringify((await row(eui)));
       const r=await h.http(c.method,c.url(eui),c.body,token);httpCheck(check,r,409);
+      await h.sleep(120);
       e.radio=radio(eui);check('radio',e.radio.length===0,e.radio);
       check('stored',(await logs(eui)).length===0&&before===JSON.stringify((await row(eui))),(await row(eui)));
+      recheck(async()=>{
+        const stored=await logs(eui),sent=radio(eui);
+        check('stored',stored.length===0,stored);check('radio',sent.length===0,sent);
+      });
     });
   }
   for(const body of [{action:'OPEN'},{action:'OPEN_FOR_DURATION',duration_minutes:0},{action:'OPEN_FOR_DURATION',duration_minutes:256}]) {
@@ -87,8 +103,8 @@ exports.run = async function(h) {
   const evidenceOf=r=>{try{return Object.keys((JSON.parse(r.transport_json||'{}')||{}).untrusted_report||{}).sort().join('+')||null;}catch(_){return 'unreadable';}};
   await test('open-report-close-open',async(check,e)=>{
     const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-    await h.uplink(eui,1);check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
-    await h.uplink(eui,0);check('closed-state',(await row(eui)).current_state==='CLOSED',(await row(eui)).current_state);
+    await h.uplink(eui,1);await waitFor(async()=>(await row(eui)).current_state==='OPEN');check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
+    await h.uplink(eui,0);await waitFor(async()=>(await row(eui)).current_state==='CLOSED');check('closed-state',(await row(eui)).current_state==='CLOSED',(await row(eui)).current_state);
     e.stored=(await expectations(eui));check('settled',e.stored.some(r=>r.observed_open_at&&r.observed_close_at),e.stored);
     httpCheck(check,await open(eui),202,'second-http');check('radio',radio(eui).length===2,radio(eui));
   });
@@ -97,7 +113,7 @@ exports.run = async function(h) {
   const age=require('./time').age;
   await test('open-no-report-open-later',async(check,e)=>{
     const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-    (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
+    (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.settle();
     httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
     check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
     check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
@@ -118,8 +134,8 @@ exports.run = async function(h) {
       // after a power cut. current_state is the last report the gateway accepted, not the valve's
       // physical state.
       const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-      await h.uplink(eui,1);check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
-      await h.uplink(eui,0);check('closed-state',(await row(eui)).current_state==='CLOSED',(await row(eui)).current_state);
+      await h.uplink(eui,1);await waitFor(async()=>(await row(eui)).current_state==='OPEN');check('open-state',(await row(eui)).current_state==='OPEN',(await row(eui)).current_state);
+      await h.uplink(eui,0);await waitFor(async()=>(await row(eui)).current_state==='CLOSED');check('closed-state',(await row(eui)).current_state==='CLOSED',(await row(eui)).current_state);
       httpCheck(check,await open(eui),202,'second-http');
       e.stored=(await records(eui));e.radio=radioCalls(eui);
       check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
@@ -142,7 +158,7 @@ exports.run = async function(h) {
     h.setMarker(false);
     try {
       const eui=(await device());httpCheck(check,await open(eui),202,'initial-http');
-      (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.sleep(200);
+      (await age(h,eui,3*24*60));h.inject('strega-reconciliation-monitor');await h.settle();
       httpCheck(check,await open(eui),202,'later-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
       check('stored',e.stored.length===2&&oneRecordPerOpen(e.stored,2),recordSummary(e.stored));
       check('radio',isDeepStrictEqual(e.radio,[OPEN_FRAME,OPEN_FRAME]),e.radio);
@@ -172,7 +188,13 @@ exports.run = async function(h) {
     await test('open-after:'+id,async(check,e)=>{
       const c=commands.find(c=>c.id===id),eui=(await device());httpCheck(check,await h.http(c.method,c.url(eui),c.body,token),202,'initial-http');
       const serviceFrame={fn:'enqueue',port:c.port,hex:c.hex,expiresAt:null};
-      const beforeCount=(await expectations(eui)).length;(await age(h,eui,3*24*60));await h.uplink(eui,0);
+      const beforeCount=(await expectations(eui)).length;(await age(h,eui,3*24*60));
+      const reportCount=async()=>(await h.sql('SELECT COUNT(*) n FROM device_data WHERE deveui=?',eui))[0].n;
+      const beforeReport=await reportCount();
+      await h.uplink(eui,0);
+      const reportApplied=async()=>(await row(eui)).current_state==='CLOSED'&&await reportCount()>beforeReport;
+      await waitFor(reportApplied);
+      check('closed-state',await reportApplied(),{device:await row(eui),reports:await reportCount()});
       httpCheck(check,await open(eui),202,'open-http');e.stored=(await records(eui));e.radio=radioCalls(eui);
       check('stored',e.stored.length===beforeCount+1&&openRecords(e.stored).length===1,recordSummary(e.stored));
       check('radio',isDeepStrictEqual(e.radio,[serviceFrame,OPEN_FRAME]),e.radio);
@@ -213,8 +235,8 @@ exports.run = async function(h) {
     const before=radio(eui).length;
     h.inject('valve-clock-fn');
     await waitFor(()=>radio(eui).length>=before+8);
-    // The clock worker closes its database asynchronously after its last enqueue.
-    await h.sleep(120);
+    // Wait for post-enqueue persistence and the worker's asynchronous close.
+    await h.settle();
     return radio(eui).slice(before).filter(c=>c.port>=14&&c.port<=21).map(c=>({port:c.port,hex:c.hex}));
   }
   const planFrames=minutes=>[...Array.from({length:7},(_,day)=>({port:14+day,hex:minutes?'ff8600ff06'+String(minutes)+'ff'.repeat(18):'ff'.repeat(24)})),{port:21,hex:'30'}].sort((a,b)=>a.port-b.port);
@@ -323,6 +345,8 @@ exports.run = async function(h) {
     check('bytes',changed.length===0,changed);
   });
   await h.settle();
+  // Side branches can add a forbidden row/frame or duplicate an accepted one.
+  for(const recheck of rechecks)await recheck();
   // All error-level events are checked, including non-function nodes. Keep the
   // established F-14 node error separate from unhandled function errors.
   await test('startup-node-errors',async check=>{
