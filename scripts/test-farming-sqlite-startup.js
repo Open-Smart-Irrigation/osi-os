@@ -33,7 +33,7 @@ function fakeChild(result, manual) {
 }
 
 function fixture({ addons = [], stat = () => ({}), result = { status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' }, clock = [0, 12], manual = false } = {}) {
-  const logs = [], calls = [], children = [], timers = [];
+  const logs = [], calls = [], children = [], timers = [], exits = [];
   let maps = addons;
   let tick = 0;
   const state = createStartupState({
@@ -44,10 +44,11 @@ function fixture({ addons = [], stat = () => ({}), result = { status: 0, stdout:
     spawn: (...args) => { calls.push(args); const child = fakeChild(typeof result === 'function' ? result() : result, manual); children.push(child); return child; },
     setTimer: (fn, ms) => { const timer = { fn, ms, cleared: false }; timers.push(timer); return timer; },
     clearTimer: (timer) => { timer.cleared = true; },
+    onProcessExit: (fn) => { exits.push(fn); return () => { const i = exits.indexOf(fn); if (i >= 0) exits.splice(i, 1); }; },
     monotonicNow: () => clock[Math.min(tick++, clock.length - 1)],
     log: (message) => logs.push(message),
   });
-  return { state, logs, calls, children, timers, setAddons: (value) => { maps = value; } };
+  return { state, logs, calls, children, timers, exits, setAddons: (value) => { maps = value; } };
 }
 
 test('a healthy file is checked once, read-only, with quick_check and the core tables', async () => {
@@ -359,4 +360,16 @@ test('"checking" ranks with "not checked": it replaces only healthy', async () =
   assert.equal(global.get('edge_health').health_state, 'degraded');
   await pending;
   assert.equal(global.get('edge_health').health_state, 'degraded');
+});
+
+test('the reader is killed when Node-RED exits, and the exit hook is removed once it answers', async () => {
+  const f = fixture({ manual: true });
+  f.state.check();
+  assert.equal(f.exits.length, 1);
+  f.exits[0]();
+  assert.equal(f.children[0].killedWith, 'SIGKILL');
+  const g = fixture();
+  g.state.check();
+  await flush();
+  assert.equal(g.exits.length, 0, 'no hook left after the verdict');
 });

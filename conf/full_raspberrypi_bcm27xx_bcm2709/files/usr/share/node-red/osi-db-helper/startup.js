@@ -19,12 +19,16 @@ const childProcess = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 
 const FARM_DB = '/data/db/farming.db';
-// quick_check reads every page. A 103 MiB file took 1.1 to 1.2 s cold on the
-// emulated Pi 5; the production gateway's SD card read about ten times slower
-// (18 s for a copy the emulator makes in 1 to 2 s), so about 12 s per 100 MB
-// there, a minute for 500 MB. Ten minutes leaves a verdict for files many
-// times today's size. The check runs beside the flows, so the bound delays
-// nothing; it only ends a read that will not finish.
+// The bound, from measurements:
+// - quick_check reads every page: 1.1 to 1.2 s cold for a 103 MiB file on
+//   the emulated Pi 5 (image builder, 12 November 2026);
+// - the production gateway's SD card copied its 94 MiB database in 18 s,
+//   a copy the emulator makes in 1 to 2 s: 9 to 18 times slower;
+// - so the check needs 10 to 22 s per 100 MB there, about 50 s to 2 min for
+//   500 MB, and ten minutes still gives a verdict on 2.7 to 6 GB.
+// The check runs beside the flows: the bound delays nothing; it ends a read
+// that will not finish, and so also bounds how long the reader holds back
+// checkpoints (the -wal grows by about 22 KB per committed write meanwhile).
 const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 const CORE_TABLES = ['users', 'devices', 'irrigation_zones'];
 const CHECK_SQL = 'PRAGMA quick_check(1); SELECT \'core_tables=\' || count(*) FROM sqlite_master'
@@ -72,6 +76,10 @@ function createStartupState({
   spawn = childProcess.spawn,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+  // Node-RED's SIGTERM, SIGINT and SIGHUP handlers and its uncaught-error
+  // handler end in process.exit(), which fires 'exit': the reader is killed
+  // with Node-RED and does not hold the write-ahead log alone afterwards.
+  onProcessExit = (fn) => { process.once('exit', fn); return () => process.removeListener('exit', fn); },
   monotonicNow = () => performance.now(),
   log = (message) => console.error(message),
   farmPath = FARM_DB,
@@ -186,7 +194,11 @@ function createStartupState({
       return getHealth();
     }
     let stdout = '', stderr = '';
+    const stopWithProcess = onProcessExit(() => {
+      try { child.kill('SIGKILL'); } catch (error) { report('exit', 'start-up check reader not stopped at exit: ' + String(error && error.message || error)); }
+    });
     const timer = setTimer(() => {
+      stopWithProcess();
       try { child.kill('SIGKILL'); } catch (error) { report('kill', 'start-up check could not be stopped: ' + String(error && error.message || error)); }
       finish(started, { status: 'not_checked_timeout', detail: 'check exceeded ' + CHECK_TIMEOUT_MS + ' ms' });
     }, CHECK_TIMEOUT_MS);
@@ -195,10 +207,12 @@ function createStartupState({
     if (child.stderr) child.stderr.on('data', (chunk) => { if (stderr.length < 65536) stderr += chunk; });
     child.on('error', (error) => {
       clearTimer(timer);
+      stopWithProcess();
       finish(started, { status: 'not_checked', detail: String(error && (error.code || error.message) || error).slice(0, 200) });
     });
     child.on('close', (code) => {
       clearTimer(timer);
+      stopWithProcess();
       finish(started, classify({ status: code, stdout, stderr }));
     });
     return getHealth();
