@@ -384,6 +384,12 @@ for supported upgrades. An image is for a new device or a deliberate reset.
 The post-sysupgrade states below describe recovery from unsupported operations;
 they do not authorize performing such an upgrade.
 
+Until the next release, a gateway that was installed from an OSI OS image must
+not be upgraded by script either: the upgrade stops at the payload switch,
+after the database migration, and leaves the gateway stopped (NEW-13 in
+[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Leave
+such a gateway on its current version until that release.
+
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the
 target. Otherwise (a gateway the payload layout has not reached, or after a

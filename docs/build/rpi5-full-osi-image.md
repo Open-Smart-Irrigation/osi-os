@@ -5,6 +5,12 @@ gateway in use erases the farm's data; never use that path for an existing
 installation. Upgrade it with `deploy.sh`, or the
 [bundle path over a flaky link](../operations/deploying-over-a-flaky-link.md).
 
+Until the next release, a gateway that was installed from an OSI OS image must
+not be upgraded by script either: the upgrade stops at the payload switch,
+after the database migration, and leaves the gateway stopped (NEW-13 in
+[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Leave
+such a gateway on its current version until that release.
+
 This is the release workflow for fresh OSI OS Raspberry Pi factory images. It
 builds:
 

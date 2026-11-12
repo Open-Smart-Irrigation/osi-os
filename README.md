@@ -163,6 +163,12 @@ a gateway in use by image: use `deploy.sh` as described under
 [bundle path over a flaky link](docs/operations/deploying-over-a-flaky-link.md).
 Flash an image only for a new device or a deliberate reset.
 
+Until the next release, a gateway that was installed from an OSI OS image must
+not be upgraded by script either: the upgrade stops at the payload switch,
+after the database migration, and leaves the gateway stopped (NEW-13 in
+[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Leave
+such a gateway on its current version until that release.
+
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
 |                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |
