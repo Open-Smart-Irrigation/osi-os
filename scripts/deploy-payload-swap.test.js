@@ -1183,3 +1183,61 @@ test('a payload without its modules is never a target on a gateway whose helpers
   assert.equal(swap.rollbackTarget(root, '20261103', 'next'), '20261101');
   assert.equal(swap.owedCheckPlan(root, '70', '70:a'), '20261103|0|20261101|20261101');
 });
+
+// Ledger item 5: a power cut while a switch removes the image layer's GUI
+// directory, file by file. The marker beside it is now synced before the
+// first file goes; a GUI left partly removed is finished whether its marker
+// is present, empty (written by a head before the sync) or absent. Each state
+// is repaired by the boot (resumeInterruptedSwitch), passes the next deploy's
+// legacy-capture preflight, and takes the next switch.
+for (const marker of ['present', 'empty', 'absent']) {
+  test(`a GUI partly removed by a cut switch, marker ${marker}: the boot, the next deploy and the next switch repair it`, (t) => {
+    const root = moduleRoot(t);
+    const guiRoot = path.join(root, 'web', 'gui');
+    const romGui = path.join(root, 'rom', path.resolve(guiRoot));
+    const saved = { paths: process.env.OSI_SWAP_IMAGE_LAYER_PATHS, rom: process.env.OSI_SWAP_ROM_ROOT };
+    process.env.OSI_SWAP_IMAGE_LAYER_PATHS = path.resolve(guiRoot);
+    process.env.OSI_SWAP_ROM_ROOT = path.join(root, 'rom');
+    t.after(() => {
+      for (const [name, value] of [['OSI_SWAP_IMAGE_LAYER_PATHS', saved.paths], ['OSI_SWAP_ROM_ROOT', saved.rom]]) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+    // The image's GUI, and the payload that holds the same GUI.
+    for (const dir of [romGui]) {
+      fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'index.html'), '<title>image</title>\n');
+      fs.writeFileSync(path.join(dir, 'assets', 'a.js'), 'a\n');
+      fs.writeFileSync(path.join(dir, 'assets', 'b.js'), 'b\n');
+    }
+    stageWithModules(root, '20261101', { 'osi-a': '' });
+    flipTo(root, '20261101', guiRoot);
+    // The cut: the GUI path is the image's directory again, partly removed.
+    fs.rmSync(guiRoot, { force: true });
+    fs.mkdirSync(path.join(guiRoot, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(guiRoot, 'assets', 'b.js'), 'b\n');
+    const markerPath = `${guiRoot}.osi-removing`;
+    if (marker === 'present') fs.writeFileSync(markerPath, `${path.join(root, 'payloads', 'active', 'gui')}\n`);
+    if (marker === 'empty') fs.writeFileSync(markerPath, '');
+
+    const report = swap.resumeInterruptedSwitch(root, guiRoot);
+    assert.match(report || '', /gui/);
+    assert.ok(fs.lstatSync(guiRoot).isSymbolicLink(), 'the GUI is a link again');
+    assert.equal(fs.readFileSync(path.join(guiRoot, 'index.html'), 'utf8'), '<title>20261101</title>\n');
+    assert.equal(fs.existsSync(markerPath), false);
+    assert.equal(swap.verifyPair(root, '20261101', guiRoot), true);
+    assert.doesNotThrow(() => swap.legacyCapturePreflight(root, path.join(root, 'flows.json'), guiRoot));
+
+    stageWithModules(root, '20261102', { 'osi-a': '' });
+    flipTo(root, '20261102', guiRoot);
+    assert.equal(swap.verifyPair(root, '20261102', guiRoot), true);
+  });
+}
+
+test('the removal marker is on storage before the first file of the GUI is removed', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'deploy-payload-swap.js'), 'utf8');
+  const at = source.indexOf("removing = `${link}.osi-removing`;");
+  const block = source.slice(at, source.indexOf('fs.rmSync(link, { recursive: true, force: true });', at));
+  assert.match(block, /writeDurable\(removing,/);
+});

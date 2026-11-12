@@ -299,9 +299,10 @@ function atomicSymlink(link, target, label, { keepBackup = false, replaceable = 
         if (remove) {
           // The removal goes file by file, so a kill can leave the directory
           // partly removed. The marker beside it (the link's target) lets
-          // resumeInterruptedSwitch() finish the removal and the link.
+          // resumeInterruptedSwitch() finish the removal and the link. It is
+          // on storage, file and directory synced, before the first file goes.
           removing = `${link}.osi-removing`;
-          fs.writeFileSync(removing, `${target}\n`);
+          writeDurable(removing, `${target}\n`);
           fs.rmSync(link, { recursive: true, force: true });
         }
       } else if (keepBackup) {
@@ -783,6 +784,26 @@ function leftovers(link) {
   };
 }
 
+// True when <gui> is a real directory of the image layer missing an entry its
+// image copy has, and the active payload holds a GUI to link instead.
+function partlyRemovedImageGui(root, gui) {
+  const stat = lstatOrNull(gui);
+  if (!stat || !stat.isDirectory() || !imageLayerDir(gui)) return false;
+  const active = activeStamp(root);
+  if (!active || !isFile(path.join(guiPayloadDir(root, active), 'index.html'))) return false;
+  const missing = (rom, live) => fs.readdirSync(rom).some((name) => {
+    const romEntry = path.join(rom, name);
+    const liveEntry = path.join(live, name);
+    if (!lstatOrNull(liveEntry)) return true;
+    return isDirectory(romEntry) && isDirectory(liveEntry) && missing(romEntry, liveEntry);
+  });
+  try {
+    return missing(romCopy(gui), gui);
+  } catch (_) {
+    return false;
+  }
+}
+
 // Finishes what a killed switch left behind, before deploy.sh reads the live
 // state and before node-red.init starts Node-RED:
 // - an entry that is absent while the directory or file a switch moved aside
@@ -799,15 +820,33 @@ function resumeInterruptedSwitch(root, guiRoot) {
     const { aside, temps } = leftovers(link);
     for (const temp of temps) fs.rmSync(temp, { recursive: true, force: true });
     const removing = `${link}.osi-removing`;
-    if (isFile(removing)) {
-      const target = fs.readFileSync(removing, 'utf8').trim();
+    if (lstatOrNull(removing)) {
+      // Present means a removal began. An empty or unreadable marker (from
+      // before it was written durably) still finishes the removal; the link
+      // then follows from the active payload or the image below.
+      let target = '';
+      try {
+        target = fs.readFileSync(removing, 'utf8').trim();
+      } catch (_) {
+        target = '';
+      }
       const stat = lstatOrNull(link);
-      if (target && (!stat || !stat.isSymbolicLink())) {
+      if (!stat || !stat.isSymbolicLink()) {
         fs.rmSync(link, { recursive: true, force: true });
-        atomicSymlink(link, target, `finish ${path.basename(link)}`);
-        lines.push(`WARN: an interrupted switch was removing ${path.basename(link)}; finished it and linked it to ${path.relative(path.dirname(link), target)}`);
+        if (target) {
+          atomicSymlink(link, target, `finish ${path.basename(link)}`);
+          lines.push(`WARN: an interrupted switch was removing ${path.basename(link)}; finished it and linked it to ${path.relative(path.dirname(link), target)}`);
+        } else {
+          lines.push(`WARN: an interrupted switch was removing ${path.basename(link)} (its marker is empty); finished the removal`);
+        }
       }
       fs.rmSync(removing, { force: true });
+    } else if (guiRoot && link === guiLink(guiRoot) && partlyRemovedImageGui(root, link)) {
+      // No marker, but the image-layer GUI directory lacks files the image
+      // has while the active payload holds a complete GUI: a conversion was
+      // cut during its removal. Finish it; the link follows below.
+      fs.rmSync(link, { recursive: true, force: true });
+      lines.push(`WARN: ${path.basename(link)} was partly removed by an interrupted switch (no marker); finished the removal`);
     }
     if (!lstatOrNull(link) && aside.length) {
       fs.renameSync(aside[0], link);
