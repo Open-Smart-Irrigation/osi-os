@@ -68,6 +68,35 @@ function missingFetches(deploySource, moduleName, fileList) {
   return fileList.filter((filename) => !fetchBlockPattern(moduleName, filename).test(deploySource));
 }
 
+// NEW-27: without stat(1), the one-filesystem precondition of the switch is
+// still checked, and a path whose filesystem cannot be read refuses.
+test('same_fs_or_die checks the filesystem without stat and refuses what it cannot read', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const start = indexOf('same_fs_or_die() {');
+  const fn = deploy.slice(start, deploy.indexOf('\n}\n', start) + 3);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-same-fs-'));
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const run = (a, b) => spawnSync('/bin/sh', ['-c', `${fn}\nsame_fs_or_die "$1" "$2"\necho same`, 'sh', a, b],
+    { encoding: 'utf8', env: { PATH: bin } });
+  try {
+    fs.mkdirSync(path.join(dir, 'payloads'));
+    const same = run(dir, path.join(dir, 'payloads'));
+    assert.equal(same.status, 0, same.stderr);
+    assert.match(same.stdout, /same/);
+    const missing = run(dir, path.join(dir, 'absent'));
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /could not read the filesystem/);
+    if (fs.existsSync('/proc/self') && fs.statSync('/proc/self').dev !== fs.statSync(dir).dev) {
+      const other = run(dir, '/proc/self');
+      assert.equal(other.status, 1);
+      assert.match(other.stderr, /different filesystem/);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 for (const mod of FENCED_MODULES) {
   mod.expectedFiles = listExpectedModuleFiles(mod.dir);
 }
@@ -79,8 +108,8 @@ test('deploy.sh fetches the tested payload-swap module and verifies same-filesys
   assert.match(deploy, /SWAP_JS="\$TMP_DIR\/deploy-payload-swap\.js"/);
   assert.match(deploy, /fetch "scripts\/deploy-payload-swap\.js" "\$SWAP_JS"/);
   assert.match(deploy, /same_fs_or_die\(\)/);
-  assert.match(deploy, /stat -c %d \/srv\/node-red/);
-  assert.match(deploy, /stat -c %d "\$PAYLOADS_ROOT"/);
+  assert.match(deploy, /^same_fs_or_die \/srv\/node-red "\$PAYLOADS_ROOT"$/m);
+  assert.doesNotMatch(deploy, /^[^#\n]*\bstat -c/m, 'the gateways have no stat(1) (NEW-27)');
   assert.match(deploy, /typeof out === "boolean"\) process\.exit\(out \? 0 : 1\)/,
     'boolean swap results must propagate false as a nonzero shell status');
 });
