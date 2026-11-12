@@ -49,6 +49,10 @@ jobs:
             scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
+      - name: Image upgrade refusal and first-boot hold
+        run: |
+          command -v sqlite3 || (sudo apt-get update && sudo apt-get install -y sqlite3)
+          OSI_TEST_IMAGE_NODE=/__osi_fixture_missing_node__/node node --test scripts/test-image-upgrade-safety.js
       - name: Shell tests
         run: |
           sh scripts/test-gateway-identity-helper.sh

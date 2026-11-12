@@ -2318,6 +2318,11 @@ function r11Image(gw) {
 function r11Script(gw, opts = {}) {
   let s = fs.readFileSync(path.join(REPO, 'conf', 'full_raspberrypi_bcm27xx_bcm2712',
     'files/etc/uci-defaults/98_osi_node_red_seed'), 'utf8');
+  // This fixture isolates native sqlite recovery. W7's suite exercises the
+  // real image provenance gate with farm databases and provisioning evidence.
+  const safetyStub = path.join(gw.root, 'image-safety-stub.sh');
+  fs.writeFileSync(safetyStub, '#!/bin/sh\nexit 0\n');
+  s = s.split('/usr/bin/node /usr/libexec/osi-image-safety.js').join('sh ' + r2Quote(safetyStub));
   const img = path.join(gw.root, 'image');
   const fw = opts.firmware === false
     ? path.join(gw.root, 'firmware-that-was-removed', 'sqlite3') : gw.fwSqlite;

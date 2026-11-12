@@ -17,6 +17,11 @@ boot() {
 }
 
 start() {
+    if [ -e /etc/osi-image-initialization.required ] &&
+       ! /usr/bin/node /usr/libexec/osi-image-safety.js runtime; then
+        logger -t osi-bootstrap 'image initialization hold; provisioning refused'
+        return 1
+    fi
 	if stamp_valid; then
 		return 0
 	fi

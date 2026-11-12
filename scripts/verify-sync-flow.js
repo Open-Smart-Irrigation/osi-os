@@ -3822,9 +3822,10 @@ if (fs.existsSync(osiDbSeedPath)) {
 } else {
   fail(`missing 97_osi_db_seed at ${osiDbSeedPath}`);
 }
-expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/usr/share/db/farming.db', '97_osi_db_seed seeds from /usr/share/db/farming.db');
-expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/data/db/farming.db', '97_osi_db_seed seeds to /data/db/farming.db');
-expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '[ -f "$DATA_DB" ]', '97_osi_db_seed skips seed when target DB exists');
+expectFileIncludes('97_osi_db_seed', osiDbSeedScript, '/usr/libexec/osi-image-safety.js seed', '97_osi_db_seed delegates to guarded image initialization');
+const imageSafety = fs.readFileSync(path.resolve(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-image-safety.js'), 'utf8');
+expectFileIncludes('image safety', imageSafety, 'if (present(at(root, DB))) return', 'a retained database holds before fresh seeding');
+expectFileIncludes('image safety', imageSafety, 'atomicWrite(dest, fs.readFileSync', 'fresh image seeding publishes the seed atomically');
 expectFileExcludes('97_osi_db_seed', osiDbSeedScript, 'cp --force', '97_osi_db_seed must not force-overwrite existing DB');
 
 // --- 98_osi_node_red_seed ---

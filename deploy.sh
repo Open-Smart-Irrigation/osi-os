@@ -2300,6 +2300,22 @@ fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
     "/etc/init.d/node-red"
 chmod 755 /etc/init.d/node-red
+
+# image upgrade guard begin
+# W7 source-side guard installation is independent of W5 payload activation.
+fetch_required "Image upgrade safety helper" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-image-safety.js" \
+    "$TMP_DIR/osi-image-safety.js"
+mkdir -p /usr/libexec /usr/sbin
+cp "$TMP_DIR/osi-image-safety.js" /usr/libexec/osi-image-safety.js.new
+chmod 755 /usr/libexec/osi-image-safety.js.new
+mv /usr/libexec/osi-image-safety.js.new /usr/libexec/osi-image-safety.js
+fetch_required "Console factory reset" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/sbin/osi-factory-reset" \
+    "/usr/sbin/osi-factory-reset"
+chmod 755 /usr/sbin/osi-factory-reset
+node /usr/libexec/osi-image-safety.js install
+# image upgrade guard end
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
