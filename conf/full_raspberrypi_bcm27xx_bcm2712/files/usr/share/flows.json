@@ -903,6 +903,10 @@
       {
         "var": "chirpstack",
         "module": "osi-chirpstack-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ]
   },
@@ -1437,6 +1441,10 @@
       {
         "var": "osiLib",
         "module": "osi-lib"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 1300,
@@ -1680,6 +1688,10 @@
       {
         "var": "osiLib",
         "module": "osi-lib"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ]
   },
@@ -1798,6 +1810,10 @@
       {
         "var": "osiLib",
         "module": "osi-lib"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ]
   },
@@ -14039,6 +14055,10 @@
       {
         "var": "osiDb",
         "module": "osi-db-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 350,
@@ -14070,6 +14090,10 @@
       {
         "var": "osiDb",
         "module": "osi-db-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 350,
@@ -14105,6 +14129,10 @@
       {
         "var": "chirpstack",
         "module": "osi-chirpstack-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 350,
@@ -15467,6 +15495,10 @@
       {
         "var": "osiLib",
         "module": "osi-lib"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 1580,
@@ -15502,6 +15534,10 @@
       {
         "var": "chirpstack",
         "module": "osi-chirpstack-helper"
+      },
+      {
+        "var": "crypto",
+        "module": "crypto"
       }
     ],
     "x": 500,

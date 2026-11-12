@@ -22,8 +22,12 @@ jobs:
           node-version: '22'
       # The conditional command contract and the local pending-boundary harness
       # use the same pinned AJV dependencies as the paired server export gate.
-      - name: Install scripts AJV dependencies
+      - name: Install scripts check dependencies
         run: npm ci --ignore-scripts --prefix scripts
+      - name: Function sandbox identifier check and regression tests
+        run: |
+          node --test scripts/verify-flows-sandbox.test.js
+          node scripts/verify-flows-sandbox.js
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Reference-tree ownership and valve-router client lifetime
