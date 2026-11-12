@@ -184,16 +184,25 @@ function pathWithout(dir, missing) {
   return bin;
 }
 
-test('without stat: an existing executable hook (a second deploy, a retry) is refreshed', () => {
-  const fixture = makeFixture({ hookMode: 0o755, service: false, adapter: false });
-  try {
-    const result = runFixture(fixture, { path: pathWithout(fixture.dir, ['stat']) });
-    assert.equal(result.status, 0, result.stderr);
-    assert.doesNotMatch(result.stderr, /could not record existing clock hook mode/);
-    assert.equal(mode(fixture.hook), 0o755);
-    assert.equal(result.serviceLog, '');
-  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
-});
+// The hook exists before the deploy in two ways: an earlier deploy installed
+// it (the second deploy, the retry), or the v0.8.2 image ships it, so there
+// the first script deploy meets it too. Both are executable (the image ships
+// it 0755).
+for (const [name, options] of [
+  ['installed by an earlier deploy (a second deploy, a retry)', { hookMode: 0o755, service: false, adapter: false }],
+  ['shipped in the image (the first script deploy on a v0.8.2 image)', { hookMode: 0o755 }],
+]) {
+  test(`without stat: an existing executable hook ${name} is refreshed without a restart`, () => {
+    const fixture = makeFixture(options);
+    try {
+      const result = runFixture(fixture, { path: pathWithout(fixture.dir, ['stat']) });
+      assert.equal(result.status, 0, result.stderr);
+      assert.doesNotMatch(result.stderr, /could not record existing clock hook mode/);
+      assert.equal(mode(fixture.hook), 0o755);
+      assert.equal(result.serviceLog, '');
+    } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+  });
+}
 
 test('without stat: an existing inactive hook keeps its mode when the restart fails, and a retry activates it', () => {
   const fixture = makeFixture({ hookMode: 0o640 });
