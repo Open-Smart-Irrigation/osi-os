@@ -63,7 +63,7 @@ copy_required() {  # source, destination, name
   [ -f "$2" ] && [ ! -L "$2" ] || die "$3 backup is not a regular file"
   cmp -s "$1" "$2" || die "$3 backup differs from its source"
 }
-# flows.json is a SYMLINK through /srv/node-red/payloads/.active into payloads/<stamp>.
+# flows.json is a SYMLINK through /srv/node-red/payloads/active into payloads/<stamp>.
 copy_required /srv/node-red/flows.json "$BK/flows.json" flows.json
 [ -s "$BK/flows.json" ] || die "flows.json backup is empty"
 copy_required /srv/node-red/settings.js "$BK/settings.js" settings.js

@@ -357,11 +357,25 @@ payload_switch_repair() {
         logger -t node-red.init "WARN: payload switch repair failed: $report"
     fi
 }
+
+# A gateway deploy.sh held stopped (payload-state.json says "held"): Node-RED
+# does not start, after a reboot or a manual start either. It would run code
+# whose health check failed, or older code on a migrated database. The hold
+# ends with the command in /srv/node-red/DEPLOY-HELD (restore the
+# pre-migration backup, switch back, record that payload healthy) or with a
+# deploy that switches in a payload.
+payload_hold_check() {
+    local state="/srv/$PACKAGE_NAME/payload-state.json"
+    grep -q '"state":"held"' "$state" 2>/dev/null || return 0
+    logger -t node-red.init "HELD: Node-RED not started. $(cat "/srv/$PACKAGE_NAME/DEPLOY-HELD" 2>/dev/null || echo "See $state.")"
+    return 1
+}
 # payload switch repair end
 
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
     payload_switch_repair
+    payload_hold_check || return 0
 
     ensure_persistent_syslog_sink
 

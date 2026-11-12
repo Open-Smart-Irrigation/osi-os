@@ -122,6 +122,7 @@ function writeFlows(g, marker) {
 function freshImage(g, image = 'image') {
   writeFlows(g, `flows@${image}`);
   writeModule(g.guiRoot, `gui@${image}`);
+  fs.writeFileSync(path.join(g.guiRoot, 'index.html'), `<title>gui@${image}</title>\n`);
   for (const name of TABLE_MODULES) writeModule(path.join(g.root, name), `${name}@${image}`);
 }
 
@@ -131,6 +132,7 @@ function freshImage(g, image = 'image') {
 function sysupgrade(g, image, { oldSeed = false } = {}) {
   fs.rmSync(g.guiRoot, { recursive: true, force: true });
   writeModule(g.guiRoot, `gui@${image}`);
+  fs.writeFileSync(path.join(g.guiRoot, 'index.html'), `<title>gui@${image}</title>\n`);
   for (const name of TABLE_MODULES) {
     const live = path.join(g.root, name);
     const stat = lstatOrNull(live);

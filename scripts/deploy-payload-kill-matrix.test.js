@@ -95,8 +95,13 @@ function bootRepair(g) {
   try {
     fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(g.root, 'boot.log'))}\n`, { mode: 0o755 });
-    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair`], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+    const env = { PATH: `${bin}:/usr/bin:/bin` };
+    for (const name of ['OSI_SWAP_IMAGE_LAYER_PATHS', 'OSI_SWAP_ROM_ROOT']) if (process.env[name] !== undefined) env[name] = process.env[name];
+    // start_service: the repair, then the hold check; on a hold it returns
+    // before Node-RED is launched.
+    const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair\nif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`], { encoding: 'utf8', env });
     assert.equal(run.status, 0, run.stderr);
+    g.started = run.stdout.includes('NODE_RED_STARTS');
   } finally {
     fs.rmSync(bin, { recursive: true, force: true });
   }
@@ -136,6 +141,7 @@ function deployDecision(g, stamp, outcome = 'pass') {
     const owed = owedCheck(g, outcome);
     if (owed) return owed;
     table.stageWithModules(g.root, stamp, NEW_MODULES);
+    swap.markStaged(g.root, stamp);
     let prev = swap.currentStamp(g.root) || '';
     const prevGui = swap.guiStamp(g.root, g.guiRoot);
     const guiDir = fs.existsSync(g.guiRoot) && fs.statSync(g.guiRoot).isDirectory();
@@ -204,6 +210,23 @@ function killed(g, k, call, args) {
     const swap = require(${JSON.stringify(SWAP_JS)});
     const limit = ${k};
     let count = 0;
+    // A directory of the image layer cannot be renamed (EXDEV), as on an
+    // overlay root with redirect_dir off.
+    const marked = (process.env.OSI_SWAP_IMAGE_LAYER_PATHS || '').split(':').filter(Boolean);
+    if (marked.length) {
+      const realRename = fs.renameSync;
+      fs.renameSync = function (from, to) {
+        const source = require('node:path').resolve(String(from));
+        let stat = null;
+        try { stat = fs.lstatSync(source); } catch (_) {}
+        if (marked.includes(source) && stat && stat.isDirectory()) {
+          const error = new Error(\`EXDEV: cross-device link not permitted, rename '\${source}'\`);
+          error.code = 'EXDEV';
+          throw error;
+        }
+        return realRename.call(this, from, to);
+      };
+    }
     for (const name of ['renameSync', 'symlinkSync', 'unlinkSync', 'rmSync', 'writeFileSync',
       'copyFileSync', 'cpSync', 'mkdirSync', 'linkSync']) {
       const real = fs[name];
@@ -244,7 +267,7 @@ function withRow(build, stale, fn) {
 
 function leftovers(g) {
   return [g.root, path.dirname(g.guiRoot), path.join(g.root, 'payloads')]
-    .flatMap((dir) => fs.readdirSync(dir).filter((entry) => /\.(flip|osi-old)-/.test(entry)));
+    .flatMap((dir) => fs.readdirSync(dir).filter((entry) => /\.(flip|osi-old|osi-rom)-|\.osi-removing$/.test(entry)));
 }
 
 // The retry after a kill and its rollback: both end on a complete payload,
@@ -499,3 +522,184 @@ for (const row of ['S41', 'S42']) {
     });
   });
 }
+
+// The image layer (builder's overlay probe): on a factory install the GUI
+// directory belongs to the image's read-only layer and rename(2) of it
+// returns EXDEV. The switch removes it and links it into a payload that
+// holds an identical copy; the image's copy stays under /rom. A kill between
+// the removal and the link leaves the GUI absent, also across a reboot, and
+// the repair links it into the active payload or copies it from /rom.
+function withImageLayer(g, fn) {
+  const saved = { paths: process.env.OSI_SWAP_IMAGE_LAYER_PATHS, rom: process.env.OSI_SWAP_ROM_ROOT };
+  const realRename = fs.renameSync;
+  process.env.OSI_SWAP_IMAGE_LAYER_PATHS = path.resolve(g.guiRoot);
+  process.env.OSI_SWAP_ROM_ROOT = path.join(g.root, 'rom');
+  fs.renameSync = function (from, to) {
+    const source = path.resolve(String(from));
+    let stat = null;
+    try { stat = fs.lstatSync(source); } catch (_) { /* absent */ }
+    if (source === path.resolve(g.guiRoot) && stat && stat.isDirectory()) {
+      const error = new Error(`EXDEV: cross-device link not permitted, rename '${source}'`);
+      error.code = 'EXDEV';
+      throw error;
+    }
+    return realRename.call(this, from, to);
+  };
+  try {
+    return fn();
+  } finally {
+    fs.renameSync = realRename;
+    for (const [name, value] of [['OSI_SWAP_IMAGE_LAYER_PATHS', saved.paths], ['OSI_SWAP_ROM_ROOT', saved.rom]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
+// A row built with the GUI as a real directory, its image copy under /rom.
+function withImageRow(build, fn) {
+  const root = table.tableRoot();
+  try {
+    const g = table.tableGateway(root);
+    fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+    build(g);
+    const gui = fs.lstatSync(g.guiRoot);
+    if (!gui.isDirectory() || gui.isSymbolicLink()) return null;
+    fs.cpSync(g.guiRoot, path.join(root, 'rom', path.resolve(g.guiRoot)), { recursive: true });
+    return withImageLayer(g, () => {
+      const decision = deployDecision(g, 'new');
+      if (!decision.refused && !decision.held) swap.markActivated(g.root, 'new');
+      return fn(g, decision);
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// The removal goes file by file: between its first step and the link the
+// GUI is partly removed or absent; the marker beside it names the link.
+function guiWindow(g, state, olds) {
+  const gui = lstatOrNull(g.guiRoot);
+  return state.gui === 'absent' && (!gui || !gui.isSymbolicLink()) &&
+    fs.existsSync(`${g.guiRoot}.osi-removing`) &&
+    olds.some((old) => sameOld({ ...state, gui: old.gui }, old));
+}
+
+function lstatOrNull(target) {
+  try { return fs.lstatSync(target); } catch (_) { return null; }
+}
+
+const IMAGE_ROWS = table.STATE_TABLE.filter((row) => !EXPECTED_REFUSALS[row.row]);
+for (const row of IMAGE_ROWS) {
+  row.builds.forEach((build, index) => {
+    test(`image layer ${row.row} variant ${index + 1}: the GUI directory cannot be renamed; a kill at every step still ends complete and started`, (t) => {
+      const plan = withImageRow(build, (g, decision) => {
+        if (decision.refused) return { refused: true };
+        const notes = swap.switchPreflight(g.root, 'new', g.guiRoot, decision.served) || '';
+        const old = served(g);
+        const olds = oldSide(g, old, decision);
+        const steps = countSteps(g, 'flipTo', ['new', g.guiRoot, decision.served]);
+        return { olds, after: served(g), steps, notes, prev: decision.prev };
+      });
+      if (!plan || plan.refused) {
+        t.skip('the row leaves the GUI a link, or deploy.sh refuses it before the stop');
+        return;
+      }
+      assert.match(plan.notes, /the GUI is a directory of the image layer; the switch removes it and links it into payloads\//);
+      let windows = 0;
+      for (let k = 1; k <= plan.steps; k += 1) {
+        withImageRow(build, (g, decision) => {
+          assert.equal(killed(g, k, 'flipTo', ['new', g.guiRoot, decision.served]).status, KILLED);
+          const state = served(g);
+          const window = guiWindow(g, state, plan.olds);
+          if (window) windows += 1;
+          assert.ok(window || conversionWindow(g, state, plan.olds) || plan.olds.some((o) => sameOld(state, o)) || same(state, plan.after),
+            `${row.row} k=${k}: ${JSON.stringify(state)}`);
+          // A reboot: the repair restores the GUI, and Node-RED starts.
+          bootRepair(g);
+          const booted = served(g);
+          assert.ok(plan.olds.some((o) => sameOld(booted, o)) || same(booted, plan.after), `${row.row} k=${k} after reboot: ${JSON.stringify(booted)}`);
+          assert.equal(g.started, true, `${row.row} k=${k}: Node-RED starts after the reboot`);
+          retryAndRollback(g, `${row.row} image layer k=${k}`);
+        });
+      }
+      assert.ok(windows >= 1, 'the removal and the link are separate steps');
+
+      // The rollback (and the HELD restore command, which calls the same
+      // flipTo) from the GUI still the image's directory, and from the GUI
+      // removed with no link yet.
+      if (plan.prev) {
+        withImageRow(build, (g, decision) => {
+          swap.flipTo(g.root, decision.prev, g.guiRoot);
+          assert.equal(swap.verifyPair(g.root, decision.prev, g.guiRoot), true, 'rollback from the image directory');
+        });
+        for (let k = 1; k <= plan.steps; k += 1) {
+          withImageRow(build, (g, decision) => {
+            killed(g, k, 'flipTo', ['new', g.guiRoot, decision.served]);
+            if (!guiWindow(g, served(g), plan.olds)) return;
+            swap.flipTo(g.root, decision.prev, g.guiRoot);
+            swap.writePayloadState(g.root, decision.prev, 'healthy', 'restored from the pre-migration backup by the operator', 'operator');
+            assert.equal(swap.verifyPair(g.root, decision.prev, g.guiRoot), true, 'rollback from the GUI removed, link not yet made');
+            assert.ok(plan.olds.some((o) => sameOld(served(g), o)));
+          });
+        }
+      }
+    });
+  });
+}
+
+// The builder's failure state (v0.8.2 on the 0.8.1 image): the switch had
+// pointed payloads/active at the rollback payload and routed flows.json
+// through it, the GUI conversion failed after the migration, and deploy.sh
+// held the gateway. A reboot must not start Node-RED (older code on a
+// migrated database); the HELD restore command clears the hold.
+test('a reboot of a held gateway starts nothing until the HELD restore command clears the hold', () => {
+  const build = table.STATE_TABLE.find((r) => r.row === 'S9').builds[0];
+  withImageRow(build, (g, decision) => {
+    let k = 1;
+    for (; ; k += 1) {
+      const probe = table.tableRoot();
+      fs.rmSync(probe, { recursive: true, force: true });
+      const run = killed(g, k, 'flipTo', ['new', g.guiRoot, decision.served]);
+      if (run.status !== KILLED) break;
+      const flows = lstatOrNull(g.flowsPath);
+      if (flows && flows.isSymbolicLink() && fs.lstatSync(g.guiRoot).isDirectory()) break;
+    }
+    assert.ok(fs.lstatSync(g.flowsPath).isSymbolicLink() && !fs.lstatSync(g.guiRoot).isSymbolicLink(), 'flows routed, the GUI still the image directory');
+    const before = served(g);
+    swap.writePayloadState(g.root, 'new', 'held', 'it failed after migrating the database');
+    fs.writeFileSync(path.join(g.root, 'DEPLOY-HELD'), 'HELD: Node-RED stopped. (fixture)\n');
+    const log = bootRepair(g);
+    assert.equal(g.started, false, 'a held gateway does not start Node-RED after a reboot');
+    assert.match(log, /HELD: Node-RED not started\. HELD: Node-RED stopped\. \(fixture\)/);
+    assert.deepEqual(served(g), before, 'the boot repair changes nothing served');
+    // The restore command's switch and state write.
+    swap.flipTo(g.root, decision.prev, g.guiRoot);
+    swap.writePayloadState(g.root, decision.prev, 'healthy', 'restored from the pre-migration backup by the operator', 'operator');
+    fs.rmSync(path.join(g.root, 'DEPLOY-HELD'));
+    bootRepair(g);
+    assert.equal(g.started, true, 'after the restore command Node-RED starts');
+    assert.equal(swap.verifyPair(g.root, decision.prev, g.guiRoot), true);
+  });
+});
+
+test('with no payload holding it, the boot repair copies an absent GUI back from the image', () => {
+  const root = table.tableRoot();
+  try {
+    const g = table.tableGateway(root);
+    const build = table.STATE_TABLE.find((r) => r.row === 'S9').builds[0];
+    build(g);
+    fs.cpSync(g.guiRoot, path.join(root, 'rom', path.resolve(g.guiRoot)), { recursive: true });
+    fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+    const before = served(g);
+    fs.rmSync(g.guiRoot, { recursive: true });
+    withImageLayer(g, () => {
+      const log = bootRepair(g);
+      assert.match(log, /copied it back from/);
+      assert.deepEqual(served(g), before);
+      assert.equal(g.started, true);
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
