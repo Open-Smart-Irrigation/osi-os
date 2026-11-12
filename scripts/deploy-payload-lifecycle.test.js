@@ -801,6 +801,66 @@ printf '%s\\n' gui-missing-rolled-back
   }
 });
 
+// Council #636 round 1 (row S7): a v0.8.2 switch into "cut" was killed during
+// its module renames: flows, GUI and osi-a are in cut, osi-b is still the
+// v0.8.1 directory. The deploy must neither refuse after the stop nor leave
+// Node-RED stopped: it completes cut toward the new payload, and a failure
+// returns to cut complete.
+function rowS7Setup() {
+  return `
+mkdir -p "$SWAP_ROOT/src-cut-gui"
+printf '%s\\n' cut > "$SWAP_ROOT/cut-flows.json"
+printf '%s\\n' cut > "$SWAP_ROOT/src-cut-gui/index.html"
+swap_call stagePayload cut "$SWAP_ROOT/cut-flows.json" "$SWAP_ROOT/src-cut-gui" >/dev/null
+write_module "$PAYLOADS_ROOT/cut/modules/osi-a" a@cut
+write_module "$PAYLOADS_ROOT/cut/modules/osi-b" b@cut
+swap_call sealModules cut >/dev/null
+swap_call writeCompatibility cut 70 70:v081 >/dev/null
+rm -f "$PAYLOADS_ROOT/active" "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+ln -s "$PAYLOADS_ROOT/cut/gui" "$GUI_ROOT"
+rm -rf "$SWAP_ROOT/osi-a"
+ln -s payloads/cut/modules/osi-a "$SWAP_ROOT/osi-a"
+stage_new_deploy new
+${fragment('# rollback target begin\n', '# rollback target end')}
+[ "$PREV_STAMP" = cut ]
+stop_for_migration
+flip_new
+`;
+}
+
+test('row S7: a deploy over a v0.8.2 switch cut during its module renames completes it and runs', () => {
+  const run = runModuleDeploy(`${rowS7Setup()}
+restart_node_red
+swap_call verifyPair new "$GUI_ROOT"
+printf '%s\\n' s7-completed
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /module osi-b was left behind by a switch into payloads\/cut that was cut; this switch completes it/);
+    assert.equal(run.state('node-red.state'), '1', 'Node-RED runs');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' });
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('row S7: a failure after the switch returns to the cut payload complete', () => {
+  const run = runModuleDeploy(`${rowS7Setup()}
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' s7-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'cut', gui: 'cut', compatible: true });
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@cut', 'osi-b': 'b@cut', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
 test('a failure after the stop and before the migration commit restores flows and modules', () => {
   const run = runModuleDeploy(`
 stage_new_deploy new
