@@ -1360,3 +1360,30 @@ for (const { row, verdict, name, match, stale, builds } of STATE_TABLE) {
     });
   });
 }
+
+// Council #636 round 1: a conversion an older deploy.sh left interrupted,
+// before payloads/.active existed, is undone too; leftovers are removed.
+test('resumeInterruptedSwitch moves a set-aside entry back without payloads/.active and sweeps leftovers', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'usr-lib', 'gui');
+  fs.mkdirSync(guiRoot, { recursive: true });
+  fs.writeFileSync(path.join(guiRoot, 'index.html'), 'image\n');
+  fs.writeFileSync(path.join(root, 'flows.json'), '[]\n');
+  // A v0.8.2 flipTo() killed between moving the GUI aside and linking it.
+  fs.renameSync(guiRoot, `${guiRoot}.osi-old-1-200`);
+  fs.mkdirSync(`${guiRoot}.osi-old-1-100`);
+  fs.symlinkSync('nowhere', path.join(root, 'usr-lib', '.gui.flip-1-300'));
+  fs.symlinkSync('nowhere', path.join(root, 'payloads', '.active.flip-1-300'));
+  writeModule(path.join(root, 'osi-a'), 'a');
+  fs.mkdirSync(path.join(root, 'osi-a.osi-old-1-50'));
+  assert.equal(fs.existsSync(path.join(root, 'payloads', '.active')), false);
+
+  const report = swap.resumeInterruptedSwitch(root, guiRoot);
+  assert.match(report, /left gui at gui\.osi-old-1-200; moved it back/);
+  assert.equal(fs.readFileSync(path.join(guiRoot, 'index.html'), 'utf8'), 'image\n', 'the newest set-aside directory is back');
+  for (const leftover of [`${guiRoot}.osi-old-1-100`, path.join(root, 'usr-lib', '.gui.flip-1-300'),
+    path.join(root, 'payloads', '.active.flip-1-300'), path.join(root, 'osi-a.osi-old-1-50')]) {
+    assert.throws(() => fs.lstatSync(leftover), /ENOENT/, leftover);
+  }
+  assert.equal(swap.resumeInterruptedSwitch(root, guiRoot), null, 'a second run finds nothing');
+});
