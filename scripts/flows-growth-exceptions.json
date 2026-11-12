@@ -5,5 +5,17 @@
     "Fields: id (slug), kind \"fix\", issue (GitHub issue number), granted (YYYY-MM-DD, not in the future), reason, nodes (node id -> absolute max chars, counting On Start and On Stop code), payback_total (the per-profile total before the fix, at or below the current total).",
     "An entry lets its listed nodes grow for 14 days from granted; only that growth may raise the total. From day 14 every run fails until each profile total is at or below payback_total. Payback is measured on the total, so while an earlier entry is outstanding, a later entry's growth is due by the earlier entry's date. A merged entry is never edited, and is deleted only once paid back; a new entry cannot be added while an expired one is still in the file."
   ],
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "fix-633-valve-module-missing-answer",
+      "kind": "fix",
+      "issue": 633,
+      "granted": "2026-11-12",
+      "reason": "NEW-2: when osi-valve-control fails to load, POST /api/valve/:deveui gets no HTTP answer. Build STREGA downlink + emit log ctx must answer 503 inline: the module it would call is the one that failed to load.",
+      "nodes": {
+        "cdbaa3891d40d7a1": 866
+      },
+      "payback_total": 1611629
+    }
+  ]
 }
