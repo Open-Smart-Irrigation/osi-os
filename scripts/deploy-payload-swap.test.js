@@ -1387,3 +1387,46 @@ test('resumeInterruptedSwitch moves a set-aside entry back without payloads/.act
   }
   assert.equal(swap.resumeInterruptedSwitch(root, guiRoot), null, 'a second run finds nothing');
 });
+
+// v0.8.2 review, S-1 follow-up: health record and rollback target.
+test('a payload is a rollback target once healthy and only while its recorded files are unchanged', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, 'a', { 'osi-a': '' });
+  stageWithModules(root, 'b', { 'osi-a': '' });
+  stageWithModules(root, 'c', { 'osi-a': '' });
+  assert.equal(swap.payloadTrusted(root, 'a'), true, 'no record: from before the record, trusted');
+  swap.markActivated(root, 'b');
+  assert.equal(swap.payloadTrusted(root, 'b'), false, 'activated, never checked');
+  swap.markHealthy(root, 'b');
+  assert.equal(swap.payloadTrusted(root, 'b'), true);
+  writeModule(path.join(root, 'payloads', 'b', 'modules', 'osi-extra'), 'captured later');
+  assert.equal(swap.payloadTrusted(root, 'b'), true, 'a module captured into it later does not change the recorded set');
+  fs.appendFileSync(path.join(root, 'payloads', 'b', 'modules', 'osi-a', 'index.js'), '// written in place\n');
+  assert.equal(swap.payloadTrusted(root, 'b'), false, 'a recorded module that changed');
+  fs.writeFileSync(path.join(root, 'payloads', 'b', 'health.json'), '{');
+  assert.equal(swap.payloadTrusted(root, 'b'), false, 'an unreadable record');
+
+  swap.markHealthy(root, 'a');
+  swap.markActivated(root, 'c');
+  flipTo(root, 'c', guiRoot);
+  assert.equal(swap.rollbackTarget(root, 'c', 'next'), 'a', 'the newest complete, trusted payload');
+  swap.markHealthy(root, 'c');
+  assert.equal(swap.rollbackTarget(root, 'c', 'next'), 'c');
+  swap.markActivated(root, 'c');
+  swap.markActivated(root, 'a');
+  assert.equal(swap.rollbackTarget(root, 'c', 'next'), 'c', 'nothing trusted is left: the served payload stays the target');
+  assert.equal(swap.rollbackTarget(root, '', 'next'), '');
+});
+
+test('prune keeps the payload the next deploy would roll back to', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  for (const stamp of ['20261101', '20261102', '20261103', '20261104']) stageWithModules(root, stamp, { 'osi-a': '' });
+  swap.markHealthy(root, '20261101');
+  for (const stamp of ['20261102', '20261103', '20261104']) swap.markActivated(root, stamp);
+  flipTo(root, '20261104', guiRoot);
+  prunePayloads(root, 1);
+  assert.ok(fs.existsSync(path.join(root, 'payloads', '20261101')), 'the healthy payload stays');
+  assert.equal(fs.existsSync(path.join(root, 'payloads', '20261102')), false);
+});
