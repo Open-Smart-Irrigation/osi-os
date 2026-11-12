@@ -29,6 +29,13 @@ runs at a time, using the native npm `sqlite3` binding and the image settings'
 `os`, `fs`, `cp` global names. No `crypto`, `require`, or browser globals are
 added to the function sandbox.
 
+Fixture setup and assertions use that same native SQLite binding asynchronously.
+Do not load `node:sqlite` into the runtime process: two SQLite libraries keep
+separate lock bookkeeping and can interfere with POSIX locks
+([SQLite's explanation](https://www.sqlite.org/howtocorrupt.html#multiple_copies_of_sqlite_linked_into_the_same_application)).
+The hosted runner exposed that mistake in the initial harness; the final
+integrity case checks the database after all scenarios.
+
 The flow file, function bodies, wires, inject schedules and helper files are
 copied unchanged. The suite checks their bytes again after execution. Before
 boot it also compares both maintained image profiles, including every file
@@ -106,9 +113,9 @@ the empty-list gate after the suite; the release procedure also runs
 
 ## Known to fail on the baseline
 
-On payload baseline `1bdd49d5`, strict mode reports 181 passed, 0 unexpected
+On payload baseline `1bdd49d5`, strict mode reports 182 passed, 0 unexpected
 failures and 26 known failing cases, then exits 1. The whole local command
-took 50.35 seconds with maximum RSS 268392 KiB (262 MiB). Hosted timing is
+took 0:52.06 elapsed with maximum RSS 268868 KiB. Hosted timing is
 measured by the new workflow, whose timeout is ten minutes.
 The checked-in baseline output is in `baseline-1bdd49d5.txt`.
 Each line below names one case; the JSON file carries its exact signatures.

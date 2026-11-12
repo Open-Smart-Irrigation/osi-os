@@ -4,7 +4,6 @@
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const os = require('node:os'), net = require('node:net'), dns = require('node:dns');
 const Module = require('node:module');
-const { DatabaseSync } = require('node:sqlite');
 const ROOT = path.resolve(__dirname, '../../..');
 const SRC = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
 const RUN = process.env.OSI_SMOKE_RUN;
@@ -178,8 +177,19 @@ async function start() {
   await new Promise((resolve,reject)=>{client.once('connect',resolve);client.once('error',reject);});
   const h={RED,state,RUN,DBFILE,sleep,
     flows:JSON.parse(fs.readFileSync(path.join(RUN,'flows.json'),'utf8')),
-    db(){return new DatabaseSync(DBFILE);},
-    sql(q,...params){const d=new DatabaseSync(DBFILE);try{d.exec('PRAGMA busy_timeout=4000');const s=d.prepare(q);return /^\s*(select|pragma|with)/i.test(q)?s.all(...params):s.run(...params);}finally{d.close();}},
+    async sql(q,...params) {
+      // One SQLite library owns every connection in this process. Mixing the
+      // Node builtin and sqlite3 gives them separate in-process lock registries.
+      let db;
+      db=await new Promise((resolve,reject)=>{const d=new nativeSqlite.Database(DBFILE,e=>e?reject(e):resolve(d));});
+      db.configure('busyTimeout',4000);
+      try {
+        return await new Promise((resolve,reject)=>{
+          if(/^\s*(select|pragma|with)/i.test(q))db.all(q,params,(e,rows)=>e?reject(e):resolve(rows));
+          else db.run(q,params,function(e){if(e)reject(e);else resolve({changes:this.changes,lastID:this.lastID});});
+        });
+      } finally {await new Promise((resolve,reject)=>db.close(e=>e?reject(e):resolve()));}
+    },
     inject(id,msg={payload:Date.now()}) {const n=RED.nodes.getNode(id);if(!n)throw new Error('missing node '+id);n.receive(msg);},
     setMarker(v){state.markerOverride=v;},
     async uplink(eui,bit){const payload={deduplicationId:require('node:crypto').randomUUID(),time:new Date().toISOString(),fCnt:++h.fcnt,fPort:4,deviceInfo:{devEui:eui.toLowerCase(),deviceProfileName:'OSI STREGA Valve',applicationId:'synthetic-actuators-app'},object:{Valve:String(bit),Battery:90,Temperature:21,Hygrometry:40}};await new Promise((resolve,reject)=>client.publish('application/synthetic-actuators-app/device/'+eui.toLowerCase()+'/event/up',JSON.stringify(payload),{qos:1},e=>e?reject(e):resolve()));await sleep(200);},fcnt:100,

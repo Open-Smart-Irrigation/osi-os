@@ -3,9 +3,8 @@ Command: node scripts/test-release-smoke.js --strict
 Expected exit: 1 (listed release blockers only)
 
 PROFILE PARITY: 2890 flow/helper files byte-identical
-EVIDENCE: /tmp/osi-release-smoke-3FvsMZ
+EVIDENCE: /tmp/osi-release-smoke-2uSZs5
 PASS runtime-started
-PASS startup-function-errors
 PASS login-and-lists
 PASS command-refused:close
 PASS command-refused:close-duration
@@ -185,6 +184,8 @@ PASS no-token:GET /api/irrigation-zones/:id/irrigation-policy/decisions
 PASS network-contained
 PASS flows-unchanged
 PASS helpers-unchanged
+PASS startup-function-errors
+PASS database-integrity
 KNOWN TO FAIL F-14 startup-node-errors [{"code":"node-errors","actual":[{"id":"dendro-readings-sqlite","msg":"Sqlite database not configured"}]}]
 KNOWN TO FAIL F-5 / known defect 2 command-accepted:close [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-5 / known defect 2 command-accepted:close-duration [{"code":"http","symptom":"http-timeout"}]
@@ -211,7 +212,7 @@ KNOWN TO FAIL known defect 1 no-token:PUT /api/irrigation-zones/:id/devices/:dev
 KNOWN TO FAIL known defect 1 no-token:DELETE /api/irrigation-zones/:id/devices/:deveui [{"code":"http","status":500,"error":"device-api failed","missingCrypto":true}]
 KNOWN TO FAIL F-13 no-token:POST /api/account-link [{"code":"http","symptom":"http-timeout"}]
 KNOWN TO FAIL F-13 no-token:POST /api/sync/force [{"code":"http","symptom":"http-timeout"}]
-RESULT passed=181 failed=0 known-to-fail=26; 42.2s; peak RSS 259 MiB
+RESULT passed=182 failed=0 known-to-fail=26; 43.9s; peak RSS 260 MiB
 RELEASE REFUSED: 26 known failing cases remain
 
-Measured whole command: 50.35 seconds, maximum RSS 268392 KiB, exit 1.
+Measured whole command: 0:52.06 elapsed, maximum RSS 268868 KiB, exit 1.
