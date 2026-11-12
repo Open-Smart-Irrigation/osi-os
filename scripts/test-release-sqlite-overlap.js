@@ -160,11 +160,17 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   let evidence={fault,layout,run};
   if(fs.existsSync(observation)) {
     const r=JSON.parse(fs.readFileSync(observation,'utf8'));
-    // The first heartbeat as handed to its MQTT output node. The harness broker
-    // (aedes, MQTT 3.1.1) cannot accept the cloud broker node's MQTT 5
-    // connection, so publication itself is not observable here; `published`
-    // stays in the evidence.
-    const first=r.heartbeats[0]?JSON.parse(r.heartbeats[0].payload):null;
+    // What is shown: the first heartbeat message reaching its MQTT output node
+    // carries the state, and is complete for publication. What is not: its
+    // publication. The harness broker (aedes, MQTT 3.1.1) cannot accept the
+    // cloud broker node's MQTT 5 connection; `published` stays in the evidence.
+    const message=r.heartbeats[0]||null;
+    let first=null;
+    try{first=message&&typeof message.payload==='string'?JSON.parse(message.payload):null;}catch{first=null;}
+    check('heartbeat-message',!!first&&message.topic==='devices/0016C001F1000001/heartbeat'&&message.qos===1
+      &&first.deviceEui==='0016C001F1000001'&&typeof first.firmwareVersion==='string'&&!Number.isNaN(Date.parse(first.timestamp))
+      &&first.health&&typeof first.health==='object'&&'health_state' in first.health&&'schema_sig' in first.health&&'crash_count' in first.health,
+      message&&{topic:message.topic,qos:message.qos,keys:first&&Object.keys(first)});
     const database=r.stats.json&&r.stats.json.database;
     evidence={...evidence,statsStatus:r.stats.status,addons:r.addons.length,firstHeartbeatHealth:first?.health?.health_state,database,
       check:r.exec.filter(e=>/^sqlite3 -readonly/.test(e.cmd)).length};
