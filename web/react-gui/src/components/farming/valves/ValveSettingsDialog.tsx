@@ -35,6 +35,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
   const [flowSource, setFlowSource] = useState<FlowSource>(() => initialFlowState(valve).source);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryUnconfirmed, setDeliveryUnconfirmed] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [closeDone, setCloseDone] = useState(false);
 
@@ -46,6 +47,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
       setFlowRateInput(flow.input);
       setFlowSource(flow.source);
       setError(null);
+      setDeliveryUnconfirmed(false);
       setConfirmClose(false);
       setCloseDone(false);
     }
@@ -80,7 +82,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
     setBusy(true);
     setError(null);
     try {
-      await valvesAPI.updateSettings(valve.deviceEui, {
+      const outcome = await valvesAPI.updateSettings(valve.deviceEui, {
         stregaGeneration: generation,
         // Flow fields go out only when edited. The route leaves an absent flow_rate_lpm untouched,
         // so an unrelated Save keeps a zone-sourced rate linked to the zone calibration.
@@ -88,8 +90,10 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
           ? { flowRateLpm: parsedFlowRate, ...(parsedFlowRate !== null ? { flowRateSource: flowSource } : {}) }
           : {}),
       });
-      onChanged();
-      onClose();
+      setDeliveryUnconfirmed(Boolean(outcome?.deliveryUnconfirmed));
+      try { await onChanged(); }
+      catch (refreshError) { console.warn('Failed to refresh valve settings after saving', refreshError); }
+      if (!outcome?.deliveryUnconfirmed) onClose();
     } catch {
       setError(t('settingsDialog.saveFailed'));
     } finally {
@@ -259,6 +263,7 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
           )}
         </div>
 
+        {deliveryUnconfirmed && <p role="status" className="mt-3 text-sm text-[var(--warn-text)]">{t('saveOutcome.deliveryUnconfirmed')}</p>}
         {error && <p className="mt-3 text-sm text-[var(--warn-text)]">{error}</p>}
 
         <div className="mt-5 flex justify-end gap-2">

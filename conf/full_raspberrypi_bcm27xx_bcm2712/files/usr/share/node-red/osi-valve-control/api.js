@@ -214,6 +214,7 @@ async function handleHttpRequest(options) {
   const method = String(msg.req && msg.req.method || '').toUpperCase();
   const requestPath = String((msg.req && (msg.req.path || msg.req.originalUrl || msg.req.url)) || '').split('?')[0]; // journal-api precedent: req.path first
   let db = null;
+  let savedResponse = null; // Set only after the desired-state transaction commits.
   let currentEui = null; // set once a route resolves its target valve, so the catch block can enrich a thrown plan_conflict with labels.
   try {
     const secret = resolveAuthSecret(environment, warn);
@@ -273,10 +274,11 @@ async function handleHttpRequest(options) {
         await assertScheduleModeTx(tx, eui);
         await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
       }));
+      savedResponse = { status: 201, payload: { schedule: row } };
       const q = row.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
       throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(201, Object.assign({ schedule: row, pushes_queued: q.rows.length }, waitsFor(q)));
+      return respond(201, Object.assign({ saved: true, schedule: row, pushes_queued: q.rows.length }, waitsFor(q)));
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/schedules\/([0-9a-fA-F-]{36})$/)) && (method === 'PUT' || method === 'DELETE')) {
@@ -318,6 +320,7 @@ async function handleHttpRequest(options) {
           if (changed) await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
         }));
       }
+      savedResponse = { status: 200, payload: { ok: true, schedule_uuid: uuid } };
       // Only a WEEKLY schedule feeds compileWindows()/the on-valve plan; compiling and pushing
       // after a ONCE mutation would otherwise send an empty all-FF weekday plan (silently
       // wiping any Bluetooth-configured on-valve schedule) as a side effect of editing a
@@ -326,7 +329,7 @@ async function handleHttpRequest(options) {
       const q = current.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
       throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(200, Object.assign({ ok: true, pushes_queued: q.rows.length }, waitsFor(q)));
+      return respond(200, Object.assign({ saved: true, ok: true, pushes_queued: q.rows.length }, waitsFor(q)));
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/plan\/resend$/)) && method === 'POST') {
@@ -362,7 +365,8 @@ async function handleHttpRequest(options) {
       try {
         q = await dispatch.withValveWriter(eui, async () => {
           await authorizedValve(db, eui, auth, scopedOn);
-          return push.setSchedulerStatus({ db, deviceEui: eui, appId: options.appId, status, settingsPatch, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
+          return push.setSchedulerStatus({ db, deviceEui: eui, appId: options.appId, status, settingsPatch, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback,
+            onSettingsSaved: () => { savedResponse = { status: 202, payload: { ok: true, status } }; } });
         });
       } catch (e) {
         if (e && e.code === 'conditional_readiness_pending') throw apiError(409, 'conditional_readiness_pending', 'ACTIVE cannot resume a valve-resident schedule while conditional mode is active');
@@ -370,7 +374,7 @@ async function handleHttpRequest(options) {
       }
       throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(202, { ok: true, status });
+      return respond(202, { saved: true, ok: true, status });
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/settings$/)) && method === 'PUT') {
@@ -395,17 +399,26 @@ async function handleHttpRequest(options) {
           await push.invalidateLifecycleClearTx(tx, eui, { reason: 'generation_changed', now });
         }
       }));
+      savedResponse = { status: 200, payload: { ok: true } };
       let q = { rows: [], messages: [] };
       if (generationChanged) {
         q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
         throwTransportFailure(q);
         assignPushMessages(msg, q);
       }
-      return respond(200, { ok: true, settings: await store.getSettings(db, eui), pushes_queued: q.rows.length });
+      return respond(200, { saved: true, ok: true, settings: await store.getSettings(db, eui), pushes_queued: q.rows.length });
     }
 
     return respond(404, { error: 'not_found', message: 'Unknown valve-control route' });
   } catch (error) {
+    if (savedResponse) {
+      warn('[valve-api] desired state saved; delivery unconfirmed: ' + String(error && error.message || error));
+      delete msg.valvePushMessages;
+      return respond(savedResponse.status, Object.assign({}, savedResponse.payload, {
+        saved: true, delivery_status: 'unconfirmed',
+        message: 'Changes saved on the gateway; delivery to the valve is not confirmed',
+      }));
+    }
     const status = Number(error && error.statusCode) || 500;
     if (status === 500) warn('[valve-api] ' + method + ' ' + requestPath + ' failed: ' + (error && error.stack || error));
     let details = status === 500 ? undefined : (error.details || undefined);

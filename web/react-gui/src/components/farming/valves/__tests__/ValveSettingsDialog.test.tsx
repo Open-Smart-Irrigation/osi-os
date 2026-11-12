@@ -249,3 +249,15 @@ describe('ValveSettingsDialog', () => {
     expect(patch).toHaveProperty('flowRateSource', 'estimated');
   });
 });
+
+it('A-3 keeps the saved settings warning visible when delivery is unconfirmed', async () => {
+  vi.mocked(valvesAPI.updateSettings).mockResolvedValueOnce({ saved: true, deliveryUnconfirmed: true });
+  const onClose = vi.fn();
+  const onChanged = vi.fn();
+  render(<ValveSettingsDialog valve={makeValve()} open onClose={onClose} onChanged={onChanged} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('saveOutcome.deliveryUnconfirmed');
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.queryByText('Could not save valve settings.')).not.toBeInTheDocument();
+});

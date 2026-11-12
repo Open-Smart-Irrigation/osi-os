@@ -411,3 +411,12 @@ Tracked in code at `web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
+
+## `valves.json` — Saved changes and unconfirmed delivery
+
+`saveOutcome.saved`, `saveOutcome.deliveryUnconfirmed` and
+`saveOutcome.refreshFailed` distinguish a saved gateway change from unconfirmed
+valve delivery or a failed list refresh. Luganda keeps the English source until a
+human translation pass. The de-CH/es/fr/it/pt translations need native review.
+`web/react-gui/tests/valveControlLocales.test.ts` pins the Luganda values in
+`PENDING_HUMAN_LUGANDA`; remove these entries when reviewed translations land.

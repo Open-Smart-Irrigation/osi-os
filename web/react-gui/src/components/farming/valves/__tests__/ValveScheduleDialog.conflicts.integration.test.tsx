@@ -216,3 +216,71 @@ describe('server conflict payload through service normalization and mounted dial
     expect(http.put).toHaveBeenCalledWith('/api/valves/' + eui + '/schedules/monday', { enabled: false });
   });
 });
+
+// Exercise the real edge API and SQLite commit, then the service and mounted GUI.
+// Only the HTTP connection and radio transport are replaced.
+describe('A-3 saved schedule with unconfirmed valve delivery', () => {
+  it.each(['create', 'update', 'delete'] as const)('%s reconciles the saved row and warns instead of reporting an unsaved change', async (operation) => {
+    // Match cardHistorySeries.test.ts: the GUI does not include Node typings.
+    const nodeModuleSpecifier: string = 'node:module';
+    const { createRequire } = await import(/* @vite-ignore */ nodeModuleSpecifier);
+    const require = createRequire(import.meta.url);
+    const { createHmac } = require('node:crypto');
+    const { Buffer } = require('node:buffer');
+    const relativeModulePath: string = '../../../../../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/';
+    const modulePath = decodeURIComponent(new URL(relativeModulePath, import.meta.url).pathname);
+    const { tempDb, facade } = require(modulePath + '/test-helpers.js');
+    const { handleHttpRequest } = require(modulePath + '/api.js');
+    const store = require(modulePath + '/store.js');
+    const { DatabaseSync } = require('node:sqlite');
+    const fixture = await tempDb();
+    const uuid = '11111111-2222-4333-8444-555555555555';
+    try {
+      if (operation !== 'create') await store.insertSchedule(fixture.db, { schedule_uuid: uuid, device_eui: eui, kind: 'WEEKLY', label: 'Saved plan', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+      const encoded = Buffer.from(JSON.stringify({ userId: 1, username: 't', exp: Date.now() + 60000 })).toString('base64url');
+      const secret = 'synthetic-test-key';
+      const authorization = 'Bearer ' + encoded + '.' + createHmac('sha256', secret).update(encoded).digest('base64url');
+      const httpCall = async (method: string, url: string, body?: unknown) => {
+        const out = await handleHttpRequest({
+          msg: { req: { method, url, body, headers: { authorization } } },
+          Database: function () { return facade(new DatabaseSync(fixture.path)); },
+          environment: { authTokenSecret: secret }, appId: 'test-app', warn() {},
+          transport: {
+            async getDeviceQueue() { throw new Error('synthetic transport unavailable'); },
+            async flushDeviceQueue() { throw new Error('synthetic transport unavailable'); },
+            async enqueueDownlink() { throw new Error('synthetic transport unavailable'); },
+          },
+        });
+        if (out.statusCode >= 400) throw Object.assign(new Error('HTTP request failed'), { isAxiosError: true, response: { status: out.statusCode, data: out.payload } });
+        return { data: out.payload };
+      };
+      http.get.mockImplementation((url: string) => httpCall('GET', url));
+      http.post.mockImplementation((url: string, body: unknown) => httpCall('POST', url, body));
+      http.put.mockImplementation((url: string, body: unknown) => httpCall('PUT', url, body));
+      http.delete.mockImplementation((url: string) => httpCall('DELETE', url));
+      const onChanged = await mount();
+      if (operation === 'create') {
+        fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
+        clickWeeklySave();
+      } else if (operation === 'update') {
+        fireEvent.click(await screen.findByRole('checkbox', { name: enValves.scheduleDialog.enabled }));
+      } else {
+        fireEvent.click(await screen.findByRole('button', { name: enValves.scheduleDialog.delete }));
+        fireEvent.click(await screen.findByRole('button', { name: enValves.scheduleDialog.deleteConfirmButton }));
+      }
+      expect(await screen.findByText('Changes saved on the gateway. Delivery to the valve is not confirmed; the valve may still use its previous plan.')).toBeInTheDocument();
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText(enValves.scheduleDialog.saveFailed)).not.toBeInTheDocument();
+      expect(screen.queryByText(enValves.scheduleDialog.updateFailed)).not.toBeInTheDocument();
+      expect(screen.queryByText(enValves.scheduleDialog.deleteFailed)).not.toBeInTheDocument();
+      const rows = await fixture.db.all('SELECT * FROM valve_schedules');
+      expect(rows).toHaveLength(1);
+      if (operation === 'create') expect(screen.getAllByRole('button', { name: enValves.scheduleDialog.save })[0]).toBeDisabled();
+      if (operation === 'update') expect(await screen.findByRole('checkbox', { name: enValves.scheduleDialog.enabled })).not.toBeChecked();
+      if (operation === 'delete') {
+        expect(rows[0].deleted_at).not.toBeNull();
+        expect(screen.queryByText('Saved plan')).not.toBeInTheDocument();
+      }
+    } finally { fixture.cleanup(); }
+  });
+});

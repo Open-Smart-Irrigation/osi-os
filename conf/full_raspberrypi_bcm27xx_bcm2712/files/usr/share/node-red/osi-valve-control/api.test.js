@@ -583,3 +583,59 @@ test('A-1 GET /api/valves: scoped flag off preserves the disabled owner list', a
     assert.deepEqual(out.payload.valves.map(valve => valve.device_eui), [FIXTURE_EUI]);
   } finally { fixture.cleanup(); }
 });
+
+const OUTCOME_UUID = '11111111-2222-4333-8444-555555555555';
+const unavailableTransport = {
+  async getDeviceQueue() { throw new Error('synthetic transport unavailable'); },
+  async flushDeviceQueue() { throw new Error('synthetic transport unavailable'); },
+  async enqueueDownlink() { throw new Error('synthetic transport unavailable'); },
+};
+for (const method of ['POST', 'PUT', 'DELETE']) {
+  test(`A-3 ${method} weekly schedule: saved state survives failing transport and is reported as saved`, async () => {
+    const fixture = await tempDb();
+    try {
+      if (method !== 'POST') await store.insertSchedule(fixture.db, { schedule_uuid: OUTCOME_UUID, device_eui: FIXTURE_EUI, kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+      const body = method === 'POST' ? { kind: 'WEEKLY', weekdays_mask: 2, start_time: '07:00', duration_minutes: 20 } : { start_time: '07:00' };
+      const out = await call(fixture.path, req(method, `/api/valves/${FIXTURE_EUI}/schedules${method === 'POST' ? '' : '/' + OUTCOME_UUID}`, body), { transport: unavailableTransport });
+      const rows = await fixture.db.all('SELECT * FROM valve_schedules');
+      assert.equal(rows.length, 1, 'the request has committed');
+      if (method === 'DELETE') assert.ok(rows[0].deleted_at);
+      else assert.equal(rows[0].start_time, '07:00');
+      assert.equal(out.statusCode, method === 'POST' ? 201 : 200, JSON.stringify(out.payload));
+      assert.equal(out.payload.saved, true);
+      assert.equal(out.payload.delivery_status, 'unconfirmed');
+      if (method === 'POST') assert.equal(out.payload.schedule.schedule_uuid, rows[0].schedule_uuid);
+      assert.equal(out.valvePushMessages, undefined, 'failed transport cannot fall back to MQTT');
+    } finally { fixture.cleanup(); }
+  });
+}
+for (const operation of ['settings', 'scheduler-status']) {
+  test(`A-3 ${operation}: a committed setting is reported even when transport fails`, async () => {
+    const fixture = await tempDb();
+    try {
+      const out = await call(fixture.path, req(operation === 'settings' ? 'PUT' : 'POST', `/api/valves/${FIXTURE_EUI}/${operation}`, operation === 'settings' ? { strega_generation: 'GEN2' } : { status: 'DEACTIVATED' }), { transport: unavailableTransport });
+      const settings = await store.getSettings(fixture.db, FIXTURE_EUI);
+      assert.equal(operation === 'settings' ? settings.strega_generation : settings.scheduler_status, operation === 'settings' ? 'GEN2' : 'DEACTIVATED');
+      assert.equal(out.statusCode, operation === 'settings' ? 200 : 202, JSON.stringify(out.payload));
+      assert.equal(out.payload.saved, true);
+      assert.equal(out.payload.delivery_status, 'unconfirmed');
+    } finally { fixture.cleanup(); }
+  });
+}
+test('A-3 validation failure is not reported as saved', async () => {
+  const fixture = await tempDb();
+  try {
+    const out = await call(fixture.path, req('POST', `/api/valves/${FIXTURE_EUI}/schedules`, { kind: 'WEEKLY', weekdays_mask: 2, start_time: 'bad', duration_minutes: 20 }), { transport: unavailableTransport });
+    assert.equal(out.statusCode, 422);
+    assert.notEqual(out.payload.saved, true);
+    assert.deepEqual(await fixture.db.all('SELECT * FROM valve_schedules'), []);
+  } finally { fixture.cleanup(); }
+});
+test('A-3 resend transport failure remains a failure because no schedule was saved', async () => {
+  const fixture = await tempDb();
+  try {
+    const out = await call(fixture.path, req('POST', `/api/valves/${FIXTURE_EUI}/plan/resend`, {}), { transport: unavailableTransport });
+    assert.equal(out.statusCode, 503);
+    assert.notEqual(out.payload.saved, true);
+  } finally { fixture.cleanup(); }
+});

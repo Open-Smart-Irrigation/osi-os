@@ -13303,7 +13303,7 @@
     "type": "function",
     "z": "valve-control-tab",
     "name": "Valve API Router",
-    "func": "/* adapter inventory: enqueueValveCommand, flushValveQueue */\nconst live=osiLib.require('osi-valve-control');\nif(!live.ok){node.error('valve control unavailable: '+live.error,msg);msg.statusCode=503;return [msg,null];}\nreturn live.value.liveValveApiRouter({msg,node,env,context,chirpstack,osiLib});",
+    "func": "/* adapter inventory: enqueueValveCommand, flushValveQueue */\nconst live=osiLib.require('osi-valve-control');\nif(!live.ok){node.error('valve control unavailable: '+live.error);msg.statusCode=503;return [msg,null];}\nreturn live.value.liveValveApiRouter({msg,node,env,context,chirpstack,osiLib});",
     "outputs": 2,
     "timeout": 0,
     "noerr": 0,
@@ -13340,6 +13340,87 @@
     "x": 860,
     "y": 230,
     "wires": []
+  },
+  {
+    "id": "valve-api-catch",
+    "type": "catch",
+    "z": "valve-control-tab",
+    "name": "Catch valve HTTP exceptions",
+    "scope": [
+      "valve-api-router-fn"
+    ],
+    "uncaught": false,
+    "x": 220,
+    "y": 390,
+    "wires": [
+      [
+        "valve-api-error-has-response"
+      ]
+    ]
+  },
+  {
+    "id": "valve-api-error-has-response",
+    "type": "switch",
+    "z": "valve-control-tab",
+    "name": "HTTP response present",
+    "property": "res",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "nnull"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 1,
+    "x": 470,
+    "y": 390,
+    "wires": [
+      [
+        "valve-api-http500"
+      ]
+    ]
+  },
+  {
+    "id": "valve-api-http500",
+    "type": "change",
+    "z": "valve-control-tab",
+    "name": "Return valve HTTP 500",
+    "rules": [
+      {
+        "t": "set",
+        "p": "statusCode",
+        "pt": "msg",
+        "to": "500",
+        "tot": "num"
+      },
+      {
+        "t": "set",
+        "p": "headers",
+        "pt": "msg",
+        "to": "{\"Content-Type\":\"application/json; charset=utf-8\"}",
+        "tot": "json"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"error\":\"internal_error\",\"message\":\"Valve request failed\"}",
+        "tot": "json"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 710,
+    "y": 390,
+    "wires": [
+      [
+        "valve-api-response"
+      ]
+    ]
   },
   {
     "id": "valve-push-mqtt-out",

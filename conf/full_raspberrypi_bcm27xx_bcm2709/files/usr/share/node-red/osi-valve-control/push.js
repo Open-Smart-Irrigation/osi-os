@@ -1014,7 +1014,7 @@ async function queuePushes({ db, deviceEui, appId, pushes, transport, now, warn 
 // writes, so a concurrent compile on another DB handle cannot leave an older snapshot as the
 // pending truth). With a transport the flush is dispatch.flushValveQueue (durable intent, owners
 // captured and invalidated); `flushQueue: null` means "never flush" on either path.
-async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, transport, warn, now, emitNow }) {
+async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, transport, warn, now, emitNow, onCommitted }) {
   const eui = String(deviceEui).toUpperCase();
   const nowDate = now || new Date();
   let flushed = false;
@@ -1058,6 +1058,7 @@ async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, 
     try { await runtime.emitRuntimeChanged(tx, eui, warn); }
     catch (e) { warn && warn('[valve-control] queueSnapshot: runtime emit failed: ' + (e && e.message ? e.message : e)); }
   });
+  if (typeof onCommitted === 'function') onCommitted();
   const out = { rows, messages: [], flushed, flushResult, superseded, deferred: !emitNow, transportResults: [], requeued: 0 };
   if (emitNow) {
     if (transport) out.transportResults = await sendRows({ db, deviceEui: eui, rows, transport, now });
@@ -1321,7 +1322,7 @@ async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, t
 // (R5 M3, the status routes): a stored plan that compileWindows rejects must not block
 // pause/skip/resume, so the snapshot falls back to the status alone. timeZoneFallback is unused
 // since CLOCK_SYNC left the compile; it stays in the signature for the callers.
-async function compileAndQueueLocked({ db, deviceEui, appId, force, now, flushQueue, transport, warn, timeZoneFallback, settingsPatch, statusOnlyOnConflict, schedulerStatus }) {
+async function compileAndQueueLocked({ db, deviceEui, appId, force, now, flushQueue, transport, warn, timeZoneFallback, settingsPatch, statusOnlyOnConflict, schedulerStatus, onSettingsSaved }) {
   const eui = String(deviceEui).toUpperCase();
   const schedules = await store.listSchedules(db, eui);
   const settings = await store.getSettings(db, eui);
@@ -1387,7 +1388,7 @@ async function compileAndQueueLocked({ db, deviceEui, appId, force, now, flushQu
   // Validate before the flush: a refused compile must not touch the radio queue.
   let built = await build(db, statusOverride);
   if (built.compiled.errors.length && warn) warn('[valve-control] ' + eui + ': plan_conflict in the stored schedules; sending the scheduler status alone');
-  const queued = await queueSnapshot({ db, deviceEui: eui, appId, flushQueue, transport, warn, now, build: async (tx) => {
+  const queued = await queueSnapshot({ db, deviceEui: eui, appId, flushQueue, transport, warn, now, onCommitted: settingsPatch ? onSettingsSaved : undefined, build: async (tx) => {
     if (settingsPatch) await store.upsertSettings(tx, eui, settingsPatch);
     built = await build(tx, schedulerStatus);
     return built.pushes;
@@ -1405,7 +1406,7 @@ async function compileAndQueueLocked({ db, deviceEui, appId, force, now, flushQu
 // (R13-M1). ACTIVE is refused in lifecycle-clear mode, and in conditional mode while the current
 // clear is not confirmed READY: the valve may still hold a resident plan, and status 0 would let
 // it run.
-async function setSchedulerStatus({ db, deviceEui, appId, status, settingsPatch, now, flushQueue, transport, warn, timeZoneFallback } = {}) {
+async function setSchedulerStatus({ db, deviceEui, appId, status, settingsPatch, now, flushQueue, transport, warn, timeZoneFallback, onSettingsSaved } = {}) {
   const eui = String(deviceEui).toUpperCase();
   const code = statusCodeFor(status);
   const wanted = String(status).toUpperCase();
@@ -1433,13 +1434,14 @@ async function setSchedulerStatus({ db, deviceEui, appId, status, settingsPatch,
         await store.insertPushes(tx, rows);
         await store.upsertSettings(tx, eui, patch);
       });
+      if (typeof onSettingsSaved === 'function') onSettingsSaved();
       const out = { statusOnly: true, conditional, invalidMode, rows, messages: [], transportResults: [], requeued: 0 };
       if (transport) out.transportResults = await sendRows({ db, deviceEui: eui, rows, transport, now });
       else out.messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui: eui, fport: r.fport, payloadHex: r.payload_hex }));
       return out;
     }
     return compileAndQueueLocked({ db, deviceEui: eui, appId, now, flushQueue, transport, warn, timeZoneFallback,
-      settingsPatch: patch, statusOnlyOnConflict: true });
+      settingsPatch: patch, statusOnlyOnConflict: true, onSettingsSaved });
   });
 }
 
