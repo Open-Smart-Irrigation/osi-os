@@ -139,6 +139,7 @@ jobs:
         run: |
           node --test scripts/test-conditional-irrigation-5b1.js
           node --test scripts/test-conditional-irrigation-adapters.js
+          node --test scripts/test-request-message-isolation.js
           node --test scripts/test-conditional-irrigation-clock-install.js
           node scripts/test-conditional-irrigation-clock.js
           node scripts/test-conditional-irrigation-command-boundary.js scripts/fixtures/conditional-irrigation-command-boundary-local.json

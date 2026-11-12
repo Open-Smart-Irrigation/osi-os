@@ -9,7 +9,11 @@ no dependency.
 The checker discovers every repository `flows.json` through Git's file inventory,
 including new variants. It applies ESLint's lexical `no-undef` analysis to every
 function node's `func`, `initialize` and `finalize`, including disabled nodes.
-Local declarations and each node's `libs[].var` resolve names in that node only.
+Local declarations and each node's `libs[].var` resolve names in that node only. Library aliases must
+also be unique within a node and must not collide with sandbox globals,
+JavaScript intrinsics or the wrapper names, including `node`. The checker
+rejects `with` statements in every source field, because their dynamic scopes
+can hide unresolved lexical references.
 Use `--flows <path>` to check an extracted historical flow or a fixture.
 
 The allowed globals come from the [Node-RED 3.1.15 function implementation](https://github.com/node-red/node-red/blob/3.1.15/packages/node_modules/@node-red/nodes/core/function/10-function.js):
@@ -31,14 +35,11 @@ probes and checks their subsequent identifier uses. It does not infer control
 flow, including feature guards and unreachable statements. ESLint suppression
 comments inside flow code cannot disable the rule.
 
-`scripts/flows-sandbox-exceptions.json` records four reviewed exceptions. Each
+`scripts/flows-sandbox-exceptions.json` records two reviewed exceptions. Each
 matches a node ID, source field, identifier, exact locations and the SHA-256 of
 the complete field. Changed code or diagnostic counts fail the check and require
 reviewing or removing the exception. Each applied exception is printed.
 
-- `al-link-handle-auth` and `al-link-store-mqtt`: `new URL(...)` is inside an
-  immediate `typeof URL === 'function'` guard. With no URL constructor, that
-  branch never executes and the existing fallback runs.
 - `settings-disable-schedules-fn`: the `disabledSchedules` expression follows
   an unconditional return and cannot execute.
 - `dendro-compute-fn`: **known runtime defect**, retained outside this fix's

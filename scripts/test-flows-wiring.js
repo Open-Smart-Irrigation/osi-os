@@ -1701,7 +1701,22 @@ function assertPromotionOnlyValveSettingsUpsert(node, label) {
         failures.push(label + ' not found');
         return;
     }
-    const func = node.func || '';
+    let func = node.func || '';
+    if (node.id === 'cs-register-device-fn') {
+        if (!hasLib(node, 'osiLib', 'osi-lib') ||
+            !func.includes("osiLib.require('osi-irrigation-policy')") ||
+            !func.includes('load.value.routes.requestCsRegisterDeviceFn({msg,node,env,osiDb,chirpstack,osiLib})')) {
+            failures.push(label + ' must delegate registration to the registered request helper');
+            return;
+        }
+        const policyRoot = path.resolve(valveControlRoot, '..', 'osi-irrigation-policy');
+        const exported = require(policyRoot).routes.requestCsRegisterDeviceFn;
+        if (typeof exported !== 'function' || exported !== require(path.join(policyRoot, 'routes.js')).requestCsRegisterDeviceFn) {
+            failures.push(label + ' request helper must be exported by osi-irrigation-policy.routes');
+            return;
+        }
+        func = stripJavaScriptComments(exported.toString());
+    }
     if (!/applyStregaClaim/.test(func) || !/VC\s*&&\s*VC\.claim/.test(func)) {
         failures.push(label + ' must delegate the STREGA owner write to osi-valve-control.claim.applyStregaClaim');
     } else if (!PROMOTION_ONLY_VALVE_SETTINGS_RE.test(stregaClaimSource)) {

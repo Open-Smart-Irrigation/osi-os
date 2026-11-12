@@ -715,15 +715,17 @@ async function conditionalLifecycleCommand(context) {
     const fail = () => Promise.reject(Object.assign(new Error('chirpstack_transport_unavailable'), { code: 'transport_unavailable' }));
     return { getDeviceQueue: fail, getQueue: fail, flushDeviceQueue: fail, enqueueDownlink: fail, enqueue: fail };
   };
-  let transport;
+  const transport = valveLoad.value.push.lazyTransport(() => {
   try {
-    transport = typeof chirpstack !== 'undefined' && chirpstack && typeof chirpstack.createProvisioningClientFromEnv === 'function'
+    return typeof chirpstack !== 'undefined' && chirpstack && typeof chirpstack.createProvisioningClientFromEnv === 'function'
       ? chirpstack.createProvisioningClientFromEnv(env)
       : unavailableTransport();
   } catch (transportError) {
-    transport = unavailableTransport();
     node.warn('lifecycle command clear transport unavailable: ' + String(transportError && transportError.message || transportError));
+    return unavailableTransport();
   }
+  }, (message) => node.warn(String(message)));
+  try {
   const db = new dbLoad.value.Database('/data/db/farming.db');
   const close = () => new Promise((resolve) => db.close(() => resolve()));
   const ackBase = {
@@ -842,6 +844,9 @@ async function conditionalLifecycleCommand(context) {
     }
   } finally {
     try { await close(); } catch (closeError) { node.warn('lifecycle command DB close failed: ' + String(closeError && closeError.message || closeError)); }
+  }
+  } finally {
+    closeUnclaimTransport(transport);
   }
 }
 
@@ -983,15 +988,17 @@ async function conditionalPolicyCommand(context) {
     const fail = () => Promise.reject(Object.assign(new Error('chirpstack_transport_unavailable'), { code: 'transport_unavailable' }));
     return { getDeviceQueue: fail, getQueue: fail, flushDeviceQueue: fail, enqueueDownlink: fail, enqueue: fail };
   };
-  let transport;
+  const transport = valveLoad.value.push.lazyTransport(() => {
   try {
-    transport = typeof chirpstack !== 'undefined' && chirpstack && typeof chirpstack.createProvisioningClientFromEnv === 'function'
+    return typeof chirpstack !== 'undefined' && chirpstack && typeof chirpstack.createProvisioningClientFromEnv === 'function'
       ? chirpstack.createProvisioningClientFromEnv(env)
       : unavailableTransport();
   } catch (transportError) {
-    transport = unavailableTransport();
     node.warn('conditional policy command transport unavailable: ' + String(transportError && transportError.message || transportError));
+    return unavailableTransport();
   }
+  }, (message) => node.warn(String(message)));
+  try {
   const db = new dbLoad.value.Database('/data/db/farming.db');
   const close = () => new Promise((resolve) => db.close(() => resolve()));
   const txFacade = (tx) => ({
@@ -1090,6 +1097,9 @@ async function conditionalPolicyCommand(context) {
   } finally {
     try { await close(); } catch (closeError) { node.warn('conditional policy command DB close failed: ' + String(closeError && closeError.message || closeError)); }
   }
+  } finally {
+    closeUnclaimTransport(transport);
+  }
 }
 
 async function zoneDelete(context) {
@@ -1139,10 +1149,19 @@ if (!msg.payload || msg.payload.length === 0) {
   return [null, msg];
 }
 const device = msg.payload[0];
-const zoneId = Number(flow.get('assign_zone_id'));
-const deveui = String(flow.get('assign_deveui') || '').trim().toUpperCase();
-const userId = Number(flow.get('assign_user_id'));
-const gateway = String(flow.get('assign_zone_gateway_device_eui') || device.gateway_device_eui || env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
+const request = (msg.osi || {}).request;
+if (!request || request.kind !== 'device_assign' || Number(msg.authUserId) !== request.actorId ||
+    String(msg.authUsername || '') !== request.actorUsername ||
+    !request.zone || Number(request.zone.id) !== request.zoneId || Number(request.zone.user_id) !== request.actorId ||
+    String(device.deveui || '').trim().toUpperCase() !== request.deviceEui) {
+  msg.statusCode = 400;
+  msg.payload = { message: 'Device assignment lookup does not match request' };
+  return [null, msg];
+}
+const zoneId = request.zoneId;
+const deveui = request.deviceEui;
+const userId = request.actorId;
+const gateway = String(request.zone.gateway_device_eui || device.gateway_device_eui || env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
 if (typeof osiDb === 'undefined' || typeof osiLib === 'undefined') {
   msg.statusCode = 503;
   msg.payload = { message: 'conditional lifecycle service unavailable' };
@@ -1233,8 +1252,13 @@ if (!msg.payload || msg.payload.length === 0) {
   msg.payload = { message: 'User not found' };
   return [null, msg];
 }
-const userId = msg.payload[0].id;
-const deveui = flow.get('delete_device_deveui');
+const userId = Number(msg.authUserId);
+const deveui = String(msg.deleteDeviceEui || '').trim().toUpperCase();
+if (!deveui || !Number.isSafeInteger(userId) || Number(msg.payload[0].id) !== userId) {
+  msg.statusCode = 400;
+  msg.payload = { message: 'Device removal lookup does not match request' };
+  return [null, msg];
+}
 const gatewayDeviceEui = String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase();
 if (typeof osiDb === 'undefined' || typeof osiLib === 'undefined') {
   msg.statusCode = 503;
@@ -1297,4 +1321,276 @@ async function s2120UnclaimGate(context) {
   }
 }
 
-module.exports = Object.freeze({ scopedZoneDelete, scopedDeviceAssign, scopedDeviceUnassign, scopedDeviceDelete, conditionalLegacySchedule, conditionalLifecycleCommand, conditionalPolicyCommand, s2120UnclaimGate, zoneDelete, deviceAssign, deviceUnassign, deviceUnclaim });
+function legacyAssignVerifyZone(context) {
+const { msg } = context;
+
+if (!msg.payload || msg.payload.length === 0) {
+  msg.statusCode = 401;
+  msg.payload = { message: 'User not found' };
+  return [null, msg];
+}
+
+const request = { kind: 'device_assign', actorId: Number(msg.authUserId), actorUsername: String(msg.authUsername || ''), zoneId: parseInt(msg.req?.params?.id, 10), deviceEui: String(msg.req?.params?.deveui || '').trim().toUpperCase() };
+msg.osi = { ...(msg.osi || {}), request };
+if (Number(msg.payload[0].id) !== request.actorId) { msg.statusCode = 401; msg.payload = { message: 'User lookup does not match request' }; return [null, msg]; }
+const userId = request.actorId;
+const zoneId = request.zoneId;
+const deveui = request.deviceEui;
+
+if (!Number.isFinite(zoneId)) {
+  msg.statusCode = 400;
+  msg.payload = { message: 'Invalid zone ID' };
+  return [null, msg];
+}
+if (!deveui) {
+  msg.statusCode = 400;
+  msg.payload = { message: 'Device EUI is required' };
+  return [null, msg];
+}
+
+
+msg.topic = `SELECT id, user_id, zone_uuid, gateway_device_eui, sync_version
+FROM irrigation_zones
+WHERE id = ${zoneId}
+  AND user_id = ${userId}
+  AND deleted_at IS NULL
+LIMIT 1`;
+return [msg, null];
+
+}
+
+function legacyAssignVerifyDevice(context) {
+const { msg } = context;
+
+if (!msg.payload || msg.payload.length === 0) {
+  msg.statusCode = 404;
+  msg.payload = { message: 'Zone not found or access denied' };
+  return [null, msg];
+}
+
+const request = (msg.osi || {}).request;
+const zone = msg.payload[0];
+if (!request || request.kind !== 'device_assign' || Number(zone.id) !== request.zoneId || Number(zone.user_id) !== request.actorId) { msg.statusCode = 404; msg.payload = { message: 'Zone lookup does not match request' }; return [null, msg]; }
+const deveui = request.deviceEui;
+const userId = request.actorId;
+request.zone = { id: zone.id, user_id: zone.user_id, zone_uuid: zone.zone_uuid, gateway_device_eui: zone.gateway_device_eui, sync_version: zone.sync_version };
+msg.topic = `SELECT deveui, sync_version, gateway_device_eui
+FROM devices
+WHERE deveui = '${deveui.replace(/'/g, "''")}'
+  AND user_id = ${userId}
+LIMIT 1`;
+return [msg, null];
+
+}
+
+function legacyAssignResponse(context) {
+const { msg } = context;
+
+msg.statusCode = 200;
+msg.payload = {
+  message: 'Device assigned to zone successfully',
+  deveui: String(msg.osi?.request?.deviceEui || '').trim().toUpperCase(),
+  irrigation_zone_id: Number(msg.osi?.request?.zoneId),
+  irrigation_zone_uuid: msg.osi?.request?.zone?.zone_uuid || null,
+  gateway_device_eui: msg.osi?.request?.zone?.gateway_device_eui || null,
+  sync_version: Number(msg.osi?.request?.deviceSyncVersion || 0),
+  deleted_at: null
+};
+return msg;
+
+}
+
+function requestPostZoneInsert(input) {
+const { msg, node, env, osiDb } = input;
+if (!msg.payload || msg.payload.length === 0) {
+  msg.statusCode = 401;
+  msg.payload = { message: 'User not found' };
+  return [null, msg];
+}
+
+return (async () => {
+  try {
+    const userId = Number(msg.payload[0].id);
+    if (!msg.zone || userId !== msg.zone.user_id) { msg.statusCode = 401; msg.payload = { message: 'User lookup does not match request' }; return [null, msg]; }
+    const zoneName = String(msg.zone.name || '').trim();
+    const requestedTimezone = msg.zone.timezone;
+    const now = new Date().toISOString();
+    const gateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
+    function uuidv4() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : ((r & 0x3) | 0x8);
+        return v.toString(16);
+      });
+    }
+    const zoneUuid = uuidv4();
+
+    // (FW-T5) A missing request timezone defaults to the gateway-level app_settings
+    // setting, then 'UTC'; table-missing-safe (deploys are staged, this migration may
+    // not have run yet on this gateway).
+    let timezone = requestedTimezone;
+    if (!timezone) {
+      const db = new osiDb.Database('/data/db/farming.db');
+      try {
+        const row = await db.get("SELECT value FROM app_settings WHERE key = 'gateway_timezone'");
+        timezone = (row && row.value) || 'UTC';
+      } catch (e) {
+        const detail = String(e && e.message ? e.message : e);
+        if (!/no such table:\s*app_settings\b/i.test(detail)) {
+          node.warn('post-zone-insert: gateway_timezone read failed: ' + detail);
+        }
+        timezone = 'UTC';
+      } finally {
+        await new Promise((res) => db.close(() => res()));
+      }
+    }
+
+    msg.zone.user_id = (userId);
+    msg.zone.uuid = (zoneUuid);
+    msg.zone.gateway_device_eui = (gateway);
+    msg.zone.sync_version = (1);
+
+    msg.topic = "INSERT INTO irrigation_zones (name, user_id, zone_uuid, gateway_device_eui, sync_version, timezone, created_at, updated_at) VALUES ('" + zoneName.replace(/'/g, "''") + "', " + userId + ", '" + zoneUuid + "', '" + gateway.replace(/'/g, "''") + "', 1, '" + String(timezone).replace(/'/g, "''") + "', '" + now + "', '" + now + "')";
+    return [msg, null];
+  } catch (error) {
+    node.error('post-zone-insert failed: ' + (error && error.stack || error), msg);
+    msg.statusCode = 500;
+    msg.payload = { message: 'Failed to create zone' };
+    return [null, msg];
+  }
+})();
+}
+
+function requestPostZoneGetId(input) {
+const { msg } = input;
+
+const zoneUuid = String(msg.zone.uuid || '').trim();
+if (!zoneUuid) {
+  msg.statusCode = 500;
+  msg.payload = { message: 'Missing zone UUID after create' };
+  return msg;
+}
+msg.topic = `SELECT id, name, zone_uuid, gateway_device_eui, sync_version, deleted_at, created_at, updated_at
+FROM irrigation_zones
+WHERE zone_uuid = '${zoneUuid.replace(/'/g, "''")}' AND user_id = ${Number(msg.zone.user_id)}
+LIMIT 1`;
+return msg;
+
+}
+
+function requestCsRegisterDeviceFn(input) {
+const { msg, node, env, osiDb, chirpstack, osiLib } = input;
+return (async () => {
+const registration = msg.deviceRegistration || {};
+const sql = String(msg.topic || '').trim();
+const claimFence = registration.claimFence || { exists: false };
+const now = new Date().toISOString();
+const _db = new osiDb.Database('/data/db/farming.db');
+const run = (statement, params) => new Promise((resolve, reject) => {
+  const cb = (error) => error ? reject(error) : resolve();
+  if (params === undefined) _db.run(statement, cb);
+  else _db.run(statement, params, cb);
+});
+const close = () => new Promise((resolve) => _db.close(() => resolve()));
+let provisioned = null;
+try {
+  if (!sql) {
+    msg.statusCode = 500;
+    msg.payload = { message: 'Missing local device SQL update after ChirpStack provisioning' };
+    await close();
+    return [null, msg];
+  }
+  const client = chirpstack.createProvisioningClientFromEnv(env);
+  provisioned = await client.ensureDeviceProvisioned(registration);
+  try {
+    let valveLoad = { ok: false };
+    if (typeof osiLib !== 'undefined' && osiLib && typeof osiLib.require === 'function') {
+      try { valveLoad = osiLib.require('osi-valve-control'); }
+      catch (loadError) { valveLoad = { ok: false, error: String(loadError && loadError.message || loadError) }; }
+    }
+    const VC = valveLoad && valveLoad.ok ? valveLoad.value : null;
+    const deviceEui = String(registration.devEui || '').trim().toUpperCase();
+    const txScope = {
+      get: (statement, params) => new Promise((resolve, reject) => _db.get(statement, params || [], (error, row) => error ? reject(error) : resolve(row))),
+      run: (statement, params) => new Promise((resolve, reject) => _db.run(statement, params || [], (error) => error ? reject(error) : resolve())),
+    };
+    const mutateLegacy = async (tx) => {
+      const before = await tx.get('SELECT id, user_id, irrigation_zone_id, deleted_at, type_id, sync_version FROM devices WHERE UPPER(deveui)=UPPER(?)', [deviceEui]);
+      const sameClaimValue = (left, right) => left == null && right == null
+        ? true
+        : left == null || right == null
+          ? false
+          : String(left) === String(right);
+      if (!claimFence.exists) {
+        if (before) throw Object.assign(new Error('claim_state_changed'), { code: 'claim_state_changed' });
+      } else if (!before
+          || Number(before.id) !== Number(claimFence.id)
+          || before.type_id !== claimFence.type_id
+          || !sameClaimValue(before.user_id, claimFence.user_id)
+          || !sameClaimValue(before.irrigation_zone_id, claimFence.irrigation_zone_id)
+          || !sameClaimValue(before.deleted_at, claimFence.deleted_at)
+          || Number(before.sync_version || 0) !== Number(claimFence.sync_version || 0)) {
+        throw Object.assign(new Error('claim_state_changed'), { code: 'claim_state_changed' });
+      }
+      const run = (statement, params) => tx.run(statement, params);
+      await run(sql);
+      const after = await tx.get('SELECT id, user_id, irrigation_zone_id, deleted_at, type_id, sync_version FROM devices WHERE UPPER(deveui)=UPPER(?)', [deviceEui]);
+      if (!after || after.type_id !== registration.deviceType || after.deleted_at !== null
+          || Number(after.user_id) !== Number(registration.userId)) {
+        throw Object.assign(new Error('claim_write_not_applied'), { code: 'claim_write_not_applied' });
+      }
+    };
+    if (registration.deviceType === 'STREGA_VALVE') {
+      const claim = VC && VC.claim;
+      if (!claim || typeof claim.applyStregaClaim !== 'function' || typeof _db.transaction !== 'function') {
+        const error = new Error('STREGA claim writer unavailable');
+        error.code = 'strega_writer_unavailable';
+        error.step = 'db';
+        throw error;
+      }
+      await claim.applyStregaClaim({
+        db: _db,
+        deviceEui,
+        sql,
+        claimFence,
+        expectedDeviceType: registration.deviceType,
+        expectedUserId: Number(registration.userId),
+        authorization: { userId: Number(registration.userId) },
+        stregaGeneration: registration.stregaGeneration,
+        now,
+      });
+    } else {
+      await mutateLegacy(txScope);
+    }
+  } catch (dbError) {
+    dbError.step = 'db';
+    throw dbError;
+  }
+  msg.device.chirpstack_result = (provisioned);
+  await close();
+  return [msg, null];
+} catch (error) {
+  if (provisioned && provisioned.deviceCreated) {
+    try {
+      const cleanupClient = chirpstack.createProvisioningClientFromEnv(env);
+      await cleanupClient.deleteDevice(registration.devEui);
+    } catch (error) { node.warn('cs-register-device-fn: ' + String(error && error.message ? error.message : error)); }
+  }
+  try { await close(); } catch (error) { node.warn('cs-register-device-fn: ' + String(error && error.message ? error.message : error)); }
+  const step = String(error.step || 'chirpstack');
+  const grpcStatus = error.grpcStatus || null;
+  const details = String(error.details || error.message || error);
+  msg.statusCode = step === 'validate' ? 400 : (grpcStatus === 'UNAVAILABLE' ? 503 : (step === 'db' ? 500 : 502));
+  msg.payload = {
+    message: step === 'db' ? 'Device registration could not be saved locally' : 'ChirpStack provisioning failed',
+    error: details,
+    step,
+    grpcStatus,
+    verificationRequired: error.verificationRequired === true
+  };
+  return [null, msg];
+}
+})();
+}
+
+module.exports = Object.freeze({ requestPostZoneInsert, requestPostZoneGetId, requestCsRegisterDeviceFn, legacyAssignVerifyZone, legacyAssignVerifyDevice, legacyAssignResponse, scopedZoneDelete, scopedDeviceAssign, scopedDeviceUnassign, scopedDeviceDelete, conditionalLegacySchedule, conditionalLifecycleCommand, conditionalPolicyCommand, s2120UnclaimGate, zoneDelete, deviceAssign, deviceUnassign, deviceUnclaim });

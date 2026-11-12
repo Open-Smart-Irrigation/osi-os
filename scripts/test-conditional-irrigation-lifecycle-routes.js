@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
 const {
-  executeFunction,
+  executeFunction: executeActualFunction,
   facadeDb,
   loadNode,
   makeAuthHeader,
@@ -53,6 +53,25 @@ const SOURCE = 'DENDRO1';
 const TARGET = 'DENDRO2';
 const ZONE_UUID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AT = '2026-10-19T10:00:00.000Z';
+
+// Direct adapter fixtures supply the same per-message values as the auth and
+// lookup stages. These are fixture inputs, never a shared flow-state fallback.
+function executeFunction(node, options) {
+  const { legacyFixture, ...input } = options;
+  if (legacyFixture) {
+    const actorId = Number(legacyFixture.assign_user_id ?? input.msg.payload[0].id);
+    const username = input.db.prepare('SELECT username FROM users WHERE id=?').get(actorId).username;
+    input.msg.authUserId = actorId;
+    input.msg.authUsername = username;
+    if (legacyFixture.delete_device_deveui) input.msg.deleteDeviceEui = legacyFixture.delete_device_deveui;
+    else input.msg.osi = { request: { kind: 'device_assign', actorId, actorUsername: username,
+      zoneId: legacyFixture.assign_zone_id, deviceEui: legacyFixture.assign_deveui,
+      zone: { id: legacyFixture.assign_zone_id, user_id: actorId,
+        gateway_device_eui: legacyFixture.assign_zone_gateway_device_eui } } };
+  }
+  return executeActualFunction(node, input);
+}
+
 const ENV = {
   AUTH_TOKEN_SECRET: AUTH_SECRET,
   DEVICE_EUI: GATEWAY,
@@ -302,7 +321,7 @@ test('flag-off wrappers still use the canonical mutation boundary for legacy dis
         payload: [{ id: 2 }],
       },
       env: offEnv,
-      flowState: { delete_device_deveui: VALVE },
+      legacyFixture: { delete_device_deveui: VALVE },
       db: unclaimDb,
     });
     // S6: a detach that applied answers 200; the pending clear is reported as valve_cleanup.
@@ -328,7 +347,7 @@ test('flag-off assign and unassign wrappers require the owner actor before mutat
     const deniedAssign = await executeFunction(loadNode('assign-device-update'), {
       msg: { payload: [assignDb.prepare('SELECT * FROM devices WHERE deveui=?').get(TARGET)] },
       env: offEnv,
-      flowState: {
+      legacyFixture: {
         assign_zone_id: 1,
         assign_deveui: TARGET,
         assign_user_id: 1,
@@ -430,7 +449,7 @@ for (const profile of PROFILES) {
       flagAssignDb.prepare('UPDATE devices SET irrigation_zone_id=NULL, user_id=2 WHERE deveui=?').run(TARGET);
       const result = await runNode(profile, 'assign-device-update', {
         msg: { payload: [flagAssignDb.prepare('SELECT * FROM devices WHERE deveui=?').get(TARGET)] }, env: offEnv,
-        flowState: { assign_zone_id: 1, assign_deveui: TARGET, assign_user_id: 2, assign_zone_gateway_device_eui: GATEWAY }, db: flagAssignDb,
+        legacyFixture: { assign_zone_id: 1, assign_deveui: TARGET, assign_user_id: 2, assign_zone_gateway_device_eui: GATEWAY }, db: flagAssignDb,
       });
       assert.equal(result.result[1].statusCode, 200);
       assertNoRetirement(flagAssignDb);
@@ -450,7 +469,7 @@ for (const profile of PROFILES) {
     try {
       policyFixture(flagUnclaimDb);
       const result = await runNode(profile, 'delete-device-unlink', {
-        msg: { payload: [{ id: 2 }] }, env: offEnv, flowState: { delete_device_deveui: VALVE }, db: flagUnclaimDb,
+        msg: { payload: [{ id: 2 }] }, env: offEnv, legacyFixture: { delete_device_deveui: VALVE }, db: flagUnclaimDb,
       });
       // S6: a detach that applied answers 200; the pending clear is reported as valve_cleanup.
       assert.equal(result.result[1].statusCode, 200);
@@ -580,7 +599,7 @@ test('lifecycle wrappers fail closed when context or helpers are missing without
     const missingHelpers = await executeFunction(loadNode('delete-device-unlink'), {
       msg: { payload: [{ id: 2 }] },
       env: ENV,
-      flowState: { delete_device_deveui: VALVE },
+      legacyFixture: { delete_device_deveui: VALVE },
       db,
       libOverrides: { osiDb: undefined, osiLib: undefined },
     });
@@ -1286,7 +1305,7 @@ async function localUnclaim(profile, db, deviceEui, { scoped = false } = {}) {
     });
   }
   return runNode(profile, 'delete-device-unlink', {
-    msg: { payload: [{ id: 2 }] }, env: { ...ENV, OSI_SCOPED_ACCESS: '0' }, flowState: { delete_device_deveui: deviceEui }, db,
+    msg: { payload: [{ id: 2 }] }, env: { ...ENV, OSI_SCOPED_ACCESS: '0' }, legacyFixture: { delete_device_deveui: deviceEui }, db,
   });
 }
 
@@ -1474,7 +1493,7 @@ for (const profile of PROFILES) {
     const nodeId = scoped ? 'scoped-device-delete-router' : 'delete-device-unlink';
     const call = (db, transport) => runNode(profile, nodeId, scoped
       ? { msg: request(2, 'res1', 'DELETE', '/api/devices/' + VALVE, { deveui: VALVE }), env: ENV, db, libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } } }
-      : { msg: { payload: [{ id: 2 }] }, env: { ...ENV, OSI_SCOPED_ACCESS: '0' }, flowState: { delete_device_deveui: VALVE }, db, libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } } });
+      : { msg: { payload: [{ id: 2 }] }, env: { ...ENV, OSI_SCOPED_ACCESS: '0' }, legacyFixture: { delete_device_deveui: VALVE }, db, libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } } });
 
     test(`${profile} ${mode}: local unclaim with a queued open flushes it (in_flight_cancel handed_off), no CLOSE`, async () => {
       const db = seedScopedDb(VALVE);

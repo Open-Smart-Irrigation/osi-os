@@ -82,7 +82,7 @@ test('zone create trims and stores the normalized name', async () => {
   try {
     const run = await callZoneAuth(db, '\ufeffNorth');
     assert.equal(run.result[1], null, JSON.stringify(run.result[1] && run.result[1].payload));
-    assert.equal(run.flowState.new_zone_name, 'North');
+    assert.equal(run.result[0].zone.name, 'North');
   } finally {
     db.close();
   }
@@ -136,7 +136,7 @@ test('device create stores the normalized name', async () => {
   try {
     const run = await callDeviceAuth(db, '\u2028North\u2029');
     assert.equal(run.result[1], null, JSON.stringify(run.result[1] && run.result[1].payload));
-    assert.equal(run.flowState.new_device_name, 'North');
+    assert.equal(run.result[0].device.name, 'North');
   } finally {
     db.close();
   }

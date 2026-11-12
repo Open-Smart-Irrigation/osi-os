@@ -8,6 +8,7 @@ const {
   facadeDb,
   loadNode,
   makeAuthHeader,
+  moduleByName,
   seedScopedDb,
 } = require('./lib/scoped-access-harness');
 const scopeHelper = require(
@@ -2048,7 +2049,7 @@ test('W7: every zone-config route fresh-checks scope and records the actor', asy
       });
       assert.equal(allowed.result[index].actor_user_uuid, 'u-res1');
       assert.equal(allowed.result[index]._scopedZoneOwnerId, 2);
-      assert.equal(allowed.flowState.actor_user_uuid, 'u-res1');
+      assert.equal(allowed.flowState.actor_user_uuid, undefined, 'actor stays on the request');
 
       scopeHelper._resetForTests();
       const foreignAdmin = await executeFunction(loadNode('scoped-zone-config-guard'), {
@@ -2524,15 +2525,10 @@ async function applyDevicePost(db, deveui, zoneId, userId) {
     msg: {
       payload: [row],
       ...(zoneId === undefined ? {} : { _deviceZoneId: zoneId }),
+      device: { user_id: userId == null ? row.user_id : userId, deveui: row.deveui,
+        name: row.deveui + ' repost', type: row.type_id, appkey: REGISTER_APPKEY },
     },
     env: DEVICE_POST_ENV,
-    flowState: {
-      new_device_user_id: userId == null ? row.user_id : userId,
-      new_device_deveui: row.deveui,
-      new_device_name: row.deveui + ' repost',
-      new_device_type: row.type_id,
-      new_device_appkey: REGISTER_APPKEY,
-    },
     db,
   });
   return result;
@@ -2608,7 +2604,11 @@ async function applyLocalValveRegistration(db, { deviceEui = '0016C001F1000001',
   const libOverrides = {
     chirpstack: fakeChirpstackLib(tracker),
     ...(noTransaction ? { osiDb: { Database: function Database() { return noTx; } } } : {}),
-    ...(noValveHelper ? { osiLib: { require: () => ({ ok: false, error: 'missing valve helper' }) } } : {}),
+    ...(noValveHelper ? { osiLib: { require(name) {
+      if (name === 'osi-valve-control') return { ok: false, error: 'missing valve helper' };
+      const value = moduleByName(name);
+      return value ? { ok: true, value } : { ok: false, error: 'missing fixture module: ' + name };
+    } } } : {}),
   };
   const response = await executeFunction(loadNode('cs-register-device-fn'), {
     msg: prepared.result[0], env: DEVICE_POST_ENV, db,

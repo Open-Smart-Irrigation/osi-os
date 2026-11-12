@@ -7,7 +7,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { executeFunction, loadNode, profilePaths, seedScopedDb } = require('./lib/scoped-access-harness');
+const { executeFunction, loadNode, moduleByName, profilePaths, seedScopedDb } = require('./lib/scoped-access-harness');
 
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY = '0016C001F1000002';
@@ -81,6 +81,50 @@ function transportRecorder() {
     async flushDeviceQueue() { calls.push('flush'); return { ok: true }; },
     async enqueueDownlink() { calls.push('enqueue'); return { id: `adapter-${calls.length}` }; },
   };
+}
+
+for (const profile of PROFILES) {
+  for (const scenario of ['schedule', 'policy', 'rejected', 'post-commit failure', 'database constructor failure']) {
+    test(`${profile}: cloud command owns and closes its client (${scenario})`, async (t) => {
+      const db = seedScopedDb(VALVE); t.after(() => db.close());
+      let created = 0, closed = 0;
+      const transport = { ...transportRecorder(), close() { closed++; } };
+      if (scenario === 'post-commit failure') transport.enqueueDownlink = async () => { throw new Error('fixture transport failed'); };
+      const paths = profilePaths(profile);
+      const policy = moduleByName('osi-irrigation-policy', paths.nodeRedModules);
+      // Force the post-commit physical boundary independently of whether this
+      // fixture's prepared plan happens to need another transmission.
+      const policyWithTransport = { ...policy, async completePauseTransport(options) {
+        await options.transport.enqueueDownlink(VALVE, {});
+      } };
+      if (scenario === 'schedule') policyFixture(db);
+      let command;
+      if (scenario === 'policy' || scenario === 'post-commit failure') {
+        policyFixture(db);
+        command = envelope(8101, 'PAUSE_IRRIGATION_POLICY', uuid(8101), { expected_policy_version: 4 });
+        command.appliedSyncVersion = 5;
+      } else {
+        command = { commandId: 8102, commandType: 'UPSERT_SCHEDULE', effectKey: 'lifecycle:UPSERT_SCHEDULE:8102',
+          payload: { zoneId: scenario === 'rejected' ? 9999 : 1, zoneUuid: scenario === 'schedule' ? ZONE : 'z-1', gatewayDeviceEui: GATEWAY,
+            triggerMetric: 'SWT_WM1', thresholdKpa: 30, durationMinutes: 10, enabled: false, appliedSyncVersion: 1 } };
+      }
+      const run = () => executeFunction(loadNode('conditional-lifecycle-command-adapter', paths.flowsPath), {
+        msg: { payload: { _pendingCommandEnvelope: command }, _commandTypeRecognized: true },
+        env: { DEVICE_EUI: GATEWAY }, db, nodeRedModules: paths.nodeRedModules,
+        osiLibModules: scenario === 'database constructor failure'
+          ? { 'osi-db-helper': { Database: function() { throw new Error('fixture database unavailable'); } } }
+          : { 'osi-irrigation-policy': policyWithTransport },
+        libOverrides: { chirpstack: { createProvisioningClientFromEnv() { created++; return transport; } } },
+      });
+      if (scenario === 'database constructor failure') await assert.rejects(run, /fixture database unavailable/);
+      else {
+        const result = await run();
+        assert.equal(result.result[1].payload.result, scenario === 'rejected' ? 'REJECTED_PERMANENT' : 'APPLIED');
+      }
+      assert.equal(closed, created, `${created} clients created, ${closed} closed`);
+      if (['schedule', 'policy', 'post-commit failure'].includes(scenario)) assert.equal(created, 1, 'post-commit work exercised a real owned fixture client');
+    });
+  }
 }
 
 async function runCommand(profile, db, command, transport) {

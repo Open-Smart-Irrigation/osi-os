@@ -370,7 +370,8 @@ const protectedNodeHashes = {
   // resolution, and the flag-off branch inlines the pre-refactor secret-resolution logic
   // byte-equivalent to the pre-port route. Hash re-derived fresh on this branch.
   // Previous pin (pick-list commit 65, AgroLink d2e81bd6a): a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc
-  'al-link-validate': '586ed5912d0dfb36171c299a3b8b9e24b0588fec91fd47a5fa4549d2f873b842',
+  // Request-state repair: only transient request fields and the touched-node warning changed.
+  'al-link-validate': 'd09ba37e6eafb5fd8e91fcd51c845f28646a277073da56b0882f6c0ce6915046',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
   // The source branch's own history never closed this gap -- a live rebuild would have created
@@ -1013,7 +1014,7 @@ for (const flowRelativePath of flowRelativePaths) {
   const linkRequest = byId.get('al-link-build-req');
   if (linkRequest) {
     expectIncludes(`${flowRelativePath}:al-link-build-req`, linkRequest.func,
-      "flow.set('al_server_password', null);\n  msg.statusCode = 503;\n  msg.payload = { message: 'Gateway identity is being applied. The central hub will restart before linking.' };\n  return [null, msg];",
+      "msg.link.server_password = (null);\n  msg.statusCode = 503;\n  msg.payload = { message: 'Gateway identity is being applied. The central hub will restart before linking.' };\n  return [null, msg];",
       'clears the password and returns the second/error output with status 503');
   }
   for (const [nodeId, reason, delaySeconds] of restartOwnerContracts) {
@@ -1108,9 +1109,9 @@ if (silentCatchBaseline) {
   // 77: issue #356 durable Chameleon diagnostic link -- Insert Chameleon Reading's
   // close() catch and calibration-local-backfill's ROLLBACK and close() catches become
   // visible node.warn while both nodes move to one scoped db.transaction: 80 -> 77.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 77 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 77,
-    'silent-catch baseline records 77 for both maintained profiles',
-    'silent-catch baseline must be 77 for both maintained profiles');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 72 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 72,
+    'silent-catch baseline records 72 for both maintained profiles',
+    'silent-catch baseline must be 72 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

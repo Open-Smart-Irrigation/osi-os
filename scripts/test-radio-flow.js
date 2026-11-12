@@ -527,16 +527,10 @@ test('a RAK10701 field tester registers instead of 503ing as an unsupported type
  const db=seedTestDb();
  try{
   const response=await executeFunction(loadNode('post-devices-insert'),{
-   msg:{payload:[]},// no existing local row
+   msg:{payload:[],device:{user_id:1,deveui:'A840410000000001',name:'Field tester',
+    type:'RAK10701_FIELD_TESTER',appkey:'000000000000000000000000000000AB'}},
    env:REGISTER_ENV,
-   db,
-   flowState:{
-    new_device_user_id:1,
-    new_device_deveui:'A840410000000001',
-    new_device_name:'Field tester',
-    new_device_type:'RAK10701_FIELD_TESTER',
-    new_device_appkey:'000000000000000000000000000000AB'
-   }
+   db
   });
   assert.equal(response.result[1],null,'the 503 "unsupported device type" branch must not fire');
   const registration=response.result[0].deviceRegistration;

@@ -306,11 +306,17 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
   return fn(msg, nodeApi, flowApi, envApi, noopStore, globalApi, () => undefined, () => {});
 }
 
+function linkFixture(values) {
+  return Object.fromEntries([...values].filter(([key]) => key.startsWith('al_'))
+    .map(([key, value]) => [key.slice(3), value]));
+}
+
 async function buildLinkAttempt(flows, flowStore, helper, expectedRoute = 'legacy') {
   const buildNode = findNode(flows, 'al-link-build-req');
   const [continueMsg, rejectMsg] = await executeFunctionNode(buildNode, {
     authUserId: 1,
     authUsername: flowStore.get('al_local_username'),
+    link: linkFixture(flowStore),
   }, {
     flowStore,
     scope: { osiDb: helper, osiLib },
@@ -388,12 +394,12 @@ test('legacy cloud (no installationUuid) is tolerated: link succeeds, warns once
     assert.match(warnings[0], /installation identity/i);
 
     assert.equal(
-      flowStore.get('al_installation_uuid'),
+      responseMsg.link.installation_uuid,
       localInstallationUuid,
       'no remote installation identity must be persisted for a legacy cloud; the local uuid must be kept'
     );
     assert.equal(
-      flowStore.get('al_offline_verifier_version'),
+      continueMsg.link.offline_verifier_version,
       1,
       'offlineVerifierVersion must be stored as returned by the cloud (1), not forced/rejected'
     );
@@ -501,7 +507,7 @@ test('a cloud-reported installationUuid that differs from the local one is still
     assert.equal(rejectMsg.payload.message, 'Server authentication returned an installation identity mismatch');
     assert.equal(warnings.length, 0, 'a real mismatch is a rejection, not a legacy-cloud warning');
     assert.equal(
-      flowStore.get('al_installation_uuid'),
+      responseMsg.link.installation_uuid,
       localInstallationUuid,
       'a rejected mismatch must not overwrite the local installation identity'
     );
@@ -812,7 +818,7 @@ async function linkEndToEnd(profile, lib) {
   const scope = { osiDb: helper, osiLib: lib };
   const warnings = [];
   const [requestMsg, buildReject] = await executeFunctionNode(findNode(flows, 'al-link-build-req'), {
-    authUserId: 1, authUsername: 'edgeuser',
+    authUserId: 1, authUsername: 'edgeuser', link: linkFixture(flowStore),
   }, { flowStore, scope, warnings });
   assert.equal(buildReject, null, 'link build must succeed: ' + JSON.stringify(buildReject && buildReject.payload));
   const request = { url: requestMsg.url, capabilities: requestMsg.payload.syncCapabilities.slice() };
