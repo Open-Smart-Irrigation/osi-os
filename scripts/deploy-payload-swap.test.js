@@ -395,7 +395,7 @@ test('prunePayloads keeps the newest N and never removes the current target', ()
   flipTo(root, '20260501');
 
   const { removed } = prunePayloads(root, 2);
-  const remaining = fs.readdirSync(path.join(root, 'payloads')).sort();
+  const remaining = fs.readdirSync(path.join(root, 'payloads')).filter((entry) => !entry.startsWith('.')).sort();
 
   assert.ok(remaining.includes('20260501'), 'current target is never pruned');
   assert.ok(remaining.includes('20260504'), 'newest is retained');
@@ -561,7 +561,7 @@ test('node_modules links and relative requires follow the active payload', (t) =
     'edge-channels.json and the codecs stay in place and are reached from the payload');
 });
 
-test('a failed module switch restores flows, GUI and the modules already switched', (t) => {
+test('a failed payload switch leaves flows, GUI and every module on the old payload', (t) => {
   const root = moduleRoot(t);
   const guiRoot = path.join(root, 'gui');
   stageWithModules(root, 'old', { 'osi-a': '', 'osi-b': '' });
@@ -570,11 +570,11 @@ test('a failed module switch restores flows, GUI and the modules already switche
 
   const realRename = fs.renameSync;
   fs.renameSync = (from, to) => {
-    if (to === path.join(root, 'osi-b')) throw new Error('forced module replacement failure');
+    if (to === path.join(root, 'payloads', '.active')) throw new Error('forced switch failure');
     return realRename(from, to);
   };
   try {
-    assert.throws(() => flipTo(root, 'new', guiRoot), /module flip osi-b.*forced module replacement failure/);
+    assert.throws(() => flipTo(root, 'new', guiRoot), /payload switch to new.*forced switch failure/);
   } finally {
     fs.renameSync = realRename;
   }
