@@ -15,14 +15,14 @@ Figures marked `<builder: …>` are measurements the image builder has not yet d
 
 ### On a gateway with the fixed release
 
-The start-up check reads the file once, read-only, before the flows start. A damaged file gives:
+The start-up check reads the file once, read-only, beside the flows (the state reads `checking` until it answers). A damaged file gives:
 
 - in the gateway log (`logread`), once per start:
   `[osi-db-startup] ERROR farm database start-up check: damaged (<SQLite's first message>); reported only, nothing was changed; see docs/operations/damaged-farm-database.md`
 - in `GET /api/system/stats` (logged in): `"database": {"status": "damaged", "health_state": "database_damaged", …}`
-- in the heartbeat the cloud receives, from the first one after the start: `"health": {"health_state": "database_damaged", …}`
+- in the heartbeat the cloud receives, from the first tick after the verdict: `"health": {"health_state": "database_damaged", …}`
 
-`database_missing`, `database_unreadable` and `database_missing_core_tables` in the same places also lead here. `database_not_checked` does not: the check took longer than 10 s or could not run, and the file may be sound. For those, see `farm-database-startup-check.md`.
+`database_missing`, `database_unreadable` and `database_missing_core_tables` in the same places also lead here. `database_checking` and `database_not_checked` do not: the check is still reading, or passed its ten-minute bound, or could not run, and the file may be sound. For those, see `farm-database-startup-check.md`.
 
 ### On a gateway still on v0.8.x
 

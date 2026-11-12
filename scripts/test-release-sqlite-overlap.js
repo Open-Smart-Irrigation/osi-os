@@ -121,7 +121,11 @@ const STARTUP_FAULTS={
   none:{id:'database-startup-healthy',status:'healthy',health:null},
   damaged:{id:'database-startup-damaged',status:'damaged',health:'database_damaged',log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
   conflict:{id:'database-startup-module-conflict',status:'healthy',health:'sqlite_module_conflict',log:/\[osi-db-startup\] ERROR found 2 native SQLite addons/},
+  // The check answers 12 s after the flows started: first "checking", then damaged.
+  damaged_late:{id:'database-startup-damaged-late',status:'checking',health:'database_checking',late:{status:'damaged',health:'database_damaged'},
+    log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
 };
+const STANDIN_DELAY_S=12;
 function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   const expected=STARTUP_FAULTS[fault];
   if(!expected||!LAYOUTS.includes(layout)||(fault==='conflict'&&layout!=='dual'))throw new Error('invalid start-up case');
@@ -130,7 +134,14 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   const dbfile=path.join(run,'data/db/farming.db');
   const env={PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:os.tmpdir(),OSI_SMOKE_RUN:run,OSI_SMOKE_SOURCE:source,UV_THREADPOOL_SIZE:'4',OSI_STARTUP_FAULT:fault};
   seedFarm(source,run,dbfile,env);
-  if(fault==='damaged') {
+  if(fault==='damaged_late') {
+    // A stand-in sqlite3 for the runtime only: it waits, then runs the real one.
+    const real=spawnSync('sh',['-c','command -v sqlite3'],{encoding:'utf8'}).stdout.trim();
+    const dir=path.join(run,'standin');fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir,'sqlite3'),`#!/bin/sh\nsleep ${STANDIN_DELAY_S}\nexec ${JSON.stringify(real)} "$@"\n`,{mode:0o755});
+    env.PATH=dir+':'+env.PATH;
+  }
+  if(fault==='damaged'||fault==='damaged_late') {
     // Zero the page-type byte of a non-core index's root page: quick_check
     // reports it, the core tables stay readable.
     const [{page_size:pageSize}]=cli(dbfile,'PRAGMA page_size');
@@ -140,7 +151,7 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   }
   const entry=prepareLayout(run,layout,'sqlite-startup-worker.js'),logfile=path.join(run,'runtime.log');
   const fd=fs.openSync(logfile,'w');let child;
-  try {child=spawnSync(process.execPath,['--max-old-space-size=1536',entry],{cwd:ROOT,env,stdio:['ignore',fd,fd],timeout:130000});}
+  try {child=spawnSync(process.execPath,['--max-old-space-size=1536',entry],{cwd:ROOT,env,stdio:['ignore',fd,fd],timeout:160000});}
   finally {fs.closeSync(fd);}
   const text=fs.readFileSync(logfile,'utf8');
   const failures=[],check=(code,ok,actual)=>{if(!ok)failures.push({code,actual});};
@@ -165,6 +176,15 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
     // the database state is added either way.
     check('stats-database',[200,500].includes(r.stats.status)&&database?.status===expected.status&&database?.health_state===expected.health,{status:r.stats.status,database});
     check('native-addons',r.addons.length===(fault==='conflict'?2:1),r.addons.length);
+    if(expected.late) {
+      // The flows did not wait for the check: the valve command was taken while it read.
+      check('flows-not-held',r.open.status===202,r.open.status);
+      const laterDatabase=r.later?.stats?.json?.database;
+      const laterHeartbeat=r.later?.heartbeat?JSON.parse(r.later.heartbeat):null;
+      evidence.later={database:laterDatabase,heartbeatHealth:laterHeartbeat?.health?.health_state};
+      check('late-verdict-in-stats',laterDatabase?.status===expected.late.status&&laterDatabase?.health_state===expected.late.health,laterDatabase);
+      check('late-verdict-in-next-heartbeat',laterHeartbeat?.health?.health_state===expected.late.health,laterHeartbeat?.health);
+    }
     if(fault==='conflict')check('refused-open',r.open.status===503&&r.open.json?.error==='OSI_SQLITE_REFUSED'&&r.openRadio===0,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
   } else check('observation',false,'runtime wrote no startup.json');
   if(expected.log)check('loud-log',expected.log.test(text),'no start-up error line');

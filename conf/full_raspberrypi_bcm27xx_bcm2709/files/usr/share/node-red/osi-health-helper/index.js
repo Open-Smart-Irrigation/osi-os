@@ -504,9 +504,12 @@ function recordError(msg, state = {}) {
 // A database fault replaces the gathered state; "not checked" (a 10 s
 // timeout on a large file, say) only replaces "healthy", so it never hides
 // crash_looping or degraded.
+// "checking" (the start-up check is still reading) and "not checked" rank
+// below degraded: they replace only healthy.
+const WEAK_DATABASE_STATES = new Set(['database_checking', 'database_not_checked']);
 function withDatabaseState(gathered, databaseState) {
   if (!databaseState) return gathered;
-  if (databaseState !== 'database_not_checked') return databaseState;
+  if (!WEAK_DATABASE_STATES.has(databaseState)) return databaseState;
   return gathered === 'healthy' || gathered == null ? databaseState : gathered;
 }
 

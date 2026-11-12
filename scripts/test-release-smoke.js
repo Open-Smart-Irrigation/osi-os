@@ -86,7 +86,7 @@ function main(argv,options={}) {
     const sqliteCases=require('./test-release-sqlite-overlap');
     for(const layout of ['dual','npm','stock'])evidence.cases.push(sqliteCases.run({layout}));
     // Start-up state: healthy, damaged file, two native addons.
-    for(const fault of ['none','damaged','conflict'])evidence.cases.push(sqliteCases.startupCase({fault}));
+    for(const fault of ['none','damaged','conflict','damaged_late'])evidence.cases.push(sqliteCases.startupCase({fault}));
     // The field layout (stock base, only the user copy): one addon, no fault.
     evidence.cases.push(sqliteCases.startupCase({fault:'none',layout:'stock'}));
   }

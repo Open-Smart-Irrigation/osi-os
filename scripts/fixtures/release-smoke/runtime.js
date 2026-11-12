@@ -84,15 +84,16 @@ function refuseExec(name) {
 }
 const fakeCp = {}; for (const k of ['exec', 'execFile', 'spawn', 'execSync', 'execFileSync', 'spawnSync', 'fork']) fakeCp[k] = refuseExec(k);
 // One exception: the farm database start-up check (osi-db-helper/startup.js)
-// runs `sqlite3 -readonly <db> <sql>`, a read-only separate process; it runs
-// for real on the relocated file and is recorded like every other command.
-const refusedSpawnSync = fakeCp.spawnSync;
-fakeCp.spawnSync = function (cmd, args, ...rest) {
+// runs `sqlite3 -readonly <db> <sql>` as a child beside the flows, a read-only
+// separate process; it runs for real on the relocated file and is recorded
+// like every other command.
+const refusedSpawn = fakeCp.spawn;
+fakeCp.spawn = function (cmd, args, ...rest) {
   if (cmd === 'sqlite3' && Array.isArray(args) && args.length === 3 && args[0] === '-readonly' && remap(args[1]) === DBFILE) {
-    state.exec.push({ fn: 'spawnSync', cmd: 'sqlite3 -readonly ' + args[1] });
-    return require('node:child_process').spawnSync(cmd, ['-readonly', DBFILE, args[2]], ...rest);
+    state.exec.push({ fn: 'spawn', cmd: 'sqlite3 -readonly ' + args[1] });
+    return require('node:child_process').spawn(cmd, ['-readonly', DBFILE, args[2]], ...rest);
   }
-  return refusedSpawnSync(cmd, args, ...rest);
+  return refusedSpawn(cmd, args, ...rest);
 };
 // path remap for the function nodes' fs (functionGlobalContext.fs) and for the clock marker
 function remap(p) {
