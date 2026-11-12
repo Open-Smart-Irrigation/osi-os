@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const policyApi = require('./api');
 const lifecycle = require('./lifecycle');
-const { tempDb } = require('../osi-valve-control/test-helpers');
+const { tempDb, linkCloud } = require('../osi-valve-control/test-helpers');
 
 const EUI = '0016C001F1000001';
 const POLICY = 'policy-lifecycle-test';
@@ -488,6 +488,138 @@ test('R19-1: a zone_delete clear prepared without a transport is sent by the val
     const up = upTransport();
     await tickThrice(f, up, now);
     assert.equal(up.calls.enqueued.length, control.required_push_ids.length, 'the clear goes out once');
+  } finally {
+    f.cleanup();
+  }
+});
+
+// Found by the council on #631 in the real runtime. irrigation_zone_id is UNIQUE, so a zone has one
+// schedule row for good. v0.8.1 saved with INSERT ... ON CONFLICT(irrigation_zone_id) DO UPDATE ...
+// deleted_at = NULL and so revived a soft-deleted row; a plain INSERT fails on the constraint.
+async function zoneWithSoftDeletedSchedule(f, version) {
+  await f.db.run("INSERT INTO irrigation_zones(id,name,user_id,created_at,updated_at,timezone,zone_uuid,sync_version) VALUES (1,'Lifecycle zone',1,?,?, 'UTC','zone-lifecycle-test',1)", ['2026-10-19T00:00:00.000Z', '2026-10-19T00:00:00.000Z']);
+  await f.db.run(
+    "INSERT INTO irrigation_schedules(irrigation_zone_id,trigger_metric,threshold_kpa,duration_minutes,enabled,response_mode,sync_version,deleted_at,created_at,updated_at) VALUES (1,'SWT_WM1',40,20,0,'proportional',?,?,?,?)",
+    [version, '2026-10-19T02:00:00.000Z', '2026-10-18T00:00:00.000Z', '2026-10-19T02:00:00.000Z']
+  );
+}
+const REVIVE_PATCH = { trigger_metric: 'SWT_WM2', threshold_kpa: 25, duration_minutes: 10, enabled: 1, response_mode: 'proportional' };
+const scheduleRows = async (f) => (await f.db.all('SELECT trigger_metric,threshold_kpa,duration_minutes,enabled,response_mode,sync_version,deleted_at,created_at,updated_at FROM irrigation_schedules WHERE irrigation_zone_id=1')).map((row) => ({ ...row }));
+
+test('a schedule save on a zone that holds a soft-deleted schedule row revives that row, as v0.8.1 did', async () => {
+  const f = await tempDb();
+  try {
+    await zoneWithSoftDeletedSchedule(f, 4);
+    const result = await lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, now: '2026-10-19T04:00:00.000Z' });
+    assert.equal(result.managed, false);
+    assert.deepEqual(await scheduleRows(f), [{
+      trigger_metric: 'SWT_WM2', threshold_kpa: 25, duration_minutes: 10, enabled: 1, response_mode: 'proportional',
+      sync_version: 5, deleted_at: null, created_at: '2026-10-18T00:00:00.000Z', updated_at: '2026-10-19T04:00:00.000Z',
+    }], 'one row, revived, one version above the soft-deleted one');
+    assert.equal(result.schedule.sync_version, 5);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('a cloud schedule command revives a soft-deleted schedule row at the version it names', async () => {
+  const f = await tempDb();
+  try {
+    await zoneWithSoftDeletedSchedule(f, 4);
+    await lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, syncVersion: 6, now: '2026-10-19T04:00:00.000Z' });
+    const rows = await scheduleRows(f);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].deleted_at, null);
+    assert.equal(rows[0].sync_version, 6);
+    assert.equal(rows[0].threshold_kpa, 25);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('a cloud schedule command older than the soft-deleted schedule row is refused as stale and changes nothing', async () => {
+  const f = await tempDb();
+  try {
+    await zoneWithSoftDeletedSchedule(f, 4);
+    const before = await scheduleRows(f);
+    await assert.rejects(
+      lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, syncVersion: 2, now: '2026-10-19T04:00:00.000Z' }),
+      (error) => error && error.code === 'stale_sync_version' && Number(error.statusCode || error.status) === 409
+    );
+    assert.deepEqual(await scheduleRows(f), before);
+  } finally {
+    f.cleanup();
+  }
+});
+
+// Sol's review 2, finding 8. The soft-deleted row's version already stands for "deleted" at the
+// cloud. A command that names the same version with a live schedule would put two different
+// contents at one version, which the cloud rejects (equal_version_payload_conflict).
+const outboxEvents = async (f) => (await f.db.all('SELECT op, sync_version FROM sync_outbox ORDER BY rowid')).map((row) => ({ ...row }));
+async function linkedZoneWithSoftDeletedSchedule(f, version) {
+  await linkCloud(f.db);
+  await zoneWithSoftDeletedSchedule(f, version);
+  await f.db.run('DELETE FROM sync_outbox');
+}
+
+test('a cloud schedule command at the version of the soft-deleted schedule row is refused with 409; row and outbox stay as they are', async () => {
+  const f = await tempDb();
+  try {
+    await linkedZoneWithSoftDeletedSchedule(f, 4);
+    const before = await scheduleRows(f);
+    await assert.rejects(
+      lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, syncVersion: 4, now: '2026-10-19T04:00:00.000Z' }),
+      (error) => error && error.code === 'version_conflict' && Number(error.statusCode || error.status) === 409
+    );
+    assert.deepEqual(await scheduleRows(f), before, 'the row is still soft-deleted at version 4');
+    assert.deepEqual(await outboxEvents(f), [], 'nothing goes to the cloud');
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('a cloud schedule command below the version of the soft-deleted schedule row leaves the outbox empty', async () => {
+  const f = await tempDb();
+  try {
+    await linkedZoneWithSoftDeletedSchedule(f, 4);
+    await assert.rejects(
+      lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, syncVersion: 3, now: '2026-10-19T04:00:00.000Z' }),
+      (error) => error && error.code === 'stale_sync_version' && Number(error.statusCode || error.status) === 409
+    );
+    assert.deepEqual(await outboxEvents(f), []);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('a cloud schedule command above the version of the soft-deleted schedule row revives it once; the same command again is a replay', async () => {
+  const f = await tempDb();
+  try {
+    await linkedZoneWithSoftDeletedSchedule(f, 4);
+    const input = { db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, syncVersion: 5, now: '2026-10-19T04:00:00.000Z' };
+    const first = await lifecycle.applyLifecycleMutation(input);
+    assert.notEqual(first.replayed, true);
+    const revived = await scheduleRows(f);
+    assert.equal(revived.length, 1);
+    assert.equal(revived[0].deleted_at, null);
+    assert.equal(revived[0].sync_version, 5, 'one above the soft-deleted version is enough');
+    assert.deepEqual(await outboxEvents(f), [{ op: 'SCHEDULE_UPSERTED', sync_version: 5 }]);
+    const again = await lifecycle.applyLifecycleMutation(input);
+    assert.equal(again.replayed, true);
+    assert.deepEqual(await scheduleRows(f), revived, 'the replay changes nothing');
+    assert.deepEqual(await outboxEvents(f), [{ op: 'SCHEDULE_UPSERTED', sync_version: 5 }], 'and sends nothing more');
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('a local schedule save on a soft-deleted schedule row goes one version above it and sends one event', async () => {
+  const f = await tempDb();
+  try {
+    await linkedZoneWithSoftDeletedSchedule(f, 4);
+    await lifecycle.applyLifecycleMutation({ db: f.db, operation: 'legacy_schedule_write', zoneId: 1, patch: REVIVE_PATCH, now: '2026-10-19T04:00:00.000Z' });
+    assert.equal((await scheduleRows(f))[0].sync_version, 5);
+    assert.deepEqual(await outboxEvents(f), [{ op: 'SCHEDULE_UPSERTED', sync_version: 5 }]);
   } finally {
     f.cleanup();
   }

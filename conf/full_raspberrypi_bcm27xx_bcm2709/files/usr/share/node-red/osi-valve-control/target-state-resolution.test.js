@@ -161,7 +161,9 @@ test('a proven cancel resolves target_state and syncs it; the cancel route still
       flushDeviceQueue: async () => { throw new Error('a proven cancel flushes nothing'); },
       enqueueDownlink: async () => { throw new Error('a cancel never enqueues'); },
     };
-    const out = await cancelActuation({ db, deviceEui: FIXTURE_EUI, transport, now: new Date('2026-10-18T10:02:00.000Z') });
+    // wholeQueue: the D19/Q01 flush path (conditional irrigation, unclaim). Since stage 1 the
+    // cancel of an ordinary open reads the queue as v0.8.1 did.
+    const out = await cancelActuation({ db, deviceEui: FIXTURE_EUI, transport, wholeQueue: true, now: new Date('2026-10-18T10:02:00.000Z') });
     assert.equal(out.ok, true, JSON.stringify(out));
     assert.equal(out.outcome, 'cancelled');
     const after = await deviceRow(db);
@@ -177,7 +179,7 @@ test('a handed-off cancel keeps the OPEN target until the tick expires the open'
   try {
     const chirpstack = fakeChirpStack();
     await acceptOpen(db, chirpstack, { commandId: 'cmd-handed-off', at: '2026-10-18T10:00:00.000Z' });
-    const out = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: 'cmd-handed-off', transport: chirpstack.transport, now: new Date('2026-10-18T10:01:00.000Z') });
+    const out = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: 'cmd-handed-off', transport: chirpstack.transport, wholeQueue: true, now: new Date('2026-10-18T10:01:00.000Z') });
     assert.equal(out.outcome, 'handed_off', 'an accepted open may already be on the air (fail closed)');
     assert.equal((await deviceRow(db)).target_state, 'OPEN', 'the valve may still open, so the target stays');
     assert.deepEqual(await deviceEvents(db), []);
@@ -200,21 +202,23 @@ test('a CLOSED report before the open is delivered keeps the OPEN target (Class 
   } finally { cleanup(); }
 });
 
-test('a second open before the first resolves is refused and leaves the first open\'s target to resolve', async () => {
+test('a second open before the first resolves is accepted as in v0.8.1; the target resolves when the last one ends', async () => {
   const { db, cleanup } = await linkedClosedValve();
   try {
     const chirpstack = fakeChirpStack();
     await acceptOpen(db, chirpstack, { commandId: 'cmd-first', at: '2026-10-18T10:00:00.000Z' });
-    // The dispatch fence holds the valve until the first open is observed or expires, so two
-    // commanded opens are never live together.
+    // v0.8.2 fix, stage 1: an ordinary open is not fenced by an earlier ordinary open, so two
+    // commanded opens can be live together, as in v0.8.1.
     const second = await acceptOpen(db, chirpstack, { commandId: 'cmd-second', at: '2026-10-18T10:20:00.000Z' });
-    assert.equal(second.out[3].statusCode, 503);
-    assert.equal(second.out[3].payload.error, 'valve_busy');
-    assert.equal((await deviceRow(db)).target_state, 'OPEN', 'the first open is still pending');
-    assert.deepEqual((await liveExpectations(db)).map((row) => row.expectation_id), ['cmd-first']);
+    assert.equal(second.out[3].statusCode, 202);
+    assert.equal((await deviceRow(db)).target_state, 'OPEN');
+    assert.deepEqual((await liveExpectations(db)).map((row) => row.expectation_id), ['cmd-first', 'cmd-second']);
     assert.deepEqual(await deviceEvents(db), []);
     const before = await deviceRow(db);
     await tick(db, (await effectEndMs(db, 'cmd-first')) + GRACE_MS + 1000);
+    assert.equal((await deviceRow(db)).target_state, 'OPEN', 'the second open is still live');
+    assert.deepEqual(await deviceEvents(db), []);
+    await tick(db, (await effectEndMs(db, 'cmd-second')) + GRACE_MS + 1000);
     assert.equal((await deviceRow(db)).target_state, 'CLOSED');
     assert.deepEqual(await deviceEvents(db), [{ op: 'DEVICE_FLAGS_UPDATED', sync_version: before.sync_version + 1, current_state: 'CLOSED', target_state: 'CLOSED' }]);
   } finally { cleanup(); }

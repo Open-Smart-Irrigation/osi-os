@@ -480,7 +480,16 @@ function flushTransport(snapshot, { failFlush = false } = {}) {
   };
 }
 
+// v0.8.2 fix, stage 1: the whole-queue flush of owner decision D19/Q01 holds where conditional
+// irrigation is involved; the cancel of an ordinary open behaves as in v0.8.1 (the "stage 1"
+// tests at the end of this file and the equivalence test). The transport-cancel fixtures
+// therefore put an active occurrence on the valve.
+async function conditionalOccurrence(db) {
+  await db.run("INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, command_id) VALUES ('cancel-test-conditional','2026-10-19','07:00',?,?,'SENT','cancel-test-conditional-command')", [EUI, '2026-10-19T07:00:00.000Z']);
+}
+
 async function seedTransportCancel(db) {
+  await conditionalOccurrence(db);
   await insertExpectation(db, { id: 'e-target', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   await insertExpectation(db, { id: 'e-other', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:01:00.000Z' });
   await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-target', { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
@@ -524,6 +533,7 @@ test('transport cancel: a target still listed unsent before the flush is handed_
 
 test('transport cancel: a lone flushed open is handed_off and leaves target_state alone (fail closed)', async () => {
   const { db } = await tempDb();
+  await conditionalOccurrence(db);
   await insertExpectation(db, { id: 'e-target', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-target', { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
   await db.run("UPDATE devices SET target_state='OPEN' WHERE deveui=?", [EUI]);
@@ -569,6 +579,7 @@ test('transport cancel: a failed flush is transport_uncertain, marks nothing CAN
 
 test('transport cancel: a running actuation has no pending command, so nothing is flushed and nothing is marked', async () => {
   const { db } = await tempDb();
+  await conditionalOccurrence(db);
   await insertExpectation(db, { id: 'e-run', state: 'OBSERVED_RUNNING', commandedAt: '2026-10-19T08:00:00.000Z' });
   await db.run("UPDATE devices SET target_state='OPEN' WHERE deveui=?", [EUI]);
   const transport = flushTransport([]);
@@ -626,6 +637,7 @@ test('transport cancel: a queued plan the flush removed is reported as collatera
 // --- R3-M4 (night run): a cancel flushes only when the target's open was handed to ChirpStack
 // with a queue id and no earlier flush already settled it. Otherwise nothing is flushed.
 async function soleTarget(db, transport) {
+  await conditionalOccurrence(db);
   await insertExpectation(db, { id: 'e-t', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   if (transport !== undefined) await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-t', transport);
   await db.run("UPDATE devices SET target_state='OPEN' WHERE deveui=?", [EUI]);
@@ -792,6 +804,7 @@ test('cancel results say whether the actuation may still run (pending)', async (
     db.close();
   }
   const { db } = await tempDb();
+  await conditionalOccurrence(db);
   await insertExpectation(db, { id: 'e-run', state: 'OBSERVED_RUNNING', commandedAt: '2026-10-19T08:00:00.000Z' });
   const running = await cancelActuation({ db, deviceEui: EUI, transport: flushTransport([]), now: new Date('2026-10-19T08:02:00.000Z') });
   assert.equal(running.outcome, 'already_running');
@@ -805,6 +818,7 @@ test('cancel results say whether the actuation may still run (pending)', async (
 // one real open ambiguous.
 test('a pending CLOSE owner is not a cancellable actuation', async () => {
   const { db } = await tempDb();
+  await conditionalOccurrence(db);
   await db.run(
     "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) " +
     "VALUES ('close-owner', ?, 'close:1', '2026-10-19T08:00:00.000Z', 0, '2026-10-19T08:00:00.000Z', 'unknown', 'PENDING_OBSERVATION', '2026-10-19T08:00:00.000Z')", [EUI]);
@@ -898,7 +912,7 @@ test('unclaim cancel: nothing active is none_active; no transport is not_attempt
 // proves the open never reached ChirpStack settles it, so the next manual open is not refused
 // valve_busy. A flushed open, even one the pre-flush read listed unsent, may have been delivered
 // and keeps fencing until its bounded duration has passed.
-test('only an open that never reached ChirpStack stops fencing after a cancel; a flushed one still fences', async () => {
+test('whole-queue flush (conditional irrigation): only an open that never reached ChirpStack stops fencing a conditional command after a cancel', async () => {
   const dispatch = require('./dispatch');
   const { tempDb: freshDb, FIXTURE_EUI, fakeChirpStack } = require('./test-helpers');
   const T0 = Date.parse('2026-08-19T10:00:00Z');
@@ -916,7 +930,10 @@ test('only an open that never reached ChirpStack stops fencing after a cancel; a
         await dispatch.enqueueValveCommand({ db, deviceEui: FIXTURE_EUI, owner: { type: 'expectation', id: first.expectation.expectation_id }, item: { devEui: FIXTURE_EUI, fPort: 2, data: Buffer.from([0x41, 5]).toString('base64'), confirmed: false }, transport: cs.transport, now: at(0) });
       }
       if (scenario === 'drained') cs.drain();
-      const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport: cs.transport, now: at(10), warn: () => {} });
+      // wholeQueue selects the D19/Q01 flush, as the unclaim does; since stage 1 an ordinary open
+      // is cancelled as in v0.8.1 otherwise. reserveValveCommand is the strict caller: it shows
+      // the rule that conditional irrigation keeps, not what an ordinary open meets.
+      const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport: cs.transport, wholeQueue: true, now: at(10), warn: () => {} });
       outcomes[scenario] = { cancel: cancel.outcome };
       const tryReserve = async (s) => {
         try {
@@ -943,7 +960,7 @@ test('only an open that never reached ChirpStack stops fencing after a cancel; a
 // between the two. A snapshot that still lists the open unsent therefore proves nothing: the
 // cancel answers handed_off, nothing is marked CANCELLED, and the valve stays fenced until the
 // open's bounded duration has passed. D04: no CLOSE is ever sent.
-test('fail closed: an open delivered between the queue read and the flush is handed_off and keeps fencing the valve', async () => {
+test('whole-queue flush (conditional irrigation), fail closed: an open delivered between the queue read and the flush is handed_off and keeps fencing a conditional command', async () => {
   const dispatch = require('./dispatch');
   const { tempDb: freshDb, FIXTURE_EUI, fakeChirpStack } = require('./test-helpers');
   const T0 = Date.parse('2026-08-19T10:00:00Z');
@@ -959,7 +976,8 @@ test('fail closed: an open delivered between the queue read and the flush is han
       async getDeviceQueue(eui) { const snapshot = await cs.transport.getDeviceQueue(eui); cs.drain(); return snapshot; },
       async enqueueDownlink() { throw new Error('a cancel must never enqueue anything (D04: no CLOSE)'); },
     };
-    const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, now: at(10), warn: () => {} });
+    // wholeQueue: the D19/Q01 flush, as above.
+    const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, wholeQueue: true, now: at(10), warn: () => {} });
     assert.equal(cancel.outcome, 'handed_off', JSON.stringify(cancel));
     assert.equal(cancel.ok, false);
     assert.equal(cancel.pending, true);
@@ -975,9 +993,104 @@ test('fail closed: an open delivered between the queue read and the flush is han
       (error) => error.code === 'valve_busy',
       'the valve stays fenced while the open may be running');
     // A second cancel finds the earlier flush and still cannot prove the open unsent.
-    const again = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, now: at(30), warn: () => {} });
+    const again = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, wholeQueue: true, now: at(30), warn: () => {} });
     assert.equal(again.outcome, 'handed_off');
   } finally {
     cleanup();
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// v0.8.2 fix, stage 1 (CTO ruling of 2026-11-12): the cancel of an ordinary open behaves as in
+// v0.8.1, also when the caller hands over the ChirpStack client as the routes of 0.8.2 do.
+// ---------------------------------------------------------------------------------------------
+
+function chirpstackClient(items) {
+  const q = fakeQueue(items);
+  return { q, client: { getDeviceQueue: q.readQueue, flushDeviceQueue: q.flushQueue, enqueueDownlink: q.enqueue } };
+}
+const queueFrames = (q) => q.queue.map((item) => [item.fPort, Buffer.from(item.data, 'base64').toString('hex')]);
+
+test('stage 1: the cancel of an ordinary open takes the open out and queues the setting and the CLOSE again', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-open', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  const { q, client } = chirpstackClient([queueItem('q-open', 2, [0x41, 15]), queueItem('q-cfg', 11, [0x00, 0x0a, 0x00, 0x02]), queueItem('q-close', 1, [0x30])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:01:00.000Z') });
+  assert.equal(out.ok, true);
+  assert.equal(out.outcome, 'cancelled');
+  assert.equal(out.queueScope, 'target_only');
+  assert.deepEqual(queueFrames(q), [[11, '000a0002'], [1, '30']], 'the open is gone, the setting and the CLOSE are queued again in order');
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-open'")).reconciliation_state, 'CANCELLED');
+  db.close();
+});
+
+test('stage 1: the cancel of an ordinary open that has left the queue touches nothing and is answered as in v0.8.1', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-open', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  const { q, client } = chirpstackClient([queueItem('q-cfg', 11, [0x00, 0x0a, 0x00, 0x02])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:01:00.000Z') });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'not_queued');
+  assert.equal(q.calls.flush, 0);
+  assert.deepEqual(queueFrames(q), [[11, '000a0002']]);
+  db.close();
+});
+
+test('stage 1: with an active conditional occurrence on the valve the same cancel flushes the whole queue and queues nothing again', async () => {
+  const { db } = await tempDb();
+  await conditionalOccurrence(db);
+  await insertExpectation(db, { id: 'e-open', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-open', { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
+  const { q, client } = chirpstackClient([queueItem('q-open', 2, [0x41, 15]), queueItem('q-cfg', 11, [0x00, 0x0a, 0x00, 0x02]), queueItem('q-close', 1, [0x30])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:01:00.000Z') });
+  assert.equal(out.queueScope, 'full_flush');
+  assert.deepEqual(queueFrames(q), [], 'owner decision D19/Q01: nothing is queued again');
+  assert.equal(q.calls.enqueued.length, 0);
+  db.close();
+});
+
+test('stage 1: an unnamed cancel with two ordinary opens active is refused as in v0.8.1 (#428), with or without a ChirpStack client', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-b', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:01:00.000Z' });
+  const { q, client } = chirpstackClient([queueItem('q-a', 2, [0x41, 15]), queueItem('q-b', 2, [0x41, 15])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:02:00.000Z') });
+  assert.equal(out.error, 'ambiguous_actuation');
+  assert.equal(q.calls.flush, 0);
+  db.close();
+});
+
+// On a gateway without a time signal an open keeps its record pending after its run; the valve's
+// OPEN and CLOSED reports are attached to it as evidence. Such a record is not a target of a
+// cancel, and it does not make the cancel of the next open ambiguous.
+test('stage 1: an open whose OPEN and CLOSED reports are attached is no target of a cancel', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-over', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-over',
+    { phase: 'ACCEPTED', queue_id: 'q-over', untrusted_report: { open: { received_at: '2026-10-19T08:01:00.000Z' }, closed: { received_at: '2026-10-19T08:16:00.000Z' } } });
+  const none = chirpstackClient([]);
+  const nothing = await cancelActuation({ db, deviceEui: EUI, transport: none.client, now: new Date('2026-10-19T08:20:00.000Z') });
+  assert.equal(nothing.error, 'no_active_actuation');
+
+  await insertExpectation(db, { id: 'e-next', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:21:00.000Z' });
+  const { q, client } = chirpstackClient([queueItem('q-next', 2, [0x41, 15])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:22:00.000Z') });
+  assert.equal(out.ok, true);
+  assert.equal(out.expectationId, 'e-next');
+  assert.deepEqual(queueFrames(q), []);
+  const states = Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((row) => [row.expectation_id, row.reconciliation_state]));
+  assert.deepEqual(states, { 'e-over': 'PENDING_OBSERVATION', 'e-next': 'CANCELLED' }, 'the record of the finished run is left as it is');
+  db.close();
+});
+
+test('stage 1: an open with only an OPEN report attached is still a target of a cancel', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-running', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-running',
+    { phase: 'ACCEPTED', queue_id: 'q-running', untrusted_report: { open: { received_at: '2026-10-19T08:01:00.000Z' } } });
+  const { client } = chirpstackClient([]);
+  const out = await cancelActuation({ db, deviceEui: EUI, transport: client, now: new Date('2026-10-19T08:02:00.000Z') });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'not_queued');
+  db.close();
 });

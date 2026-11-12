@@ -64,7 +64,10 @@ test('executeValveAttempt composes reservation, immutable snapshot, sole claim, 
   const transportState = JSON.parse(row.transport_json);
   assert.equal(transportState.phase, 'ACCEPTED');
   assert.equal(transportState.effect_snapshot.effect_class, 'SELF_CLOSING_OPEN');
-  assert.equal(transportState.effect_snapshot.queue_expires_at, events[0].item.expiresAt);
+  // v0.8.2 fix, stage 1: the snapshot still records the cutoff, but an ordinary frame is queued
+  // without a queue expiry, as v0.8.1 queued it.
+  assert.equal(transportState.effect_snapshot.queue_expires_at, '2026-10-18T10:31:00.000Z');
+  assert.equal(events[0].item.expiresAt, undefined);
   fixture.cleanup();
 });
 
@@ -283,24 +286,31 @@ test('safety CLOSE receipts follow rising centisecond uptimes across second boun
   fixture.cleanup();
 });
 
-test('safety CLOSE refuses an attempt receipt that runs backward from its reservation receipt', async () => {
+// v0.8.2 fix, stage 1: a CLOSE is sent whatever the receipts say. An attempt receipt that runs
+// backward from the reservation receipt (or comes from another boot, when a CLOSE is resumed after
+// a restart) is stored as it is; observeClosedEvidence decides later whether CLOSED evidence may
+// be credited to this owner.
+test('a CLOSE is sent when its attempt receipt runs backward from its reservation receipt', async () => {
   const fixture = await tempDb();
-  let calls = 0;
+  const calls = [];
   const readings = ['8.04', '8.03', '4.07', '4.06', '4.03', '4.02', '2.03', '2.01'];
-  await assert.rejects(dispatch.executeValveAttempt({
+  const result = await dispatch.executeValveAttempt({
     db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: 'safe-close-uptime-backward', action: 'CLOSE' }, frame: safeCloseFrame(),
-    transport: { async enqueueDownlink() { calls += 1; return { id: 'backward-must-not-enqueue' }; } },
+    transport: { async enqueueDownlink(item) { calls.push(item); return { id: 'backward-receipt-close' }; } },
     now: '2026-10-18T10:00:00.000Z', trustedContext: fixedUptimeRuntime(readings.map((value) => `${value} 0.00\n`)),
-  }), (error) => error && error.code === 'close_receipt_unproven');
-  assert.equal(calls, 0);
+  });
+  assert.equal(result.phase, 'ACCEPTED');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].expiresAt, undefined);
   const state = JSON.parse((await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', ['safe-close-uptime-backward'])).transport_json);
   assert.equal(Number.isInteger(state.effect_snapshot.reservation_receipt.uptime_ms), true);
-  assert.equal(state.attempt_receipt, undefined);
-  assert.equal(state.phase, undefined);
+  assert.equal(state.attempt_receipt.uptime_ms < state.effect_snapshot.reservation_receipt.uptime_ms, true, 'the receipts are kept as read');
   fixture.cleanup();
 });
 
-test('safety CLOSE still refuses missing, malformed, non-finite or negative uptime and a missing boot id', async () => {
+// v0.8.2 fix, stage 1: a manual CLOSE is always sent. Without a usable boot id and uptime it cannot
+// take the receipt-bound variant, so it takes the wall-anchored snapshot, and no queue expiry.
+test('a CLOSE is sent, without a queue expiry, when the uptime or the boot id cannot be read', async () => {
   const cases = [
     ['missing uptime', fixedUptimeRuntime(null)],
     ['non-numeric uptime', fixedUptimeRuntime('abc 0.00\n')],
@@ -313,14 +323,17 @@ test('safety CLOSE still refuses missing, malformed, non-finite or negative upti
   ];
   for (const [label, trustedContext] of cases) {
     const fixture = await tempDb();
-    let calls = 0;
-    await assert.rejects(dispatch.executeValveAttempt({
-      db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: `safe-close-refused-${label.replace(/\W+/g, '-')}`, action: 'CLOSE' }, frame: safeCloseFrame(),
-      transport: { async enqueueDownlink() { calls += 1; return { id: 'refused-must-not-enqueue' }; } },
+    const calls = [];
+    const result = await dispatch.executeValveAttempt({
+      db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: `safe-close-sent-${label.replace(/\W+/g, '-')}`, action: 'CLOSE' }, frame: safeCloseFrame(),
+      transport: { async enqueueDownlink(item) { calls.push(item); return { id: 'close-without-receipt' }; } },
       now: '2026-10-18T10:00:00.000Z', trustedContext,
-    }), (error) => error && error.code === 'clock_untrusted', label);
-    assert.equal(calls, 0, label);
-    assert.equal((await fixture.db.get('SELECT COUNT(*) AS count FROM valve_actuation_expectations')).count, 0, label);
+    });
+    assert.equal(result.phase, 'ACCEPTED', label);
+    assert.equal(calls.length, 1, label);
+    assert.equal(calls[0].expiresAt, undefined, label);
+    const state = JSON.parse((await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations')).transport_json);
+    assert.equal(state.effect_snapshot.timing_contract, undefined, label + ': not the receipt-bound variant');
     fixture.cleanup();
   }
 });
@@ -354,3 +367,33 @@ test('CLOSED evidence read in the marker centisecond settles a 2.01 s safety CLO
   assert.deepEqual(state.closed_observation.receipt, { boot_id: 'fixed-uptime-boot', uptime_ms: 2030 });
   fixture.cleanup();
 });
+
+// v0.8.2 fix, stage 1 (Sol's review 2, finding 1): the snapshot of an ordinary command carries a
+// cutoff the gateway generated (anchor plus 31 minutes by its own wall clock). A clock that is
+// corrected between the reservation and the claim must not turn the command into
+// command_expired: v0.8.1 sent it. The sender's own expiry still decides (test "final timed OPEN
+// check uses a fresh runtime instant" above); a conditional occurrence keeps its cutoff
+// (effects-safety-dispatch.test.js).
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+for (const [what, command, frame] of [
+  ['a timed open', { device_eui: EUI, command_id: 'corrected-open', action: 'OPEN_FOR_DURATION', duration_minutes: 2 },
+    { fPort: 2, data: Buffer.from([0x41, 2]).toString('base64'), confirmed: false, encrypted: false, provenance: { source: 'local_encoder', encoder: 'strega-v1' } }],
+  ['a CLOSE', { device_eui: EUI, command_id: 'corrected-close', action: 'CLOSE' }, safeCloseFrame()],
+]) {
+  for (const [how, markerTrusted] of [['with a synchronised clock', () => true], ['with the first time signal arriving in between', (() => { let reads = 0; return () => (reads += 1) > 1; })()]]) {
+    test(`${what} is sent when the clock is set four hours forward between its reservation and its claim, ${how}`, async () => {
+      const fixture = await tempDb();
+      const start = Date.parse('2026-10-18T10:00:00.000Z');
+      const calls = [];
+      const result = await dispatch.executeValveAttempt({
+        db: fixture.db, deviceEui: EUI, command: { ...command, command_id: command.command_id + '-' + how.length }, frame,
+        transport: { async enqueueDownlink(item) { calls.push(item); return { id: 'corrected-q' }; } },
+        now: new Date(start), trustedContext: controlledRuntime([start, start + FOUR_HOURS_MS], { markerTrusted }),
+      });
+      assert.equal(result.phase, 'ACCEPTED');
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].expiresAt, undefined, 'and without a queue expiry of the gateway');
+      fixture.cleanup();
+    });
+  }
+}
