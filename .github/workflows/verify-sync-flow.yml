@@ -235,6 +235,12 @@ jobs:
       # both activate a complete set (v0.8.2 review, S-1).
       - name: Payload activation kill matrix
         run: node --test scripts/deploy-payload-kill-matrix.test.js
+      # A deploy cut between its migration and its switch (#636, item 3): a
+      # cut after each of the ten commits, then the boot (held, or forward
+      # after the last), then the deploy run again, on a real database with
+      # the real migration runner.
+      - name: Cut during the migration
+        run: node --test --test-concurrency=1 scripts/deploy-cut-during-migration.test.js
       # The swap helpers of the v0.8.1 and v0.8.2 tags, read from git, on a
       # gateway in the payloads/active layout: a downgrade ends complete.
       - name: Payload layout downgrade
