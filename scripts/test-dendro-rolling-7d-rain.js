@@ -18,6 +18,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { execFileSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { facadeDb, loadNode } = require('./lib/flow-node-harness');
 
@@ -89,7 +90,7 @@ function openMeteoTemperatureOnly({ nullPrecipitation = false } = {}) {
   return { status: 200, body: { hourly } };
 }
 
-function seedDb({ timezone = 'UTC', withLocation = true } = {}) {
+function seedDb({ timezone = 'UTC', withLocation = true, providerSetting = '1' } = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync(SEED, 'utf8'));
   db.exec(`
@@ -101,6 +102,10 @@ function seedDb({ timezone = 'UTC', withLocation = true } = {}) {
     INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at, irrigation_zone_id, dendro_enabled, is_reference_tree)
     VALUES ('${TREE}', 'Fixture Tree', 'DRAGINO_LSN50', 1, '${NOW_ISO}', '${NOW_ISO}', 1, 1, 0);
   `);
+  // Existing weather-policy cases explicitly opt in; the default-off cases
+  // below pass null (absent), '0', or an unreadable setting.
+  if (providerSetting != null) db.prepare('INSERT INTO app_settings(key,value) VALUES (?,?)')
+    .run('dendro_provider_irrigation_enabled', providerSetting);
   return db;
 }
 
@@ -134,14 +139,20 @@ function addUnstressedTreeDay(db, date) {
   for (const [position, time] of readings) insert.run(TREE, position, `${date}T${time}.000Z`);
 }
 
-async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO, transport, completionTimeout } = {}) {
+async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO, transport, completionTimeout, sourceRef = process.env.OSI_DENDRO_CONTROL_SOURCE_REF, settingUnreadable } = {}) {
   const flowsPath = path.join(ROOT, profile, 'flows.json');
   const moduleDirs = {
     'dendro-analytics': path.join(ROOT, profile, 'node-red/osi-dendro-analytics'),
     rain: path.join(ROOT, profile, 'node-red/osi-rain'),
   };
-  const node = loadNode('dendro-compute-fn', flowsPath);
+  const node = sourceRef
+    ? JSON.parse(execFileSync('git', ['show', `${sourceRef}:${profile}/flows.json`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 })).find(n => n.id === 'dendro-compute-fn')
+    : loadNode('dendro-compute-fn', flowsPath);
   const facade = facadeDb(db);
+  if (settingUnreadable) {
+    const get = facade.get;
+    facade.get = (sql, ...args) => /app_settings/.test(sql) ? Promise.reject(new Error('fixture setting read failed')) : get(sql, ...args);
+  }
   const calls = [];
   const errors = [];
   const warnings = [];
@@ -187,6 +198,140 @@ function recommendation(db, date) {
   const row = db.prepare('SELECT * FROM zone_daily_recommendations WHERE zone_id = 1 AND date = ?').get(date);
   assert.ok(row, `a recommendation row exists for ${date}`);
   return { row, json: JSON.parse(row.recommendation_json) };
+}
+
+const CONTROL_BASE_REF = '27459db81e605f07c1b62886ec150ffc753fbe33';
+const PROVIDER_SETTING = 'dendro_provider_irrigation_enabled';
+
+function controlFixture(providerSetting, highVpd) {
+  const db = seedDb({ providerSetting });
+  addUnstressedTreeDay(db, '2026-10-08');
+  addRecommendation(db, '2026-10-07', null, { stress: highVpd ? 'mild' : 'none' });
+  addRecommendation(db, '2026-10-06', null);
+  if (highVpd) db.prepare(`INSERT INTO dendrometer_daily(deveui,date,d_max_um,d_min_um,mds_um,twd_night_um,tree_state_v5,data_quality,valid_readings_count,computed_at)
+    VALUES (?, '2026-10-07', 146, 110, 36, 0, 'mild', 'good', 8, ?)`).run(TREE, NOW_ISO);
+  return db;
+}
+
+async function controlOutcome(db, profile) {
+  const { row } = recommendation(db, '2026-10-08');
+  const scheduler = loadNode('5f0d2b7e9b9b1b3a', path.join(ROOT, profile, 'flows.json'));
+  const multiplierSource = scheduler.func.match(/function applyDurationMultiplier\([^]*?\n\}/);
+  assert.ok(multiplierSource, 'test executes the shipped scheduler multiplier');
+  const scaled = vm.runInNewContext('(' + multiplierSource[0] + ')')(100, row.irrigation_action);
+  const { readEvidence } = require(path.join(ROOT, profile, 'node-red/osi-irrigation-policy/observations'));
+  const conditional = await readEvidence({ db: facadeDb(db), policy: { zone_id: 1, condition: { kind: 'DENDRO' } }, dueAt: NOW_ISO });
+  const { evaluateCondition } = require(path.join(ROOT, profile, 'node-red/osi-irrigation-policy/evaluate'));
+  const eligibility = evaluateCondition({ kind: 'DENDRO', minimum_stress: 'mild' }, conditional, NOW_ISO, 60);
+  return { action: row.irrigation_action, reasoning: row.action_reasoning, multiplier: scaled / 100,
+    suppression: row.rain_suppression_active,
+    state: { ...db.prepare('SELECT * FROM zone_irrigation_state WHERE zone_id=1').get() }, conditional, eligibility };
+}
+
+for (const profile of PROFILES) {
+  const tag = profile.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+  test(`[${tag}] provider control off excludes historical provider rain while displaying it`, async t => {
+    const db = controlFixture('0', false);
+    t.after(() => db.close());
+    db.prepare('UPDATE zone_daily_recommendations SET rainfall_mm=25,recommendation_json=? WHERE date=?')
+      .run(JSON.stringify({ rain: { daily_mm: 25, daily_status: 'observed', source: 'open_meteo' } }), '2026-10-07');
+    await runDendro(db, { profile, weather: openMeteoDay(0) });
+    const { row, json } = recommendation(db, '2026-10-08');
+    assert.equal(row.irrigation_action, 'decrease_10');
+    assert.equal(json.rain.rolling7d, 25);
+    assert.equal(json.weather_control.decision_rain.rolling7d, 0);
+  });
+  test(`[${tag}] changed provider observations still update and re-version the displayed row`, async t => {
+    const db = controlFixture('0', false);
+    t.after(() => db.close());
+    await runDendro(db, { profile, weather: openMeteoDay(5.4) });
+    const first = recommendation(db, '2026-10-08').row;
+    const weather = openMeteoDay(8);
+    weather.body.hourly.temperature_2m.fill(35);
+    weather.body.hourly.relative_humidity_2m.fill(20);
+    await runDendro(db, { profile, weather });
+    const { row } = recommendation(db, '2026-10-08');
+    assert.equal(row.rainfall_mm, 8);
+    assert.ok(row.vpd_max_kpa > first.vpd_max_kpa);
+    assert.equal(row.irrigation_action, first.irrigation_action, 'control remains off');
+    assert.equal(row.sync_version, first.sync_version + 1);
+  });
+  test(`[${tag}] provider control off retains local rain and local VPD`, async t => {
+    const db = controlFixture('0', true);
+    const main = controlFixture(null, true);
+    t.after(() => { db.close(); main.close(); });
+    for (const fixture of [db, main]) {
+      addLocalRain(fixture, '2026-10-08', 6);
+      fixture.exec(`INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
+        VALUES ('A840410000000009','Local weather','KIWI_SENSOR',1,1,'${NOW_ISO}','${NOW_ISO}');
+        INSERT INTO device_data(deveui,recorded_at,ambient_temperature,relative_humidity)
+        VALUES ('A840410000000009','2026-10-08T12:00:00Z',35,20);`);
+    }
+    await runDendro(db, { profile, weather: openMeteoDay(25) });
+    await runDendro(main, { profile, sourceRef: CONTROL_BASE_REF });
+    assert.deepEqual(await controlOutcome(db, profile), await controlOutcome(main, profile));
+    const { row, json } = recommendation(db, '2026-10-08');
+    assert.equal(row.vpd_source, 'local_sensor');
+    assert.equal(row.rainfall_mm, 6);
+    assert.equal(json.weather_control.decision_vpd.available, true);
+    assert.equal(json.weather_control.decision_rain.daily_mm, 6);
+  });
+  for (const enabled of ['0', '1']) for (const highVpd of [false, true]) {
+    test(`[${tag}] same-day provider observation survives a failed rerun, gate ${enabled}, ${highVpd ? 'high VPD' : 'rain'}`, async t => {
+      const db = controlFixture(enabled, highVpd);
+      t.after(() => db.close());
+      const weather = openMeteoDay(highVpd ? 0 : 5.4);
+      if (highVpd) { weather.body.hourly.temperature_2m.fill(35); weather.body.hourly.relative_humidity_2m.fill(20); }
+      await runDendro(db, { profile, weather });
+      const first = recommendation(db, '2026-10-08').row;
+      await runDendro(db, { profile });
+      const { row, json } = recommendation(db, '2026-10-08');
+      for (const key of ['rainfall_mm', 'vpd_max_kpa', 'vpd_source', 'irrigation_action', 'rain_suppression_active', 'zone_stress_summary'])
+        assert.equal(row[key], first[key], key);
+      const changedReason = row.action_reasoning !== first.action_reasoning;
+      assert.equal(row.sync_version, first.sync_version + (changedReason ? 1 : 0), 'an unchanged recommendation is not re-versioned');
+      assert.equal(json.weather_control.provider_reused_from_computed_at, changedReason ? first.computed_at : null);
+    });
+  }
+  for (const highVpd of [false, true]) {
+    for (const mode of ['off', 'absent', 'unreadable']) {
+      test(`[${tag}] provider control default-off: ${highVpd ? 'high VPD' : '5.4 mm rain'}, setting ${mode}`, async t => {
+        const setting = mode === 'absent' ? null : mode === 'off' ? '0' : '1';
+        const observed = controlFixture(setting, highVpd);
+        const unreachable = controlFixture(setting, highVpd);
+        const baseline = controlFixture(setting, highVpd);
+        t.after(() => { observed.close(); unreachable.close(); baseline.close(); });
+        const weather = openMeteoDay(highVpd ? 0 : 5.4);
+        if (highVpd) {
+          weather.body.hourly.temperature_2m.fill(35);
+          weather.body.hourly.relative_humidity_2m.fill(20);
+        }
+        await runDendro(baseline, { profile, sourceRef: CONTROL_BASE_REF });
+        await runDendro(unreachable, { profile, settingUnreadable: mode === 'unreadable' });
+        await runDendro(observed, { profile, weather, settingUnreadable: mode === 'unreadable' });
+        assert.deepEqual(await controlOutcome(observed, profile), await controlOutcome(unreachable, profile), 'provider observations cannot change valves while off');
+        assert.deepEqual(await controlOutcome(observed, profile), await controlOutcome(baseline, profile), 'same control outputs as the pinned shipped main node');
+        const { row, json } = recommendation(observed, '2026-10-08');
+        assert.equal(row.rainfall_mm, highVpd ? 0 : 5.4, 'provider rain is still stored');
+        assert.equal(row.vpd_source, 'open_meteo');
+        if (highVpd) assert.ok(row.vpd_max_kpa > 2, 'high provider VPD is still stored');
+        assert.equal(json.weather_control.provider_irrigation_enabled, false);
+        assert.equal(json.weather_control.decision_vpd.available, false);
+        assert.equal(json.weather_control.decision_rain.daily_mm, null);
+      });
+    }
+    test(`[${tag}] provider control opt-in retains ${highVpd ? 'VPD adjustment' : 'rain suppression'}`, async t => {
+      const db = controlFixture('1', highVpd);
+      const baseline = controlFixture(null, highVpd);
+      t.after(() => { db.close(); baseline.close(); });
+      const weather = openMeteoDay(highVpd ? 0 : 5.4);
+      if (highVpd) { weather.body.hourly.temperature_2m.fill(35); weather.body.hourly.relative_humidity_2m.fill(20); }
+      await runDendro(db, { profile, weather });
+      await runDendro(baseline, { profile, sourceRef: CONTROL_BASE_REF });
+      assert.notDeepEqual(await controlOutcome(db, profile), await controlOutcome(baseline, profile), 'opt-in must exercise a real decision change');
+      assert.equal(recommendation(db, '2026-10-08').row.irrigation_action, highVpd ? 'decrease_10' : 'maintain_rain_suppression');
+    });
+  }
 }
 
 for (const profile of PROFILES) {

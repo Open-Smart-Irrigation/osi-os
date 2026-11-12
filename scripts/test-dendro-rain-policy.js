@@ -91,6 +91,8 @@ function seedDb({ linked = false } = {}) {
     INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at, irrigation_zone_id, dendro_enabled, is_reference_tree)
     VALUES ('${TREE}', 'Fixture Tree', 'DRAGINO_LSN50', 1, '${NOW_ISO}', '${NOW_ISO}', 1, 1, 0);
   `);
+  // These cases qualify provider-informed advice with the operator gate on.
+  db.prepare('INSERT INTO app_settings(key,value) VALUES (?,?)').run('dendro_provider_irrigation_enabled', '1');
   if (linked) {
     db.prepare("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, ?, ?)").run(GATEWAY, NOW_ISO);
   }
