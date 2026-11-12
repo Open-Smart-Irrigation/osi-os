@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Retained state must hold before code copying or payload repair.
+if ! /usr/bin/node /usr/libexec/osi-image-safety.js prepare; then
+    exit 0
+fi
+trap 'rc=$?; /usr/bin/node /usr/libexec/osi-image-safety.js failed "$rc" || :; exit "$rc"' EXIT
+/usr/bin/node /usr/libexec/osi-image-safety.js step copy-image-code
+
 SRC=/usr/share/node-red
 DST=/srv/node-red
 
@@ -43,6 +50,13 @@ if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/codecs" ]; then
 fi
 
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/node_modules" ]; then
+    # Only this image's fresh initialization reaches this retry repair.
+    for entry in "$SRC/node_modules"/osi-*; do
+        if [ -L "$entry" ] && [ -d "$DST/node_modules/${entry##*/}" ] &&
+           [ ! -L "$DST/node_modules/${entry##*/}" ]; then
+            rm -rf "$DST/node_modules/${entry##*/}"
+        fi
+    done
     cp -a "$SRC/node_modules/." "$DST/node_modules/"
 fi
 
@@ -85,6 +99,7 @@ fi
 # script, so it runs again on the next boot. Those later runs skip the image
 # copy above.
 # Operator steps for a retained rollback: osi-live-ops-runbook, repair.md.
+/usr/bin/node /usr/libexec/osi-image-safety.js step native-sqlite
 # BEGIN native sqlite3 seed
 seed_sqlite3_report_paths() {
     for seed_report in "$@"; do
@@ -624,4 +639,5 @@ rm -f "$SEED_COPIED"
 
 chown -R node-red:node-red "$DST" 2>/dev/null || true
 
+/usr/bin/node /usr/libexec/osi-image-safety.js complete
 exit 0

@@ -377,6 +377,15 @@ installer or the probe names the cause.
 
 ### Rollback capture check
 
+**Upgrade existing gateways with `deploy.sh`. Images are for new devices or
+deliberate resets.** Older sysupgrade keep lists omit `/data`, and even a
+hand-extended list can capture stale SQLite state while running old application
+code under the new GUI. The source guard now refuses provisioned image
+upgrades; the new image holds any unproven restored state. Procedure and
+recovery: [image upgrade safety](../../../../docs/operations/image-upgrade-safety.md).
+The post-sysupgrade states below describe recovery from older unsupported
+operations; they do not authorize performing such an upgrade.
+
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the
 target. Otherwise (a gateway the payload layout has not reached, or after a
@@ -497,11 +506,12 @@ stopped:
   `npm install` needs every `file:` dependency on disk. A switch back to the
   previous payload removes that link again.
 
-The image seed (`98_osi_node_red_seed`) copies a module from the image only
-where `/srv/node-red/<module>` is not a symlink, so a sysupgrade keeps the
-deployed flows and modules together. Images up to v0.8.1 copy their helpers
-over the links too; the next deploy then refuses (see "Rollback capture
-check"). Each retained payload carries its module
+The image seed (`98_osi_node_red_seed`) holds before copying code when it
+finds retained application or database state. Its directory/link repair runs
+only during a proven fresh initialization. Older images did not provide this
+hold: v0.8.2's seed can stop at a directory/link collision, while images up
+to v0.8.1 can copy helpers over deployed links. Such states need operator
+recovery (see "Rollback capture check"). Each retained payload carries its module
 copy: about 3 MB staged, up to about 5 MB for a capture of seed-installed
 modules (they include test files), times `PAYLOAD_KEEP_N`.
 
