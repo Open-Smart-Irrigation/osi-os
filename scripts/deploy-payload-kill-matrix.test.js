@@ -52,10 +52,27 @@ function baseRoot() {
 // Each fixture is a gateway before the deploy of payload "new", which carries
 // osi-a and osi-new; it returns the rollback payload deploy.sh would pass.
 const FIXTURES = {
-  // A gateway whose last deploy used this code: everything through .active.
+  // A gateway whose last deploy used this code: everything through payloads/active.
   'one active link': { windows: [], build: ({ root, guiRoot }) => {
     stage(root, 'old', ['osi-a', 'osi-gone']);
     swap.flipTo(root, 'old', guiRoot);
+    stage(root, 'new', ['osi-a', 'osi-new']);
+    swap.linkNewModules(root, 'new', 'old');
+    return 'old';
+  } },
+  // A gateway converted by the first version of this layout, which named the
+  // link payloads/.active.
+  'one .active link (first version)': { windows: [], build: ({ root, guiRoot }) => {
+    stage(root, 'old', ['osi-a', 'osi-gone']);
+    swap.flipTo(root, 'old', guiRoot);
+    const payloads = path.join(root, 'payloads');
+    fs.renameSync(path.join(payloads, 'active'), path.join(payloads, '.active'));
+    const relink = (at) => {
+      const text = fs.readlinkSync(at).replace(/(^|\/)payloads\/active\//, '$1payloads/.active/');
+      fs.rmSync(at);
+      fs.symlinkSync(text, at);
+    };
+    for (const at of [path.join(root, 'flows.json'), guiRoot, path.join(root, 'osi-a'), path.join(root, 'osi-gone')]) relink(at);
     stage(root, 'new', ['osi-a', 'osi-new']);
     swap.linkNewModules(root, 'new', 'old');
     return 'old';
@@ -218,6 +235,8 @@ for (const [name, { build, windows }] of Object.entries(FIXTURES)) {
         assert.equal(swap.verifyPair(env.root, retryPrev), true, `k=${k}: payloads/${retryPrev} is complete`);
         swap.flipTo(env.root, 'retry', env.guiRoot, retryPrev);
         assert.equal(swap.verifyPair(env.root, 'retry', env.guiRoot), true, `k=${k}: the retry activates completely`);
+        assert.throws(() => fs.lstatSync(path.join(env.root, 'payloads', '.active')), /ENOENT/, `k=${k}: the first version's link is gone`);
+        assert.equal(fs.readlinkSync(path.join(env.root, 'payloads', 'active')), 'retry');
         assert.deepEqual(served(env), { ...after, flows: 'flows@retry', gui: 'gui@retry', 'osi-a': 'osi-a@retry', 'osi-new': 'osi-new@retry' });
 
         // The rollback returns to the set the gateway served after the kill.

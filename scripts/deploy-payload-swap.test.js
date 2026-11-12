@@ -395,7 +395,7 @@ test('prunePayloads keeps the newest N and never removes the current target', ()
   flipTo(root, '20260501');
 
   const { removed } = prunePayloads(root, 2);
-  const remaining = fs.readdirSync(path.join(root, 'payloads')).filter((entry) => !entry.startsWith('.')).sort();
+  const remaining = fs.readdirSync(path.join(root, 'payloads')).filter((entry) => !entry.startsWith('.') && entry !== 'active').sort();
 
   assert.ok(remaining.includes('20260501'), 'current target is never pruned');
   assert.ok(remaining.includes('20260504'), 'newest is retained');
@@ -570,7 +570,7 @@ test('a failed payload switch leaves flows, GUI and every module on the old payl
 
   const realRename = fs.renameSync;
   fs.renameSync = (from, to) => {
-    if (to === path.join(root, 'payloads', '.active')) throw new Error('forced switch failure');
+    if (to === path.join(root, 'payloads', 'active')) throw new Error('forced switch failure');
     return realRename(from, to);
   };
   try {
