@@ -49,7 +49,7 @@ DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # /srv/node-red: /srv/node-red/<module> is a link into the active payload, and
 # flipTo() switches it together with flows.json and the GUI, so every switch
 # back to the previous payload also restores the previous modules (#603).
-# All of them lead through payloads/.active, and a switch is one rename of
+# All of them lead through payloads/active, and a switch is one rename of
 # that link, so a kill leaves the old payload or the new one complete.
 MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"

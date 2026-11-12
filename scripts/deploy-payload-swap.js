@@ -34,16 +34,24 @@ function legacyCapturePath(root) {
 }
 
 // Issue S-1 (v0.8.2 review): one link switches every payload entry.
-// payloads/.active is a link to payloads/<stamp>; flows.json, the GUI and each
-// helper-module link point through it (payloads/.active/flows.json, ...) and
+// payloads/active is a link to payloads/<stamp>; flows.json, the GUI and each
+// helper-module link point through it (payloads/active/flows.json, ...) and
 // stay put once converted. flipTo() switches a payload by renaming one new
-// link over payloads/.active, so a kill at any instant leaves the complete
-// old payload or the complete new one. The dot keeps the link out of
-// listStamps() and every stamp check here, which refuse dot names.
-const ACTIVE = '.active';
+// link over payloads/active, so a kill at any instant leaves the complete
+// old payload or the complete new one. listStamps() and every stamp check
+// here skip the name. It sorts after every timestamp stamp on purpose: the
+// prune of an older deploy.sh keeps the newest names, so a downgrade cannot
+// remove the link the module links lead through. The first version of this
+// layout named it payloads/active; flipTo() converts a gateway that has it.
+const ACTIVE = 'active';
+const LEGACY_ACTIVE = '.active';
 
 function activeLink(root) {
   return path.join(payloadsRoot(root), ACTIVE);
+}
+
+function legacyActiveLink(root) {
+  return path.join(payloadsRoot(root), LEGACY_ACTIVE);
 }
 
 function viaFlows(root) {
@@ -58,19 +66,29 @@ function viaModule(root, name) {
   return path.join(activeLink(root), 'modules', name);
 }
 
-// The payload payloads/.active names, or null when it is absent, is not a
-// plain payload name or names a payload that is gone.
-function activeStamp(root) {
+function linkedStamp(root, link) {
   let target;
   try {
-    if (!fs.lstatSync(activeLink(root)).isSymbolicLink()) return null;
-    target = fs.readlinkSync(activeLink(root));
+    if (!fs.lstatSync(link).isSymbolicLink()) return null;
+    target = fs.readlinkSync(link);
   } catch (error) {
     if (absent(error)) return null;
     throw error;
   }
-  if (!target || target.includes('/') || target.startsWith('.')) return null;
+  if (!target || target.includes('/') || target.startsWith('.') || target === ACTIVE) return null;
   return isDirectory(payloadDir(root, target)) ? target : null;
+}
+
+// The payload payloads/active (or the first version's payloads/active)
+// names, or null when it is absent, is not a plain payload name or names a
+// payload that is gone.
+function activeStamp(root) {
+  if (lstatOrNull(activeLink(root))) return linkedStamp(root, activeLink(root));
+  return linkedStamp(root, legacyActiveLink(root));
+}
+
+function isStampName(name) {
+  return Boolean(name) && !name.startsWith('.') && name !== ACTIVE;
 }
 
 // True when <link> is a link whose text leads to <via>, resolvable or not.
@@ -80,10 +98,10 @@ function linksTo(link, via) {
     path.resolve(path.dirname(link), fs.readlinkSync(link)) === via);
 }
 
-// Points payloads/.active at <stamp> with one rename.
+// Points payloads/active at <stamp> with one rename.
 function pointActive(root, stamp) {
   const link = activeLink(root);
-  const tmp = path.join(payloadsRoot(root), `.active.flip-${process.pid}-${Date.now()}`);
+  const tmp = path.join(payloadsRoot(root), `.active-flip-${process.pid}-${Date.now()}`);
   try {
     fs.rmSync(tmp, { force: true });
     fs.symlinkSync(stamp, tmp);
@@ -338,14 +356,14 @@ function moduleLinkStamp(root, name) {
   if (!stat || !stat.isSymbolicLink()) return null;
   const resolved = path.resolve(path.dirname(link), fs.readlinkSync(link));
   const parts = path.relative(payloadsRoot(root), resolved).split(path.sep);
-  // A link through payloads/.active belongs to the active payload while that
+  // A link through payloads/active belongs to the active payload while that
   // payload carries the module; otherwise it leads nowhere and counts as absent.
-  if (resolved === viaModule(root, name)) {
-    const stamp = activeStamp(root);
+  if (resolved === viaModule(root, name) || resolved === path.join(legacyActiveLink(root), 'modules', name)) {
+    const stamp = linkedStamp(root, path.dirname(path.dirname(resolved)));
     return stamp && lstatOrNull(moduleTarget(root, stamp, name)) ? stamp : null;
   }
   if (parts.length !== 3 || parts[1] !== 'modules' || parts[2] !== name ||
-      !parts[0] || parts[0] === '..' || parts[0].startsWith('.')) return null;
+      parts[0] === '..' || !isStampName(parts[0])) return null;
   return parts[0];
 }
 
@@ -501,7 +519,7 @@ function linkNewModules(root, stamp, prevStamp = '') {
   for (const name of next.modules) {
     const link = moduleLink(root, name);
     let stat = lstatOrNull(link);
-    // A link through payloads/.active that leads nowhere is a module the
+    // A link through payloads/active that leads nowhere is a module the
     // running flows do not have, and npm install needs it on disk.
     if (stat && linksTo(link, viaModule(root, name)) && !isDirectory(link)) stat = null;
     const linked = stat && stat.isSymbolicLink() ? moduleLinkStamp(root, name) : null;
@@ -593,7 +611,7 @@ function sameContent(live, copy, kind) {
     hashTree(copy, { followLinks: true, label: 'payload switch: unsupported entry' });
 }
 
-// The live entries a switch to <stamp> routes through payloads/.active, with
+// The live entries a switch to <stamp> routes through payloads/active, with
 // the copy each must match in <base>.
 function switchEntries(root, stamp, guiRoot, modules, base) {
   const entries = [{ link: flowsLink(root), via: viaFlows(root), copy: base && path.join(payloadDir(root, base), 'flows.json'), kind: 'file', label: 'flows' }];
@@ -610,7 +628,7 @@ function switchEntries(root, stamp, guiRoot, modules, base) {
 }
 
 // Why <base> cannot stand in for the live entries, or null. Every step before
-// the switch points payloads/.active at <base> or routes an entry through it,
+// the switch points payloads/active at <base> or routes an entry through it,
 // so each served entry must already serve <base>'s bytes, with two
 // exceptions that are recorded on the entry:
 // - no GUI is served at all: routing it restores the payload's GUI;
@@ -699,7 +717,7 @@ function leftovers(link) {
 //   once per converted directory, and older deploy.sh versions opened it for
 //   files too;
 // - leftover temporary links and moved-aside entries beside a present entry
-//   are removed, as are temporary payloads/.active links.
+//   are removed, as are temporary payloads/active links.
 // Returns the lines deploy.sh prints, or null.
 function resumeInterruptedSwitch(root, guiRoot) {
   const lines = [];
@@ -720,7 +738,7 @@ function resumeInterruptedSwitch(root, guiRoot) {
     if (!absent(error)) throw error;
   }
   for (const name of names) {
-    if (name.startsWith('.active.flip-')) fs.rmSync(path.join(payloadsRoot(root), name), { force: true });
+    if (name.startsWith('.active.flip-') || name.startsWith('.active-flip-')) fs.rmSync(path.join(payloadsRoot(root), name), { force: true });
   }
   return lines.length ? lines.join('\n') : null;
 }
@@ -739,7 +757,7 @@ function planSwitch(root, stamp, guiRoot, fromStamp) {
   }
   const active = activeStamp(root);
   if (!guiRoot && active && isDirectory(guiPayloadDir(root, active)) && !isDirectory(guiPayloadDir(root, stamp))) {
-    throw new Error(`flipTo: payload ${stamp} has no GUI, and switching payloads/.active would take the GUI away`);
+    throw new Error(`flipTo: payload ${stamp} has no GUI, and switching payloads/active would take the GUI away`);
   }
   if (fromStamp && !isDirectory(payloadDir(root, fromStamp))) {
     throw new Error(`flipTo: rollback payload missing: ${fromStamp}`);
@@ -763,7 +781,7 @@ function planSwitch(root, stamp, guiRoot, fromStamp) {
   // No payload holds what is served. With a rollback payload named, that is
   // a refusal. Without one there is nothing to return to anyway (a first
   // deploy, or regular flows without a GUI to capture): the entries are
-  // linked one by one, as before payloads/.active existed.
+  // linked one by one, as before payloads/active existed.
   if (fromStamp) throw new Error(`flipTo: ${reasons.join('; ')}; refusing to switch`);
   const entries = switchEntries(root, stamp, guiRoot, modules, null);
   return { stamp, base: null, entries, modules, notes: nothingServed(entries) ? [] :
@@ -782,14 +800,14 @@ function switchPreflight(root, stamp, guiRoot = null, fromStamp = '') {
 //
 // With such a base, every step before the switch only re-points a live entry
 // at an identical copy in it (see baseMismatch() for the two exceptions), and
-// the switch is one rename of payloads/.active: a kill at any instant leaves
+// the switch is one rename of payloads/active: a kill at any instant leaves
 // the complete old payload or the complete new one. Each step is idempotent,
 // so a rerun resumes. Without a base (a first deploy, or regular flows with
-// no GUI to capture) the entries are linked before payloads/.active exists.
+// no GUI to capture) the entries are linked before payloads/active exists.
 function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
   const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
   if (base) {
-    if (activeStamp(root) !== base) pointActive(root, base);
+    if (linkedStamp(root, activeLink(root)) !== base) pointActive(root, base);
     for (const entry of entries) {
       if (!linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`);
     }
@@ -809,6 +827,8 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     }
     for (const entry of switched) discardBackup(entry.backup);
   }
+  // Every entry now leads through payloads/active.
+  if (lstatOrNull(legacyActiveLink(root))) fs.rmSync(legacyActiveLink(root), { force: true });
   // Links the new payload does not carry now lead nowhere; remove them.
   for (const name of modules.unlink) {
     const stat = lstatOrNull(moduleLink(root, name));
@@ -904,7 +924,7 @@ function legacyCaptureStamp(root, flowsPath, guiRoot) {
 // Why the live flows, GUI and helper modules are not one set, or null.
 // deploy.sh records no committed payload, so the live links are checked
 // against the payload the flows point into. flipTo() now switches every entry
-// with one rename of payloads/.active, but the flipTo() of v0.8.2 and
+// with one rename of payloads/active, but the flipTo() of v0.8.2 and
 // earlier switched flows first, then the GUI, then each module in that
 // payload's modules.json, so a deploy interrupted on such a gateway leaves
 // flows linked into a payload that the GUI or one of those modules does not
@@ -995,13 +1015,14 @@ function clearLegacyCapture(root) {
   fs.rmSync(legacyCapturePath(root), { force: true });
 }
 
-// Removing payloads/.active takes every entry routed through it away at once;
+// Removing payloads/active takes every entry routed through it away at once;
 // the links that led through it are removed after it.
 function deactivate(root, stamp, guiRoot = null) {
   const current = currentStamp(root);
   const gui = guiRoot ? guiStamp(root, guiRoot) : null;
   if (activeStamp(root) === stamp) {
     fs.rmSync(activeLink(root), { force: true });
+    fs.rmSync(legacyActiveLink(root), { force: true });
     if (linksTo(flowsLink(root), viaFlows(root))) fs.rmSync(flowsLink(root), { force: true });
     if (guiRoot && linksTo(guiLink(guiRoot), viaGui(root))) fs.rmSync(guiLink(guiRoot), { force: true });
     for (const name of fs.readdirSync(root)) {
@@ -1079,7 +1100,7 @@ function verifyCompatibility(root, stamp, schemaHead, schemaLedger) {
 function listStamps(root) {
   try {
     return fs.readdirSync(payloadsRoot(root))
-      .filter((entry) => !entry.startsWith('.') && fs.lstatSync(payloadDir(root, entry)).isDirectory())
+      .filter((entry) => isStampName(entry) && fs.lstatSync(payloadDir(root, entry)).isDirectory())
       .sort();
   } catch (_) {
     return [];
