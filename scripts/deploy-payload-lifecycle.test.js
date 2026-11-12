@@ -1048,10 +1048,19 @@ printf '%s\\n' held
       assert.equal(swap.currentStamp(run.root), flipped ? 'new' : 'old');
       // The command restores the backup and returns to payloads/old (the
       // service starts are left out here: they are /etc/init.d scripts).
+      // Item 1 of the last round: the text names the cost and the copies it
+      // leaves, and the command puts the release version back.
+      assert.match(held, /loses everything written to the database since it was taken; nothing more is lost while the gateway stays held/);
+      assert.match(held, /leaves the copies .*premigrate-20261112T000000Z and .*farming\.db\.bak-\* on disk/);
       const command = held.slice(held.indexOf(' with: ') + 7).replace(/ && \/etc\/init\.d\/osi-identityd start && .*$/, '');
       fs.copyFileSync(path.join(__dirname, 'deploy-payload-swap.js'), path.join(run.root, '.payload-swap.js'));
-      const restore = spawnSync('sh', ['-c', command], { encoding: 'utf8' });
+      fs.writeFileSync(path.join(run.root, 'payloads', 'old', 'release-version'), '0.8.0\n');
+      const uciBin = path.join(run.root, 'uci-bin');
+      fs.mkdirSync(uciBin);
+      fs.writeFileSync(path.join(uciBin, 'uci'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(run.root, 'uci.log'))}\n`, { mode: 0o755 });
+      const restore = spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, PATH: `${uciBin}:${process.env.PATH}` } });
       assert.equal(restore.status, 0, restore.stderr);
+      assert.equal(fs.readFileSync(path.join(run.root, 'uci.log'), 'utf8'), 'set osi-server.cloud.firmware_version=0.8.0\ncommit osi-server\n');
       assert.equal(swap.currentStamp(run.root), 'old');
       assert.equal(swap.verifyPair(run.root, 'old', run.guiRoot), true);
       // The command ends the hold: Node-RED's start no longer refuses.
