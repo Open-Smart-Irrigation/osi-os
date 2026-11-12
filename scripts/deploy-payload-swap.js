@@ -648,6 +648,9 @@ function baseMismatch(root, base, stamp, guiRoot, entries) {
   for (const entry of entries) {
     if (entry.copy) {
       if (sameContent(entry.link, entry.copy, entry.kind)) continue;
+      // No GUI is served at all: routing it through payloads/active restores
+      // it from the payload. A missing module is a half switch, never this.
+      if (entry.label === 'GUI' && !statOrNull(entry.link) && !interruptedConversion(entry.link, entry.copy)) continue;
       // A directory is moved aside before its link replaces it, and rename(2)
       // cannot do both in one step. A kill in between leaves it beside the
       // absent path; the conversion finishes here.

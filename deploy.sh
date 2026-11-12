@@ -2382,9 +2382,16 @@ PREV_STAMP="$(swap_call currentStamp || true)"
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
 if [ -n "${PREV_STAMP:-}" ] && [ ! -d "$GUI_ROOT" ]; then
-    echo "WARN: existing flows have no GUI directory; skipping retained-pair capture"
-    PREV_STAMP=""
-    PREV_GUI_STAMP=""
+    if swap_call verifyPair "$PREV_STAMP" >/dev/null; then
+        # The payload the flows run from is complete; only the served GUI is
+        # gone. Keep it as the rollback target: the switch links the GUI again.
+        echo "WARN: $GUI_ROOT is missing; payloads/$PREV_STAMP is complete and stays the rollback target, and the switch restores the GUI link"
+        PREV_GUI_STAMP="$PREV_STAMP"
+    else
+        echo "WARN: existing flows have no GUI directory; skipping retained-pair capture"
+        PREV_STAMP=""
+        PREV_GUI_STAMP=""
+    fi
 fi
 if { [ -z "${PREV_STAMP:-}" ] || [ "$PREV_GUI_STAMP" != "$PREV_STAMP" ]; } && [ -f /srv/node-red/flows.json ] && [ -d "$GUI_ROOT" ]; then
     if PREV_LEGACY_STAMP="$(swap_call legacyCaptureStamp "/srv/node-red/flows.json" "$GUI_ROOT")"; then

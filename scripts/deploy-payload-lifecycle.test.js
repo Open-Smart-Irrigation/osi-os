@@ -760,6 +760,47 @@ printf '%s\\n' healthy-target
   }
 });
 
+// NEW-5 (v0.8.2 fix campaign): with the GUI directory missing, the capture
+// block dropped the rollback target, and a failed deploy then removed every
+// live link although the payload the flows ran from was complete on disk.
+test('a failed deploy with the GUI directory missing returns to the complete payload and restores the GUI', () => {
+  const run = runModuleDeploy(`
+rm "$GUI_ROOT"
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = old ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+${fragment('# rollback target begin\n', '# rollback target end')}
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+stop_for_migration
+flip_new
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' gui-missing-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /is missing; payloads\/old is complete and stays the rollback target/);
+    assert.doesNotMatch(run.result.stderr, /first-deploy payload removed/);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(fs.readFileSync(path.join(run.guiRoot, 'index.html'), 'utf8').trim(), 'old', 'the GUI is served again');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
 test('a failure after the stop and before the migration commit restores flows and modules', () => {
   const run = runModuleDeploy(`
 stage_new_deploy new
