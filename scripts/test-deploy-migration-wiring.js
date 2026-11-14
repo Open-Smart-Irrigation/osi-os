@@ -403,7 +403,7 @@ test('rollback uses retained verification only when the migration runner was una
 // pre-migration copy and the runner's .bak- copies, each about the database's
 // size) are named and counted by the disk preflight, so an operator who is
 // short of space knows what can go.
-test('deploy migration wiring: the disk preflight counts and names earlier database copies', () => {
+test('deploy migration wiring: the disk preflight counts and names earlier database copies and staged payloads', () => {
   const { spawnSync } = require('node:child_process');
   const os = require('node:os');
   const start = deploy.indexOf('    db_bytes=$(ls -ln "$DB_PATH"');
@@ -421,11 +421,13 @@ test('deploy migration wiring: the disk preflight counts and names earlier datab
     fs.mkdirSync(bin);
     // df reports less than twice the database plus the margin.
     fs.writeFileSync(path.join(bin, 'df'), '#!/bin/sh\necho "Filesystem 1K-blocks Used Available Use% Mounted"\necho "/dev/x 100 50 50 50% /data"\n', { mode: 0o755 });
-    const script = `run() {\nDB_PATH=${JSON.stringify(db)}\nbackup_dir=${JSON.stringify(backups)}\n${deploy.slice(start, end)}\nreturn 0\n}\nrun`;
+    // One payload an earlier deploy staged and never switched to (R3, item 4).
+    const stub = 'swap_call() { [ "$1" = staleStageSizes ] && echo "20261101T000000Z 30"; }';
+    const script = `${stub}\nrun() {\nDB_PATH=${JSON.stringify(db)}\nbackup_dir=${JSON.stringify(backups)}\nPAYLOADS_ROOT=${JSON.stringify(path.join(dir, 'payloads'))}\nDEPLOY_STAMP=new\n${deploy.slice(start, end)}\nreturn 0\n}\nrun`;
     const result = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, MIGRATE_MIN_FREE_MARGIN_MB: '1' } });
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout, /earlier database copies take 20KB/);
-    assert.match(result.stderr, /premigrate-20261112T000000Z .*farming\.db\.bak-2026-11-12T00-00-00-000Z; removing the ones no longer needed frees that space/);
+    assert.match(result.stdout, /earlier database copies and staged payloads take 50KB/);
+    assert.match(result.stderr, /premigrate-20261112T000000Z .*farming\.db\.bak-2026-11-12T00-00-00-000Z .*payloads\/20261101T000000Z .*; removing the ones no longer needed frees that space/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
