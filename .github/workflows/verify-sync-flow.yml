@@ -257,6 +257,10 @@ jobs:
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js
+      # NEW-23: a gateway on a stock base gets its osi-server configuration
+      # from the image's own defaults before anything is replaced.
+      - name: Deploy osi-server configuration
+        run: node --test scripts/test-deploy-osi-server-config.js
       # Only the commands both gateway bases carry (NEW-27: no stat on
       # either): deploy.sh's command check, no absent command or tr
       # character class on the gateway side, and the second-deploy and
