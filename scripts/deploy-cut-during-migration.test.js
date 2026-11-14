@@ -1,18 +1,23 @@
 'use strict';
 
 // #636, item 3: a deploy cut between its migration's first commit and its
-// payload switch. Rows of the kill matrix, each on a real database migrated
-// by the real runner (scripts/migrate-cli.js), with node-red.init's own boot
-// step (payload_schema_check, then payload_hold_check):
-// - (g) a cut after commit k of the ten (71 to 80), k = 1..9: the boot holds,
-//   the old payload never starts, and the deploy run again applies the rest
-//   and switches;
-// - (a) a cut after the last commit: the boot switches forward to the
-//   payload the database was migrated for;
-// - a cut before the first commit: the old payload fits and starts, the
-//   record is removed.
-// The cut is a SIGKILL right after a migration's COMMIT returns, before its
-// fingerprint stamp (helpers/kill-after-migration-commit.js).
+// payload switch, on a real database migrated by the real runner
+// (scripts/migrate-cli.js), with node-red.init's own boot step
+// (payload_schema_check, then payload_hold_check). Rule (g), as ruled after
+// the old-payload-boot matrix: a cut part way is held only where the retry
+// provably cannot finish once the old payload has started, i.e. when a
+// pending migration's new body for an object the old boot node recreates is
+// already stamped; everywhere else the old payload starts, recorded
+// "unverified", and the retry completes. Rows:
+// - c3 (commit 73, no stamp): starts unverified; after the old boot rewrites
+//   its triggers, the retry completes;
+// - s3 (stamp of 73) and c6 (commit 76): held; the retry completes;
+// - c10 (commit 80): the boot switches forward;
+// - a missing record with the database ahead of the active payload: held;
+// - before the first commit: the old payload fits and starts.
+// The matrix with the real v0.8.0 payload booting under Node-RED is in the
+// pull request; here the old boot's effect on the database is reproduced by
+// recreating those objects with their bodies at schema 70.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -21,10 +26,12 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const swap = require('./deploy-payload-swap');
 const { buildReference } = require('./baseline-existing-db');
-const { readMigrationManifest } = require('../lib/osi-migrate/migrations-loader');
+const { readMigrationManifest, loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
+const { pendingBootOwnedFingerprints } = require('../lib/osi-migrate/boot-owned-fingerprints');
 
 const REPO = path.resolve(__dirname, '..');
 const MIGRATIONS = path.join(REPO, 'database', 'migrations', 'ordered');
+const INSTALLED_FLOWS = JSON.parse(fs.readFileSync(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'), 'utf8'));
 const INIT = fs.readFileSync(path.join(REPO, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'), 'utf8');
 const LEDGER_SQL = "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')";
 const FROM = 70;
@@ -63,12 +70,31 @@ async function databaseAt70() {
   return base70;
 }
 
-function migrate(db, killAfter = 0) {
-  const args = killAfter ? ['-r', path.join(__dirname, 'helpers/kill-after-migration-commit.js')] : [];
+// cut: { commit: k } kills after migration 70+k's COMMIT (before its stamp),
+// { stamp: k } after its fingerprint stamp.
+function migrate(db, cut = null) {
+  const args = cut ? ['-r', path.join(__dirname, 'helpers/kill-after-migration-commit.js')] : [];
   return spawnSync(process.execPath, [...args, path.join(REPO, 'scripts/migrate-cli.js'), db, '--backup-dir', path.join(path.dirname(db), 'backups'), '--migrations-dir', MIGRATIONS], {
     encoding: 'utf8',
-    env: { ...process.env, KILL_AFTER_COMMIT: String(killAfter) },
+    env: { ...process.env, KILL_AFTER_COMMIT: String((cut && cut.commit) || 0), KILL_AFTER_STAMP: String((cut && cut.stamp) || 0) },
   });
+}
+
+function storedFingerprints(db) {
+  return new Map(JSON.parse(spawnSync('sqlite3', ['-json', db, 'SELECT object_type, object_name, fingerprint FROM schema_object_fingerprints'], { encoding: 'utf8' }).stdout || '[]')
+    .map((r) => [`${r.object_type} ${r.object_name}`, r.fingerprint]));
+}
+
+// What the old payload's boot node does to the objects it recreates: drop
+// them and create them again with its own bodies, those at schema 70.
+async function oldBoot(g) {
+  const base = await databaseAt70();
+  for (const o of g.record.boot_owned) {
+    const sql = sqlite(base, `SELECT sql FROM sqlite_master WHERE type='${o.type}' AND name='${o.name}'`);
+    assert.ok(sql, `${o.name} at schema 70`);
+    const run = spawnSync('sqlite3', [g.db], { input: `DROP ${o.type.toUpperCase()} IF EXISTS ${o.name};\n${sql};\n`, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+  }
 }
 
 function writeModule(dir, marker) {
@@ -105,9 +131,15 @@ async function gateway() {
   swap.markHealthy(root, 'old');
   swap.writePayloadState(root, 'old', 'healthy', 'fixture');
   stage(root, 'new');
-  swap.writePendingSwitch(root, 'new', to.head, to.ledger, from.head, from.ledger);
+  // What deploy.sh computes before migrate-cli: the new bodies the pending
+  // migrations give objects the installed payload's boot node recreates.
+  const bootOwned = pendingBootOwnedFingerprints({
+    flows: INSTALLED_FLOWS, migrations: loadMigrationCorpus(MIGRATIONS).migrations, appliedHead: Number(from.head), current: storedFingerprints(db),
+  });
+  swap.writePendingSwitch(root, 'new', to.head, to.ledger, from.head, from.ledger, JSON.stringify(bootOwned));
   fs.copyFileSync(path.join(__dirname, 'deploy-payload-swap.js'), path.join(root, '.payload-swap.js'));
-  return { root, guiRoot, db, to };
+  const record = swap.readPendingSwitches(root).find((r) => r.payload_stamp === 'new');
+  return { root, guiRoot, db, to, record };
 }
 
 // node-red.init's start, up to the point where Node-RED is launched.
@@ -139,44 +171,83 @@ function completeDeploy(g, stamp) {
   swap.clearPendingSwitch(g.root, stamp);
 }
 
-for (let k = 1; k <= 9; k += 1) {
-  test(`(g) a cut after commit ${k} of 10: the boot holds, the old code never starts, the deploy run again completes`, async () => {
-    const g = await gateway();
-    const cut = migrate(g.db, k);
-    assert.equal(cut.signal, 'SIGKILL', cut.stdout + cut.stderr);
-    assert.equal(schema(g.db).head, String(FROM + k));
+// The deploy run again: its own stage and record, the rest of the
+// migrations, the switch; then the boot starts the new payload.
+function retryCompletes(g, k) {
+  stage(g.root, 'retry');
+  const from = schema(g.db);
+  const bootOwned = pendingBootOwnedFingerprints({
+    flows: INSTALLED_FLOWS, migrations: loadMigrationCorpus(MIGRATIONS).migrations, appliedHead: Number(from.head), current: storedFingerprints(g.db),
+  });
+  swap.writePendingSwitch(g.root, 'retry', g.to.head, g.to.ledger, from.head, from.ledger, JSON.stringify(bootOwned));
+  swap.clearOtherPendingSwitches(g.root, 'retry');
+  const retry = migrate(g.db);
+  assert.equal(retry.status, 0, retry.stdout + retry.stderr);
+  const applied = JSON.parse(/\[migrate\] applied: (\[[^\]]*\])/.exec(retry.stdout + retry.stderr)[1]);
+  assert.deepEqual(applied, Array.from({ length: 10 - k }, (_, i) => FROM + k + 1 + i));
+  completeDeploy(g, 'retry');
+  fs.rmSync(path.join(g.root, 'DEPLOY-HELD'), { force: true });
+  const after = boot(g);
+  assert.equal(after.started, true, after.log);
+  assert.equal(swap.currentStamp(g.root), 'retry');
+  assert.deepEqual(swap.readPendingSwitches(g.root), []);
+}
 
+test('the record carries the fingerprints of 0073\'s new trigger bodies, derived from the installed boot node', async () => {
+  const g = await gateway();
+  assert.equal(g.record.format, 2);
+  assert.deepEqual(g.record.boot_owned.map((o) => `${o.version} ${o.type} ${o.name}`).sort(),
+    ['73 trigger trg_dp_zone_env_outbox_ai', '73 trigger trg_dp_zone_env_outbox_au']);
+});
+
+test('(g) c3, a cut after commit 73 before its stamp: the old payload starts unverified; after its boot the retry completes', async () => {
+  const g = await gateway();
+  const cut = migrate(g.db, { commit: 3 });
+  assert.equal(cut.signal, 'SIGKILL', cut.stdout + cut.stderr);
+  assert.equal(schema(g.db).head, '73');
+  const first = boot(g);
+  assert.equal(first.started, true, first.log);
+  assert.match(first.log, /was cut during its migration; running the deploy again completes it/);
+  assert.equal(swap.readPayloadState(g.root).state, 'unverified');
+  assert.equal(swap.currentStamp(g.root), 'old');
+  await oldBoot(g);
+  retryCompletes(g, 3);
+});
+
+for (const [name, cut, k] of [
+  ['s3, a cut after the stamp of 73', { stamp: 3 }, 3],
+  ['c6, a cut after commit 76 before its stamp', { commit: 6 }, 6],
+]) {
+  test(`(g) ${name}: held, because 0073's stamped bodies would be undone by the old boot; the retry completes`, async () => {
+    const g = await gateway();
+    const run = migrate(g.db, cut);
+    assert.equal(run.signal, 'SIGKILL', run.stdout + run.stderr);
+    assert.equal(schema(g.db).head, String(FROM + k));
     const first = boot(g);
     assert.equal(first.started, false, first.log);
-    assert.match(first.log, /interrupted while the database was being updated/);
+    assert.match(first.log, /migration 73's new body of trigger trg_dp_zone_env_outbox_a[iu] is stamped/);
     const held = fs.readFileSync(path.join(g.root, 'DEPLOY-HELD'), 'utf8');
     assert.match(held, /Run the deploy again/);
     assert.doesNotMatch(held, /[Rr]estore/);
-    assert.equal(swap.currentStamp(g.root), 'old');
     assert.equal(boot(g).started, false, 'held again after a reboot');
-
-    // The deploy run again (a new stamp; its record replaces the old one).
-    stage(g.root, 'retry');
-    const from = schema(g.db);
-    swap.writePendingSwitch(g.root, 'retry', g.to.head, g.to.ledger, from.head, from.ledger);
-    swap.clearOtherPendingSwitches(g.root, 'retry');
-    const retry = migrate(g.db);
-    assert.equal(retry.status, 0, retry.stdout + retry.stderr);
-    const applied = JSON.parse(/\[migrate\] applied: (\[[^\]]*\])/.exec(retry.stdout + retry.stderr)[1]);
-    assert.deepEqual(applied, Array.from({ length: 10 - k }, (_, i) => FROM + k + 1 + i));
-    completeDeploy(g, 'retry');
-    fs.rmSync(path.join(g.root, 'DEPLOY-HELD'), { force: true });
-
-    const after = boot(g);
-    assert.equal(after.started, true, after.log);
-    assert.equal(swap.currentStamp(g.root), 'retry');
-    assert.deepEqual(swap.readPendingSwitches(g.root), []);
+    retryCompletes(g, k);
   });
 }
 
+test('(g) a missing pending-switch record with the database ahead of the active payload: held', async () => {
+  const g = await gateway();
+  const run = migrate(g.db, { commit: 3 });
+  assert.equal(run.signal, 'SIGKILL');
+  swap.clearPendingSwitch(g.root, 'new');
+  const first = boot(g);
+  assert.equal(first.started, false, first.log);
+  assert.match(first.log, /no readable pending-switch record proves the retry can finish/);
+});
+
 test('(a) a cut after the last commit: the boot switches forward to the payload the database was migrated for', async () => {
   const g = await gateway();
-  const cut = migrate(g.db, 10);
+  assert.equal(g.record.format, 2, 'the record carries rule (g)\'s fingerprints');
+  const cut = migrate(g.db, { commit: 10 });
   assert.equal(cut.signal, 'SIGKILL');
   assert.equal(schema(g.db).ledger, g.to.ledger);
   const first = boot(g);
