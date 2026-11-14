@@ -491,6 +491,9 @@ function loadWorkflows(root, errors) {
           with: step.with || {},
           workflowVersionPins: workflowVersionPins(text, doc.env),
           overriddenEnv: { ...(job.env || {}), ...(step.env || {}) },
+          precedingEnvWrites: job.steps.slice(0, idx)
+            .filter(previous => typeof previous?.run === 'string' && /\bGITHUB_ENV\b/.test(previous.run))
+            .map(previous => previous.run),
           env: { ...(doc.env || {}), ...(job.env || {}), ...(step.env || {}) },
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
@@ -993,7 +996,8 @@ function checkSetupNode(ctx, step) {
     return;
   }
   const expression = /^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(String(v));
-  if (expression && !Object.hasOwn(step.overriddenEnv, expression[1])) {
+  if (expression && !Object.hasOwn(step.overriddenEnv, expression[1]) &&
+      !step.precedingEnvWrites.some(run => new RegExp('\\b' + expression[1] + '\\b').test(run))) {
     v = step.workflowVersionPins[expression[1]] || v;
   }
   if (!/^\d+(\.\d+){0,2}$/.test(String(v))) ctx.errors.push(`${where}: node-version ${v} is not a pinned version (use a major such as '22')`);

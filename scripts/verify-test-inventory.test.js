@@ -341,6 +341,18 @@ test('setup-node resolves only a quoted patch version from workflow-level env', 
   assert.match(errorsOf(repo({ ...base, '.node-version': '20.18.3', '.github/workflows/ci.yml': file })), /node-version-file is not supported/);
 });
 
+test('setup-node refuses a workflow pin written to GITHUB_ENV by an earlier job step', () => {
+  const base = workflow(['node --test scripts/a.test.js'], "env:\n  NODE_PIN: '20.18.3'")
+    .replace("node-version: '22'", 'node-version: ${{ env.NODE_PIN }}');
+  const check = text => errorsOf(repo({ [INVENTORY]: EMPTY_INVENTORY, 'scripts/a.test.js': PASSING, '.github/workflows/ci.yml': text }));
+  for (const destination of ['$GITHUB_ENV', '${GITHUB_ENV}', '$env:GITHUB_ENV']) {
+    const write = `      - run: echo "NODE_PIN=lts/*" >> "${destination}"\n`;
+    assert.match(check(base.replace('      - uses: actions/setup-node@v4', write + '      - uses: actions/setup-node@v4')), /not a pinned version/);
+  }
+  assert.equal(check(base.replace('      - uses: actions/setup-node@v4', '      - run: echo "OTHER=lts/*" >> "$GITHUB_ENV"\n      - uses: actions/setup-node@v4')), '');
+  assert.equal(check(base + '      - run: echo "NODE_PIN=lts/*" >> "$GITHUB_ENV"\n'), '');
+});
+
 test('workflows install with npm ci only, without peer-dependency bypasses', () => {
   for (const [cmd, re] of [
     ['npm install', /npm install: use npm ci/],

@@ -93,3 +93,14 @@ test('release policy includes the stock list even when the image list is empty',
   assert.throws(()=>combineKnown({image:[]}),/stock/);
   assert.throws(()=>combineKnown({image:[],stock:null}),/stock/);
 });
+
+test('stock install rejects npm exit zero when required user packages are absent',t=>{
+  const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+  const run=fs.mkdtempSync(path.join(os.tmpdir(),'smoke-install-test-'));
+  t.after(()=>fs.rmSync(run,{recursive:true,force:true}));
+  t.mock.method(require('node:child_process'),'spawnSync',()=>({status:0,stdout:'',stderr:'npm error Exit handler never called!'}));
+  const file=require.resolve('./fixtures/release-smoke-stock/install-user');
+  delete require.cache[file];
+  t.after(()=>delete require.cache[file]);
+  assert.throws(()=>require(file).install(path.resolve(__dirname,'..'),run),/stock npm install failed/);
+});

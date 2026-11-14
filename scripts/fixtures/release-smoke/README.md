@@ -77,6 +77,8 @@ second setting. These are provisional measurements under the current pin.
 | protobufjs / proto-loader | 7.6.6 / 0.8.1 | 7.5.4 / 0.8.0 |
 | Node-RED MQTT node's client | 4.3.7 | 5.7.0 |
 | Node-RED HTTP node's got | 12.6.0 | 12.6.1 |
+| `device event` | stand-in on both runtimes; real version on the stock base not checked | same |
+| `field_tester_service` | stand-in on both runtimes; real version on the stock base not checked | same |
 
 The runtime's Express (4.21.2), HTTP parser (1.20.3), cronosjs (1.7.1)
 and WebSocket module (7.5.10) resolve identically. JSONata differs
