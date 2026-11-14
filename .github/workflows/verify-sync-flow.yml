@@ -263,6 +263,10 @@ jobs:
       # retry paths run with a PATH holding only the bases' commands.
       - name: Gateway base commands
         run: node --test --test-concurrency=1 scripts/test-deploy-gateway-commands.js
+      # NEW-29: the image's first-boot Tailscale script keeps every letter of
+      # the join key (no tr character class on the gateway bases).
+      - name: Tailscale first-boot join key
+        run: node --test scripts/test-tailscale-init-authkey.js
       # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
       # on the Kiwi profile and gives the Clover its own profile with it instead
       # of aliasing the codec-less field-tester profile; --repair-soil-profiles
