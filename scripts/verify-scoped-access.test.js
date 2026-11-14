@@ -609,6 +609,22 @@ test('a node type the ratchet does not know fails closed', async () => {
   );
 });
 
+test('an unreachable Change outside the named error-answer node fails closed', async () => {
+  for (const profile of [PROFILE, MIRROR]) {
+    const flows = loadFlows(profile);
+    assert.equal(await failuresFor(flows, []), '');
+    flows.push({
+      id: 'review-mutant', type: 'change', name: 'Unreachable Change',
+      rules: [{ t: 'set', p: 'payload', pt: 'msg', to: 'mutant', tot: 'str' }],
+      wires: [[]],
+    });
+    assert.match(
+      await failuresFor(flows, []),
+      /node type change \(review-mutant\) is neither an entry the ratchet probes nor a type it knows/
+    );
+  }
+});
+
 test('an unawaited first decision is not hidden by a later write-role check', async () => {
   const flows = addRoute(loadFlows(), 'probe-masked-first-http', {
     decision: `

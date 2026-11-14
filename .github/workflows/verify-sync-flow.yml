@@ -30,6 +30,8 @@ jobs:
           node scripts/verify-flows-sandbox.js
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: HTTP auth error replies and SQLite startup configuration
+        run: node --test scripts/test-auth-http-error-wiring.js
       - name: Reference-tree ownership and valve-router client lifetime
         run: node --test scripts/test-reference-tree-and-valve-router.js
       - name: Scoped-access endpoint ratchet

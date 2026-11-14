@@ -234,34 +234,34 @@ see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
-On payload baseline `88f6e84bb`, strict mode reports 200 passed, 0 unexpected
-failures and 11 known failing cases, then exits 1. The original list had 26
-entries. The untouched-list run proved 17 cases now pass before those entries
+On main base `49e93560` with #649, both no-token POSTs answer 401 and
+startup has no node errors. Those three allowances are removed from both
+runtime lists. The scoped catches preserve the exact case/source/type/message
+tuples, so all 33 entries in `expected-refusals.json` remain unchanged.
+The image runtime (Node-RED 3.1.15) and stock runtime (Node-RED 4.0.9), both
+under Node 20.18.3, each report 218 passed, 0 unexpected failures and 1 known
+failure (NEW-1).
+The archived `baseline-88f6e84bb.txt` retains its historical filename; its
+header records the earlier `b0a5e3cf` base and candidate flow checksum.
+
+On payload baseline `88f6e84bb`, strict mode reported 200 passed, 0 unexpected
+failures and 11 known failing cases, then exited 1. The original list had 26
+entries. The untouched-list run proved 17 cases passed before those entries
 were removed; six other entries lost their obsolete HTTP-timeout allowances.
-The council follow-up adds a deterministic competing-writer scheduler case
-under F-7 and reaches the existing NEW-1 in a populated dendrometer weather
+The council follow-up added a deterministic competing-writer scheduler case
+under F-7 and reached the existing NEW-1 in a populated dendrometer weather
 case, expanding the list from 9 to 11 without a new finding ID.
-See [the per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
+See [the historical per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
 for each merged fix, the single finding behind every remaining case, and the
 assertions that need changing or strengthening for stage 1.
 
-The checked-in output of that baseline is `baseline-88f6e84bb.txt`.
-
 The valve fix (valve control as in v0.8.1, #648) removed the six F-1, F-2 and
 F-4 cases from the list, changed their assertions and added five cases that
-retry at once. With it, strict mode reports 211 passed, 0 unexpected failures
-and 5 known failing cases, then exits 1; that output is
+retry at once. With it, strict mode reported 211 passed, 0 unexpected failures
+and 5 known failing cases, then exited 1; that output is
 `after-valve-fix-648.txt`, and the mapping document says what each changed
-case asserts. Each line below names one remaining case; the JSON file carries
-its exact signatures.
-
-- F-14: `startup-node-errors`.
-
-- F-13: `no-token:POST /api/account-link`.
-
-- F-13: `no-token:POST /api/sync/force`.
-
-- F-7: `scheduler-irrigates`.
+case asserts. F-7 left both runtime lists with #656. The only remaining case
+is below; both JSON files carry its exact signatures.
 
 - NEW-1: `dendro-weather-transport`.
 
