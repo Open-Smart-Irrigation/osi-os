@@ -1908,7 +1908,7 @@ process.stdout.write(`${head}|${manifest.map((m) => `${m.version}:${m.checksum}`
         echo "WARN: could not derive what the installed payload's boot node rewrites; a cut during the migration will hold the gateway until the deploy runs again" >&2
         rps_owned=null
     fi
-    if ! swap_call writePendingSwitch "$DEPLOY_STAMP" "${rps_target%%|*}" "${rps_target#*|}" "${rps_from%%|*}" "${rps_from#*|}" "$rps_owned" >/dev/null || \
+    if ! swap_call writePendingSwitch "$DEPLOY_STAMP" "${rps_target%%|*}" "${rps_target#*|}" "${rps_from%%|*}" "${rps_from#*|}" "$rps_owned" "${SERVED_STAMP:-}" >/dev/null || \
        ! swap_call clearOtherPendingSwitches "$DEPLOY_STAMP" >/dev/null; then
         echo "ERROR: could not record the pending switch to payloads/$DEPLOY_STAMP; refusing before migrating" >&2
         return 1

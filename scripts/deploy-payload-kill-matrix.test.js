@@ -742,3 +742,35 @@ test('with no payload holding it, the boot repair copies an absent GUI back from
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Delta read of 46cdfc34c0 (S1): a factory image (regular flows.json, the
+// GUI a directory of the image layer, nothing linked into payloads yet), the
+// migration complete and no switch begun, then a reboot. The boot switches
+// forward through the captured old payload the pending record names; a kill
+// at every step of that switch, then the boot again, ends complete and the
+// gateway starts.
+test('S1: boot-forward on a factory image switches through the captured base, killed at every step', () => {
+  const s9 = table.STATE_TABLE.find((r) => r.row === 'S9').builds[0];
+  const FROM = '70:a';
+  const TO = '70:a,80:b';
+  let k = 1;
+  for (;; k += 1) {
+    const status = withImageRow(s9, (g, decision) => {
+      assert.ok(decision.served && !decision.refused && !decision.held, JSON.stringify(decision));
+      swap.writePendingSwitch(g.root, 'new', '80', TO, '70', FROM, '[]', decision.served);
+      const run = killed(g, k, 'bootSchemaDecision', [g.guiRoot, '80', TO, '']);
+      // The boot again: the repair, then the decision.
+      swap.resumeInterruptedSwitch(g.root, g.guiRoot);
+      swap.bootSchemaDecision(g.root, g.guiRoot, '80', TO, '');
+      assert.equal(swap.currentStamp(g.root), 'new', `k=${k}: ${run.stderr}`);
+      assert.equal(swap.verifyPair(g.root, 'new', g.guiRoot), true, `k=${k}: the forward switch is complete`);
+      assert.deepEqual(leftovers(g), [], `k=${k}: nothing a killed switch left behind`);
+      const state = swap.readPayloadState(g.root);
+      assert.notEqual(state && state.state, 'held', `k=${k}: the gateway starts`);
+      return run.status;
+    });
+    assert.notEqual(status, null, 'the S9 row has an image-layer GUI');
+    if (status !== KILLED) break;
+  }
+  assert.ok(k > 3, `the forward switch took ${k} steps`);
+});

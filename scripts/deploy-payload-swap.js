@@ -1661,7 +1661,9 @@ function pendingSwitchPath(root, stamp) {
 // <bootOwned>: JSON from lib/osi-migrate/boot-owned-fingerprints.js (the
 // fingerprints of the new bodies pending migrations give objects the old boot
 // node recreates), or "null" when they could not be derived.
-function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger, bootOwned = 'null') {
+// <servedStamp>: the validated payload the live entries serve (deploy.sh's
+// SERVED_STAMP), the base a boot-forward switch routes through.
+function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger, bootOwned = 'null', servedStamp = '') {
   if (!isDirectory(payloadDir(root, stamp))) throw new Error(`pending switch: payload missing: ${stamp}`);
   const owned = typeof bootOwned === 'string' ? JSON.parse(bootOwned) : bootOwned;
   if (owned !== null && !Array.isArray(owned)) throw new Error('pending switch: boot-owned fingerprints must be a list or null');
@@ -1673,6 +1675,7 @@ function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fro
     from_head: String(fromHead),
     from_ledger: String(fromLedger),
     boot_owned: owned,
+    served_stamp: String(servedStamp || ''),
   })}\n`);
 }
 
@@ -1786,7 +1789,10 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
     const stamp = forward.payload_stamp;
     writeCompatibility(root, stamp, forward.schema_head, forward.schema_ledger);
     markActivated(root, stamp);
-    flipTo(root, stamp, guiRoot, active || '');
+    // The captured old payload the deploy served from is the base: a factory
+    // layout links nothing into payloads before the first switch.
+    const served = forward.served_stamp && isDirectory(payloadDir(root, forward.served_stamp)) ? forward.served_stamp : '';
+    flipTo(root, stamp, guiRoot, active || served);
     const reason = `the deploy that migrated the database to schema ${forward.schema_head} was cut before its switch; the boot switched to payloads/${stamp}, the only payload that fits it; its health check is owed`;
     writePayloadState(root, stamp, 'unverified', reason, 'node-red.init');
     clearPendingSwitch(root, stamp);
