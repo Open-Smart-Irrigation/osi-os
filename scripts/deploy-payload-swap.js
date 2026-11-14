@@ -593,12 +593,14 @@ function captureModules(root, prevStamp, deployStamp) {
   const dir = modulesDir(root, prevStamp);
   const lines = [];
   let changed = !prev;
-  fs.mkdirSync(dir, { recursive: true });
   // The new payload's modules, and every module served from another payload
   // that the new payload drops (through the flows' payload, payloads/active,
   // or a link an older deploy.sh made): a switch back must restore it too.
   const names = new Set(next.modules);
   for (const [name, linked] of payloadModuleLinks(root)) if (linked !== deployStamp) names.add(name);
+  // Every check first, then the copies: a refusal leaves the previous
+  // payload as it was.
+  const copies = [];
   for (const name of [...names].sort()) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
@@ -625,6 +627,10 @@ function captureModules(root, prevStamp, deployStamp) {
       }
       continue;
     }
+    copies.push({ name, live, liveHash, target });
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  for (const { name, live, liveHash, target } of copies) {
     const temp = path.join(dir, `.${name}.capture-${process.pid}-${Date.now()}`);
     try {
       copyTree(live, temp);

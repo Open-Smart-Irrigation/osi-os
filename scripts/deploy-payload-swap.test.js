@@ -672,6 +672,25 @@ test('captureModules refuses a live module that changed after it was captured', 
   assert.throws(() => swap.captureModules(root, 'prev', 'second'), /refusing to recapture changed live module osi-a/);
 });
 
+test('captureModules refuses a changed module before it copies any other (NEW-23)', (t) => {
+  const root = moduleRoot(t);
+  stagePayload(root, 'prev', fakeFlowsSrcAt(root, 'prev'), fakeGuiSrcAt(root, 'prev'));
+  writeModule(path.join(root, 'osi-b'), 'osi-b@live');
+  stageWithModules(root, 'first', { 'osi-b': '' });
+  swap.captureModules(root, 'prev', 'first');
+
+  // osi-a, new in this release and served from a real directory, sorts
+  // before the changed osi-b: the refusal must not have copied it.
+  writeModule(path.join(root, 'osi-a'), 'osi-a@live');
+  fs.appendFileSync(path.join(root, 'osi-b', 'index.js'), '// changed in place\n');
+  stageWithModules(root, 'second', { 'osi-a': '', 'osi-b': '' });
+  const before = fs.readdirSync(path.join(root, 'payloads', 'prev', 'modules')).sort();
+  const manifestBefore = fs.readFileSync(path.join(root, 'payloads', 'prev', 'modules.json'), 'utf8');
+  assert.throws(() => swap.captureModules(root, 'prev', 'second'), /refusing to recapture changed live module osi-b/);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'payloads', 'prev', 'modules')).sort(), before);
+  assert.equal(fs.readFileSync(path.join(root, 'payloads', 'prev', 'modules.json'), 'utf8'), manifestBefore);
+});
+
 test('captureModules keeps a payload-staged copy over a real directory and warns', (t) => {
   const root = moduleRoot(t);
   const guiRoot = path.join(root, 'gui');
