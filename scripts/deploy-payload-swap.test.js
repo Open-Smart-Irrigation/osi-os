@@ -1241,3 +1241,32 @@ test('the removal marker is on storage before the first file of the GUI is remov
   const block = source.slice(at, source.indexOf('fs.rmSync(link, { recursive: true, force: true });', at));
   assert.match(block, /writeDurable\(removing,/);
 });
+
+// R3, item 4: a retry that stopped before its switch left one more staged
+// payload each time. The next deploy removes exactly those: recorded
+// "staged", never switched to; never the active or served payload, one a
+// helper module links into, one a pending switch names, or one from before
+// the health record.
+test('stale stages: only payloads staged and never switched to are removed', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, '20261101', { 'osi-a': '' });          // from before the record
+  flipTo(root, '20261101', guiRoot);
+  for (const stamp of ['20261102', '20261103', '20261104', '20261105']) {
+    stageWithModules(root, stamp, { 'osi-a': '' });
+    swap.markStaged(root, stamp);
+  }
+  swap.writePendingSwitch(root, '20261104', '80', 'a,b', '70', 'a'); // a pending switch names it
+  swap.markActivated(root, '20261105');                             // was switched to once
+  assert.deepEqual(swap.staleStages(root, 'next'), ['20261102', '20261103']);
+  assert.match(swap.staleStageSizes(root, 'next'), /^20261102 \d+\n20261103 \d+$/);
+  const report = swap.clearStaleStages(root, 'next');
+  assert.match(report, /removed payloads\/20261102, staged by an earlier deploy that never switched to it/);
+  for (const gone of ['20261102', '20261103']) assert.equal(fs.existsSync(path.join(root, 'payloads', gone)), false);
+  for (const kept of ['20261101', '20261104', '20261105']) assert.ok(fs.existsSync(path.join(root, 'payloads', kept)), kept);
+  assert.equal(swap.verifyPair(root, '20261101', guiRoot), true);
+  // The deploy's own stage is never among them.
+  stageWithModules(root, 'next', { 'osi-a': '' });
+  swap.markStaged(root, 'next');
+  assert.deepEqual(swap.staleStages(root, 'next'), []);
+});

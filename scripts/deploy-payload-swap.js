@@ -1220,6 +1220,51 @@ function discardPayload(root, stamp) {
   fs.rmSync(payloadDir(root, stamp), { recursive: true, force: true });
 }
 
+// Payloads a deploy staged and never switched to (a retry that stopped before
+// its switch leaves one each time): recorded "staged" by deploy.sh, not
+// active or served, no helper module linked into them, and no pending switch
+// (the boot may still need that candidate). A payload from before the health
+// record, or one that was ever activated, is never among them.
+function staleStages(root, keepStamp = '') {
+  const live = new Set([activeStamp(root), currentStamp(root), keepStamp].filter(Boolean));
+  const linked = new Set(payloadModuleLinks(root).values());
+  return listStamps(root).filter((stamp) => {
+    if (live.has(stamp) || linked.has(stamp)) return false;
+    if (fs.existsSync(pendingSwitchPath(root, stamp))) return false;
+    const record = readHealth(root, stamp);
+    return Boolean(record && record.state === 'staged');
+  });
+}
+
+function treeKb(target) {
+  let bytes = 0;
+  const walk = (entry) => {
+    const stat = lstatOrNull(entry);
+    if (!stat) return;
+    if (stat.isDirectory()) for (const name of fs.readdirSync(entry)) walk(path.join(entry, name));
+    else bytes += stat.size;
+  };
+  walk(target);
+  return Math.ceil(bytes / 1024);
+}
+
+// "<stamp> <KiB>" per stale stage, one per line (the deploy's free-space
+// preflight counts them).
+function staleStageSizes(root, keepStamp = '') {
+  return staleStages(root, keepStamp).map((stamp) => `${stamp} ${treeKb(payloadDir(root, stamp))}`).join('\n');
+}
+
+// Removes the stale stages; returns one line per removed payload.
+function clearStaleStages(root, keepStamp = '') {
+  const lines = [];
+  for (const stamp of staleStages(root, keepStamp)) {
+    const kb = treeKb(payloadDir(root, stamp));
+    discardPayload(root, stamp);
+    lines.push(`removed payloads/${stamp}, staged by an earlier deploy that never switched to it (${kb} KiB)`);
+  }
+  return lines.join('\n');
+}
+
 function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
   const dir = payloadDir(root, stamp);
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -1717,6 +1762,9 @@ module.exports = {
   readPayloadState,
   unverifiedActive,
   recordBootState,
+  staleStages,
+  staleStageSizes,
+  clearStaleStages,
   writePendingSwitch,
   readPendingSwitches,
   clearPendingSwitch,

@@ -2327,11 +2327,19 @@ run_schema_migration() {
                 copies_kb=$((copies_kb + (copy_bytes + 1023) / 1024))
                 copies="$copies $copy"
             done
-            echo "Disk: need ~${req_kb}KB (twice the database plus ${margin_mb}MB) on $backup_dir, have ${avail_kb}KB; earlier database copies take ${copies_kb}KB"
+            # Payloads staged by earlier deploys and not removed above.
+            stale_kb=0
+            stale_list="$(swap_call staleStageSizes "${DEPLOY_STAMP:-}" 2>/dev/null || true)"
+            if [ -n "$stale_list" ]; then
+                stale_kb="$(printf '%s\n' "$stale_list" | awk '{ kb += $2 } END { print kb + 0 }')"
+                copies="$copies $(printf '%s\n' "$stale_list" | awk -v root="$PAYLOADS_ROOT" '{ printf "%s/%s ", root, $1 }')"
+                copies_kb=$((copies_kb + stale_kb))
+            fi
+            echo "Disk: need ~${req_kb}KB (twice the database plus ${margin_mb}MB) on $backup_dir, have ${avail_kb}KB; earlier database copies and staged payloads take ${copies_kb}KB"
             if [ "$avail_kb" -lt "$req_kb" ]; then
                 echo "ERROR: insufficient disk for a safe schema migration on $backup_dir: need ~${req_kb}KB, have ${avail_kb}KB" >&2
                 if [ -n "$copies" ]; then
-                    echo "Earlier database copies (${copies_kb}KB):$copies; removing the ones no longer needed frees that space" >&2
+                    echo "Earlier database copies and staged payloads (${copies_kb}KB):$copies; removing the ones no longer needed frees that space" >&2
                 fi
                 echo "Free space (prune old $backup_dir/*.premigrate-*, $DB_PATH.bak-*, /data/db/backups/*, check DB growth/logs) and re-deploy" >&2
                 return 1
@@ -2703,6 +2711,19 @@ if [ -n "$owed_plan" ]; then
     fi
 fi
 # owed health check end
+
+# stale stages begin
+# A deploy that stopped before its switch (a refused retry, for example)
+# leaves its staged payload behind, one more each time. Only payloads the
+# deploy recorded "staged" and never switched to are removed: never the
+# active or served payload, one a helper module links into, or one a pending
+# switch names.
+if stale_report="$(swap_call clearStaleStages "$DEPLOY_STAMP")"; then
+    [ -z "$stale_report" ] || printf 'OK: %s\n' "$stale_report"
+else
+    echo "WARN: could not remove payloads staged by earlier deploys; the disk preflight counts them" >&2
+fi
+# stale stages end
 
 DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
 capture_previous_firmware_version
