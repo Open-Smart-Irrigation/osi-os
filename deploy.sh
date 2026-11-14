@@ -1722,8 +1722,14 @@ deploy_exit_handler() {
         if [ "${PAYLOAD_FLIPPED:-0}" != "1" ] && [ -n "${DEPLOY_STAMP:-}" ]; then
             swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
         fi
-        if [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
-            ! restart_previous_payload && ! restore_as_found; then
+        # As found first: a refusal that changed neither the database nor the
+        # active payload returns to exactly what ran, and leaves a Node-RED it
+        # found stopped stopped. Only otherwise does it return to the
+        # rollback payload.
+        if [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && restore_as_found; then
+            :
+        elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
+            ! restart_previous_payload; then
             echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped" >&2
             # Never stopped with nothing written: the state goes first.
             swap_call writePayloadState "$(swap_call currentStamp 2>/dev/null || true)" held "this deploy was refused after it stopped Node-RED, and no payload is proven to fit the database as the deploy left it; run the deploy again" deploy.sh >/dev/null 2>&1 || true

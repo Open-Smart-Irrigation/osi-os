@@ -178,7 +178,8 @@ function pathWithout(dir, missing) {
     let names = [];
     try { names = fs.readdirSync(source); } catch (_) { continue; }
     for (const name of names) {
-      if (missing.includes(name) || fs.existsSync(path.join(bin, name))) continue;
+      // lstat, not existsSync: a dangling link already placed must count too.
+      if (missing.includes(name) || fs.lstatSync(path.join(bin, name), { throwIfNoEntry: false })) continue;
       fs.symlinkSync(path.join(source, name), path.join(bin, name));
     }
   }

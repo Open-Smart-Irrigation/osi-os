@@ -150,7 +150,7 @@ function boot(g) {
   const bin = path.join(g.root, 'boot-bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\nshift 2\necho "$*" >> ${JSON.stringify(path.join(g.root, 'boot.log'))}\n`, { mode: 0o755 });
-  const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair\npayload_schema_check\nif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`], {
+  const run = spawnSync('sh', ['-c', `${block}\npayload_switch_repair\nif ! payload_schema_check; then echo NODE_RED_HELD; elif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`], {
     encoding: 'utf8',
     env: { PATH: `${bin}:${path.dirname(process.execPath)}:${process.env.PATH}`, OSI_DB_PATH: g.db },
   });
@@ -262,6 +262,20 @@ test('(a) a cut after the last commit: the boot switches forward to the payload 
   const next = migrate(g.db);
   assert.equal(next.status, 0, next.stdout + next.stderr);
   assert.equal(boot(g).started, true);
+});
+
+// A boot decision that does not complete (here: the candidate already
+// carries a conflicting compatibility record, so writing it throws) proves
+// nothing about the database: Node-RED is not started (CodeRabbit, #636).
+test('a boot schema decision that throws holds, with the error in the log', async () => {
+  const g = await gateway();
+  const cut = migrate(g.db, { commit: 10 });
+  assert.equal(cut.signal, 'SIGKILL');
+  fs.writeFileSync(path.join(g.root, 'payloads', 'new', 'compatibility.json'), `${JSON.stringify({ format: 1, payload_stamp: 'new', schema_head: '1', schema_ledger: 'conflict' })}\n`);
+  const first = boot(g);
+  assert.equal(first.started, false, first.log);
+  assert.match(first.log, /the payload schema check failed, so nothing proves the active payload fits the database: .*refusing to overwrite existing metadata/);
+  assert.equal(swap.currentStamp(g.root), 'old', 'nothing switched');
 });
 
 test('a cut before the first commit: the old payload fits and starts; the record is removed', async () => {

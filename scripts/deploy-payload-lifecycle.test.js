@@ -1717,3 +1717,32 @@ printf '%s\\n' recovered
     run.cleanup();
   }
 });
+
+// CodeRabbit on #636: a deploy refused after its stop, having changed neither
+// the database nor the active payload, leaves the gateway as it found it. A
+// Node-RED it found stopped stays stopped (before, the exit handler first
+// returned to the rollback payload and started it).
+for (const [name, running] of [['found stopped stays stopped', '0'], ['found running runs again', '1']]) {
+  test(`a refused deploy that changed nothing: Node-RED ${name}`, () => {
+    const run = runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+echo ${running} > "$NODE_RED_STATE_FILE"
+stage_new_deploy new
+PRE_STOP_SCHEMA="$(schema_compatibility_metadata)"
+PRE_STOP_ACTIVE="$(swap_call currentStamp)"
+PRE_STOP_RUNNING=${running}
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' refused
+`);
+    try {
+      assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+      assert.equal(run.state('node-red.state'), running);
+      assert.equal(swap.currentStamp(run.root), 'old');
+      assert.match(run.result.stderr, running === '1' ? /runs again as this deploy found it/ : /was not running when this deploy began; left as found/);
+    } finally {
+      run.cleanup();
+    }
+  });
+}

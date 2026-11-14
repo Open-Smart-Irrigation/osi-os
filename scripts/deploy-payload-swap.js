@@ -968,12 +968,21 @@ function switchPreflight(root, stamp, guiRoot = null, fromStamp = '') {
 // the complete old payload or the complete new one. Each step is idempotent,
 // so a rerun resumes. Without a base (a first deploy, or regular flows with
 // no GUI to capture) the entries are linked before payloads/active exists.
+// A payload's files must be on storage before a switch makes them the ones
+// that start: after a power cut a renamed link could otherwise lead to bytes
+// the kernel never flushed. sync(1) is on both gateway bases (BusyBox) and
+// flushes everything staged, whichever path staged it.
+function syncStorage() {
+  require('node:child_process').execFileSync('sync', [], { stdio: 'ignore' });
+}
+
 function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
   // A switch killed earlier may have left an entry set aside, partly removed
   // or absent: finish that first (it only restores what was served), so the
   // rollback and the HELD restore command start from a whole entry.
   resumeInterruptedSwitch(root, guiRoot);
   const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
+  syncStorage();
   if (base) {
     if (linkedStamp(root, activeLink(root)) !== base) pointActive(root, base);
     for (const entry of entries) {
@@ -1377,6 +1386,7 @@ function payloadDigests(root, stamp) {
 }
 
 function markActivated(root, stamp) {
+  syncStorage();
   return writeHealth(root, stamp, { state: 'activated' });
 }
 

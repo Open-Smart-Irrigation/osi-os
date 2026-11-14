@@ -1157,7 +1157,13 @@ test('a kill at each step of staging leaves nothing usable or a staged payload',
     const record = swap.readHealth(root, 'k');
     assert.ok(!complete || (record && record.state === 'staged'),
       `kill at step ${killAt}: complete=${complete} record=${JSON.stringify(record)}`);
-    if (run.signal !== 'SIGKILL') break;
+    if (run.signal !== 'SIGKILL') {
+      // The attempt no kill reached must have staged the whole payload.
+      assert.equal(run.status, 0, `the unkilled staging failed (step ${killAt}):\n${run.stdout}${run.stderr}`);
+      assert.equal(complete, true, `the unkilled staging left an incomplete payload:\n${run.stdout}${run.stderr}`);
+      assert.equal(record && record.state, 'staged', `the unkilled staging left no staged record:\n${run.stdout}${run.stderr}`);
+      break;
+    }
   }
   assert.ok(killAt > 2 && killAt < 500, `the staging ran to completion after ${killAt} steps`);
   assert.equal(swap.payloadTrusted(root, 'k'), false);
@@ -1269,4 +1275,32 @@ test('stale stages: only payloads staged and never switched to are removed', (t)
   stageWithModules(root, 'next', { 'osi-a': '' });
   swap.markStaged(root, 'next');
   assert.deepEqual(swap.staleStages(root, 'next'), []);
+});
+
+// CodeRabbit on #636: the staged bytes are flushed (sync(1)) before the
+// payload is recorded activated and before any link of a switch changes.
+test('sync runs before activation is recorded and before a switch changes a link', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, '20261101', { 'osi-a': '' });
+  flipTo(root, '20261101', guiRoot);
+  stageWithModules(root, '20261102', { 'osi-a': '' });
+  const cp = require('node:child_process');
+  const calls = [];
+  const real = { execFileSync: cp.execFileSync, renameSync: fs.renameSync, symlinkSync: fs.symlinkSync, openSync: fs.openSync };
+  cp.execFileSync = function (file, ...rest) { if (file === 'sync') calls.push('sync'); return real.execFileSync.call(this, file, ...rest); };
+  fs.renameSync = function (...args) { calls.push(`rename ${path.basename(String(args[1]))}`); return real.renameSync.apply(this, args); };
+  fs.symlinkSync = function (...args) { calls.push('symlink'); return real.symlinkSync.apply(this, args); };
+  try {
+    swap.markActivated(root, '20261102');
+    assert.equal(calls[0], 'sync', `markActivated: ${calls.join(', ')}`);
+    calls.length = 0;
+    flipTo(root, '20261102', guiRoot);
+  } finally {
+    Object.assign(cp, { execFileSync: real.execFileSync });
+    Object.assign(fs, { renameSync: real.renameSync, symlinkSync: real.symlinkSync });
+  }
+  const first = calls.findIndex((c) => c === 'symlink' || c.startsWith('rename'));
+  assert.ok(calls.indexOf('sync') !== -1 && calls.indexOf('sync') < first, `flipTo: ${calls.join(', ')}`);
+  assert.equal(swap.currentStamp(root), '20261102');
 });

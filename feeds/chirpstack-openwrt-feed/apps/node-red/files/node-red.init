@@ -383,13 +383,23 @@ payload_schema_check() {
     # the old payload may start (bootSchemaDecision, rule (g)).
     stamped="$(sqlite3 -readonly "$OSI_DB_PATH" "SELECT object_type || ' ' || object_name || ' ' || fingerprint FROM schema_object_fingerprints" 2>/dev/null || true)"
     if report="$(node -e '
-      const swap = require(process.argv[1]);
-      const line = swap.bootSchemaDecision(process.argv[2], process.argv[3], process.argv[4], process.argv[5], process.argv[6]);
-      if (line) process.stdout.write(line);
+      try {
+        const swap = require(process.argv[1]);
+        const line = swap.bootSchemaDecision(process.argv[2], process.argv[3], process.argv[4], process.argv[5], process.argv[6]);
+        if (line) process.stdout.write(line);
+      } catch (error) {
+        process.stdout.write(String(error && error.message ? error.message : error));
+        process.exit(1);
+      }
     ' "$helper" "/srv/$PACKAGE_NAME" "/usr/lib/node-red/gui" "${schema%%|*}" "${schema#*|}" "$stamped" 2>&1)"; then
         [ -z "$report" ] || logger -t node-red.init "$report"
     else
-        logger -t node-red.init "WARN: payload schema check failed: $report"
+        # The decision did not complete (for example /srv/node-red is not
+        # writable): nothing proves the active payload fits the database, so
+        # Node-RED is not started. The state file may be unwritable, so the
+        # caller holds on this return.
+        logger -t node-red.init "HELD: Node-RED not started: the payload schema check failed, so nothing proves the active payload fits the database: $report"
+        return 1
     fi
 }
 
@@ -409,7 +419,7 @@ payload_hold_check() {
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
     payload_switch_repair
-    payload_schema_check
+    payload_schema_check || return 0
     payload_hold_check || return 0
 
     ensure_persistent_syslog_sink

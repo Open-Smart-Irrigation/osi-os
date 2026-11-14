@@ -119,13 +119,21 @@ dev workstation unless noted.
 
    On a passing post-flip self-check the script prints, in order:
    ```text
-   OK: boot node confirmed 'sync-init: schema init complete' after <n>s
-   OK: local health self-check PASSED (Node-RED service running, /gui reachable after <n>s)
+   OK: local health self-check PASSED (the boot node logged 'sync-init: schema init complete' after <n>s; the service is running and /gui answers)
    OK: committing payload <stamp>
    ```
    and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
 
-   On a failing self-check it instead prints:
+   When the check is inconclusive (no failure observed, but the completion
+   line was not seen, for example because the log ring evicted it), the new
+   payload keeps running as `unverified`, the next deploy checks it again,
+   and the deploy exits 0 with this as its last line:
+   ```text
+   UNVERIFIED: payloads/<stamp> runs, but its start could not be confirmed: <reason>. The next deploy checks it again.
+   ```
+
+   On an observed failure (an error line of the start, the service not
+   running, or `/gui` not answering) it instead prints:
    ```text
    ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI
    ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair
@@ -305,21 +313,36 @@ Reading straight through the script, in order:
     migration step already activated it),
     writes the new `firmware_version` to UCI (every switch back to the previous
     payload puts the old value back first), restarts Node-RED unless the
-    migration step did, then probes `http://127.0.0.1:1880/gui` with
-    `wget --spider` and requires the boot node's
-    `sync-init: schema init complete` line from this restart (5.3 / DD10).
-    On pass: prints `OK: local health self-check PASSED …` then
-    `OK: committing payload <stamp>` and prunes old payload directories to
-    `PAYLOAD_KEEP_N` (default 5). On fail: prints
-    `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
-    flips back to the previous stamp (flows, GUI and modules together), restarts
-    Node-RED on the last-known-good pair, prints
-    `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
-    notes that a committed DB migration is **not** auto-undone (DD10 — see
-    step 8) and that `deploy-canary-gate.js` gives the full cloud verdict, then
-    exits 1. If there is no previous payload to roll back to, it removes the
-    first-deploy payload, leaves Node-RED stopped, prints an `ERROR`, and
-    exits 1.
+    migration step did, and judges that start (5.3 / DD10). It reads only the
+    log lines after a marker it wrote with `logger` just before the restart,
+    probes `http://127.0.0.1:1880/gui` with `wget --spider`, and checks that
+    the service runs. One rule for every check of a start (this one and the
+    owed check of a retry):
+    - **Healthy:** the boot node's `sync-init: schema init complete` line
+      after the marker, the service running and `/gui` answering. Prints
+      `OK: local health self-check PASSED …` then `OK: committing payload
+      <stamp>` and prunes old payload directories to `PAYLOAD_KEEP_N`
+      (default 5).
+    - **Unverified (inconclusive):** no failure observed, but the completion
+      line not seen (the marker evicted from a full log ring, `logread` absent
+      or empty) while the service runs and `/gui` answers. The new payload
+      keeps running, `payload-state.json` says `unverified`, nothing is
+      pruned or rolled back, the next deploy runs the check again, and the
+      deploy exits 0 with `UNVERIFIED: …` as its last line.
+    - **Failed (an observed failure only):** an error line of the start after
+      the marker (`devices rebuild ABORTED`, `Uncaught Exception:`, `Failed to
+      start server:`, `Error loading flows:`), the service not running, or
+      `/gui` not answering within its time. Prints
+      `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
+      flips back to the previous stamp (flows, GUI and modules together),
+      restarts Node-RED on the last-known-good pair, prints
+      `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
+      notes that a committed DB migration is **not** auto-undone (DD10 — see
+      step 8) and that `deploy-canary-gate.js` gives the full cloud verdict,
+      then exits 1. When no previous payload fits a migrated database, the
+      gateway is held (`HELD:` line, run the deploy again first). If there is
+      no previous payload at all, it removes the first-deploy payload, leaves
+      Node-RED stopped, prints an `ERROR`, and exits 1.
 11. The React GUI is not a separate step after the flip. Earlier,
     `--- flows.json + React GUI (staged payload; activation deferred to migration) ---`
     fetches `react_gui.tar.gz`, extracts it into a staging directory and stages
