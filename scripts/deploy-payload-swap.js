@@ -1538,15 +1538,21 @@ function pendingSwitchPath(root, stamp) {
   return path.join(payloadDir(root, stamp), PENDING_SWITCH);
 }
 
-function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger) {
+// <bootOwned>: JSON from lib/osi-migrate/boot-owned-fingerprints.js (the
+// fingerprints of the new bodies pending migrations give objects the old boot
+// node recreates), or "null" when they could not be derived.
+function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger, bootOwned = 'null') {
   if (!isDirectory(payloadDir(root, stamp))) throw new Error(`pending switch: payload missing: ${stamp}`);
+  const owned = typeof bootOwned === 'string' ? JSON.parse(bootOwned) : bootOwned;
+  if (owned !== null && !Array.isArray(owned)) throw new Error('pending switch: boot-owned fingerprints must be a list or null');
   return writeDurable(pendingSwitchPath(root, stamp), `${JSON.stringify({
-    format: 1,
+    format: 2,
     payload_stamp: stamp,
     schema_head: String(schemaHead),
     schema_ledger: String(schemaLedger),
     from_head: String(fromHead),
     from_ledger: String(fromLedger),
+    boot_owned: owned,
   })}\n`);
 }
 
@@ -1559,7 +1565,7 @@ function readPendingSwitches(root) {
     } catch (_) {
       continue;
     }
-    if (record && record.format === 1 && record.payload_stamp === stamp &&
+    if (record && (record.format === 1 || record.format === 2) && record.payload_stamp === stamp &&
         typeof record.schema_ledger === 'string' && typeof record.from_ledger === 'string') records.push(record);
   }
   return records;
@@ -1635,7 +1641,11 @@ const INTERRUPTED_REASON = 'the upgrade was interrupted while the database was b
 //   then refuse): held, and the deploy run again completes the update;
 // - (b) any other mismatch: start what is there, state "unverified" with the
 //   reason, as before.
-function bootSchemaDecision(root, guiRoot, dbHead, dbLedger) {
+// <storedFingerprints>: schema_object_fingerprints as lines
+// "<type> <name> <fingerprint>".
+function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints = '') {
+  const stored = new Map(String(storedFingerprints).split('\n').map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length === 3).map(([type, name, fingerprint]) => [`${type} ${name}`, fingerprint]));
   // A hold deploy.sh wrote (a failure it observed) stands; only the boot's own
   // hold of an interrupted update is decided again.
   const state = readPayloadState(root);
@@ -1664,11 +1674,39 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger) {
   }
   const interrupted = others.find((record) =>
     properPrefix(record.from_ledger, dbLedger) && properPrefix(dbLedger, record.schema_ledger));
-  if (interrupted) {
-    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead} of ${interrupted.schema_head}, upgrade to payloads/${interrupted.payload_stamp}). Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
-    writePayloadState(root, active || interrupted.payload_stamp, 'held', `${INTERRUPTED_REASON}; run the deploy again to complete it`, 'node-red.init');
+  // (g) as ruled after the old-boot matrix: hold only where the retry
+  // provably cannot finish once the old payload has started. That is when a
+  // pending migration's new body for an object the old boot node recreates is
+  // already stamped: the old boot writes its own body, and the retry's drift
+  // preflight then refuses. Unstamped, the old boot puts back exactly the
+  // stamped schema and the retry completes. A record that cannot tell (old
+  // format, or the fingerprints not derived) holds.
+  const holdFor = (reason, stamp, head) => {
+    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead} of ${head}, upgrade to payloads/${stamp}); ${reason}. Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
+    writePayloadState(root, active || stamp, 'held', `${INTERRUPTED_REASON}; ${reason}; run the deploy again to complete it`, 'node-red.init');
     writeDurable(path.join(root, 'DEPLOY-HELD'), `${line}\n`);
     return line;
+  };
+  if (interrupted) {
+    const owned = interrupted.boot_owned;
+    if (!Array.isArray(owned)) {
+      return holdFor(owned === null
+        ? 'the deploy could not derive what the old payload would rewrite, so nothing proves the retry can finish'
+        : 'its pending-switch record is of an older format, so nothing proves the retry can finish', interrupted.payload_stamp, interrupted.schema_head);
+    }
+    const stamped = owned.find((o) => stored && stored.get(`${o.type} ${o.name}`) === o.fingerprint);
+    if (stamped) {
+      return holdFor(`migration ${stamped.version}'s new body of ${stamped.type} ${stamped.name} is stamped, which the old payload's start would undo and the retry would then refuse`, interrupted.payload_stamp, interrupted.schema_head);
+    }
+    const base = activeCompat ? activeCompat.schema_head : interrupted.from_head;
+    const reason = `payloads/${active} was recorded for schema ${base}, the database is at schema ${dbHead}: the upgrade to payloads/${interrupted.payload_stamp} was cut during its migration; running the deploy again completes it`;
+    writePayloadState(root, active, 'unverified', reason, 'node-red.init');
+    return `WARN: ${reason}`;
+  }
+  // No usable record, but the database is ahead of the active payload's
+  // schema: nothing proves a retry can finish after the old payload starts.
+  if (activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger)) {
+    return holdFor('no readable pending-switch record proves the retry can finish', '?', '?');
   }
   if (activeCompat) {
     const reason = `payloads/${active} was recorded for schema ${activeCompat.schema_head}, the database is at schema ${dbHead}`;

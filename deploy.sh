@@ -1887,7 +1887,15 @@ process.stdout.write(`${head}|${manifest.map((m) => `${m.version}:${m.checksum}`
         return 1
     fi
     [ "$rps_target" != "$rps_from" ] || return 0
-    if ! swap_call writePendingSwitch "$DEPLOY_STAMP" "${rps_target%%|*}" "${rps_target#*|}" "${rps_from%%|*}" "${rps_from#*|}" >/dev/null || \
+    # Rule (g): the fingerprints of the new bodies pending migrations give
+    # objects the installed (old) payload's boot node recreates, read from
+    # that payload's own sync-init-fn. When they cannot be derived the record
+    # says so, and a boot after a cut part way holds.
+    if ! rps_owned="$(node "$TMP_DIR/lib/osi-migrate/boot-owned-fingerprints.js" "${SWAP_ROOT:-/srv/node-red}/flows.json" "$migrations_dir" "$DB_PATH" 2>/dev/null)" || [ -z "$rps_owned" ]; then
+        echo "WARN: could not derive what the installed payload's boot node rewrites; a cut during the migration will hold the gateway until the deploy runs again" >&2
+        rps_owned=null
+    fi
+    if ! swap_call writePendingSwitch "$DEPLOY_STAMP" "${rps_target%%|*}" "${rps_target#*|}" "${rps_from%%|*}" "${rps_from#*|}" "$rps_owned" >/dev/null || \
        ! swap_call clearOtherPendingSwitches "$DEPLOY_STAMP" >/dev/null; then
         echo "ERROR: could not record the pending switch to payloads/$DEPLOY_STAMP; refusing before migrating" >&2
         return 1
@@ -2207,6 +2215,7 @@ fetch_migration_runner() {
     for module in \
         add-column-compat.js \
         backup.js \
+        boot-owned-fingerprints.js \
         fingerprints.js \
         index.js \
         ledger.js \
