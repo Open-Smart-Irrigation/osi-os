@@ -48,6 +48,42 @@ test('flow is integrated only over observed-open time and shared by readings and
   assert.equal(sim.devices.find(device => device.deveui === '00000000000000E1')?.latest_data.flow_liters_today, 6);
 });
 
+test('no-meter estimates follow the requested zone-local day and reset with the session', () => {
+  const sim = new Simulator({mode: 'public'});
+  sim.removeDevice('00000000000000E1');
+  const today = () => sim.request('GET', `/api/v1/devices/${VALVE_EUI}/today-liters`);
+  const run = () => {
+    sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
+    sim.advanceTo(sim.now + 62_000);
+  };
+  assert.deepEqual(today(), {liters: null, source: 'none'});
+  run();
+  assert.deepEqual(today(), {liters: 6, source: 'estimated_duration_flow_rate'});
+  sim.advanceTo(Date.parse('2026-10-10T21:00:00.000Z'));
+  assert.deepEqual(today(), {liters: null, source: 'none'});
+  run();
+  assert.deepEqual(today(), {liters: 6, source: 'estimated_duration_flow_rate'});
+  sim.request('PUT', '/api/irrigation-zones/1/config', {timezone: 'America/New_York'});
+  // The first run was on October 9 in New York; the second is on October 10.
+  assert.deepEqual(today(), {liters: 6, source: 'estimated_duration_flow_rate'});
+  sim.request('PUT', '/api/irrigation-zones/1/config', {timezone: 'UTC'});
+  assert.deepEqual(today(), {liters: 12, source: 'estimated_duration_flow_rate'});
+  sim.reset();
+  sim.removeDevice('00000000000000E1');
+  assert.deepEqual(today(), {liters: null, source: 'none'});
+});
+
+test('a no-meter run crossing local midnight estimates only the portion delivered today', () => {
+  const sim = new Simulator({mode: 'public'});
+  sim.removeDevice('00000000000000E1');
+  sim.advanceTo(Date.parse('2026-10-10T20:58:58.000Z'));
+  sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 120});
+  sim.advanceTo(Date.parse('2026-10-10T21:01:00.000Z'));
+  assert.equal(sim.outcomes[0]?.estimatedGrossLiters, 12);
+  assert.deepEqual(sim.request('GET', `/api/v1/devices/${VALVE_EUI}/today-liters`),
+    {liters: 6, source: 'estimated_duration_flow_rate'});
+});
+
 test('public manual close waits for its local acknowledgement and integrates until observed close', () => {
   const sim = new Simulator({mode: 'public'});
   sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});

@@ -32,6 +32,29 @@ function nativeForecastFor(sim: Simulator, zoneId: number, summary: Awaited<Retu
 
 function install(sim: Simulator): void { api.defaults.adapter = createDemoAdapter(sim); }
 
+test('idle public clock ticks leave completed weather records untouched until the local day changes', () => {
+  const sim = new Simulator({mode: 'public'});
+  const retained = sim.state.environmentRecords;
+  const before = structuredClone([...retained]);
+  const get = retained.get;
+  let lookups = 0;
+  retained.get = function(key) { lookups++; return get.call(this, key); };
+  try {
+    for (let tick = 0; tick < 20; tick++) sim.advance(100);
+    sim.advanceTo(sim.now + 100);
+    assert.equal(lookups, 0, 'idle ticks must not revisit the retained historical window');
+    assert.deepEqual([...retained], before);
+    sim.advanceTo(Date.parse('2026-10-10T21:00:00.000Z'));
+    assert.ok(retained.has(`1|2026-10-10|${DAILY_AGRONOMY_SOURCE_KEY}`));
+    assert.ok(lookups > 0, 'local midnight captures the completed day');
+    const afterRollover = lookups;
+    sim.advance(100);
+    assert.equal(lookups, afterRollover);
+  } finally {
+    retained.get = get;
+  }
+});
+
 test('provider selection matches the native weather-provider resolver for the finite source policy', () => {
   for (const [source, fallback] of [['meteoswiss', 'open_meteo'], ['auto', 'meteoswiss'], ['auto', null],
     [null, 'invalid'], ['openagri', 'meteoswiss'], ['local', 'open_meteo'], [' Open_Meteo ', 'meteoswiss']] as const) {

@@ -23,7 +23,7 @@ import {DemoError} from './errors';
 import {createJournalState, handleJournalRoute, type JournalState} from './model/journal';
 import {handleAnalysisRoute} from './model/analysis';
 import {handleHistoryRoute} from './model/history';
-import {buildEnvironmentSummary, hasValidWeatherLocation, seedCompletedEnvironmentRecords} from './model/environment';
+import {buildEnvironmentSummary, hasValidWeatherLocation, seedCompletedEnvironmentRecords, selectedWeatherProvider} from './model/environment';
 import {resolveWaterAction} from './model/water-action';
 import {handleNetworkRoute} from './model/network';
 export { DEMO_EPOCH, PUBLIC_EPOCH, VALVE_EUI, SPARE_EUI };
@@ -92,6 +92,8 @@ export class Simulator {
   private lastIntegratedAt = new Map<string, number>();
   private flowByZone = new Map<number, number>();
   private flowByCommand = new Map<string, number>();
+  private estimatedFlowIntervals: Array<{zoneId: number; from: number; until: number; liters: number}> = [];
+  private completedEnvironmentKeys = new Map<number, string>();
   private presentationWaterSeed = new Map<string, {rain_mm_today?: number | null; flow_liters_today?: number | null}>();
   onDailyTrigger?: (at: number) => void;
   constructor(options: {mode?: SimulatorMode} = {}) {
@@ -102,7 +104,7 @@ export class Simulator {
     }
     this.clock = new SimulationClock(this.state.now);
     this.readings = new ReadingLedger(this.state.devices, this.mode === 'public');
-    if (this.mode === 'public') seedCompletedEnvironmentRecords(this.zones, this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+    this.refreshCompletedEnvironmentRecords();
     if (this.mode === 'public') this.syncSeedSnapshots();
     if (this.mode === 'public') {
       this.onDailyTrigger = at => evaluateAutomaticTriggers(this.triggerPort(at), at);
@@ -251,9 +253,20 @@ export class Simulator {
     this.refreshDailyTrigger();
     for (const device of this.devices) if (device.type_id === 'STREGA_VALVE') rescheduleSkipTodayRollover(this.planPort(), device.deveui);
   }
+  private refreshCompletedEnvironmentRecords(zones = this.zones): void {
+    if (this.mode !== 'public') return;
+    for (const zone of zones) {
+      const timezone = zone.timezone ?? this.state.settings.gatewayTimezone;
+      const key = JSON.stringify([timezone, localCalendarDate(this.now, timezone), zone.latitude, zone.longitude,
+        selectedWeatherProvider(zone)]);
+      if (this.completedEnvironmentKeys.get(zone.id) === key) continue;
+      seedCompletedEnvironmentRecords([zone], this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+      this.completedEnvironmentKeys.set(zone.id, key);
+    }
+  }
   private saveSystemSettings(body: UpdateSystemSettingsRequest) {
     try {
-      if (this.mode === 'public') seedCompletedEnvironmentRecords(this.zones, this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+      this.refreshCompletedEnvironmentRecords();
       const previousTimezone = this.state.settings.gatewayTimezone;
       const update = updateSystemSettings(this.state.settings, this.zones, body, iso(this.now));
       Object.assign(this.state.settings, update.settings);
@@ -300,21 +313,23 @@ export class Simulator {
     this.journal = createJournalState();
     this.clock.reset(this.state.now);
     this.readings = new ReadingLedger(this.devices, this.mode === 'public');
-    if (this.mode === 'public') seedCompletedEnvironmentRecords(this.zones, this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+    this.completedEnvironmentKeys.clear();
+    this.refreshCompletedEnvironmentRecords();
     if (this.mode === 'public') this.syncSeedSnapshots();
     this.lastIntegratedAt.clear(); this.flowByZone.clear(); this.flowByCommand.clear();
+    this.estimatedFlowIntervals = [];
     if (this.mode === 'public') this.setupPublicClock();
   }
   advance(realMilliseconds: number): boolean {
     if (!this.active || !Number.isFinite(realMilliseconds) || realMilliseconds <= 0) return false;
     const before = this.clock.revision;
     this.clock.advanceTo(this.now + realMilliseconds * this.speed);
-    if (this.mode === 'public') seedCompletedEnvironmentRecords(this.zones, this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+    this.refreshCompletedEnvironmentRecords();
     return this.clock.revision !== before;
   }
   advanceTo(targetMs: number) {
     this.clock.advanceTo(targetMs);
-    if (this.mode === 'public') seedCompletedEnvironmentRecords(this.zones, this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+    this.refreshCompletedEnvironmentRecords();
   }
   jumpToNextEvent(): boolean {
     const at = this.clock.nextEventAt(MAX_JUMP_MS);
@@ -372,6 +387,7 @@ export class Simulator {
     const liters = Math.max(0, (until - from) / 60000 * flowRateLpm * openness / 100);
     this.lastIntegratedAt.set(command.expectation_id, until);
     if (!liters) return;
+    if (zoneId !== null) this.estimatedFlowIntervals.push({zoneId, from, until, liters});
     const flow = this.flowDeviceForCommand(command);
     const dayStart = localDayStart(until, this.state.settings.gatewayTimezone);
     const flowZoneKey = zoneId ?? -1;
@@ -390,6 +406,15 @@ export class Simulator {
       flow.latest_data.flow_liters_today = Number(total.toFixed(2));
       if (this.mode === 'public') this.appendFlowSample(command, until, liters);
     }
+  }
+  private estimatedLitersBetween(zoneId: number, from: number, until: number): number | null {
+    let total: number | null = null;
+    for (const interval of this.estimatedFlowIntervals) {
+      if (interval.zoneId !== zoneId) continue;
+      const overlap = Math.min(until, interval.until) - Math.max(from, interval.from);
+      if (overlap > 0) total = (total ?? 0) + interval.liters * overlap / (interval.until - interval.from);
+    }
+    return total === null ? null : Number(total.toFixed(2));
   }
   private appendFlowSample(command: ActiveCommand, at: number, liters: number) {
     const zoneId = command.zone_id === undefined
@@ -960,7 +985,7 @@ export class Simulator {
         if (zoneId == null) return {liters: null, source: 'unknown'};
         const flow = this.flowSourceForZone(zoneId);
         const from = localDayStart(this.now, this.zones.find(zone => zone.id === zoneId)?.timezone ?? this.state.settings.gatewayTimezone);
-        const observed = flow ? this.readings.aggregate(flow.deveui, 'flow_liters_delta', from, this.now) : this.flowByZone.get(zoneId) ?? null;
+        const observed = flow ? this.readings.aggregate(flow.deveui, 'flow_liters_delta', from, this.now) : this.estimatedLitersBetween(zoneId, from, this.now);
         return {liters: observed, source: flow ? 'measured_flow_meter' : observed == null ? 'none' : 'estimated_duration_flow_rate'};
       }
     }
@@ -1006,7 +1031,7 @@ export class Simulator {
     if (path === '/api/irrigation-zones' && method === 'POST') {
       try {
         const zone = createZone(this.state, body);
-        if (this.mode === 'public') seedCompletedEnvironmentRecords([zone], this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+        this.refreshCompletedEnvironmentRecords([zone]);
         return zone;
       }
       catch (error) { return fail(Number((error as {status?: number}).status ?? 422), (error as Error).message); }
@@ -1061,6 +1086,7 @@ export class Simulator {
       if (!part && method === 'DELETE') {
         const valveEuis = this.devices.filter(device => device.type_id === 'STREGA_VALVE' && device.irrigation_zone_id === id).map(device => device.deveui);
         deleteZone(this.state, this.devices, id);
+        this.completedEnvironmentKeys.delete(id);
         this.refreshDailyTrigger();
         for (const [eui, assignments] of this.state.weatherAssignments) {
           const remaining = assignments.filter(zoneId => zoneId !== id);
@@ -1076,7 +1102,7 @@ export class Simulator {
       }
       if (part === 'config' && method === 'PUT') {
         try {
-          if (this.mode === 'public') seedCompletedEnvironmentRecords([zone], this.now, this.state.settings.gatewayTimezone, this.state.environmentRecords);
+          this.refreshCompletedEnvironmentRecords([zone]);
           const result = configureZone(zone, body, this.now);
           for (const device of this.devices) if (device.type_id === 'STREGA_VALVE' && device.irrigation_zone_id === id) rescheduleSkipTodayRollover(this.planPort(), device.deveui);
           return result;
