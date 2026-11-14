@@ -425,7 +425,57 @@ const CONSTANTS = {
   CALIBRATIONS,
 };
 
+// Weather transport runs in this Node module, outside the function sandbox.
+function requestJson(method,urlString,options){
+  const opts=options||{};
+  const headers=Object.assign({},opts.headers||{});
+  const body=opts.body!=null?String(opts.body):null;
+  return new Promise((resolve,reject)=>{
+    let req,response,settled=false,ended=false;
+    // Progress may reset socket inactivity, but never this overall deadline.
+    const deadline=setTimeout(()=>finish(new Error('weather request deadline (15000 ms)')),15000);
+    function finish(error,value){
+      if(settled)return;
+      settled=true;
+      clearTimeout(deadline);
+      if(req)req.setTimeout(0);
+      if(error){
+        if(response)response.destroy();
+        if(req)req.destroy();
+        reject(error);
+      }else resolve(value);
+    }
+    try{
+      const lib=urlString.startsWith('https:')?require('https'):require('http');
+      req=lib.request(urlString,{method,headers},r=>{
+        r.on('error',error=>finish(error));
+        if(settled){r.destroy();return;}
+        response=r;
+        let d='';
+        r.on('aborted',()=>finish(new Error('weather response aborted')));
+        r.on('close',()=>{if(!ended)finish(new Error('weather response closed before end'));});
+        r.on('data',c=>{if(!settled)d+=c;});
+        r.on('end',()=>{
+          ended=true;
+          const status=Number(r.statusCode||0);
+          if(status<200||status>=300){
+            return finish(new Error('HTTP '+status+(d?': '+String(d).slice(0,160):'')));
+          }
+          if(!d)return finish(null,null);
+          try{finish(null,JSON.parse(d));}catch(e){finish(e);}
+        });
+      });
+      req.on('error',error=>finish(error));
+      req.setTimeout(10000,()=>finish(new Error('weather socket timeout (10000 ms)')));
+      if(body!=null)req.write(body);
+      req.end();
+    }catch(error){finish(error);}
+  });
+}
 module.exports = {
+  createWeatherInputs: context => require('./weather-inputs').createWeatherInputs({ ...context, analytics: module.exports }),
+  recommendationChangedWhere: require('./weather-inputs').RECOMMENDATION_CHANGED_WHERE,
+  requestJson,
   round,
   avg,
   percentile,

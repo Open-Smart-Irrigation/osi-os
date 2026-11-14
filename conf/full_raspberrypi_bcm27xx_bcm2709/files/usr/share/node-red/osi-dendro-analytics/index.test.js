@@ -251,3 +251,67 @@ test('irrDecision: suppression entry uses suppression_mm (amount or received low
   // A caller without suppression_mm keeps the daily amount (scenario tests, older callers).
   assert.equal(da.irrDecision(['none'], { daily_mm: 6, rolling7d: 6 }, {}, [], opts).action, 'maintain_rain_suppression');
 });
+
+
+for (const failure of ['response error', 'aborted', 'premature close', 'request error', 'socket inactivity']) {
+  test(`weather transport settles and cleans up on ${failure}`, async (t) => {
+    const { EventEmitter } = require('node:events');
+    const http = require('node:http');
+    const req = new EventEmitter();
+    const response = new EventEmitter();
+    let requestDestroyed = 0;
+    let responseDestroyed = 0;
+    const timeouts = [];
+    let socketTimeout;
+    req.setTimeout = (ms, callback) => { timeouts.push(ms); if (callback) socketTimeout = callback; return req; };
+    req.destroy = () => { requestDestroyed++; return req; };
+    response.destroy = () => { responseDestroyed++; return response; };
+    req.end = () => {};
+    t.mock.method(http, 'request', (_url, _options, onResponse) => {
+      process.nextTick(() => {
+        onResponse(response);
+        if (failure === 'response error') response.emit('error', new Error('read failed'));
+        if (failure === 'aborted') response.emit('aborted');
+        if (failure === 'premature close') response.emit('close');
+        if (failure === 'request error') req.emit('error', new Error('connection failed'));
+        if (failure === 'socket inactivity') socketTimeout();
+      });
+      return req;
+    });
+    await assert.rejects(da.requestJson('GET', 'http://weather.example.invalid/'), /read failed|aborted|closed before end|connection failed|socket timeout/);
+    assert.deepEqual(timeouts, [10000, 0], 'socket timer disabled after settlement');
+    assert.equal(requestDestroyed, 1);
+    assert.equal(responseDestroyed, 1);
+    // Real sockets can report several terminal events for one disconnect.
+    response.emit('aborted');
+    response.emit('error', new Error('late response error'));
+    response.emit('close');
+    req.emit('error', new Error('late request error'));
+    assert.equal(requestDestroyed, 1, 'only the first terminal event settles and destroys');
+  });
+}
+
+
+test('weather transport cleans up a synchronous request-construction failure', async (t) => {
+  t.mock.method(require('node:http'), 'request', () => { throw new Error('request construction failed'); });
+  await assert.rejects(da.requestJson('GET', 'http://weather.example.invalid/'), /request construction failed/);
+  await assert.rejects(da.requestJson('GET', null), TypeError);
+});
+
+for (const value of [null, undefined, '', '0', 'false', 'no', 'off', 'invalid', ' ON ', '2', 'true', ' true ', 'YES', 'yes', 'on', 'ON', ' 1 ', '1', 1, true]) {
+  test(`provider irrigation setting requires exact string 1: ${JSON.stringify(value)}`, async () => {
+    const { providerIrrigationEnabled, PROVIDER_IRRIGATION_SETTING_KEY } = require('./weather-inputs');
+    const enabled = await providerIrrigationEnabled({ get: async (sql, params) => {
+      assert.match(sql, /SELECT value FROM app_settings/);
+      assert.deepEqual(params, [PROVIDER_IRRIGATION_SETTING_KEY]);
+      return value === undefined ? undefined : { value };
+    } }, () => assert.fail('a readable setting must not warn'));
+    assert.equal(enabled, value === '1');
+  });
+}
+test('an unreadable provider irrigation setting warns and stays off', async () => {
+  const { providerIrrigationEnabled } = require('./weather-inputs');
+  const warnings = [];
+  assert.equal(await providerIrrigationEnabled({ get: async () => { throw new Error('fixture unreadable'); } }, m => warnings.push(m)), false);
+  assert.match(warnings.join('\n'), /setting unreadable: fixture unreadable/);
+});

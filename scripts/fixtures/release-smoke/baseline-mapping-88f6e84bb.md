@@ -1,5 +1,13 @@
 # Smoke baseline after the sandbox and HTTP-reply fixes
 
+## Current update: NEW-1
+
+On main base `103e4c54` with [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643), remove only `dendro-weather-transport`: the earlier unchanged-list run proved it passed with 5.4 mm rain, OpenAgri VPD and no warning. Main #648 already removed the six valve cases. Four known cases remain, covering F-13, F-14 and F-7. The refreshed output retains its historical filename; its header names the current base and candidate payload checksum.
+
+The transport also bounds dropped and stalled responses. Provider control is off by default; the smoke assertion checks collected rainfall/VPD rather than the action. Separate regressions compare control outputs with the shipped main node and exercise the real startup rerun.
+
+## Earlier baseline updates
+
 The first baseline update reduced the list from 26 to 9 cases after rebasing onto
 `88f6e84bb251a03034dc4a6e8fa8e3a10992a2e4` (#631, #632 and #634 included).
 The council follow-up expands it from 9 to 11: one scheduler case now has
@@ -17,13 +25,13 @@ HTTP reply. The remaining database/radio failures were already present.
 
 ## Removed cases
 
-Each case below passed its original HTTP, stored-state and radio assertions
-in the unchanged-list run. The merged fix is shown per case. The scheduler's
+Each case below passed its own assertions in an unchanged-list run. The responsible pull request is shown per case; #643 is the current candidate. The scheduler's
 crypto/save failure remains fixed by #631; its new contention precondition
 now exposes the separate F-7 persistence defect.
 
 | Case | Fix |
 |---|---|
+| `dendro-weather-transport` | [#643](https://github.com/Open-Smart-Irrigation/osi-os/pull/643) |
 | `command-accepted:close` | [#632](https://github.com/Open-Smart-Irrigation/osi-os/pull/632) |
 | `command-accepted:close-duration` | [#632](https://github.com/Open-Smart-Irrigation/osi-os/pull/632) |
 | `command-accepted:open-duration` | [#632](https://github.com/Open-Smart-Irrigation/osi-os/pull/632) |
@@ -45,12 +53,11 @@ now exposes the separate F-7 persistence defect.
 #631 fixed seven cases; #632 fixed ten. #634 grants a size-ratchet exception
 and did not itself fix a smoke case.
 
-## Remaining cases
+## Earlier remaining cases before #648
 
 Every remaining case has exactly one finding ID from
 [tracking issue #637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637).
-The eleven cases cover seven findings. The two added cases map to existing
-F-7 and NEW-1, so no new finding ID was needed. The classifier also rejects entries that combine finding IDs.
+The ten cases cover six findings. The contended scheduler case maps to F-7; NEW-1 is removed by #643. The classifier also rejects entries that combine finding IDs.
 
 | Case | Finding | Observed failure |
 |---|---|---|
@@ -64,7 +71,6 @@ F-7 and NEW-1, so no new finding ID was needed. The classifier also rejects entr
 | `no-token:POST /api/account-link` | F-13 | Unauthenticated request gives no HTTP answer. |
 | `no-token:POST /api/sync/force` | F-13 | Unauthenticated request gives no HTTP answer. |
 | `scheduler-irrigates` | F-7 | Under one held native SQLite writer lock, both legacy SQLite nodes report exactly `Error: SQLITE_BUSY: database is locked`; the irrigation event and last-triggered timestamp are absent although the exact open frame arrives. |
-| `dendro-weather-transport` | NEW-1 | The enabled daily inject reaches a populated dendro zone. Both weather warnings say `require is not defined`; stored rain is NULL and VPD source is unavailable. |
 
 `no-clock-open-no-report-open-later` belongs to F-1: the marker is absent,
 but no OPEN report arrives, so it does not reproduce the report-attribution
@@ -138,7 +144,7 @@ direction, the cancel, reboots and clock corrections. They are covered by
 `scripts/test-valve-v081-equivalence.js` and the module tests of
 `osi-valve-control`, outside the real runtime.
 
-Remaining after the fix, five cases over four findings:
+Remaining after #648 and this NEW-1 fix, four cases over three findings:
 
 | Case | Finding |
 |---|---|
@@ -146,16 +152,13 @@ Remaining after the fix, five cases over four findings:
 | `no-token:POST /api/account-link` | F-13 |
 | `no-token:POST /api/sync/force` | F-13 |
 | `scheduler-irrigates` | F-7 |
-| `dendro-weather-transport` | NEW-1 |
 
 `after-valve-fix-648.txt` is the strict output on that change: 211 passed, 0
 unexpected failures, 5 known failing cases, exit 1.
 
 ## Evidence
 
-`baseline-88f6e84bb.txt` replaces the old payload-baseline output. The base
-name follows the main commit whose shipped payload runs, rather than this
-PR's test-only head. Evidence paths in that file use `<scratch>`; only the
+`baseline-88f6e84bb.txt` retains the campaign baseline filename. Its header identifies the current payload base and fix; earlier output remains in Git history. Evidence paths in that file use `<scratch>`; only the
 local scratch-directory spelling was normalized. The JSON result and logs
 retain the original absolute path outside the repository.
 
