@@ -1665,8 +1665,16 @@ function pendingSwitchPath(root, stamp) {
 // SERVED_STAMP), the base a boot-forward switch routes through.
 function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger, bootOwned = 'null', servedStamp = '') {
   if (!isDirectory(payloadDir(root, stamp))) throw new Error(`pending switch: payload missing: ${stamp}`);
-  const owned = typeof bootOwned === 'string' ? JSON.parse(bootOwned) : bootOwned;
+  let owned = typeof bootOwned === 'string' ? JSON.parse(bootOwned) : bootOwned;
   if (owned !== null && !Array.isArray(owned)) throw new Error('pending switch: boot-owned fingerprints must be a list or null');
+  // A retry's pending set no longer holds what an earlier attempt applied:
+  // keep the hazards of the records it replaces. One that cannot be read, or
+  // could not tell, makes the list null (a cut part way then holds).
+  for (const other of listStamps(root).filter((name) => name !== stamp && fs.existsSync(pendingSwitchPath(root, name)))) {
+    let prior = null;
+    try { prior = JSON.parse(fs.readFileSync(pendingSwitchPath(root, other), 'utf8')); } catch (_) { prior = null; }
+    owned = owned && prior && Array.isArray(prior.boot_owned) ? [...owned, ...prior.boot_owned] : null;
+  }
   return writeDurable(pendingSwitchPath(root, stamp), `${JSON.stringify({
     format: 2,
     payload_stamp: stamp,
@@ -1798,8 +1806,10 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
     clearPendingSwitch(root, stamp);
     return `WARN: switched forward to payloads/${stamp}: ${reason}`;
   }
-  const interrupted = others.find((record) =>
-    properPrefix(record.from_ledger, dbLedger) && properPrefix(dbLedger, record.schema_ledger));
+  // A retry cut before its first commit starts at the live ledger, ahead of
+  // the active payload's: an interrupted upgrade too.
+  const interrupted = others.find((record) => properPrefix(dbLedger, record.schema_ledger) &&
+    (properPrefix(record.from_ledger, dbLedger) || (record.from_ledger === dbLedger && activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger))));
   // (g) as ruled after the old-boot matrix: hold only where the retry
   // provably cannot finish once the old payload has started. That is when a
   // pending migration's new body for an object the old boot node recreates is

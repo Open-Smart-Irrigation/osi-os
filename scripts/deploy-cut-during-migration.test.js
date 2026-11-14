@@ -285,3 +285,58 @@ test('a cut before the first commit: the old payload fits and starts; the record
   assert.equal(swap.currentStamp(g.root), 'old');
   assert.deepEqual(swap.readPendingSwitches(g.root), []);
 });
+
+// Delta read of 46cdfc34c0 (S2, S3): a retry replaces the pending record. Its
+// own pending set no longer holds 0073, which an earlier attempt applied; the
+// record keeps the hazards of the attempts it replaces, and a retry cut before
+// its first commit is decided by the same rule.
+function recordAttempt(g, stamp) {
+  stage(g.root, stamp);
+  const from = schema(g.db);
+  const bootOwned = pendingBootOwnedFingerprints({
+    flows: INSTALLED_FLOWS, migrations: loadMigrationCorpus(MIGRATIONS).migrations, appliedHead: Number(from.head), current: storedFingerprints(g.db),
+  });
+  swap.writePendingSwitch(g.root, stamp, g.to.head, g.to.ledger, from.head, from.ledger, JSON.stringify(bootOwned));
+  swap.clearOtherPendingSwitches(g.root, stamp);
+}
+
+function finishAttempt(g, stamp) {
+  recordAttempt(g, stamp);
+  const retry = migrate(g.db);
+  assert.equal(retry.status, 0, retry.stdout + retry.stderr);
+  completeDeploy(g, stamp);
+  fs.rmSync(path.join(g.root, 'DEPLOY-HELD'), { force: true });
+  const after = boot(g);
+  assert.equal(after.started, true, after.log);
+  assert.equal(swap.currentStamp(g.root), stamp);
+  assert.equal(schema(g.db).head, g.to.head);
+}
+
+test('(g) s3, held; the retry is cut after 74; the boot holds again; the next retry completes', async () => {
+  const g = await gateway();
+  assert.equal(migrate(g.db, { stamp: 3 }).signal, 'SIGKILL');
+  assert.equal(boot(g).started, false);
+  recordAttempt(g, 'retry1');
+  assert.equal(migrate(g.db, { commit: 1 }).signal, 'SIGKILL');
+  assert.equal(schema(g.db).head, '74');
+  const second = boot(g);
+  assert.equal(second.started, false, second.log);
+  assert.match(second.log, /migration 73's new body of trigger trg_dp_zone_env_outbox_a[iu] is stamped/);
+  assert.match(fs.readFileSync(path.join(g.root, 'DEPLOY-HELD'), 'utf8'), /Run the deploy again/);
+  finishAttempt(g, 'retry2');
+});
+
+for (const k of [1, 3]) {
+  test(`(g) c${k}, unverified; the retry is cut before its first commit; the old payload runs unverified; the next retry completes`, async () => {
+    const g = await gateway();
+    assert.equal(migrate(g.db, { commit: k }).signal, 'SIGKILL');
+    assert.equal(boot(g).started, true);
+    await oldBoot(g);
+    recordAttempt(g, 'retry1');
+    const second = boot(g);
+    assert.equal(second.started, true, second.log);
+    assert.equal(swap.readPayloadState(g.root).state, 'unverified');
+    assert.equal(swap.currentStamp(g.root), 'old');
+    finishAttempt(g, 'retry2');
+  });
+}

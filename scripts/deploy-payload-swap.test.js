@@ -1353,3 +1353,20 @@ test('node files: a switch back to a payload from before the fold keeps the node
   assert.equal(servedNode(root), '// new payload\n', 'the serializer that ran stays loaded');
   assert.ok(fs.statSync(path.join(root, 'nodes', 'osi-sqlite-serialize.html')).isFile(), 'no node file link leads nowhere');
 });
+
+// Delta read of 46cdfc34c0 (S2): a new pending record keeps the hazards of
+// the records it replaces; one that cannot be read, or that could not tell,
+// makes the merged list null (a cut part way then holds).
+test('a pending record merges its predecessors\' hazard lists; an unreadable or null one makes it null', (t) => {
+  const root = moduleRoot(t);
+  for (const stamp of ['20261101', '20261102', '20261103']) stageWithModules(root, stamp, { 'osi-a': '' });
+  const a = { type: 'trigger', name: 't_a', version: 73, fingerprint: 'fa' };
+  const b = { type: 'trigger', name: 't_b', version: 76, fingerprint: 'fb' };
+  swap.writePendingSwitch(root, '20261101', '80', 'L80', '70', 'L70', JSON.stringify([a]));
+  swap.writePendingSwitch(root, '20261102', '80', 'L80', '73', 'L73', JSON.stringify([b]));
+  const merged = swap.readPendingSwitches(root).find((r) => r.payload_stamp === '20261102').boot_owned;
+  assert.deepEqual(merged.map((o) => o.name).sort(), ['t_a', 't_b']);
+  fs.writeFileSync(path.join(root, 'payloads', '20261101', 'pending-switch.json'), '{ not json');
+  swap.writePendingSwitch(root, '20261103', '80', 'L80', '74', 'L74', '[]');
+  assert.equal(swap.readPendingSwitches(root).find((r) => r.payload_stamp === '20261103').boot_owned, null);
+});
