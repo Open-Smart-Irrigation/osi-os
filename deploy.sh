@@ -157,6 +157,18 @@ check_gateway_commands() {
 check_gateway_commands || exit 1
 # command check end
 
+# NEW-24: a stock base accepts root over SSH with no password at first boot.
+# A warning, never a refusal (a refusal could lock an operator out of an
+# upgrade in the field). It reads only whether root's password field in the
+# shadow file is empty, and never prints it.
+warn_root_password() {
+    rp_shadow="${SHADOW_FILE:-/etc/shadow}"
+    [ -r "$rp_shadow" ] || return 0
+    [ "$(awk -F: '$1 == "root" { print ($2 == "" ? "empty" : "set") }' "$rp_shadow")" = empty ] || return 0
+    echo "WARN: root has no password on this gateway: anyone who reaches it over the network can log in as root. Set one now with 'passwd' (README, Path B, Step 1)." >&2
+}
+warn_root_password
+
 # deploy lock begin
 take_deploy_lock || exit 1
 # deploy lock end
