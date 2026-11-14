@@ -107,7 +107,8 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
     // lsn50-zone-agg-fn awaits the transaction in which it recomputes the zone day;
     // captureLsn50Observation and aggregateLsn50ZoneDay are awaited inside their transactions;
     // zone-rain-source-fn awaits the transaction that stores the gauge selection;
-    // dendro-compute-fn and zone-env-fn await read-only advice resolution with plain reads.
+    // zone-env-fn awaits advice directly; dendro-compute-fn delegates through
+    // createWeatherInputs and forZone (checked at every hop below).
     awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.(?:ingest(?:LoRain|S2120)Uplink|setZoneRainSource)\(|await\s+db\.transaction\(async\s+\(t\)\s*=>\s*\{[\s\S]*?await\s+R\.recomputeZoneDay\(t,|await\s+db\.transaction\(async\s+function\s*\(t\)\s*\{[\s\S]*?await\s+rainRes\.value\.captureLsn50Observation\(t,|await\s+db\.transaction\(async\s*\(t\)\s*=>\s*rainLoad\.value\.aggregateLsn50ZoneDay\(t,|await\s+R\.resolveAdviceRain\(_db,/,
   }),
   'agronomy-daily': Object.freeze({
@@ -151,6 +152,10 @@ function findDbCallerNodes(flows, moduleName) {
 // of shipping silently again.
 function awaitsPolicyCall(node, policy) {
   if (!node || typeof node.func !== 'string') return false;
+  if (policy === MODULE_DB_CALLER_POLICIES.rain && node.id === 'dendro-compute-fn') {
+    return /await\s+DA\.createWeatherInputs\(/.test(stripComments(node.func)) &&
+      /await\s+weatherInputs\.forZone\(/.test(stripComments(node.func));
+  }
   return policy.awaitedCall.test(node.func);
 }
 
@@ -198,6 +203,32 @@ function unlistedDelegatedCallers(nodeRedDir, policy) {
   return found.sort();
 }
 
+// Reviewed lexical chain, not general JavaScript data-flow analysis. Pin the
+// current bindings and every rain call; a renamed/restructured chain needs review.
+function dendroWeatherDelegationProblem(node, indexSource, weatherSource) {
+  const source = stripComments(node.func);
+  if (!/const\s+_daLoad\s*=\s*osiLib\.require\('dendro-analytics'\)/.test(source) ||
+      !/const\s+DA\s*=\s*_daLoad\.value/.test(source) ||
+      !/const\s+R\s*=\s*_rainLoad\.value/.test(source) ||
+      !/const\s+weatherInputs\s*=\s*await\s+DA\.createWeatherInputs\(\{db:_db,q,env,node,now:NOW,rain:R\}\)/.test(source) ||
+      !/await\s+weatherInputs\.forZone\(\{zone,date:ANALYTICS_DATE,windowStart:WINDOW_START,windowEnd:WINDOW_END\}\)/.test(source)) {
+    return 'node must bind dendro/rain and await createWeatherInputs and forZone with its database and rain module';
+  }
+  if (!/createWeatherInputs:\s*context\s*=>\s*require\('\.\/weather-inputs'\)\.createWeatherInputs\(\{\s*\.\.\.context,\s*analytics:\s*module\.exports\s*\}\)/.test(stripComments(indexSource))) {
+    return 'index must return the weather-inputs createWeatherInputs promise with the same context';
+  }
+  const weather = stripComments(weatherSource);
+  if (!/async\s+function\s+createWeatherInputs\(\{db:_db,q,env,node,now:NOW,rain:R,analytics:DA\}\)/.test(weather) ||
+      !/return\s+\{async\s+forZone\(/.test(weather) ||
+      !/module\.exports\s*=\s*\{[^}]*\bcreateWeatherInputs\b/.test(weather)) {
+    return 'weather-inputs must export the async factory and async forZone using the passed database and rain module';
+  }
+  return delegatedCallProblem(weather, { calls: 2 }, {
+    delegatedCallPattern: /\.resolveAdviceRain\s*\(/g,
+    delegatedAwaitedCall: /await\s+R\.resolveAdviceRain\(_db,/g,
+  });
+}
+
 function run() {
   const failures = [];
   const oks = [];
@@ -236,6 +267,16 @@ function run() {
       }
       oks.push(`OK [${profile}] ${moduleName}: caller set matches reviewed ${JSON.stringify(actualCallerIds)}`);
       const nodeRedDir = path.join(REPO_ROOT, profile, 'files/usr/share/node-red');
+      if (moduleName === 'rain') {
+        const dendro = flows.find(n => n.id === 'dendro-compute-fn');
+        const moduleRoot = path.join(nodeRedDir, 'osi-dendro-analytics');
+        const problem = dendroWeatherDelegationProblem(dendro,
+          fs.readFileSync(path.join(moduleRoot, 'index.js'), 'utf8'),
+          fs.readFileSync(path.join(moduleRoot, 'weather-inputs.js'), 'utf8'));
+        if (problem) failures.push(`[${profile}] rain: dendro delegation ${problem}`);
+        else oks.push(`OK [${profile}] rain: dendro factory/zone awaited; both delegated advice calls awaited`);
+      }
+
       for (const entry of policy.delegatedCallerFiles || []) {
         const filePath = path.join(nodeRedDir, entry.file);
         if (!fs.existsSync(filePath)) {
@@ -303,4 +344,4 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { MODULE_DB_CALLER_POLICIES, findDbCallerNodes, hasOsiDbLibBinding, callsOsiLibRequire, delegatedCallProblem, unlistedDelegatedCallers };
+module.exports = { MODULE_DB_CALLER_POLICIES, findDbCallerNodes, hasOsiDbLibBinding, callsOsiLibRequire, delegatedCallProblem, unlistedDelegatedCallers, dendroWeatherDelegationProblem };

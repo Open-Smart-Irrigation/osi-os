@@ -298,6 +298,8 @@ There is no plugin registry (ADR [2026-05-28](docs/adr/2026-05-28-static-device-
 
 ## Device catalog
 
+Dendrometer provider observations are collected with their irrigation effect off by default. The per-gateway operator gate and the distinction between stored observations and control inputs are specified in [dendrometer provider control](docs/development/dendro-provider-control.md).
+
 Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (ChirpStack app `Sensors`); `STREGA_VALVE`, `MILESIGHT_UC512` (`Actuators`); `RAK10701_FIELD_TESTER` (`Field Tester`). Profiles, sensors, SWT canonicalization, unified SWT estimates, LoRain onboarding and interval-rain aggregation, STREGA timed irrigation and valve control (schedules pushed only on user change or explicit re-send, never on a timer): `osi-agronomy-sensors-reference`, "Device catalog (edge reference)". Rules that bind every change:
 
 - `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes; derive pF only for display or export through the shared conversion in [matric-potential/v1.md](docs/contracts/matric-potential/v1.md); aggregate kPa before deriving pF; preserve calculated doubles and round display strings only.

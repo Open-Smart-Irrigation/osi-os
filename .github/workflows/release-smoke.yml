@@ -44,6 +44,8 @@ jobs:
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
         run: node scripts/test-release-smoke.js
+      - name: Dendro observations and control survive a real restart
+        run: node scripts/test-dendro-provider-restart.js
       - name: Refuse a release with known failures
         run: node scripts/release-smoke-gate.js --ci
       - name: Preserve runtime evidence

@@ -1240,3 +1240,21 @@ test('every shipped helper module loads through the payload links as it does fro
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test('dendro module loads with exactly the files named by deploy', () => {
+  const { computeFetchList } = require('./deploy-fetch-list');
+  const prefix = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/';
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-dendro-'));
+  try {
+    for (const file of computeFetchList(REPO).filter(file => file.startsWith(prefix + 'osi-dendro-analytics/') || file.startsWith(prefix + 'osi-crop-kc/'))) {
+      const target = path.join(root, file.slice(prefix.length));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(REPO, file), target);
+    }
+    const load = spawnSync(process.execPath, ['-e',
+      "const m = require(process.argv[1]); if (typeof m.createWeatherInputs !== 'function' || typeof m.recommendationChangedWhere !== 'string') process.exit(1)",
+      path.join(root, 'osi-dendro-analytics')], { encoding: 'utf8' });
+    assert.equal(load.status, 0, load.stderr);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
