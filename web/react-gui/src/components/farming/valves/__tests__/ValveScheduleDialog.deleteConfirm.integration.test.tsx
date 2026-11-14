@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { SWRConfig } from 'swr';
@@ -128,6 +129,33 @@ beforeEach(() => {
 });
 
 describe('delete confirmation through service normalization and mocked HTTP transport', () => {
+  it('keeps keyboard focus in the nested confirmation and restores the trigger without closing the schedule dialog', async () => {
+    const user = userEvent.setup();
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    await mount();
+    const scheduleDialog = screen.getByRole('dialog');
+    expect(scheduleDialog).toContainElement(document.activeElement as HTMLElement);
+    await user.click(within(rowByLabel('Morning soak')).getByRole('button', { name: enValves.scheduleDialog.delete }));
+    const confirmation = await screen.findByRole('alertdialog');
+    const cancel = within(confirmation).getByRole('button', { name: enValves.cancel });
+    const confirm = within(confirmation).getByRole('button', { name: enValves.scheduleDialog.deleteConfirmButton });
+    expect(cancel).toHaveFocus();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    outside.focus();
+    expect(cancel).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(scheduleDialog).toBeInTheDocument();
+    expect(within(rowByLabel('Morning soak')).getByRole('button', { name: enValves.scheduleDialog.delete })).toHaveFocus();
+    expect(http.delete).not.toHaveBeenCalled();
+    outside.remove();
+  });
+
   it('issues zero DELETE requests on the first tap and on dismissal', async () => {
     await mount();
 

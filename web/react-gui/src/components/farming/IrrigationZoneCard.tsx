@@ -31,6 +31,7 @@ import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
 import { formatDisplayFallbackReason } from '../../utils/displayFallback';
+import { subscribePublicSimulatorInvalidation } from '../../utils/publicSimulatorInvalidation';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 interface IrrigationZoneCardProps {
@@ -42,6 +43,7 @@ interface IrrigationZoneCardProps {
   irrigationActuations?: IrrigationActuation[];
   valvesByEui?: Map<string, ValveSummary>;
   canWrite?: boolean;
+  initiallyExpanded?: boolean;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -210,13 +212,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   irrigationActuations = [],
   valvesByEui,
   canWrite = true,
+  initiallyExpanded = false,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const dateFormat = useDateFormat();
   const { swtUnit, modules } = useDisplayPreferences();
-  const [zoneCollapsed, setZoneCollapsed] = useState(true);
+  const [zoneCollapsed, setZoneCollapsed] = useState(() => !initiallyExpanded);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -418,9 +421,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     };
 
     void load();
+    const unsubscribe = subscribePublicSimulatorInvalidation(() => void load());
     const interval = window.setInterval(() => void load(), 5 * 60 * 1000);
     return () => {
       cancelled = true;
+      unsubscribe();
       window.clearInterval(interval);
     };
   }, [hasDendroDevices, settingsVersion, zone.id]);

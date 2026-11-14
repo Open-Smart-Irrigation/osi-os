@@ -29,7 +29,8 @@ describe('valves locale bundles', () => {
     const expectedPaths = paths(english).sort();
     for (const locale of LOCALES) {
       const translated = readLocale(locale);
-      expect(paths(translated).sort(), `${locale} key paths`).toEqual(expectedPaths);
+      const localePaths = paths(translated).sort();
+      expect(localePaths, `${locale} key paths`).toEqual(expectedPaths);
       for (const path of expectedPaths) {
         expect(typeof atPath(translated, path), `${locale} ${path} value type`).toBe(typeof atPath(english, path));
       }

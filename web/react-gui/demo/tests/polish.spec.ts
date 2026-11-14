@@ -44,7 +44,7 @@ test('accelerated opening never displays more time than requested',async({page})
   await page.getByRole('combobox',{name:'Simulation speed'}).selectOption('10');await page.waitForTimeout(800);
   await app.getByRole('button',{name:'Open',exact:true}).click();await app.getByRole('spinbutton').fill('1');
   await app.getByRole('button',{name:'Open for 1 min',exact:true}).click();
-  const tile=app.getByTestId('valve-last-seen').locator('..');
+  const tile=app.getByTestId('valve-actions').locator('xpath=..');
   await expect(tile).toContainText('min left');
   await expect(tile).not.toContainText('2 min left');
   await page.getByRole('button',{name:'Pause',exact:true}).click();

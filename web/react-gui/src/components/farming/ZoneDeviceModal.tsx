@@ -4,6 +4,7 @@ import { devicesAPI, irrigationZonesAPI } from '../../services/api';
 import type { Device, DeviceCatalogItem, DeviceType } from '../../types/farming';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
 import { normalizeEntityName } from '../../utils/entityName';
+import { createPublicSimulatorDevEui, isPublicSimulatorBuild } from '../../utils/publicSimulatorDeviceDefaults';
 
 interface ZoneDeviceModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
     setError('');
     setCatalog([]);
     setSelectedType('');
+    if (isPublicSimulatorBuild()) setDeveui(createPublicSimulatorDevEui());
     devicesAPI.getCatalog()
       .then((data) => {
         setCatalog(data);

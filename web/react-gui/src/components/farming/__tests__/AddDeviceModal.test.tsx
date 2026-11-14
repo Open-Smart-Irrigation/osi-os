@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AddDeviceModal } from '../AddDeviceModal';
 import { devicesAPI } from '../../../services/api';
@@ -57,6 +57,8 @@ function fillRequiredFields() {
 }
 
 describe('AddDeviceModal generation control', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(devicesAPI.getCatalog).mockResolvedValue(catalog as any);
@@ -71,6 +73,15 @@ describe('AddDeviceModal generation control', () => {
     fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'KIWI_SENSOR' } });
 
     expect(screen.queryByLabelText('Valve generation')).not.toBeInTheDocument();
+  });
+
+  it('prefills only a fictional DevEUI in the public simulator build', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    render(<AddDeviceModal isOpen={true} onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalled());
+    expect((screen.getByLabelText('DevEUI') as HTMLInputElement).value).toMatch(/^02F1[0-9A-F]{12}$/);
+    expect(screen.getByLabelText('AppKey')).toHaveValue('');
+    vi.unstubAllEnvs();
   });
 
   it('shows the generation control for STREGA_VALVE and defaults to GEN1', async () => {
