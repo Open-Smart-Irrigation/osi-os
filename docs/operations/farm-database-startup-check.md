@@ -17,7 +17,7 @@ Two copies of the native `sqlite3` addon in one Node-RED process damaged the far
 
 No module mapped yet is not a conflict: at `settings.js` time no SQLite module is loaded. The count is read at every new connection and at every health read (one per heartbeat tick and per stats answer); once a conflict is seen it stays until Node-RED restarts, and it is seen again at the next start if the stranger is still there. It is announced by one log line naming both files, `[osi-db-startup] ERROR a second SQLite library is loaded in this process (2 native modules: <path>, <path>); …`, and the two paths travel in the stats answer as `database.module_paths`. The heartbeat carries the state's name only. A path is reported only when it lies under `/usr/lib/node/`, `/usr/lib/node-red/`, `/srv/node-red/` or the helper's own install tree; any other is reported as `<outside the firmware and user directories>`.
 
-The valve and schedule routes answer a refusal with 503 and the code. The login route still answers it with 500: its flow node sets that status itself.
+Under a driver refusal the valve and schedule routes answer 503 `OSI_SQLITE_REFUSED`, and login answers 500 `Unable to query local users`: no route can read the users table then, so refusing login is right, though its status and text are poor (its flow node sets them; left as it is in this release). An operator sees the reason without logging in: the `[osi-db-startup] ERROR native SQLite driver unavailable: …` line in the Node-RED log, and the heartbeat's `health_state` `sqlite_driver_unavailable`, which reaches the fleet check.
 
 ## The file check
 

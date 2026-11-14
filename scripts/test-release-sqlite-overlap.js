@@ -193,7 +193,7 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
       check('late-verdict-in-next-heartbeat',laterHeartbeat?.health?.health_state===expected.late.health,laterHeartbeat?.health);
     }
     if(fault==='conflict') {
-      check('open-still-accepted',r.open.status===202&&r.openRadio>=1,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
+      check('open-still-accepted',r.open.status===202&&r.openRadio===1,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
       check('conflict-paths',Array.isArray(database?.module_paths)&&database.module_paths.length===2&&database.module_paths.every(p=>/node_sqlite3\.node$/.test(p)),database?.module_paths);
     }
   } else check('observation',false,'runtime wrote no startup.json');
