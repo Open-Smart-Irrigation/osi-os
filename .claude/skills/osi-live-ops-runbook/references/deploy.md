@@ -26,17 +26,6 @@ The actual guard, in `seed_db_if_missing()`:
    `sqlite3` if available), re-check the target is still absent (race guard), then
    `mv` the seed into place.
 
-## Before any upgrade by script
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 ## Quick reference
 
 | Task | Command |
@@ -46,8 +35,9 @@ until that release.
 | Serve repo root | `python3 -m http.server 9876 --bind 127.0.0.1` |
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
 | Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
-| Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
-| Show active helper modules | `ls -l /srv/node-red/osi-lib` (symlink into `payloads/<stamp>/modules/`; every staged `osi-*` module follows the same stamp as `flows.json`) |
+| Show active payload | `ls -l /srv/node-red/payloads/active` (link to `<stamp>`; `flows.json`, the GUI and every staged `osi-*` module link through it, and a switch is one rename of this link). A gateway last deployed by v0.8.2 or earlier links each entry straight into `payloads/<stamp>` until its next deploy converts it |
+| Show which payloads a rollback may return to | `cat /srv/node-red/payloads/*/health.json` (`healthy` with digests once a deploy's health check passed; `activated` means it never passed one; no file means it predates the record and is trusted) |
+| Show active helper modules | `readlink -f /srv/node-red/osi-lib` (resolves into `payloads/<stamp>/modules/`, the same stamp as `flows.json`) |
 | Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
@@ -153,6 +143,18 @@ dev workstation unless noted.
    (e.g. the very first deploy), it prints
    `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
    and exits 1 — treat that as a stop, with the service down.
+
+   When the deploy migrated the database and no payload that passed its health
+   check fits the new schema, it holds Node-RED stopped and ends with one line,
+   kept in `/srv/node-red/DEPLOY-HELD` until the hold ends:
+   `HELD: Node-RED stopped. payloads/<failed> failed after migrating ... Restore the pre-migration backup and return to payloads/<healthy> with: <command>`.
+   The command restores the named `/data/backups/migrate/farming.db.premigrate-*`
+   backup, switches back to that payload, records it healthy in
+   `/srv/node-red/payload-state.json`, removes `DEPLOY-HELD` and starts identityd
+   and Node-RED. While the gateway is held, Node-RED does not start, after a
+   reboot or `/etc/init.d/node-red start` either: the start logs the `HELD:`
+   line instead. The command, or a later deploy that switches in a payload,
+   ends the hold.
 
    Restarting Node-RED by hand right after a green deploy doesn't make it any
    safer — it only obscures which restart (migration, flip, or yours) produced
@@ -394,15 +396,6 @@ a gateway in use by image.** Use `deploy.sh`, or the
 for supported upgrades. An image is for a new device or a deliberate reset.
 The post-sysupgrade states below describe recovery from unsupported operations;
 they do not authorize performing such an upgrade.
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
 
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the

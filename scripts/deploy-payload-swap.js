@@ -33,6 +33,85 @@ function legacyCapturePath(root) {
   return path.join(payloadsRoot(root), '.legacy-capture.json');
 }
 
+// Issue S-1 (v0.8.2 review): one link switches every payload entry.
+// payloads/active is a link to payloads/<stamp>; flows.json, the GUI and each
+// helper-module link point through it (payloads/active/flows.json, ...) and
+// stay put once converted. flipTo() switches a payload by renaming one new
+// link over payloads/active, so a kill at any instant leaves the complete
+// old payload or the complete new one. listStamps() and every stamp check
+// here skip the name. It sorts after every timestamp stamp on purpose: the
+// prune of an older deploy.sh keeps the newest names, so a downgrade cannot
+// remove the link the module links lead through. The first version of this
+// layout named it payloads/active; flipTo() converts a gateway that has it.
+const ACTIVE = 'active';
+const LEGACY_ACTIVE = '.active';
+
+function activeLink(root) {
+  return path.join(payloadsRoot(root), ACTIVE);
+}
+
+function legacyActiveLink(root) {
+  return path.join(payloadsRoot(root), LEGACY_ACTIVE);
+}
+
+function viaFlows(root) {
+  return path.join(activeLink(root), 'flows.json');
+}
+
+function viaGui(root) {
+  return path.join(activeLink(root), 'gui');
+}
+
+function viaModule(root, name) {
+  return path.join(activeLink(root), 'modules', name);
+}
+
+function linkedStamp(root, link) {
+  let target;
+  try {
+    if (!fs.lstatSync(link).isSymbolicLink()) return null;
+    target = fs.readlinkSync(link);
+  } catch (error) {
+    if (absent(error)) return null;
+    throw error;
+  }
+  if (!target || target.includes('/') || target.startsWith('.') || target === ACTIVE) return null;
+  return isDirectory(payloadDir(root, target)) ? target : null;
+}
+
+// The payload payloads/active (or the first version's payloads/active)
+// names, or null when it is absent, is not a plain payload name or names a
+// payload that is gone.
+function activeStamp(root) {
+  if (lstatOrNull(activeLink(root))) return linkedStamp(root, activeLink(root));
+  return linkedStamp(root, legacyActiveLink(root));
+}
+
+function isStampName(name) {
+  return Boolean(name) && !name.startsWith('.') && name !== ACTIVE;
+}
+
+// True when <link> is a link whose text leads to <via>, resolvable or not.
+function linksTo(link, via) {
+  const stat = lstatOrNull(link);
+  return Boolean(stat && stat.isSymbolicLink() &&
+    path.resolve(path.dirname(link), fs.readlinkSync(link)) === via);
+}
+
+// Points payloads/active at <stamp> with one rename.
+function pointActive(root, stamp) {
+  const link = activeLink(root);
+  const tmp = path.join(payloadsRoot(root), `.active-flip-${process.pid}-${Date.now()}`);
+  try {
+    fs.rmSync(tmp, { force: true });
+    fs.symlinkSync(stamp, tmp);
+    fs.renameSync(tmp, link);
+  } catch (error) {
+    fs.rmSync(tmp, { force: true });
+    throw new Error(`payload switch to ${stamp}: ${error.message}`);
+  }
+}
+
 // Helper modules (issue #603). Each payload carries the osi-* modules deploy.sh
 // fetched for it under modules/<name>/, and /srv/node-red/<name> is a link into
 // the active payload, switched by flipTo() with flows and GUI. modules.json
@@ -119,9 +198,15 @@ function discardBackup(backup) {
   }
 }
 
-function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null) {
+// <staged> ("staged" from deploy.sh): record the payload as staged before
+// anything is copied into it, in this one call, so a deploy cut while staging
+// never leaves a payload without a health record (which would count as one
+// from before the record, and so as a rollback target). The legacy capture
+// stages without it: a copy of what was running is trusted.
+function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null, staged = '') {
   const dir = payloadDir(root, stamp);
   fs.mkdirSync(dir, { recursive: true });
+  if (staged === 'staged' || staged === true) markStaged(root, stamp);
   fs.copyFileSync(srcFlowsPath, path.join(dir, 'flows.json'));
   if (srcGuiPath) {
     if (!fs.existsSync(srcGuiPath) || !fs.statSync(srcGuiPath).isDirectory()) {
@@ -132,34 +217,112 @@ function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null) {
   return dir;
 }
 
-function atomicSymlink(link, target, label, { keepBackup = false } = {}) {
+// A directory of the image's read-only layer (overlay root, the same path is
+// a directory under /rom, redirect_dir off) cannot be renamed: rename(2)
+// returns EXDEV. It can be removed (the image's copy stays under /rom) and a
+// link created in its place. This read-only check decides how a switch
+// converts a real directory; it never refuses one. OSI_SWAP_IMAGE_LAYER_PATHS
+// (colon-separated) stands in for the overlay in tests, OSI_SWAP_ROM_ROOT for
+// /rom.
+function romRoot() {
+  return process.env.OSI_SWAP_ROM_ROOT || '/rom';
+}
+
+function romCopy(target) {
+  return path.join(romRoot(), path.resolve(target));
+}
+
+function imageLayerDir(target) {
+  const resolved = path.resolve(target);
+  if (process.env.OSI_SWAP_IMAGE_LAYER_PATHS !== undefined) {
+    return process.env.OSI_SWAP_IMAGE_LAYER_PATHS.split(':').includes(resolved);
+  }
+  try {
+    if (fs.readFileSync('/sys/module/overlay/parameters/redirect_dir', 'utf8').trim() === 'Y') return false;
+  } catch (_) {
+    // No overlay module parameters: no overlay to worry about.
+    return false;
+  }
+  if (!isDirectory(romCopy(resolved))) return false;
+  let mounts = '';
+  try {
+    mounts = fs.readFileSync('/proc/mounts', 'utf8');
+  } catch (_) {
+    return false;
+  }
+  let best = { point: '', type: '' };
+  for (const line of mounts.split('\n')) {
+    const [, point, type] = line.split(' ');
+    if (!point) continue;
+    if ((resolved === point || resolved.startsWith(point === '/' ? '/' : `${point}/`)) && point.length >= best.point.length) {
+      best = { point, type };
+    }
+  }
+  return best.type === 'overlay';
+}
+
+// replaceable: a verified identical copy of a real directory at <link>
+// exists in the payload the link will lead to, so the directory may be
+// removed instead of moved aside. The path is then absent until the link
+// takes its place; resumeInterruptedSwitch() restores it after a kill.
+function atomicSymlink(link, target, label, { keepBackup = false, replaceable = false } = {}) {
   const parent = path.dirname(link);
   const relativeTarget = path.relative(parent, target);
   const tmp = path.join(parent, `.${path.basename(link)}.flip-${process.pid}-${Date.now()}`);
   let backup = null;
   let previousTarget = null;
+  let removing = null;
   try {
     fs.mkdirSync(parent, { recursive: true });
     fs.rmSync(tmp, { force: true });
+    fs.symlinkSync(relativeTarget, tmp);
+    // rename(2) replaces a file or link with the new link in one step; a
+    // directory cannot be replaced by a link, so it is moved aside first and
+    // the path is absent until the link takes its place. A file is kept as a
+    // hard link, and its path is never absent.
+    let backupIsLink = false;
     try {
       const existing = fs.lstatSync(link);
       if (existing.isSymbolicLink()) previousTarget = fs.realpathSync(link);
-      else {
+      else if (existing.isDirectory()) {
+        let remove = replaceable && imageLayerDir(link);
+        if (!remove) {
+          backup = `${link}.osi-old-${process.pid}-${Date.now()}`;
+          try {
+            fs.renameSync(link, backup);
+          } catch (error) {
+            backup = null;
+            if (error.code !== 'EXDEV' || !replaceable) throw error;
+            remove = true;
+          }
+        }
+        if (remove) {
+          // The removal goes file by file, so a kill can leave the directory
+          // partly removed. The marker beside it (the link's target) lets
+          // resumeInterruptedSwitch() finish the removal and the link. It is
+          // on storage, file and directory synced, before the first file goes.
+          removing = `${link}.osi-removing`;
+          writeDurable(removing, `${target}\n`);
+          fs.rmSync(link, { recursive: true, force: true });
+        }
+      } else if (keepBackup) {
         backup = `${link}.osi-old-${process.pid}-${Date.now()}`;
-        fs.renameSync(link, backup);
+        fs.linkSync(link, backup);
+        backupIsLink = true;
       }
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
-    fs.symlinkSync(relativeTarget, tmp);
     try {
       fs.renameSync(tmp, link);
     } catch (error) {
       if (!backup) throw error;
-      fs.renameSync(backup, link);
+      if (backupIsLink) fs.rmSync(backup, { force: true });
+      else fs.renameSync(backup, link);
       backup = null;
       throw error;
     }
+    if (removing) fs.rmSync(removing, { force: true });
     if (backup && !keepBackup) discardBackup(backup);
   } catch (error) {
     fs.rmSync(tmp, { force: true });
@@ -181,7 +344,7 @@ function restoreFlippedEntry(result) {
     return;
   }
   if (result.backup) {
-    fs.rmSync(result.link, { force: true, recursive: true });
+    if (isDirectory(result.backup)) fs.rmSync(result.link, { force: true, recursive: true });
     fs.renameSync(result.backup, result.link);
     result.backup = null;
     return;
@@ -267,8 +430,14 @@ function moduleLinkStamp(root, name) {
   if (!stat || !stat.isSymbolicLink()) return null;
   const resolved = path.resolve(path.dirname(link), fs.readlinkSync(link));
   const parts = path.relative(payloadsRoot(root), resolved).split(path.sep);
+  // A link through payloads/active belongs to the active payload while that
+  // payload carries the module; otherwise it leads nowhere and counts as absent.
+  if (resolved === viaModule(root, name) || resolved === path.join(legacyActiveLink(root), 'modules', name)) {
+    const stamp = linkedStamp(root, path.dirname(path.dirname(resolved)));
+    return stamp && lstatOrNull(moduleTarget(root, stamp, name)) ? stamp : null;
+  }
   if (parts.length !== 3 || parts[1] !== 'modules' || parts[2] !== name ||
-      !parts[0] || parts[0] === '..' || parts[0].startsWith('.')) return null;
+      parts[0] === '..' || !isStampName(parts[0])) return null;
   return parts[0];
 }
 
@@ -362,10 +531,15 @@ function captureModules(root, prevStamp, deployStamp) {
   const lines = [];
   let changed = !prev;
   fs.mkdirSync(dir, { recursive: true });
-  for (const name of next.modules) {
+  // The new payload's modules, and every module served from another payload
+  // that the new payload drops (through the flows' payload, payloads/active,
+  // or a link an older deploy.sh made): a switch back must restore it too.
+  const names = new Set(next.modules);
+  for (const [name, linked] of payloadModuleLinks(root)) if (linked !== deployStamp) names.add(name);
+  for (const name of [...names].sort()) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
-    if (!stat) continue;
+    if (!stat || (linksTo(live, viaModule(root, name)) && !isDirectory(live))) continue;
     // A link into a payload is part of that payload's module set, unless the
     // previous payload has no module set of its own: the legacy capture after
     // a sysupgrade (it keeps /srv and with it the module links, but not the
@@ -418,7 +592,10 @@ function linkNewModules(root, stamp, prevStamp = '') {
   const lines = [];
   for (const name of next.modules) {
     const link = moduleLink(root, name);
-    const stat = lstatOrNull(link);
+    let stat = lstatOrNull(link);
+    // A link through payloads/active that leads nowhere is a module the
+    // running flows do not have, and npm install needs it on disk.
+    if (stat && linksTo(link, viaModule(root, name)) && !isDirectory(link)) stat = null;
     const linked = stat && stat.isSymbolicLink() ? moduleLinkStamp(root, name) : null;
     if (stat && (!linked || linked === stamp || linked === prevStamp || (prev && prev.modules.includes(name)))) continue;
     atomicSymlink(link, moduleTarget(root, stamp, name), `link new module ${name}`);
@@ -487,11 +664,7 @@ function restoreSwitched(switched) {
   const failures = [];
   for (const entry of [...switched].reverse()) {
     try {
-      if (entry.removedLink !== undefined) {
-        if (!lstatOrNull(entry.link)) fs.symlinkSync(entry.removedLink, entry.link);
-      } else {
-        restoreFlippedEntry(entry);
-      }
+      restoreFlippedEntry(entry);
     } catch (error) {
       failures.push(`${entry.link}: ${error.message}`);
     }
@@ -499,46 +672,344 @@ function restoreSwitched(switched) {
   return failures;
 }
 
-// Switches flows, the GUI and the helper modules to <stamp>. Every target is
-// checked before the first link moves; if any switch fails, the ones already
-// made are put back and the error names any that could not be.
-function flipTo(root, stamp, guiRoot = null) {
+// True when <live> serves the same bytes as <copy>: the same file or
+// directory, or an identical copy of it.
+function sameContent(live, copy, kind) {
+  const liveStat = statOrNull(live);
+  const copyStat = statOrNull(copy);
+  if (!liveStat || !copyStat) return false;
+  if (fs.realpathSync(live) === fs.realpathSync(copy)) return true;
+  if (kind === 'file') return liveStat.isFile() && copyStat.isFile() && hashFile(live) === hashFile(copy);
+  return liveStat.isDirectory() && copyStat.isDirectory() &&
+    hashTree(live, { followLinks: true, label: 'payload switch: unsupported entry' }) ===
+    hashTree(copy, { followLinks: true, label: 'payload switch: unsupported entry' });
+}
+
+// The live entries a switch to <stamp> routes through payloads/active, with
+// the copy each must match in <base>.
+function switchEntries(root, stamp, guiRoot, modules, base) {
+  const entries = [{ link: flowsLink(root), via: viaFlows(root), copy: base && path.join(payloadDir(root, base), 'flows.json'), kind: 'file', label: 'flows' }];
+  if (guiRoot) entries.push({ link: guiLink(guiRoot), via: viaGui(root), copy: base && guiPayloadDir(root, base), kind: 'dir', label: 'GUI' });
+  const baseManifest = base ? readModuleManifest(root, base) : null;
+  const baseModules = baseManifest ? baseManifest.modules : [];
+  const names = new Set([...modules.link, ...modules.unlink, ...baseModules]);
+  for (const name of [...names].sort()) {
+    const copy = base && baseModules.includes(name) ? moduleTarget(root, base, name) : null;
+    const sealed = Boolean(copy && baseManifest.captured[name] === undefined);
+    entries.push({ link: moduleLink(root, name), via: viaModule(root, name), copy, sealed, kind: 'dir', label: `module ${name}`, name });
+  }
+  return entries;
+}
+
+// Why <base> cannot stand in for the live entries, or null. Every step before
+// the switch points payloads/active at <base> or routes an entry through it,
+// so each served entry must already serve <base>'s bytes, with two
+// exceptions that are recorded on the entry:
+// - no GUI is served at all: routing it restores the payload's GUI;
+// - a module <base> carries as its own sealed copy while the flows already
+//   run from <base>: a switch into <base> by an older deploy.sh was cut
+//   during its module renames (state-table row S7), and routing the module
+//   completes that switch, as that deploy.sh would have.
+function baseMismatch(root, base, stamp, guiRoot, entries) {
+  if (!isFile(path.join(payloadDir(root, base), 'flows.json'))) return `payloads/${base} has no flows.json`;
+  if (guiRoot && !isDirectory(guiPayloadDir(root, base))) return `payloads/${base} has no GUI`;
+  const flowsInBase = currentStamp(root) === base;
+  for (const entry of entries) {
+    if (entry.copy) {
+      if (sameContent(entry.link, entry.copy, entry.kind)) continue;
+      if (entry.label === 'GUI' && !statOrNull(entry.link)) {
+        entry.restores = true;
+        continue;
+      }
+      if (entry.sealed && flowsInBase) {
+        entry.completes = true;
+        continue;
+      }
+      return `the live ${entry.label} differs from payloads/${base}`;
+    }
+    // payloads/<base> has no copy: the old flows must not run from the entry.
+    // Absent, leading nowhere, or linked into a payload the flows do not run
+    // from (a module new in this release, linked early for npm install) is
+    // fine; a module the flows' own payload carries is not.
+    const stat = lstatOrNull(entry.link);
+    if (!stat || !statOrNull(entry.link)) continue;
+    if (!stat.isSymbolicLink()) return `the live ${entry.label} is a directory payloads/${base} does not hold`;
+    const into = moduleLinkStamp(root, entry.name);
+    if (into && into !== base && (into === currentStamp(root) || into === activeStamp(root))) {
+      return `the live ${entry.label} belongs to payloads/${into}, which the gateway runs from, and payloads/${base} does not hold it`;
+    }
+  }
+  return null;
+}
+
+// No flows are served: Node-RED runs nothing a switch could break.
+function nothingServed(entries) {
+  return !statOrNull(entries[0].link);
+}
+
+// The entry paths a switch can move aside or leave a temporary link for.
+function switchPaths(root, guiRoot) {
+  const paths = [flowsLink(root)];
+  if (guiRoot) paths.push(guiLink(guiRoot));
+  let names = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  const modules = new Set();
+  for (const name of names) {
+    const base = name.replace(/^\./, '').replace(/\.(osi-old|flip)-.*$/, '').replace(/\.osi-removing$/, '');
+    if (MODULE_NAME.test(base)) modules.add(base);
+  }
+  for (const name of [...modules].sort()) paths.push(moduleLink(root, name));
+  return paths;
+}
+
+// The sibling a killed atomicSymlink() left for <link>: the entry it moved
+// aside ("<name>.osi-old-<pid>-<ms>"), newest first, and its temporary links.
+function leftovers(link) {
+  const dir = path.dirname(link);
+  const base = path.basename(link);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  const stampOf = (name) => Number(name.split('-').pop()) || 0;
+  return {
+    aside: names.filter((name) => name.startsWith(`${base}.osi-old-`)).sort((a, b) => stampOf(b) - stampOf(a)).map((name) => path.join(dir, name)),
+    temps: names.filter((name) => name.startsWith(`.${base}.flip-`) || name.startsWith(`${base}.osi-rom-`)).map((name) => path.join(dir, name)),
+  };
+}
+
+// True when <gui> is a real directory of the image layer missing an entry its
+// image copy has, and the active payload holds a GUI to link instead.
+function partlyRemovedImageGui(root, gui) {
+  const stat = lstatOrNull(gui);
+  if (!stat || !stat.isDirectory() || !imageLayerDir(gui)) return false;
+  const active = activeStamp(root);
+  if (!active || !isFile(path.join(guiPayloadDir(root, active), 'index.html'))) return false;
+  const missing = (rom, live) => fs.readdirSync(rom).some((name) => {
+    const romEntry = path.join(rom, name);
+    const liveEntry = path.join(live, name);
+    if (!lstatOrNull(liveEntry)) return true;
+    return isDirectory(romEntry) && isDirectory(liveEntry) && missing(romEntry, liveEntry);
+  });
+  try {
+    return missing(romCopy(gui), gui);
+  } catch (_) {
+    return false;
+  }
+}
+
+// Finishes what a killed switch left behind, before deploy.sh reads the live
+// state and before node-red.init starts Node-RED:
+// - an entry that is absent while the directory or file a switch moved aside
+//   lies beside it is moved back, which restores exactly what was served;
+//   rename(2) cannot replace a directory with a link, so that window exists
+//   once per converted directory, and older deploy.sh versions opened it for
+//   files too;
+// - leftover temporary links and moved-aside entries beside a present entry
+//   are removed, as are temporary payloads/active links.
+// Returns the lines deploy.sh prints, or null.
+function resumeInterruptedSwitch(root, guiRoot) {
+  const lines = [];
+  for (const link of switchPaths(root, guiRoot)) {
+    const { aside, temps } = leftovers(link);
+    for (const temp of temps) fs.rmSync(temp, { recursive: true, force: true });
+    const removing = `${link}.osi-removing`;
+    if (lstatOrNull(removing)) {
+      // Present means a removal began. An empty or unreadable marker (from
+      // before it was written durably) still finishes the removal; the link
+      // then follows from the active payload or the image below.
+      let target = '';
+      try {
+        target = fs.readFileSync(removing, 'utf8').trim();
+      } catch (_) {
+        target = '';
+      }
+      const stat = lstatOrNull(link);
+      if (!stat || !stat.isSymbolicLink()) {
+        fs.rmSync(link, { recursive: true, force: true });
+        if (target) {
+          atomicSymlink(link, target, `finish ${path.basename(link)}`);
+          lines.push(`WARN: an interrupted switch was removing ${path.basename(link)}; finished it and linked it to ${path.relative(path.dirname(link), target)}`);
+        } else {
+          lines.push(`WARN: an interrupted switch was removing ${path.basename(link)} (its marker is empty); finished the removal`);
+        }
+      }
+      fs.rmSync(removing, { force: true });
+    } else if (guiRoot && link === guiLink(guiRoot) && partlyRemovedImageGui(root, link)) {
+      // No marker, but the image-layer GUI directory lacks files the image
+      // has while the active payload holds a complete GUI: a conversion was
+      // cut during its removal. Finish it; the link follows below.
+      fs.rmSync(link, { recursive: true, force: true });
+      lines.push(`WARN: ${path.basename(link)} was partly removed by an interrupted switch (no marker); finished the removal`);
+    }
+    if (!lstatOrNull(link) && aside.length) {
+      fs.renameSync(aside[0], link);
+      lines.push(`WARN: an interrupted switch left ${path.basename(link)} at ${path.basename(aside[0])}; moved it back`);
+      aside.shift();
+    }
+    for (const stale of aside) discardBackup(stale);
+  }
+  // A directory of the image layer is removed before its link is made, since
+  // rename(2) cannot move it. A kill in between leaves the path absent, also
+  // across a reboot. Link it into the active payload, which holds an identical
+  // copy; when no payload holds the GUI, copy it back from the image (/rom).
+  const active = activeStamp(root);
+  if (active) {
+    const restore = [[flowsLink(root), viaFlows(root), path.join(payloadDir(root, active), 'flows.json')]];
+    if (guiRoot) restore.push([guiLink(guiRoot), viaGui(root), guiPayloadDir(root, active)]);
+    let manifest = null;
+    try {
+      manifest = readModuleManifest(root, active);
+    } catch (_) {
+      // A malformed manifest restores no module; the deploy preflight refuses it.
+    }
+    for (const name of manifest ? manifest.modules : []) {
+      restore.push([moduleLink(root, name), viaModule(root, name), moduleTarget(root, active, name)]);
+    }
+    for (const [link, via, copy] of restore) {
+      if (lstatOrNull(link) || !statOrNull(copy)) continue;
+      if (linkedStamp(root, activeLink(root)) !== active) pointActive(root, active);
+      atomicSymlink(link, via, `restore ${path.basename(link)}`);
+      lines.push(`WARN: an interrupted switch left ${path.basename(link)} absent; linked it into payloads/${active} again`);
+    }
+  }
+  if (guiRoot && !lstatOrNull(guiLink(guiRoot)) && isDirectory(romCopy(guiLink(guiRoot)))) {
+    const temp = `${guiLink(guiRoot)}.osi-rom-${process.pid}-${Date.now()}`;
+    try {
+      copyTree(romCopy(guiLink(guiRoot)), temp);
+      fs.renameSync(temp, guiLink(guiRoot));
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+    lines.push(`WARN: the GUI was absent and no payload holds it; copied it back from ${romCopy(guiLink(guiRoot))}`);
+  }
+  let names = [];
+  try {
+    names = fs.readdirSync(payloadsRoot(root));
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  for (const name of names) {
+    if (name.startsWith('.active.flip-') || name.startsWith('.active-flip-')) fs.rmSync(path.join(payloadsRoot(root), name), { force: true });
+  }
+  return lines.length ? lines.join('\n') : null;
+}
+
+// How a switch to <stamp> proceeds: the payload whose bytes the live entries
+// serve (the base), the entries to route, and the notes deploy.sh prints.
+// Throws when something is served and no payload holds it; deploy.sh calls
+// switchPreflight() before Node-RED stops, so that refusal comes first.
+function planSwitch(root, stamp, guiRoot, fromStamp) {
   const flowTarget = path.join(payloadDir(root, stamp), 'flows.json');
   if (!fs.existsSync(flowTarget)) {
     throw new Error(`flipTo: staged payload missing: ${flowTarget}`);
   }
-  if (guiRoot && (!fs.existsSync(guiPayloadDir(root, stamp)) ||
-      !fs.statSync(guiPayloadDir(root, stamp)).isDirectory())) {
+  if (guiRoot && !isDirectory(guiPayloadDir(root, stamp))) {
     throw new Error(`flipTo: staged GUI payload missing: ${guiPayloadDir(root, stamp)}`);
   }
-  const modules = moduleFlipPlan(root, stamp);
-  const switched = [];
-  let flow;
-  let gui;
-  try {
-    flow = atomicSymlink(flowsLink(root), flowTarget, 'flows flip', { keepBackup: true });
-    switched.push(flow);
-    if (guiRoot) {
-      gui = atomicSymlink(guiLink(guiRoot), guiPayloadDir(root, stamp), 'GUI flip', { keepBackup: true });
-      switched.push(gui);
-    }
-    for (const name of modules.link) {
-      switched.push(atomicSymlink(moduleLink(root, name), moduleTarget(root, stamp, name), `module flip ${name}`, { keepBackup: true }));
-    }
-    for (const name of modules.unlink) {
-      const link = moduleLink(root, name);
-      const removedLink = fs.readlinkSync(link);
-      fs.unlinkSync(link);
-      switched.push({ link, removedLink, backup: null });
-    }
-  } catch (error) {
-    const failures = restoreSwitched(switched);
-    if (failures.length) error.message += `; could not restore: ${failures.join('; ')}`;
-    throw error;
+  const active = activeStamp(root);
+  if (!guiRoot && active && isDirectory(guiPayloadDir(root, active)) && !isDirectory(guiPayloadDir(root, stamp))) {
+    throw new Error(`flipTo: payload ${stamp} has no GUI, and switching payloads/active would take the GUI away`);
   }
-  for (const entry of switched) discardBackup(entry.backup);
-  const result = { flowsLink: flow.link, target: flow.target };
-  if (gui) Object.assign(result, { guiLink: gui.link, guiTarget: gui.target });
+  if (fromStamp && !isDirectory(payloadDir(root, fromStamp))) {
+    throw new Error(`flipTo: rollback payload missing: ${fromStamp}`);
+  }
+  const modules = moduleFlipPlan(root, stamp);
+  // The rollback payload deploy.sh names; the payload .active names; the one
+  // the flows link into; the target itself (a rollback before the forward
+  // switch began serves the target's own captured bytes).
+  const candidates = fromStamp ? [fromStamp] : [...new Set([active, currentStamp(root), stamp].filter(Boolean))];
+  const reasons = [];
+  for (const base of candidates) {
+    const entries = switchEntries(root, stamp, guiRoot, modules, base);
+    const mismatch = baseMismatch(root, base, stamp, guiRoot, entries);
+    if (!mismatch) {
+      const notes = entries.filter((entry) => entry.completes)
+        .map((entry) => `WARN: ${entry.label} was left behind by a switch into payloads/${base} that was cut; this switch completes it`);
+      for (const entry of entries) {
+        const stat = lstatOrNull(entry.link);
+        if (stat && stat.isDirectory() && !stat.isSymbolicLink() && imageLayerDir(entry.link)) {
+          notes.push(`OK: the ${entry.label} is a directory of the image layer; the switch removes it and links it into payloads/${base} (the image's copy stays under ${romRoot()})`);
+        }
+      }
+      return { stamp, base, entries, modules, notes };
+    }
+    reasons.push(mismatch);
+  }
+  // No payload holds what is served. With a rollback payload named, that is
+  // a refusal. Without one there is nothing to return to anyway (a first
+  // deploy, or regular flows without a GUI to capture): the entries are
+  // linked one by one, as before payloads/active existed.
+  if (fromStamp) throw new Error(`flipTo: ${reasons.join('; ')}; refusing to switch`);
+  const entries = switchEntries(root, stamp, guiRoot, modules, null);
+  return { stamp, base: null, entries, modules, notes: nothingServed(entries) ? [] :
+    ['WARN: no retained payload holds the live flows, GUI and modules; they are replaced one by one'] };
+}
+
+// The checks flipTo() makes, without changing anything; deploy.sh runs it
+// before Node-RED stops. Returns the lines to print, or null.
+function switchPreflight(root, stamp, guiRoot = null, fromStamp = '') {
+  const plan = planSwitch(root, stamp, guiRoot, fromStamp);
+  return plan.notes.length ? plan.notes.join('\n') : null;
+}
+
+// Switches flows, the GUI and the helper modules to <stamp>. <fromStamp> is
+// the payload the live entries serve, as deploy.sh captured it (PREV_STAMP).
+//
+// With such a base, every step before the switch only re-points a live entry
+// at an identical copy in it (see baseMismatch() for the two exceptions), and
+// the switch is one rename of payloads/active: a kill at any instant leaves
+// the complete old payload or the complete new one. Each step is idempotent,
+// so a rerun resumes. Without a base (a first deploy, or regular flows with
+// no GUI to capture) the entries are linked before payloads/active exists.
+function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
+  // A switch killed earlier may have left an entry set aside, partly removed
+  // or absent: finish that first (it only restores what was served), so the
+  // rollback and the HELD restore command start from a whole entry.
+  resumeInterruptedSwitch(root, guiRoot);
+  const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
+  if (base) {
+    if (linkedStamp(root, activeLink(root)) !== base) pointActive(root, base);
+    for (const entry of entries) {
+      if (!linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`, { replaceable: true });
+    }
+    if (base !== stamp) pointActive(root, stamp);
+  } else {
+    // With no flows served, the links are made before payloads/active, and a
+    // link left from an earlier payload must not bring its flows back first.
+    if (!statOrNull(flowsLink(root))) {
+      fs.rmSync(activeLink(root), { force: true });
+      fs.rmSync(legacyActiveLink(root), { force: true });
+    }
+    const switched = [];
+    try {
+      for (const entry of entries) {
+        if (entry.name && modules.unlink.includes(entry.name)) continue;
+        if (!linksTo(entry.link, entry.via)) switched.push(atomicSymlink(entry.link, entry.via, `${entry.label} link`, { keepBackup: true }));
+      }
+      pointActive(root, stamp);
+    } catch (error) {
+      const failures = restoreSwitched(switched);
+      if (failures.length) error.message += `; could not restore: ${failures.join('; ')}`;
+      throw error;
+    }
+    for (const entry of switched) discardBackup(entry.backup);
+  }
+  // Every entry now leads through payloads/active.
+  if (lstatOrNull(legacyActiveLink(root))) fs.rmSync(legacyActiveLink(root), { force: true });
+  // Links the new payload does not carry now lead nowhere; remove them.
+  for (const name of modules.unlink) {
+    const stat = lstatOrNull(moduleLink(root, name));
+    if (stat && stat.isSymbolicLink()) fs.rmSync(moduleLink(root, name), { force: true });
+  }
+  const result = { flowsLink: flowsLink(root), target: path.join(payloadDir(root, stamp), 'flows.json') };
+  if (guiRoot) Object.assign(result, { guiLink: guiLink(guiRoot), guiTarget: guiPayloadDir(root, stamp) });
   if (modules.link.length || modules.unlink.length) result.modules = modules;
   return result;
 }
@@ -626,11 +1097,12 @@ function legacyCaptureStamp(root, flowsPath, guiRoot) {
 
 // Why the live flows, GUI and helper modules are not one set, or null.
 // deploy.sh records no committed payload, so the live links are checked
-// against the payload the flows point into. flipTo() switches flows first,
-// then the GUI, then each module in that payload's modules.json, and
-// restoreSwitched() puts them back in reverse order, so an interrupted switch
-// leaves flows linked into a payload that the GUI or one of those modules
-// does not point into. What no switch leaves behind is one set:
+// against the payload the flows point into. flipTo() now switches every entry
+// with one rename of payloads/active, but the flipTo() of v0.8.2 and
+// earlier switched flows first, then the GUI, then each module in that
+// payload's modules.json, so a deploy interrupted on such a gateway leaves
+// flows linked into a payload that the GUI or one of those modules does not
+// point into. What no switch leaves behind is one set:
 // - a regular flows file: no switch is under way;
 // - a regular GUI directory: a sysupgrade keeps /srv but replaces the GUI
 //   link with the image GUI, and an older deploy.sh wrote the GUI in place;
@@ -717,19 +1189,80 @@ function clearLegacyCapture(root) {
   fs.rmSync(legacyCapturePath(root), { force: true });
 }
 
+// Removing payloads/active takes every entry routed through it away at once;
+// the links that led through it are removed after it.
 function deactivate(root, stamp, guiRoot = null) {
   const current = currentStamp(root);
+  const gui = guiRoot ? guiStamp(root, guiRoot) : null;
+  if (activeStamp(root) === stamp) {
+    fs.rmSync(activeLink(root), { force: true });
+    fs.rmSync(legacyActiveLink(root), { force: true });
+    if (linksTo(flowsLink(root), viaFlows(root))) fs.rmSync(flowsLink(root), { force: true });
+    if (guiRoot && linksTo(guiLink(guiRoot), viaGui(root))) fs.rmSync(guiLink(guiRoot), { force: true });
+    for (const name of fs.readdirSync(root)) {
+      if (MODULE_NAME.test(name) && linksTo(moduleLink(root, name), viaModule(root, name))) {
+        fs.rmSync(moduleLink(root, name), { force: true });
+      }
+    }
+  }
   if (current === stamp) fs.rmSync(flowsLink(root), { force: true });
-  if (guiRoot && guiStamp(root, guiRoot) === stamp) fs.rmSync(guiLink(guiRoot), { force: true });
+  if (gui === stamp) fs.rmSync(guiLink(guiRoot), { force: true });
   removeModuleLinksInto(root, stamp);
 }
 
 // Also removes module links into the payload: the links linkNewModules made
 // for modules the gateway did not have before this deploy.
 function discardPayload(root, stamp) {
-  if (currentStamp(root) === stamp) throw new Error(`discardPayload: payload is still live: ${stamp}`);
+  if (currentStamp(root) === stamp || activeStamp(root) === stamp) {
+    throw new Error(`discardPayload: payload is still live: ${stamp}`);
+  }
   removeModuleLinksInto(root, stamp);
   fs.rmSync(payloadDir(root, stamp), { recursive: true, force: true });
+}
+
+// Payloads a deploy staged and never switched to (a retry that stopped before
+// its switch leaves one each time): recorded "staged" by deploy.sh, not
+// active or served, no helper module linked into them, and no pending switch
+// (the boot may still need that candidate). A payload from before the health
+// record, or one that was ever activated, is never among them.
+function staleStages(root, keepStamp = '') {
+  const live = new Set([activeStamp(root), currentStamp(root), keepStamp].filter(Boolean));
+  const linked = new Set(payloadModuleLinks(root).values());
+  return listStamps(root).filter((stamp) => {
+    if (live.has(stamp) || linked.has(stamp)) return false;
+    if (fs.existsSync(pendingSwitchPath(root, stamp))) return false;
+    const record = readHealth(root, stamp);
+    return Boolean(record && record.state === 'staged');
+  });
+}
+
+function treeKb(target) {
+  let bytes = 0;
+  const walk = (entry) => {
+    const stat = lstatOrNull(entry);
+    if (!stat) return;
+    if (stat.isDirectory()) for (const name of fs.readdirSync(entry)) walk(path.join(entry, name));
+    else bytes += stat.size;
+  };
+  walk(target);
+  return Math.ceil(bytes / 1024);
+}
+
+// "<stamp> <KiB>" per stale stage, one per line (the deploy's free-space
+// preflight counts them).
+function staleStageSizes(root, keepStamp = '') {
+  return staleStages(root, keepStamp).map((stamp) => `${stamp} ${treeKb(payloadDir(root, stamp))}`).join('\n');
+}
+
+// Removes the stale stages; returns one line per removed payload.
+function clearStaleStages(root, keepStamp = '') {
+  const lines = [];
+  for (const stamp of staleStages(root, keepStamp)) {
+    const kb = treeKb(payloadDir(root, stamp));
+    discardPayload(root, stamp);
+    lines.push(`removed payloads/${stamp}, staged by an earlier deploy that never switched to it (${kb} KiB)`);
+  }
+  return lines.join('\n');
 }
 
 function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
@@ -783,10 +1316,413 @@ function verifyCompatibility(root, stamp, schemaHead, schemaLedger) {
     metadata.schema_ledger === String(schemaLedger);
 }
 
+// Health record (v0.8.2 review, S-1 follow-up). A rollback target must be a
+// payload that passed deploy.sh's health check. payloads/<stamp>/health.json
+// says "activated" from just before a deploy switches to the payload, and
+// "healthy" once its health check passed, with the digests of the flows, the
+// GUI and each module as they were then. A payload without the file predates
+// the record (or is a capture of what was running) and is trusted.
+function healthPath(root, stamp) {
+  return path.join(payloadDir(root, stamp), 'health.json');
+}
+
+// Writes <text> to <target> through a temporary file, with the file synced
+// before the rename and the directory after it, so a power cut leaves the old
+// or the new record on storage, never none, and the record is on storage
+// before the payload switch that follows it.
+function writeDurable(target, text) {
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    const fd = fs.openSync(temp, 'wx');
+    try {
+      fs.writeSync(fd, text);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temp, target);
+    const dir = fs.openSync(path.dirname(target), 'r');
+    try {
+      fs.fsyncSync(dir);
+    } finally {
+      fs.closeSync(dir);
+    }
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+  return target;
+}
+
+function writeHealth(root, stamp, record) {
+  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`health record: payload missing: ${stamp}`);
+  return writeDurable(healthPath(root, stamp), `${JSON.stringify({ format: 1, payload_stamp: stamp, ...record })}\n`);
+}
+
+// A payload this deploy staged: never a rollback target until a health check
+// passes. A payload from before the record (v0.8.0, v0.8.1, a capture of what
+// was running) has no file and stays trusted.
+function markStaged(root, stamp) {
+  return writeHealth(root, stamp, { state: 'staged' });
+}
+
+function payloadDigests(root, stamp) {
+  const manifest = readModuleManifest(root, stamp);
+  const modules = {};
+  for (const name of manifest ? manifest.modules : []) modules[name] = hashModule(moduleTarget(root, stamp, name));
+  return {
+    flows_sha256: hashFile(path.join(payloadDir(root, stamp), 'flows.json')),
+    gui_sha256: isDirectory(guiPayloadDir(root, stamp)) ? hashTree(guiPayloadDir(root, stamp), { followLinks: true }) : null,
+    modules,
+  };
+}
+
+function markActivated(root, stamp) {
+  return writeHealth(root, stamp, { state: 'activated' });
+}
+
+function markHealthy(root, stamp) {
+  return writeHealth(root, stamp, { state: 'healthy', ...payloadDigests(root, stamp) });
+}
+
+// True for a payload without a health record, and for one recorded healthy
+// whose files still match the digests. An "activated" payload never passed
+// its health check; files changed since (an older deploy.sh writes helper
+// modules in place, through the module links) make it a set that did not.
+function payloadTrusted(root, stamp) {
+  const file = healthPath(root, stamp);
+  if (!fs.existsSync(file)) return true;
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    return false;
+  }
+  if (!record || record.format !== 1 || record.payload_stamp !== stamp || record.state !== 'healthy' ||
+      !record.modules || typeof record.modules !== 'object') return false;
+  // The files recorded healthy must be unchanged. A module captureModules()
+  // copied into the payload later is a copy of what its flows ran with.
+  try {
+    const dir = payloadDir(root, stamp);
+    if (hashFile(path.join(dir, 'flows.json')) !== record.flows_sha256) return false;
+    const gui = isDirectory(guiPayloadDir(root, stamp)) ? hashTree(guiPayloadDir(root, stamp), { followLinks: true }) : null;
+    if (gui !== record.gui_sha256) return false;
+    return Object.entries(record.modules).every(([name, digest]) =>
+      MODULE_NAME.test(name) && isDirectory(moduleTarget(root, stamp, name)) && hashModule(moduleTarget(root, stamp, name)) === digest);
+  } catch (_) {
+    return false;
+  }
+}
+
+// A payload a deploy may return to: complete, trusted, and, on a gateway
+// whose helper modules link into payloads, carrying its own modules
+// (flipTo refuses one without; a payload staged by a deploy cut before its
+// modules has flows and GUI only).
+function returnable(root, stamp, linked = payloadModuleLinks(root)) {
+  if (!verifyPair(root, stamp) || !payloadTrusted(root, stamp)) return false;
+  if (linked.size === 0) return true;
+  try {
+    return readModuleManifest(root, stamp) !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
+// The payload a failed deploy returns to: the served one when it is trusted,
+// else the newest other complete, trusted payload, else the served one (a
+// complete set is better than none; deploy.sh warns).
+function rollbackTarget(root, servedStamp, deployStamp = '') {
+  if (!servedStamp) return '';
+  if (payloadTrusted(root, servedStamp)) return servedStamp;
+  const candidates = listStamps(root).filter((stamp) => stamp !== servedStamp && stamp !== deployStamp).reverse();
+  const linked = payloadModuleLinks(root);
+  for (const stamp of candidates) {
+    if (returnable(root, stamp, linked)) return stamp;
+  }
+  return servedStamp;
+}
+
+function readHealth(root, stamp) {
+  try {
+    const record = JSON.parse(fs.readFileSync(healthPath(root, stamp), 'utf8'));
+    return record && record.format === 1 && record.payload_stamp === stamp ? record : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// A payload whose health check ran and failed: known bad, never a target.
+function markFailed(root, stamp, reason = '') {
+  return writeHealth(root, stamp, { state: 'failed', reason: String(reason) });
+}
+
+// The gateway's payload state, for status and for the next deploy:
+// /srv/node-red/payload-state.json, written only through this helper (by
+// deploy.sh, by node-red.init's start-up step, and by the operator's HELD
+// restore command). Format 1:
+//   { "format": 1, "active": "<stamp>", "state": "healthy" | "unverified" | "held",
+//     "reason": "<one sentence>", "updated_at": "<ISO 8601>", "writer": "deploy.sh" | "node-red.init" | "operator" }
+// osi-health-helper reports state "unverified" or "held" as health_state, so
+// it reaches the heartbeat and the local health summary.
+const PAYLOAD_STATE = 'payload-state.json';
+
+function payloadStatePath(root) {
+  return path.join(root, PAYLOAD_STATE);
+}
+
+function writePayloadState(root, active, state, reason = '', writer = 'deploy.sh') {
+  if (!['healthy', 'unverified', 'held'].includes(state)) throw new Error(`payload state: unknown state ${state}`);
+  const target = payloadStatePath(root);
+  const record = { format: 1, active: String(active || ''), state, reason: String(reason), updated_at: new Date().toISOString(), writer };
+  return writeDurable(target, `${JSON.stringify(record)}\n`);
+}
+
+function readPayloadState(root) {
+  try {
+    const record = JSON.parse(fs.readFileSync(payloadStatePath(root), 'utf8'));
+    return record && record.format === 1 ? record : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// The active payload when a deploy switched to it and was cut before its
+// health check ran ("activated"): not known bad, only unchecked.
+function unverifiedActive(root) {
+  const active = activeStamp(root) || currentStamp(root);
+  if (!active) return null;
+  const record = readHealth(root, active);
+  return record && record.state === 'activated' ? active : null;
+}
+
+const UNVERIFIED_REASON = 'switched in by a deploy that was cut before its health check; it runs because it matches the database';
+
+// node-red.init, before Node-RED starts: an unchecked active payload still
+// starts (it is the code that matches the database; older code never starts
+// on a migrated database), and the state file says it is unverified.
+// Returns the line node-red.init logs, or null.
+function recordBootState(root) {
+  const active = unverifiedActive(root);
+  if (!active) return null;
+  const current = readPayloadState(root);
+  if (current && current.active === active && current.state !== 'healthy') return null;
+  writePayloadState(root, active, 'unverified', UNVERIFIED_REASON, 'node-red.init');
+  return `WARN: payloads/${active} runs unverified: ${UNVERIFIED_REASON}`;
+}
+
+// What the next deploy does first when the active payload is unchecked:
+// "<payload>|<migrated 0/1>|<fallback>|<restore target>", or null.
+// - fallback: the newest complete, trusted payload recorded for the current
+//   schema. Empty means the cut deploy migrated the database (or the schema
+//   is unknown): only the unchecked payload matches it, so its owed health
+//   check decides, and a failure holds Node-RED stopped.
+// - restore target: the payload a held gateway returns to after restoring
+//   the pre-migration backup.
+function owedCheckPlan(root, schemaHead = '', schemaLedger = '') {
+  const active = unverifiedActive(root);
+  if (!active) return null;
+  const linked = payloadModuleLinks(root);
+  const others = listStamps(root).filter((stamp) => stamp !== active).reverse()
+    .filter((stamp) => returnable(root, stamp, linked));
+  const fits = schemaHead === '' ? null : others.find((stamp) => verifyCompatibility(root, stamp, schemaHead, schemaLedger));
+  return [active, fits ? '0' : '1', fits || '', others[0] || ''].join('|');
+}
+
+// Item 3 of #636's last round: a cut between the migration and the switch.
+// Before migrate-cli runs, deploy.sh records in the candidate's own directory
+// the ledger the migration will produce (schema_*) and the one it starts from
+// (from_*). The boot decides from the database's actual applied ledger, never
+// from the record alone (bootSchemaDecision).
+const PENDING_SWITCH = 'pending-switch.json';
+
+function pendingSwitchPath(root, stamp) {
+  return path.join(payloadDir(root, stamp), PENDING_SWITCH);
+}
+
+// <bootOwned>: JSON from lib/osi-migrate/boot-owned-fingerprints.js (the
+// fingerprints of the new bodies pending migrations give objects the old boot
+// node recreates), or "null" when they could not be derived.
+function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fromLedger, bootOwned = 'null') {
+  if (!isDirectory(payloadDir(root, stamp))) throw new Error(`pending switch: payload missing: ${stamp}`);
+  const owned = typeof bootOwned === 'string' ? JSON.parse(bootOwned) : bootOwned;
+  if (owned !== null && !Array.isArray(owned)) throw new Error('pending switch: boot-owned fingerprints must be a list or null');
+  return writeDurable(pendingSwitchPath(root, stamp), `${JSON.stringify({
+    format: 2,
+    payload_stamp: stamp,
+    schema_head: String(schemaHead),
+    schema_ledger: String(schemaLedger),
+    from_head: String(fromHead),
+    from_ledger: String(fromLedger),
+    boot_owned: owned,
+  })}\n`);
+}
+
+function readPendingSwitches(root) {
+  const records = [];
+  for (const stamp of listStamps(root)) {
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(pendingSwitchPath(root, stamp), 'utf8'));
+    } catch (_) {
+      continue;
+    }
+    if (record && (record.format === 1 || record.format === 2) && record.payload_stamp === stamp &&
+        typeof record.schema_ledger === 'string' && typeof record.from_ledger === 'string') records.push(record);
+  }
+  return records;
+}
+
+function removeDurable(target) {
+  if (!fs.existsSync(target)) return;
+  fs.rmSync(target, { force: true });
+  const dir = fs.openSync(path.dirname(target), 'r');
+  try {
+    fs.fsyncSync(dir);
+  } finally {
+    fs.closeSync(dir);
+  }
+}
+
+function clearPendingSwitch(root, stamp) {
+  removeDurable(pendingSwitchPath(root, stamp));
+  return true;
+}
+
+// A deploy that records its own pending switch removes every older one.
+function clearOtherPendingSwitches(root, keepStamp) {
+  for (const record of readPendingSwitches(root)) {
+    if (record.payload_stamp !== keepStamp) clearPendingSwitch(root, record.payload_stamp);
+  }
+  return true;
+}
+
+function readCompatibility(root, stamp) {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(compatibilityPath(root, stamp), 'utf8'));
+    return metadata && metadata.format === 1 && metadata.payload_stamp === stamp ? metadata : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// True when ledger <a> is a proper prefix of ledger <b> ("v:c,v:c,...").
+function properPrefix(a, b) {
+  if (a === b) return false;
+  return a === '' ? b !== '' : b.startsWith(`${a},`);
+}
+
+// A candidate the boot may switch to: complete, with its modules sealed where
+// helpers are linked, never one whose health check failed.
+function forwardable(root, stamp) {
+  const record = readHealth(root, stamp);
+  if (record && record.state === 'failed') return false;
+  // Without a GUI root: verifyPair(root, stamp, guiRoot) also checks the live
+  // GUI link, which a candidate that is not active yet never matches.
+  if (!verifyPair(root, stamp)) return false;
+  if (payloadModuleLinks(root).size === 0) return true;
+  try {
+    return readModuleManifest(root, stamp) !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
+const INTERRUPTED_REASON = 'the upgrade was interrupted while the database was being updated';
+
+// node-red.init, after the switch repair and before the hold check, with the
+// database's applied ledger read read-only ("<head>|<ledger>"). Returns the
+// line node-red.init logs, or null. Decides one of:
+// - the active payload fits the database: nothing to do; pending records are
+//   moot and removed;
+// - (a) the ledger is a candidate's complete one: switch forward to it
+//   (checked by the next deploy, state "unverified");
+// - (g) the ledger lies strictly between a candidate's start and its complete
+//   one: the migration was cut part way. The old code must not start (its boot
+//   node would rewrite triggers the migration replaced, and the retry would
+//   then refuse): held, and the deploy run again completes the update;
+// - (b) any other mismatch: start what is there, state "unverified" with the
+//   reason, as before.
+// <storedFingerprints>: schema_object_fingerprints as lines
+// "<type> <name> <fingerprint>".
+function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints = '') {
+  const stored = new Map(String(storedFingerprints).split('\n').map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length === 3).map(([type, name, fingerprint]) => [`${type} ${name}`, fingerprint]));
+  // A hold deploy.sh wrote (a failure it observed) stands; only the boot's own
+  // hold of an interrupted update is decided again.
+  const state = readPayloadState(root);
+  if (state && state.state === 'held' && state.writer !== 'node-red.init') return null;
+  const active = activeStamp(root) || currentStamp(root);
+  const activeCompat = active ? readCompatibility(root, active) : null;
+  const records = readPendingSwitches(root);
+  if (activeCompat && activeCompat.schema_ledger === dbLedger) {
+    for (const record of records) clearPendingSwitch(root, record.payload_stamp);
+    return null;
+  }
+  const others = records.filter((record) => record.payload_stamp !== active).reverse();
+  for (const record of records) {
+    if (record.payload_stamp === active) clearPendingSwitch(root, active);
+  }
+  const forward = others.find((record) => record.schema_ledger === dbLedger && forwardable(root, record.payload_stamp));
+  if (forward) {
+    const stamp = forward.payload_stamp;
+    writeCompatibility(root, stamp, forward.schema_head, forward.schema_ledger);
+    markActivated(root, stamp);
+    flipTo(root, stamp, guiRoot, active || '');
+    const reason = `the deploy that migrated the database to schema ${forward.schema_head} was cut before its switch; the boot switched to payloads/${stamp}, the only payload that fits it; its health check is owed`;
+    writePayloadState(root, stamp, 'unverified', reason, 'node-red.init');
+    clearPendingSwitch(root, stamp);
+    return `WARN: switched forward to payloads/${stamp}: ${reason}`;
+  }
+  const interrupted = others.find((record) =>
+    properPrefix(record.from_ledger, dbLedger) && properPrefix(dbLedger, record.schema_ledger));
+  // (g) as ruled after the old-boot matrix: hold only where the retry
+  // provably cannot finish once the old payload has started. That is when a
+  // pending migration's new body for an object the old boot node recreates is
+  // already stamped: the old boot writes its own body, and the retry's drift
+  // preflight then refuses. Unstamped, the old boot puts back exactly the
+  // stamped schema and the retry completes. A record that cannot tell (old
+  // format, or the fingerprints not derived) holds.
+  const holdFor = (reason, stamp, head) => {
+    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead} of ${head}, upgrade to payloads/${stamp}); ${reason}. Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
+    writePayloadState(root, active || stamp, 'held', `${INTERRUPTED_REASON}; ${reason}; run the deploy again to complete it`, 'node-red.init');
+    writeDurable(path.join(root, 'DEPLOY-HELD'), `${line}\n`);
+    return line;
+  };
+  if (interrupted) {
+    const owned = interrupted.boot_owned;
+    if (!Array.isArray(owned)) {
+      return holdFor(owned === null
+        ? 'the deploy could not derive what the old payload would rewrite, so nothing proves the retry can finish'
+        : 'its pending-switch record is of an older format, so nothing proves the retry can finish', interrupted.payload_stamp, interrupted.schema_head);
+    }
+    const stamped = owned.find((o) => stored && stored.get(`${o.type} ${o.name}`) === o.fingerprint);
+    if (stamped) {
+      return holdFor(`migration ${stamped.version}'s new body of ${stamped.type} ${stamped.name} is stamped, which the old payload's start would undo and the retry would then refuse`, interrupted.payload_stamp, interrupted.schema_head);
+    }
+    const base = activeCompat ? activeCompat.schema_head : interrupted.from_head;
+    const reason = `payloads/${active} was recorded for schema ${base}, the database is at schema ${dbHead}: the upgrade to payloads/${interrupted.payload_stamp} was cut during its migration; running the deploy again completes it`;
+    writePayloadState(root, active, 'unverified', reason, 'node-red.init');
+    return `WARN: ${reason}`;
+  }
+  // No usable record, but the database is ahead of the active payload's
+  // schema: nothing proves a retry can finish after the old payload starts.
+  if (activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger)) {
+    return holdFor('no readable pending-switch record proves the retry can finish', '?', '?');
+  }
+  if (activeCompat) {
+    const reason = `payloads/${active} was recorded for schema ${activeCompat.schema_head}, the database is at schema ${dbHead}`;
+    const current = readPayloadState(root);
+    if (!(current && current.active === active && current.state === 'held')) {
+      writePayloadState(root, active, 'unverified', reason, 'node-red.init');
+    }
+    return `WARN: ${reason}`;
+  }
+  return null;
+}
+
 function listStamps(root) {
   try {
     return fs.readdirSync(payloadsRoot(root))
-      .filter((entry) => fs.statSync(payloadDir(root, entry)).isDirectory())
+      .filter((entry) => isStampName(entry) && fs.lstatSync(payloadDir(root, entry)).isDirectory())
       .sort();
   } catch (_) {
     return [];
@@ -815,6 +1751,11 @@ function prunePayloads(root, keepN) {
   if (current) {
     keep.add(current);
   }
+  if (activeStamp(root)) keep.add(activeStamp(root));
+  // The payload the next deploy would roll back to.
+  const moduleLinks = payloadModuleLinks(root);
+  const trusted = [...stamps].reverse().find((stamp) => returnable(root, stamp, moduleLinks));
+  if (trusted) keep.add(trusted);
   for (const linked of payloadModuleLinks(root).values()) keep.add(linked);
   const removed = [];
   for (const stamp of stamps) {
@@ -829,6 +1770,7 @@ function prunePayloads(root, keepN) {
 
 module.exports = {
   LIVE_MODULES,
+  activeStamp,
   LIVE_ENTRIES,
   stagePayload,
   sealModules,
@@ -842,8 +1784,32 @@ module.exports = {
   captureExisting,
   legacyCaptureStamp,
   legacyCapturePreflight,
+  resumeInterruptedSwitch,
+  switchPreflight,
+  imageLayerDir,
   clearLegacyCapture,
   verifyPair,
+  markStaged,
+  markActivated,
+  markHealthy,
+  payloadTrusted,
+  rollbackTarget,
+  readHealth,
+  markFailed,
+  writePayloadState,
+  readPayloadState,
+  unverifiedActive,
+  recordBootState,
+  staleStages,
+  staleStageSizes,
+  clearStaleStages,
+  writePendingSwitch,
+  readPendingSwitches,
+  clearPendingSwitch,
+  clearOtherPendingSwitches,
+  readCompatibility,
+  bootSchemaDecision,
+  owedCheckPlan,
   writeCompatibility,
   compatibilityExists,
   verifyCompatibility,

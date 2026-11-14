@@ -106,7 +106,11 @@ test('migration stop and local health gates consume the named service state', ()
   const stopProbe = deploy.indexOf('wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', stop);
   const checkpoint = deploy.indexOf('if ! checkpoint_live_db; then', stop);
   const health = deploy.indexOf('--- Flip payload + local health self-check');
-  const healthCall = deploy.indexOf('wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"', health);
+  // The deploy's check judges the start through check_node_red_start, which
+  // waits with the bounded helper.
+  const healthCall = deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}" "${NODE_RED_HEALTH_TIMEOUT:-30}"', health);
+  const checkStart = deploy.indexOf('check_node_red_start() {');
+  assert.ok(deploy.indexOf('wait_for_node_red_health "$nrs_health_timeout"', checkStart) > checkStart);
   const healthWait = healthWaitFragment();
   const healthProbe = healthWait.indexOf('node_red_state="$(node_red_service_state)"');
   const guiProbe = healthWait.indexOf('127.0.0.1:1880/gui');

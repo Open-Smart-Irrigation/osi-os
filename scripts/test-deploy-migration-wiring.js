@@ -286,7 +286,9 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   const defaultDeclIdx = deploy.indexOf('PAYLOAD_FLIPPED=0');
   const runSchemaMigrationDefIdx = indexOf('run_schema_migration() {');
   assert.ok(defaultDeclIdx >= 0 && defaultDeclIdx < runSchemaMigrationDefIdx, 'PAYLOAD_FLIPPED must default to 0 before run_schema_migration is defined');
-  assert.match(successBlock, /if ! swap_call flipTo "\$DEPLOY_STAMP" "\$GUI_ROOT"/,
+  // The health record is written just before the switch; both are one
+  // explicitly checked condition, so a failure of either is caught here.
+  assert.match(successBlock, /if ! swap_call markActivated "\$DEPLOY_STAMP" >\/dev\/null \|\| \\\n\s*! swap_call flipTo "\$DEPLOY_STAMP" "\$GUI_ROOT" "\$\{SERVED_STAMP:-\}" >\/dev\/null; then/,
     'paired activation must be checked explicitly while errexit is disabled by the migration call site');
   assert.match(successBlock, /if \[ ! -d "\$PAYLOADS_ROOT\/\$DEPLOY_STAMP" \]; then[\s\S]*leaving Node-RED stopped/,
     'a missing staged payload must abort before restarting on an older payload');
@@ -323,17 +325,17 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   // listener, so /gui reachability alone cannot prove schema init succeeded.
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
   const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
-  const logMarkIdx = deploy.indexOf('NODE_RED_LOG_MARK="$(logread 2>/dev/null | wc -l)"', healthCheckHeaderIdx);
-  const probeCallIdx = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
-  const grepIdx = indexOf('grep -q "devices rebuild ABORTED"');
-  const overrideIdx = deploy.indexOf('PROBE_OK=1', grepIdx);
+  const markIdx = deploy.indexOf('mark_node_red_log', healthCheckHeaderIdx);
+  const checkCallIdx = deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}"', healthCheckHeaderIdx);
+  const failedIdx = deploy.indexOf('PROBE_OK=1', checkCallIdx);
   const commitDecisionIdx = deploy.indexOf('if [ "$PROBE_OK" = "0" ]; then\n    echo "OK: committing payload $DEPLOY_STAMP"');
 
-  assert.ok(logMarkIdx >= 0 && logMarkIdx < restartIdx, 'the log line count must be captured BEFORE the restart, so only new lines from this restart are considered');
-  assert.ok(restartIdx < grepIdx, 'restart still precedes the schema-init log gate');
-  assert.ok(grepIdx < probeCallIdx, 'the abort-log check must run before the /gui reachability wait');
-  assert.ok(grepIdx < overrideIdx && overrideIdx < commitDecisionIdx, 'a found abort log line must flip PROBE_OK back to failing BEFORE the commit/rollback decision');
-  assert.match(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK \+ 1\)\)"/, 'must only scan log lines appended since the mark (busybox tail -n +N), never the whole ring including stale prior aborts');
+  assert.ok(markIdx >= 0 && markIdx < restartIdx, 'the start marker is written BEFORE the restart, so only lines from this restart are considered');
+  assert.ok(restartIdx < checkCallIdx, 'restart still precedes the start check');
+  assert.ok(checkCallIdx < failedIdx && failedIdx < commitDecisionIdx, 'a failed start sets PROBE_OK=1 BEFORE the commit/rollback decision');
+  const lines = deploy.slice(indexOf("NODE_RED_START_FAILURE_LINES='"), indexOf('node_red_log_marks=0'));
+  assert.match(lines, /devices rebuild ABORTED/, 'the boot node abort is an observed failure');
+  assert.doesNotMatch(deploy, /tail -n "\+\$\(\(NODE_RED_LOG_MARK/, 'never by line position in the ring');
 });
 
 test('deploy.sh has a single migration call site and no inline schema DDL helpers', () => {
@@ -395,4 +397,38 @@ test('rollback uses retained verification only when the migration runner was una
   assert.match(deploy, /rollback_verify_mode="full"/);
   assert.match(deploy, /rollback_verify_mode="retained"/);
   assert.match(deploy, /verify_payload_db_compatibility "\$PREV_STAMP" "\$rollback_verify_mode"/);
+});
+
+// Item 1 of #636's last round: copies earlier migrations left (the
+// pre-migration copy and the runner's .bak- copies, each about the database's
+// size) are named and counted by the disk preflight, so an operator who is
+// short of space knows what can go.
+test('deploy migration wiring: the disk preflight counts and names earlier database copies and staged payloads', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const start = deploy.indexOf('    db_bytes=$(ls -ln "$DB_PATH"');
+  const end = deploy.indexOf('    if [ -n "${PREV_STAMP:-}" ]; then', start);
+  assert.ok(start > 0 && end > start);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-disk-copies-'));
+  try {
+    const db = path.join(dir, 'farming.db');
+    const backups = path.join(dir, 'backups');
+    fs.mkdirSync(backups);
+    fs.writeFileSync(db, Buffer.alloc(10 * 1024));
+    fs.writeFileSync(path.join(backups, 'farming.db.premigrate-20261112T000000Z'), Buffer.alloc(10 * 1024));
+    fs.writeFileSync(`${db}.bak-2026-11-12T00-00-00-000Z`, Buffer.alloc(10 * 1024));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    // df reports less than twice the database plus the margin.
+    fs.writeFileSync(path.join(bin, 'df'), '#!/bin/sh\necho "Filesystem 1K-blocks Used Available Use% Mounted"\necho "/dev/x 100 50 50 50% /data"\n', { mode: 0o755 });
+    // One payload an earlier deploy staged and never switched to (R3, item 4).
+    const stub = 'swap_call() { [ "$1" = staleStageSizes ] && echo "20261101T000000Z 30"; }';
+    const script = `${stub}\nrun() {\nDB_PATH=${JSON.stringify(db)}\nbackup_dir=${JSON.stringify(backups)}\nPAYLOADS_ROOT=${JSON.stringify(path.join(dir, 'payloads'))}\nDEPLOY_STAMP=new\n${deploy.slice(start, end)}\nreturn 0\n}\nrun`;
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, MIGRATE_MIN_FREE_MARGIN_MB: '1' } });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /earlier database copies and staged payloads take 50KB/);
+    assert.match(result.stderr, /premigrate-20261112T000000Z .*farming\.db\.bak-2026-11-12T00-00-00-000Z .*payloads\/20261101T000000Z .*; removing the ones no longer needed frees that space/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

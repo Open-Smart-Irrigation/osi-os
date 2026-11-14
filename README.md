@@ -163,15 +163,6 @@ a gateway in use by image: use `deploy.sh` as described under
 [bundle path over a flaky link](docs/operations/deploying-over-a-flaky-link.md).
 Flash an image only for a new device or a deliberate reset.
 
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
 |                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |
@@ -230,6 +221,8 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
 # 4. Nothing to restart: deploy.sh restarts Node-RED itself and prints a verdict.
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
+
+If the SSH session drops, the deploy ends through its exit path: before the database is changed the gateway runs as before, and after a cut the next boot either completes the switch or holds the gateway with the line "run the deploy again" in `/srv/node-red/DEPLOY-HELD`. In every case, run the same command again. On a link that drops often, use the offline bundle (below), which runs detached and writes its log to `/data/deploy-<time>.log`. The deploy ends with `OK`, with an `UNVERIFIED` payload line (the new release runs, and the next deploy checks it again), or with `ERROR`/`HELD` and its reason.
 
 The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed and enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
@@ -303,10 +296,6 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 ---
 
 ### Re-deploying after changes
-
-Read the caution under [Device Setup](#device-setup) first: until the next
-release, a gateway whose `/usr/lib/node-red/gui` is still a directory must not
-be upgraded by script.
 
 Re-run `deploy.sh` to update application components. It is safe to re-run on live devices because it preserves `/data/db/farming.db` and only seeds the DB on devices where that file is absent:
 

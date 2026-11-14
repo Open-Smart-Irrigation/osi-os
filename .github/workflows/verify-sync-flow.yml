@@ -230,12 +230,33 @@ jobs:
           node --test scripts/deploy-command-ledger-dependency.test.js \
             scripts/deploy-fetch-list.test.js \
             scripts/deploy-payload-lifecycle.test.js
+      # A deploy killed after any filesystem change of the payload activation
+      # leaves the old or the new payload complete, and its retry and rollback
+      # both activate a complete set (v0.8.2 review, S-1).
+      - name: Payload activation kill matrix
+        run: node --test scripts/deploy-payload-kill-matrix.test.js
+      # A deploy cut between its migration and its switch (#636, item 3): a
+      # cut after each of the ten commits, then the boot (held, or forward
+      # after the last), then the deploy run again, on a real database with
+      # the real migration runner.
+      - name: Cut during the migration
+        run: node --test --test-concurrency=1 scripts/deploy-cut-during-migration.test.js
+      # The swap helpers of the v0.8.1 and v0.8.2 tags, read from git, on a
+      # gateway in the payloads/active layout: a downgrade ends complete.
+      - name: Payload layout downgrade
+        run: node --test scripts/deploy-payload-downgrade.test.js
       # Gateway records deploy.sh keeps outside the payload: the reported
       # firmware version, which follows the active payload through activation
       # and every rollback, and the
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js
+      # Only the commands both gateway bases carry (NEW-27: no stat on
+      # either): deploy.sh's command check, no absent command or tr
+      # character class on the gateway side, and the second-deploy and
+      # retry paths run with a PATH holding only the bases' commands.
+      - name: Gateway base commands
+        run: node --test --test-concurrency=1 scripts/test-deploy-gateway-commands.js
       # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
       # on the Kiwi profile and gives the Clover its own profile with it instead
       # of aliasing the codec-less field-tester profile; --repair-soil-profiles

@@ -9,6 +9,19 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+
+// Every fixture directory this file makes is removed when the run ends, so
+// repeated runs do not fill the temporary directory.
+const madeFixtureDirs = [];
+const realMkdtempSync = fs.mkdtempSync;
+fs.mkdtempSync = function (...args) {
+  const dir = realMkdtempSync.apply(this, args);
+  madeFixtureDirs.push(dir);
+  return dir;
+};
+process.on('exit', () => {
+  for (const dir of madeFixtureDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 const swap = require('./deploy-payload-swap');
 
 const REPO = path.resolve(__dirname, '..');
@@ -616,7 +629,7 @@ stage_new_deploy() {
   mkdir -p "$SWAP_ROOT/src-new-gui"
   printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
   printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
-  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+  swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" staged >/dev/null
   # What the fetch_required block writes.
   write_module "$MODULE_STAGE/osi-a" "a@$DEPLOY_STAMP"
   write_module "$MODULE_STAGE/osi-b" "b@$DEPLOY_STAMP"
@@ -632,13 +645,13 @@ ${staging}
 # Node-RED stopped for the migration, as run_schema_migration does.
 stop_for_migration() { node_red_restart_needed=1; "$NODE_RED_INIT" stop; }
 commit_migration() { sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (78, 'main', 'applied');"; DB_MIGRATION_COMMITTED=1; }
-flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; PAYLOAD_FLIPPED=1; }
+flip_new() { write_payload_compatibility "$DEPLOY_STAMP"; swap_call markActivated "$DEPLOY_STAMP" >/dev/null; swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "\${SERVED_STAMP:-\${PREV_STAMP:-}}" >/dev/null; PAYLOAD_FLIPPED=1; }
 quiesce_identityd_for_deploy
 ${scenario}
 `;
 }
 
-function runModuleDeploy(scenario) {
+function runModuleDeploy(scenario, transform = (script) => script) {
   const root = fakeRoot();
   const dbPath = path.join(root, 'farming.db');
   const guiRoot = path.join(root, 'gui');
@@ -650,9 +663,11 @@ case "$1" in
   *) exec ${nodePathForShell()} "$@" ;;
 esac
 `, { mode: 0o755 });
-  const result = spawnSync('sh', ['-c', moduleDeployScript(root, dbPath, guiRoot, scenario)], {
+  const result = spawnSync('sh', ['-c', transform(moduleDeployScript(root, dbPath, guiRoot, scenario))], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    // OSI_TEST_GATEWAY_PATH: only the commands both gateway bases carry
+    // (scripts/test-deploy-gateway-commands.js).
+    env: { ...process.env, PATH: `${bin}:${process.env.OSI_TEST_GATEWAY_PATH || process.env.PATH}` },
   });
   const markers = (via = '') => {
     const out = spawnSync(process.execPath, ['-e', `
@@ -698,6 +713,283 @@ printf '%s\\n' deployed
   }
 });
 
+// v0.8.2 review, S-1 follow-up: a deploy killed after its switch and before
+// its health check leaves a complete payload that never passed one. The retry
+// must not take it as its rollback target: when the retry fails, the gateway
+// ends on the last payload that was healthy.
+test('a retry after a kill between the switch and the health check: the owed check fails on an unmigrated database, and the failed retry rolls back to the last healthy payload', () => {
+  const target = fragment('# rollback target begin\n', '# rollback target end');
+  const owed = fragment('# owed health check begin\n', '# owed health check end');
+  const run = runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+stage_new_deploy first
+${target}
+stop_for_migration
+flip_new
+restart_node_red
+# Killed here: no health check ran.
+[ "$(swap_call currentStamp)" = first ]
+mkdir -p "$SWAP_ROOT/bin-owed"
+printf '#!/bin/sh\ncat "$NODE_RED_LOG"\necho "devices rebuild ABORTED"\n' > "$SWAP_ROOT/bin-owed/logread"
+printf '#!/bin/sh\nshift 2\necho "$*" >> "$NODE_RED_LOG"\n' > "$SWAP_ROOT/bin-owed/logger"
+chmod 755 "$SWAP_ROOT/bin-owed/logread" "$SWAP_ROOT/bin-owed/logger"
+PATH="$SWAP_ROOT/bin-owed:$PATH"
+NODE_RED_INIT_TIMEOUT=2
+${owed}
+stage_new_deploy second
+[ "$PREV_STAMP" = old ]
+${target}
+[ "$SERVED_STAMP" = old ] && [ "$PREV_STAMP" = old ]
+stop_for_migration
+flip_new
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' retry-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /retry-rolled-back/);
+    assert.match(run.result.stderr, /payloads\/first failed its owed health check; returning to payloads\/old/);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' },
+      'the healthy v0.8.1 set, not the failed first attempt');
+    assert.equal(run.state('node-red.state'), '1');
+    assert.equal(swap.payloadTrusted(run.root, 'first'), false);
+    assert.equal(swap.readHealth(run.root, 'first').state, 'failed');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('a committed deploy records its payload healthy, and the next deploy returns to it', () => {
+  const target = fragment('# rollback target begin\n', '# rollback target end');
+  const run = runModuleDeploy(`
+stage_new_deploy first
+${target}
+stop_for_migration
+flip_new
+restart_node_red
+swap_call markHealthy first >/dev/null
+stage_new_deploy second
+${target}
+[ "$PREV_STAMP" = first ]
+printf '%s\\n' healthy-target
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /healthy-target/);
+    assert.doesNotMatch(run.result.stderr, /never passed a health check/);
+  } finally {
+    run.cleanup();
+  }
+});
+
+// NEW-5 (v0.8.2 fix campaign): with the GUI directory missing, the capture
+// block dropped the rollback target, and a failed deploy then removed every
+// live link although the payload the flows ran from was complete on disk.
+test('a failed deploy with the GUI directory missing returns to the complete payload and restores the GUI', () => {
+  const run = runModuleDeploy(`
+rm "$GUI_ROOT"
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+mkdir -p "$SWAP_ROOT/src-new-gui"
+printf '%s\\n' new > "$SWAP_ROOT/new-flows.json"
+printf '%s\\n' new > "$SWAP_ROOT/src-new-gui/index.html"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = old ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+${fragment('# rollback target begin\n', '# rollback target end')}
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+stop_for_migration
+flip_new
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' gui-missing-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /is missing; payloads\/old is complete and stays the rollback target/);
+    assert.doesNotMatch(run.result.stderr, /first-deploy payload removed/);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(fs.readFileSync(path.join(run.guiRoot, 'index.html'), 'utf8').trim(), 'old', 'the GUI is served again');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// Council #636 round 1 (row S7): a v0.8.2 switch into "cut" was killed during
+// its module renames: flows, GUI and osi-a are in cut, osi-b is still the
+// v0.8.1 directory. The deploy must neither refuse after the stop nor leave
+// Node-RED stopped: it completes cut toward the new payload, and a failure
+// returns to cut complete.
+function rowS7Setup() {
+  return `
+mkdir -p "$SWAP_ROOT/src-cut-gui"
+printf '%s\\n' cut > "$SWAP_ROOT/cut-flows.json"
+printf '%s\\n' cut > "$SWAP_ROOT/src-cut-gui/index.html"
+swap_call stagePayload cut "$SWAP_ROOT/cut-flows.json" "$SWAP_ROOT/src-cut-gui" >/dev/null
+write_module "$PAYLOADS_ROOT/cut/modules/osi-a" a@cut
+write_module "$PAYLOADS_ROOT/cut/modules/osi-b" b@cut
+swap_call sealModules cut >/dev/null
+swap_call writeCompatibility cut 70 70:v081 >/dev/null
+rm -f "$PAYLOADS_ROOT/active" "$SWAP_ROOT/flows.json" "$GUI_ROOT"
+ln -s payloads/cut/flows.json "$SWAP_ROOT/flows.json"
+ln -s "$PAYLOADS_ROOT/cut/gui" "$GUI_ROOT"
+rm -rf "$SWAP_ROOT/osi-a"
+ln -s payloads/cut/modules/osi-a "$SWAP_ROOT/osi-a"
+stage_new_deploy new
+${fragment('# rollback target begin\n', '# rollback target end')}
+[ "$PREV_STAMP" = cut ]
+stop_for_migration
+flip_new
+`;
+}
+
+test('row S7: a deploy over a v0.8.2 switch cut during its module renames completes it and runs', () => {
+  const run = runModuleDeploy(`${rowS7Setup()}
+restart_node_red
+swap_call verifyPair new "$GUI_ROOT"
+printf '%s\\n' s7-completed
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /module osi-b was left behind by a switch into payloads\/cut that was cut; this switch completes it/);
+    assert.equal(run.state('node-red.state'), '1', 'Node-RED runs');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@new', 'osi-b': 'b@new', 'osi-c': 'c@new' });
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('row S7: a failure after the switch returns to the cut payload complete', () => {
+  const run = runModuleDeploy(`${rowS7Setup()}
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' s7-rolled-back
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'cut', gui: 'cut', compatible: true });
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@cut', 'osi-b': 'b@cut', 'osi-c': 'MODULE_NOT_FOUND' });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// The S-1 ruling: a deploy cut between its switch and its health check.
+// The next deploy runs deploy.sh's owed health check first. A logread stub
+// stands for the boot node's log line.
+function owedCheckScenario({ migrate, health, transform }) {
+  const owed = fragment('# owed health check begin\n', '# owed health check end');
+  return runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+stage_new_deploy cut
+stop_for_migration
+${migrate ? 'commit_migration' : ': no migration'}
+flip_new
+restart_node_red
+# Cut here: no health check ran.
+mkdir -p "$SWAP_ROOT/bin-owed"
+# The boot node's line follows each Node-RED start in the log.
+${health === 'unseen'
+    ? `# A full ring: the start's marker and lines are evicted.
+printf '#!/bin/sh\\necho "kernel: later line"\\n' > "$SWAP_ROOT/bin-owed/logread"`
+    : `printf '#!/bin/sh\\ncat "$NODE_RED_LOG"\\necho "%s"\\n' "${health === 'pass' ? 'sync-init: schema init complete' : 'devices rebuild ABORTED'}" > "$SWAP_ROOT/bin-owed/logread"`}
+printf '#!/bin/sh\nshift 2\necho "$*" >> "$NODE_RED_LOG"\n' > "$SWAP_ROOT/bin-owed/logger"
+chmod 755 "$SWAP_ROOT/bin-owed/logread" "$SWAP_ROOT/bin-owed/logger"
+PATH="$SWAP_ROOT/bin-owed:$PATH"
+NODE_RED_INIT_TIMEOUT=2
+backup_dir="$SWAP_ROOT/backups"
+mkdir -p "$backup_dir"
+cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
+${owed}
+printf '%s\\n' owed-done
+`, transform);
+}
+
+test('owed check: a migrated, unchecked payload that passes becomes healthy and keeps running', () => {
+  const run = owedCheckScenario({ migrate: true, health: 'pass' });
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /OK: payloads\/cut passed its owed health check/);
+    assert.equal(swap.currentStamp(run.root), 'cut');
+    assert.equal(swap.payloadTrusted(run.root, 'cut'), true);
+    assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('owed check: a migrated, unchecked payload that fails is held with the one-line restore instruction', () => {
+  const run = owedCheckScenario({ migrate: true, health: 'fail' });
+  try {
+    assert.equal(run.result.status, 1, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.doesNotMatch(run.result.stdout, /owed-done/);
+    assert.equal(swap.currentStamp(run.root), 'cut', 'older code never starts on the migrated database');
+    assert.equal(run.state('node-red.state'), '0');
+    const held = fs.readFileSync(path.join(run.root, 'DEPLOY-HELD'), 'utf8').trim();
+    assert.match(held, /^HELD: Node-RED stopped\. payloads\/cut failed .* return to payloads\/old with: /);
+    assert.equal(run.result.stderr.trim().split('\n').pop(), held);
+    // The retry comes first; the restore is the last resort and says what it loses.
+    assert.ok(held.indexOf('First: run the deploy again') < held.indexOf('Last resort'), held);
+    assert.match(held, /premigrate-20261112T000000Z \(taken 20261112T000000Z\) loses everything written to the database since it was taken/);
+    assert.doesNotMatch(held.slice(0, held.indexOf('Last resort')), /[Rr]estore/);
+    const state = swap.readPayloadState(run.root);
+    assert.equal(state.state, 'held');
+    assert.equal(state.active, 'cut');
+    assert.equal(swap.readHealth(run.root, 'cut').state, 'failed');
+    assert.equal(run.state('identityd.state'), '0', 'identityd is stopped: the restore command replaces the database');
+  } finally {
+    run.cleanup();
+  }
+});
+
+// Item 1 of the ledger: a migrated, unchecked payload whose start cannot be
+// confirmed (its log lines evicted) but shows no failure is not held.
+test('owed check: a migrated, unchecked payload whose start cannot be seen keeps running, unverified and still owed', () => {
+  const run = owedCheckScenario({ migrate: true, health: 'unseen' });
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /owed-done/);
+    assert.match(run.result.stderr, /payloads\/cut stays active and unverified/);
+    assert.equal(fs.existsSync(path.join(run.root, 'DEPLOY-HELD')), false);
+    assert.equal(run.state('node-red.state'), '1');
+    assert.equal(swap.currentStamp(run.root), 'cut');
+    const state = swap.readPayloadState(run.root);
+    assert.equal(state.state, 'unverified');
+    assert.equal(swap.readHealth(run.root, 'cut').state, 'activated', 'the check stays owed');
+  } finally {
+    run.cleanup();
+  }
+});
+
+test('owed check: an unchecked payload that did not migrate and fails returns to the older healthy payload', () => {
+  const run = owedCheckScenario({ migrate: false, health: 'fail' });
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stderr, /payloads\/cut failed its owed health check; returning to payloads\/old/);
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+    assert.equal(swap.readPayloadState(run.root).active, 'old');
+    assert.equal(run.state('node-red.state'), '1');
+    // The owed check restarted Node-RED on the failed payload; it is stopped
+    // before the links change, then started on the older payload.
+    assert.deepEqual(run.nodeRedLog().slice(-3), ['restart', 'stop', 'restart']);
+  } finally {
+    run.cleanup();
+  }
+});
+
 test('a failure after the stop and before the migration commit restores flows and modules', () => {
   const run = runModuleDeploy(`
 stage_new_deploy new
@@ -725,6 +1017,9 @@ printf '%s\\n' rolled-back
 test('a failure after the migration commit still refuses the old payload and keeps Node-RED stopped', () => {
   for (const flipped of [true, false]) {
     const run = runModuleDeploy(`
+backup_dir="$SWAP_ROOT/backups"
+mkdir -p "$backup_dir"
+cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
 stage_new_deploy new
 stop_for_migration
 commit_migration
@@ -737,6 +1032,13 @@ printf '%s\\n' held
       assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
       assert.match(run.result.stderr, /recorded for a different schema head\/ledger/);
       assert.match(run.result.stderr, /keeping Node-RED stopped/);
+      // One line the operator finds without a log search: the deploy's last
+      // output, and /srv/node-red/DEPLOY-HELD.
+      const held = fs.readFileSync(path.join(run.root, 'DEPLOY-HELD'), 'utf8').trim();
+      assert.equal(held.split('\n').length, 1);
+      assert.equal(run.result.stderr.trim().split('\n').pop(), held, 'the hold line is the last thing the deploy prints');
+      assert.match(held, /^HELD: Node-RED stopped\. payloads\/new failed after migrating .*farming\.db, and payloads\/old does not fit the new schema\./);
+      assert.ok(held.includes(path.join(run.root, 'backups', 'farming.db.premigrate-20261112T000000Z')), 'names the pre-migration backup');
       assert.equal(run.state('node-red.state'), '0');
       assert.doesNotMatch(run.result.stderr, /rollback Node-RED readiness confirmed/);
       const expected = flipped
@@ -744,6 +1046,27 @@ printf '%s\\n' held
         : { 'osi-a': 'a@v081', 'osi-b': 'b@v081', 'osi-c': 'MODULE_NOT_FOUND' };
       assert.deepEqual(run.markers(), expected, 'flows and modules stay one set while held');
       assert.equal(swap.currentStamp(run.root), flipped ? 'new' : 'old');
+      // The command restores the backup and returns to payloads/old (the
+      // service starts are left out here: they are /etc/init.d scripts).
+      // Item 1 of the last round: the text names the cost and the copies it
+      // leaves, and the command puts the release version back.
+      assert.match(held, /loses everything written to the database since it was taken; nothing more is lost while the gateway stays held/);
+      assert.match(held, /leaves the copies .*premigrate-20261112T000000Z and .*farming\.db\.bak-\* on disk/);
+      const command = held.slice(held.indexOf(' with: ') + 7).replace(/ && \/etc\/init\.d\/osi-identityd start && .*$/, '');
+      fs.copyFileSync(path.join(__dirname, 'deploy-payload-swap.js'), path.join(run.root, '.payload-swap.js'));
+      fs.writeFileSync(path.join(run.root, 'payloads', 'old', 'release-version'), '0.8.0\n');
+      const uciBin = path.join(run.root, 'uci-bin');
+      fs.mkdirSync(uciBin);
+      fs.writeFileSync(path.join(uciBin, 'uci'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(path.join(run.root, 'uci.log'))}\n`, { mode: 0o755 });
+      const restore = spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, PATH: `${uciBin}:${process.env.PATH}` } });
+      assert.equal(restore.status, 0, restore.stderr);
+      assert.equal(fs.readFileSync(path.join(run.root, 'uci.log'), 'utf8'), 'set osi-server.cloud.firmware_version=0.8.0\ncommit osi-server\n');
+      assert.equal(swap.currentStamp(run.root), 'old');
+      assert.equal(swap.verifyPair(run.root, 'old', run.guiRoot), true);
+      // The command ends the hold: Node-RED's start no longer refuses.
+      assert.equal(fs.existsSync(path.join(run.root, 'DEPLOY-HELD')), false);
+      assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+      assert.equal(swap.readPayloadState(run.root).active, 'old');
     } finally {
       run.cleanup();
     }
@@ -826,8 +1149,9 @@ ${fragment('# legacy payload capture begin\n', '# legacy payload capture end').r
 [ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
 for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
 ${fragment('# module payload staging begin\n', '# module payload staging end')}
-[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/first/modules/osi-a ]
-[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/first/modules/osi-c ]
+[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/active/modules/osi-a ]
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/active/modules/osi-c ]
+[ "$(readlink "$PAYLOADS_ROOT/active")" = first ]
 PAYLOAD_FLIPPED=0
 DB_MIGRATION_COMMITTED=0
 write_payload_compatibility "$PREV_STAMP"
@@ -1238,5 +1562,140 @@ test('every shipped helper module loads through the payload links as it does fro
     assert.ok(Object.values(repo).filter((value) => value === 'ok').length > 150, 'the comparison must exercise loadable modules');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Ledger item 4 (residual gap 2): each hold path writes the state "held"
+// first, since node-red.init reads only the state file. A kill after any
+// step of a hold path, then a reboot: Node-RED does not start.
+const NODE_RED_INIT_SOURCE = fs.readFileSync(path.join(REPO, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'), 'utf8');
+
+function bootStartsNodeRed(root) {
+  const begin = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair end');
+  assert.ok(begin >= 0 && end > begin);
+  const block = NODE_RED_INIT_SOURCE.slice(begin, end).split('/srv/$PACKAGE_NAME').join(root);
+  const bin = path.join(root, 'boot-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'logger'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const run = spawnSync('sh', ['-c', `${block}\nif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`],
+    { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout.includes('NODE_RED_STARTS');
+}
+
+// Inserts a kill after each step of the hold branch that begins at <from>
+// and ends at <to> (both texts of deploy.sh). The kill hits the shell that
+// runs the step (the exit handler runs in a subshell; $$ would name its
+// parent and let the subshell finish the hold).
+function killAfterSteps(from, to) {
+  return (script) => {
+    const a = script.indexOf(from);
+    const b = script.indexOf(to, a);
+    assert.ok(a >= 0 && b > a, `hold branch not found: ${from}`);
+    const branch = script.slice(a, b).split('\n').map((line) =>
+      (/(\|\| true|^\s*record_deploy_hold|^\s*hold_identityd_stopped.*|^\s*DEPLOY_HOLD_SERVICES=1)$/.test(line) ? `${line}; step_done` : line)).join('\n');
+    return `step_n=0\nstep_done() { step_n=$((step_n + 1)); if [ "$step_n" = "$KILL_AT" ]; then : > "$SWAP_ROOT/killed"; sh -c 'kill -9 $PPID'; fi; }\n${script.slice(0, a)}${branch}${script.slice(b)}`;
+  };
+}
+
+function everyKill(makeRun) {
+  let killAt = 1;
+  for (; killAt < 30; killAt += 1) {
+    process.env.KILL_AT = String(killAt);
+    const run = makeRun();
+    try {
+      if (!fs.existsSync(path.join(run.root, 'killed'))) break;
+      assert.equal(bootStartsNodeRed(run.root), false, `kill after step ${killAt}: a reboot starts Node-RED`);
+    } finally {
+      run.cleanup();
+    }
+  }
+  delete process.env.KILL_AT;
+  assert.ok(killAt > 3, `the hold path ran out after ${killAt} steps`);
+}
+
+test('the owed check\'s hold: a kill after each step, then a reboot, stays held', () => {
+  everyKill(() => owedCheckScenario({
+    migrate: true,
+    health: 'fail',
+    transform: killAfterSteps('# The state goes first: node-red.init reads only the state file,\n            # so a cut during the steps below still leaves a hold.\n            swap_call writePayloadState "$owed_payload" held', 'exit 1'),
+  }));
+});
+
+test('the exit handler\'s hold: a kill after each step, then a reboot, stays held', () => {
+  for (const flipped of [true, false]) {
+    everyKill(() => runModuleDeploy(`
+backup_dir="$SWAP_ROOT/backups"
+mkdir -p "$backup_dir"
+cp "$DB_PATH" "$backup_dir/farming.db.premigrate-20261112T000000Z"
+stage_new_deploy new
+stop_for_migration
+commit_migration
+${flipped ? 'flip_new' : ': failure between the commit and the flip'}
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+`, killAfterSteps('echo "ERROR: migrated database has no proven compatible active payload; keeping Node-RED stopped" >&2', '\n        fi\n')));
+  }
+});
+
+// A device result on #636's earlier head: a normal upgrade on a gateway whose
+// log ring was full ended HELD by the old positional check (the payload
+// marked failed, the state held, Node-RED stopped), and the plain retry then
+// stopped at the stat step. The sequence on this head: that held gateway,
+// with the upgrade's payload still there, takes the deploy run again to the
+// end: no owed check, the rollback target the last healthy payload, nothing
+// left to migrate, the switch, a start judged healthy, and the boot starts it.
+// scripts/test-deploy-gateway-commands.js runs it with only the gateway
+// bases' commands on PATH (no stat).
+test('a gateway held by the old positional check takes the deploy run again to a healthy start', () => {
+  const owed = fragment('# owed health check begin\n', '# owed health check end');
+  const run = runModuleDeploy(`
+swap_call markHealthy old >/dev/null
+# What the old head left: the upgrade switched in after its migration, its
+# check missed the completion line, the rollback refused, held.
+stage_new_deploy upgrade
+stop_for_migration
+commit_migration
+flip_new
+swap_call markFailed upgrade "its deploy health check failed" >/dev/null
+swap_call writePayloadState upgrade held "it failed after migrating the database" deploy.sh >/dev/null
+printf 'HELD: (old head)\\n' > "$SWAP_ROOT/DEPLOY-HELD"
+"$NODE_RED_INIT" stop
+# The deploy run again.
+${owed}
+SERVED_STAMP="$(swap_call currentStamp)"
+PREV_STAMP="$(swap_call rollbackTarget "$SERVED_STAMP" retry)"
+[ "$PREV_STAMP" = old ]
+stage_new_deploy retry
+PREV_STAMP=old
+stop_for_migration
+: nothing left to migrate
+flip_new
+mkdir -p "$SWAP_ROOT/bin-start"
+printf '#!/bin/sh\\nshift 2\\necho "$*" >> "$NODE_RED_LOG"\\n' > "$SWAP_ROOT/bin-start/logger"
+printf '#!/bin/sh\\ncat "$NODE_RED_LOG"\\n' > "$SWAP_ROOT/bin-start/logread"
+chmod 755 "$SWAP_ROOT/bin-start/logger" "$SWAP_ROOT/bin-start/logread"
+PATH="$SWAP_ROOT/bin-start:$PATH"
+mark_node_red_log
+"$NODE_RED_INIT" restart
+echo "sync-init: schema init complete" >> "$NODE_RED_LOG"
+check_node_red_start 4 2
+[ "$NODE_RED_START_VERDICT" = healthy ]
+swap_call markHealthy retry >/dev/null
+swap_call writePayloadState retry healthy "its deploy health check passed" deploy.sh >/dev/null
+rm -f "$SWAP_ROOT/DEPLOY-HELD"
+printf '%s\\n' recovered
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /recovered/);
+    assert.equal(swap.currentStamp(run.root), 'retry');
+    assert.equal(swap.readPayloadState(run.root).state, 'healthy');
+    assert.equal(run.state('node-red.state'), '1');
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@retry', 'osi-b': 'b@retry', 'osi-c': 'c@retry' });
+    assert.equal(bootStartsNodeRed(run.root), true, 'a reboot starts the recovered payload');
+  } finally {
+    run.cleanup();
   }
 });

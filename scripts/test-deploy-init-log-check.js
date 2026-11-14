@@ -1,23 +1,25 @@
 'use strict';
-// Behavioral proof for deploy.sh's post-restart boot-node init log check
-// (PR #242 verifier fix 2, YELLOW should-fix).
+// Behavioral proof for deploy.sh's judgement of a Node-RED start
+// (check_node_red_start, used by the deploy's own health check and by the
+// owed check of a retry).
 //
-// The original single-shot check ran `logread | grep -q "devices rebuild
-// ABORTED"` the instant the /gui reachability loop broke. /gui is served by
-// Node-RED's static-file route as soon as the HTTP listener binds -- before
-// flows finish deploying -- while sync-init-fn (the boot node that can log
-// the abort, and now also logs a positive completion marker on success) is
-// only triggered by an inject node with a 1s onceDelay and then runs a long
-// async sqlite exec() sequence before it can reach either branch. The
-// single immediate grep could observe neither line yet and would silently
-// report PROBE_OK=0 (commit) regardless of what the boot node was about to
-// decide.
+// /gui answers as soon as Node-RED's HTTP listener binds, before the flows
+// run, and the boot node can refuse its devices-CHECK rebuild and carry on
+// (it logs "devices rebuild ABORTED"). So the check waits for the boot
+// node's completion line as well as /gui (PR #242).
 //
-// This test does not reimplement the poll's decision logic in JS. It
-// extracts the ACTUAL shell fragment out of deploy.sh (between its own
-// "# init log check begin/end" markers) and runs it with a real POSIX shell,
-// stubbing only `logread` and `sleep` so the test is hermetic and fast
-// (no real logread available in this environment, and no real waiting).
+// The start's log lines are the lines after a marker the deploy writes with
+// logger just before the start. logread's ring is 128 KiB and evicts, so a
+// line count taken before the start can point past it, and the completion
+// line of a healthy start can be missed. Not seen is not failed: only an
+// observed failure (an error line of the start, the service not running,
+// /gui not answering) fails the start. A healthy start whose completion line
+// cannot be seen is "unverified"; it keeps running.
+//
+// The test runs deploy.sh's own shell text (between its markers) with a real
+// POSIX shell. logger and logread are stubs over one log file; logread can
+// return the whole log, nothing, the log with the start scrolled out, or the
+// last lines of a full ring, or be absent.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -28,125 +30,173 @@ const { spawnSync } = require('node:child_process');
 const REPO = path.resolve(__dirname, '..');
 const DEPLOY = fs.readFileSync(path.join(REPO, 'deploy.sh'), 'utf8');
 
-function extractInitLogCheckFragment() {
-  const beginMatch = /^[ \t]*# init log check begin[ \t]*$/m.exec(DEPLOY);
-  const endMatch = /^[ \t]*# init log check end[ \t]*$/m.exec(DEPLOY);
-  assert.ok(beginMatch, 'deploy.sh is missing the "# init log check begin" marker');
-  assert.ok(endMatch, 'deploy.sh is missing the "# init log check end" marker');
-  assert.ok(endMatch.index > beginMatch.index, 'the init log check begin marker must precede its end marker');
-  const fragmentStart = DEPLOY.indexOf('\n', beginMatch.index) + 1;
-  return DEPLOY.slice(fragmentStart, endMatch.index);
+function fragment(name) {
+  const begin = new RegExp(`^[ \\t]*# ${name} begin[ \\t]*$`, 'm').exec(DEPLOY);
+  const end = new RegExp(`^[ \\t]*# ${name} end[ \\t]*$`, 'm').exec(DEPLOY);
+  assert.ok(begin && end && end.index > begin.index, `deploy.sh is missing the "# ${name} begin/end" markers`);
+  return DEPLOY.slice(DEPLOY.indexOf('\n', begin.index) + 1, end.index);
 }
 
-// Builds a stub bin/ directory containing fake `logread` and `sleep`
-// executables and returns its path. `sleep` is a no-op so the test runs
-// instantly regardless of NODE_RED_INIT_TIMEOUT. `logread` counts its own
-// invocations (via LOGREAD_CALL_COUNTER_FILE) and, on the call number named
-// by LOGREAD_MARKER_AT_CALL / LOGREAD_ABORT_AT_CALL, emits the matching
-// line -- otherwise it emits an unrelated log line, exactly like a real
-// logread ring buffer would between the mark and the line of interest.
-function buildStubBinDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-init-log-check-'));
-  fs.writeFileSync(
-    path.join(dir, 'sleep'),
-    '#!/bin/sh\nexit 0\n',
-    { mode: 0o755 }
-  );
-  fs.writeFileSync(
-    path.join(dir, 'logread'),
-    [
-      '#!/bin/sh',
-      'n=0',
-      '[ -f "$LOGREAD_CALL_COUNTER_FILE" ] && n="$(cat "$LOGREAD_CALL_COUNTER_FILE")"',
-      'n=$((n + 1))',
-      'echo "$n" > "$LOGREAD_CALL_COUNTER_FILE"',
-      'if [ -n "$LOGREAD_MARKER_AT_CALL" ] && [ "$n" = "$LOGREAD_MARKER_AT_CALL" ]; then',
-      '    echo "Sep 16 00:00:00 gw node-red[1]: sync-init: schema init complete"',
-      'elif [ -n "$LOGREAD_ABORT_AT_CALL" ] && [ "$n" = "$LOGREAD_ABORT_AT_CALL" ]; then',
-      '    echo "Sep 16 00:00:00 gw node-red[1]: devices rebuild ABORTED (devices left intact): boom"',
-      'else',
-      '    echo "Sep 16 00:00:00 gw node-red[1]: unrelated log line"',
-      'fi',
-      'exit 0',
-      '',
-    ].join('\n'),
-    { mode: 0o755 }
-  );
-  return dir;
+const made = [];
+process.on('exit', () => { for (const dir of made) fs.rmSync(dir, { recursive: true, force: true }); });
+
+// logread modes: whole | empty | rotated (the start scrolled out: only lines
+// written after the start's last line) | ring (the last 3 lines) | absent.
+function stubs(dir, logreadMode) {
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  const write = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  write('sleep', 'exit 0');
+  write('logger', 'shift 2; printf "Nov 12 12:00:00 gw osi-deploy: %s\\n" "$*" >> "$LOG"');
+  write('wget', 'exit "${GUI_RC:-0}"');
+  const reads = {
+    whole: 'cat "$LOG"',
+    empty: 'exit 0',
+    rotated: 'printf "%s\\n" "Nov 12 12:05:00 gw kernel: later line"',
+    ring: 'tail -n 3 "$LOG"',
+    // The device case (third fixture, ring full of short lines): the lines
+    // leaving the ring are longer than those entering it, so the line count
+    // FALLS across the restart; the start's lines are all still there.
+    shrunk: 'awk -v n="$BEFORE_LINES" \'NR > n\' "$LOG"',
+  };
+  if (logreadMode !== 'absent') write('logread', reads[logreadMode]);
+  // Only the shell's own needs beside the stubs: no system logread or logger.
+  for (const tool of ['cat', 'tail', 'awk', 'grep', 'head', 'printf']) {
+    const found = ['/usr/bin', '/bin'].map((d) => path.join(d, tool)).find((f) => fs.existsSync(f));
+    if (found && !fs.existsSync(path.join(bin, tool))) fs.symlinkSync(found, path.join(bin, tool));
+  }
+  return bin;
 }
 
-// Runs the extracted fragment with PROBE_OK=0 and NODE_RED_LOG_MARK=0
-// pre-set, the stub bin/ directory prepended to PATH, and the given
-// scenario env vars. Returns { probeOk, stdout, stderr }.
-function runFragment(scenarioEnv) {
-  const fragment = extractInitLogCheckFragment();
-  const stubDir = buildStubBinDir();
-  const counterFile = path.join(stubDir, 'call-counter');
-  const script = `PROBE_OK=0\nNODE_RED_LOG_MARK=0\n${fragment}\nprintf 'PROBE_OK=%s\\n' "$PROBE_OK"\n`;
-  const result = spawnSync('sh', ['-c', script], {
+// The start's own lines, written to the log after the marker.
+function startLines({ complete = true, failure = null, flood = 0, lateFailure = null }) {
+  const lines = ['node-red[42]: Welcome to Node-RED'];
+  for (let i = 0; i < flood; i += 1) lines.push(`node-red[42]: [info] flood line ${i}`);
+  if (failure) lines.push(`node-red[42]: ${failure}`);
+  if (complete) lines.push('node-red[42]: sync-init: schema init complete');
+  if (lateFailure) lines.push(`node-red[42]: ${lateFailure}`);
+  lines.push('node-red[42]: [info] Started flows');
+  return lines.map((l) => `Nov 12 12:00:01 gw ${l}`).join('\n') + '\n';
+}
+
+// Runs the marker, the simulated start and the check. state: running |
+// stopped | unreadable. Returns { verdict, reason, probe, stdout, stderr }.
+function judge({ logread = 'whole', start = {}, state = 'running', gui = 0, before = '', block = 'check' }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-start-check-'));
+  made.push(dir);
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(log, before);
+  const startFile = path.join(dir, 'start');
+  fs.writeFileSync(startFile, startLines(start));
+  const run = block === 'check'
+    ? 'check_node_red_start 6 2\nprintf "VERDICT=%s\\nREASON=%s\\n" "$NODE_RED_START_VERDICT" "$NODE_RED_START_REASON"'
+    : `PROBE_OK=1\n${fragment('init log check')}\nprintf "VERDICT=%s\\nPROBE_OK=%s\\n" "$NODE_RED_START_VERDICT" "$PROBE_OK"`;
+  const script = `set -eu
+DEPLOY_STAMP=new
+NODE_RED_LOG_MARK=""
+node_red_service_state() {
+  case "$NODE_STATE" in unreadable) return 1 ;; *) printf '%s\\n' "$NODE_STATE" ;; esac
+}
+${fragment('node-red health wait')}
+${fragment('node-red start check')}
+mark_node_red_log
+cat "$START" >> "$LOG"
+${run}
+`;
+  const result = spawnSync('/bin/sh', ['-c', script], {
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${stubDir}:${process.env.PATH}`,
-      LOGREAD_CALL_COUNTER_FILE: counterFile,
-      LOGREAD_MARKER_AT_CALL: '',
-      LOGREAD_ABORT_AT_CALL: '',
-      ...scenarioEnv,
-    },
+    env: { PATH: stubs(dir, logread), LOG: log, START: startFile, BEFORE_LINES: String(before.split('\n').filter(Boolean).length), NODE_STATE: state, GUI_RC: String(gui), NODE_RED_INIT_TIMEOUT: '6', NODE_RED_HEALTH_TIMEOUT: '2' },
   });
-  assert.equal(result.status, 0, `init log check fragment exited nonzero (${result.status}): stderr=${result.stderr}`);
-  const match = /PROBE_OK=(.*)/.exec(result.stdout);
-  assert.ok(match, `init log check fragment did not print PROBE_OK: stdout=${JSON.stringify(result.stdout)}`);
-  return { probeOk: match[1].trim(), stdout: result.stdout, stderr: result.stderr };
+  assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
+  const get = (key) => ((new RegExp(`^${key}=(.*)$`, 'm').exec(result.stdout) || [])[1] || '').trim();
+  return { verdict: get('VERDICT'), reason: get('REASON'), probe: get('PROBE_OK'), stdout: result.stdout, stderr: result.stderr };
 }
 
-test('init log check: positive completion marker observed at t=6s keeps the payload healthy', () => {
-  // 2s poll step, 4th logread call lands at elapsed=6s (calls at 0/2/4/6).
-  const { probeOk, stdout } = runFragment({
-    NODE_RED_INIT_TIMEOUT: '8',
-    LOGREAD_MARKER_AT_CALL: '4',
-  });
-  assert.equal(probeOk, '0', 'PROBE_OK must stay 0 (healthy) once the positive completion marker is observed');
-  assert.match(stdout, /OK: boot node confirmed 'sync-init: schema init complete' after 6s/, 'must report the elapsed time at which the marker was observed');
+test('a healthy start with its completion line after the marker is healthy', () => {
+  const r = judge({});
+  assert.equal(r.verdict, 'healthy', r.reason);
 });
 
-test('init log check: "devices rebuild ABORTED" observed at t=6s fails the probe (Uganda cascade-delete guard)', () => {
-  const { probeOk, stderr } = runFragment({
-    NODE_RED_INIT_TIMEOUT: '8',
-    LOGREAD_ABORT_AT_CALL: '4',
-  });
-  assert.equal(probeOk, '1', 'PROBE_OK must flip to 1 (unhealthy) when the boot node logs an aborted rebuild');
-  assert.match(stderr, /ALERT:.*devices rebuild ABORTED/, 'must print the ALERT line naming the abort');
+test('an abort from an earlier boot, before the marker, does not count', () => {
+  const r = judge({ before: 'Nov 12 11:00:00 gw node-red[7]: devices rebuild ABORTED (devices left intact): old\n' });
+  assert.equal(r.verdict, 'healthy', r.reason);
 });
 
-test('init log check: neither line observed within the timeout fails closed (does not commit an unconfirmed boot)', () => {
-  // NODE_RED_INIT_TIMEOUT=6 -> exactly 3 logread calls (elapsed 0/2/4), all
-  // returning the unrelated line; the loop exits before a 4th check at t=6.
-  const { probeOk, stderr } = runFragment({
-    NODE_RED_INIT_TIMEOUT: '6',
+// The four logs of the ruling, each on a healthy start: none fails.
+for (const [name, logread, start] of [
+  ['an empty log', 'empty', {}],
+  ['a rotated log with the start scrolled out', 'rotated', {}],
+  ['a full ring that evicted the marker', 'ring', { flood: 40 }],
+  ['no logread', 'absent', {}],
+]) {
+  test(`a healthy start with ${name} is unverified, never failed`, () => {
+    const r = judge({ logread, start });
+    assert.equal(r.verdict, 'unverified', r.reason);
+    assert.match(r.reason, /no failure was observed/);
   });
-  assert.equal(probeOk, '1', 'PROBE_OK must fail closed to 1 when the window elapses with no confirmation either way');
-  assert.match(stderr, /WARN:.*schema initialization could not be confirmed/, 'must print a WARN explaining the unconfirmed boot, distinct from the ALERT/abort case');
+}
+
+// Before this change the check counted lines by position and failed closed
+// on "not seen"; the ring case is the one Fable's blocker named.
+test('a healthy start on a full ring is not judged by line position', () => {
+  const r = judge({ logread: 'ring', start: { flood: 40 }, before: 'x\n'.repeat(200) });
+  assert.notEqual(r.verdict, 'failed', r.reason);
 });
 
-test('init log check: schema completion is evaluated even before /gui readiness', () => {
-  const fragment = extractInitLogCheckFragment();
-  const stubDir = buildStubBinDir();
-  const counterFile = path.join(stubDir, 'call-counter');
-  const script = `PROBE_OK=1\nNODE_RED_LOG_MARK=0\n${fragment}\nprintf 'PROBE_OK=%s\\n' "$PROBE_OK"\n`;
-  const result = spawnSync('sh', ['-c', script], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${stubDir}:${process.env.PATH}`,
-      LOGREAD_CALL_COUNTER_FILE: counterFile,
-      LOGREAD_MARKER_AT_CALL: '1',
-      LOGREAD_ABORT_AT_CALL: '',
-      NODE_RED_INIT_TIMEOUT: '6',
-    },
+// NEW-30, as measured on a device: a full ring whose line count falls from
+// 3,262 to 2,963 across the restart. A position taken before the restart
+// points past the end; the marker still finds the completion line.
+test('a healthy start on a ring whose line count falls across the restart is healthy', () => {
+  const before = Array.from({ length: 60 }, (_, i) => `Nov 12 11:59:00 gw kernel: a longer line from before the deploy, number ${i}`).join('\n') + '\n';
+  const r = judge({ logread: 'shrunk', before });
+  assert.equal(r.verdict, 'healthy', r.reason);
+});
+
+test('no position in the log ring is read anywhere in deploy.sh', () => {
+  assert.doesNotMatch(DEPLOY, /logread[^\n]*\|\s*wc -l/);
+  assert.doesNotMatch(DEPLOY, /tail -n "\+\$\(\(/);
+});
+
+// Observed failures: each of them fails the start.
+for (const line of [
+  'devices rebuild ABORTED (devices left intact): boom',
+  '[red] Uncaught Exception:',
+  '[error] Failed to start server:',
+  '[warn] Error loading flows: Error: bad',
+]) {
+  test(`the start logging "${line}" fails it`, () => {
+    const r = judge({ start: { failure: line, complete: false } });
+    assert.equal(r.verdict, 'failed');
+    assert.match(r.reason, /the start logged/);
   });
-  assert.equal(result.status, 0);
-  const match = /PROBE_OK=(.*)/.exec(result.stdout);
-  assert.equal(match && match[1].trim(), '0', 'schema completion must clear the initial failed /gui probe once the boot node is confirmed');
-  assert.ok(fs.existsSync(counterFile), 'schema initialization must be checked before /gui readiness is evaluated');
+}
+
+test('a failure line after the completion line still fails the start', () => {
+  const r = judge({ start: { lateFailure: '[red] Uncaught Exception:' } });
+  assert.equal(r.verdict, 'failed', r.reason);
+});
+
+test('the service not running fails the start, whatever the log shows', () => {
+  for (const logread of ['whole', 'empty', 'absent']) {
+    const r = judge({ logread, state: 'stopped', gui: 1 });
+    assert.equal(r.verdict, 'failed', `${logread}: ${r.reason}`);
+    assert.match(r.reason, /not running/);
+  }
+});
+
+test('/gui not answering with the service running fails the start', () => {
+  const r = judge({ gui: 1 });
+  assert.equal(r.verdict, 'failed');
+  assert.match(r.reason, /\/gui did not answer/);
+});
+
+test('an unreadable service state is not a failure: /gui decides', () => {
+  assert.equal(judge({ state: 'unreadable' }).verdict, 'unverified');
+  assert.equal(judge({ state: 'unreadable', gui: 1 }).verdict, 'failed');
+});
+
+test('the deploy maps the verdicts: healthy commits, unverified keeps running, failed rolls back', () => {
+  assert.equal(judge({ block: 'deploy' }).probe, '0');
+  assert.equal(judge({ block: 'deploy', logread: 'absent' }).probe, 'unverified');
+  assert.equal(judge({ block: 'deploy', gui: 1 }).probe, '1');
 });

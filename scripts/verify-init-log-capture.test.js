@@ -109,10 +109,10 @@ test('a declared but unenforced floor is reported', () => {
 
 test('a call outside start_service does not count as wiring', () => {
   // Moves the call into stop_service, which never runs at startup.
-  const moved = initText().replace(
-    /^(start_service\(\) \{\n)(.*\n)(\n    ensure_persistent_syslog_sink\n)/m,
-    '$1$2\n',
-  );
+  const text = initText();
+  const call = /^    ensure_persistent_syslog_sink\n/gm;
+  assert.strictEqual((text.match(call) || []).length, 1, 'expected exactly one call site in the init script');
+  const moved = text.replace(call, '');
   const elsewhere = 'stop_service() {\n    ensure_persistent_syslog_sink\n}\n' + moved;
   const problems = scanPersistentSink(elsewhere);
   assert.strictEqual(problems.length, 1);

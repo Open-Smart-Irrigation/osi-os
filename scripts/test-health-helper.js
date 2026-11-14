@@ -4,6 +4,20 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
+const path = require('node:path');
+
+// Every fixture directory this file makes is removed when the run ends, so
+// repeated runs do not fill the temporary directory.
+const madeFixtureDirs = [];
+const realMkdtempSync = fs.mkdtempSync;
+fs.mkdtempSync = function (...args) {
+  const dir = realMkdtempSync.apply(this, args);
+  madeFixtureDirs.push(dir);
+  return dir;
+};
+process.on('exit', () => {
+  for (const dir of madeFixtureDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -754,4 +768,29 @@ test('recordError restarts a non-numeric total at 1', () => {
     { now: 1, counts: { total: 'x' }, warned: {} }
   );
   assert.strictEqual(result.counts.total, 1);
+});
+
+// A payload a cut deploy switched in runs unverified until the next deploy
+// checks it, or is held stopped; health_state carries that to the heartbeat
+// and the local health summary (v0.8.2 review, S-1 ruling).
+test('an unverified or held payload state is the health_state, below a crash loop', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'payload-state-'));
+  const file = path.join(dir, 'payload-state.json');
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    const run = () => gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir(), payloadStatePath: file });
+    assert.strictEqual((await run()).health_state, 'healthy', 'no state file');
+    for (const state of ['unverified', 'held']) {
+      fs.writeFileSync(file, JSON.stringify({ format: 1, active: 'p', state, reason: 'r', updated_at: 'x', writer: 'deploy.sh' }));
+      assert.strictEqual((await run()).health_state, state);
+    }
+    fs.writeFileSync(file, JSON.stringify({ format: 1, active: 'p', state: 'healthy', reason: 'r', updated_at: 'x', writer: 'deploy.sh' }));
+    assert.strictEqual((await run()).health_state, 'healthy');
+    fs.writeFileSync(file, 'not json');
+    assert.strictEqual((await run()).health_state, 'healthy', 'an unreadable state file reports nothing');
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
