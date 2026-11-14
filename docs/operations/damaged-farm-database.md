@@ -133,7 +133,7 @@ Until step 6 is done, send valve commands one at a time, several seconds apart, 
        cmp "/data/db/$f" "$BK/$f" && echo "same: $f" || echo "STOP: $f differs"
      fi
    done
-   ( cd "$BK" && for f in farming.db farming.db-wal; do [ -e "$f" ] && sha256sum "$f"; done > SHA256SUMS && cat SHA256SUMS )
+   ( cd "$BK" && for f in farming.db farming.db-wal; do if [ -e "$f" ]; then sha256sum "$f"; fi; done > SHA256SUMS && cat SHA256SUMS )
    ```
 
    Every file beside the database must print `same`. Node-RED is stopped, so nothing changes between the copy and the comparison. The manifest `SHA256SUMS` binds the main file and the write-ahead log only: a read-only check of the copy (step 3) may change its `-shm` index, which holds nothing of the data.
@@ -340,13 +340,21 @@ C=/data/db/farming.db.restore
    ```
 
    A disabled schedule is not claimed by the scheduler, also when it has a dispatch intent. Weekly plans run on the valves themselves; check them in the GUI after step 6 and send a plan again where it differs from what the owner wants. Until the owner has gone through the whole list, the gateway stays stopped.
-4. **Put the candidate in place.** The read-only reads above may have left empty side files beside the candidate; they hold nothing, and the live file's side files belong to the damaged file, of which step 2 kept a copy:
+4. **Put the candidate in place.** The read-only reads above leave a `-shm` index (32 KB) and an empty `-wal` beside the candidate. The `-shm` is a disposable index and never a reason to stop. A `-wal` that is not empty holds changes not yet written into the candidate: that is a stop, because a candidate copied from a backup or from a recovered file, and only read since, has none. The live file's side files belong to the damaged file, of which step 2 kept a copy. The block changes nothing unless the candidate's `-wal` is empty or absent:
 
    ```sh
-   for s in -wal -shm; do [ -s "$C$s" ] && echo "STOP: $C$s is not empty"; done
-   rm -f "$C-wal" "$C-shm" /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal && \
-     mv "$C" /data/db/farming.db && echo "in place" || echo "STOP: could not put the candidate in place"
-   sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check;"
+   C=/data/db/farming.db.restore
+   if [ -s "$C-wal" ]; then
+     echo "STOP: $C-wal is not empty; nothing was changed"
+   else
+     if rm -f "$C-wal" "$C-shm" /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal &&
+        mv "$C" /data/db/farming.db; then
+       echo "in place"
+       sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check;"
+     else
+       echo "STOP: could not put the candidate in place"
+     fi
+   fi
    ```
 
    It must print `in place` and `ok`. Node-RED stays stopped until step 6.
