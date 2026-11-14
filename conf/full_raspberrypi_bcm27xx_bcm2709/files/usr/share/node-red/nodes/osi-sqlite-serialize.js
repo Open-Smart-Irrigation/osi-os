@@ -31,8 +31,7 @@
 module.exports = function (RED) {
   const MARK = Symbol.for('osi.flowsDbSerialized');
 
-  function report(contextNode, id, reason) {
-    const text = 'sqlitedb ' + id + ': ' + reason + '; the flows\' database connection is not serialized';
+  function report(contextNode, text) {
     RED.log.error('[osi-sqlite-serialize] ' + text);
     try {
       const global = contextNode.context().global;
@@ -59,7 +58,7 @@ module.exports = function (RED) {
       const contextNode = config || RED.nodes.getNode(users.get(id));
       const db = config && config.db;
       if (!db || typeof db.serialize !== 'function') {
-        report(contextNode, id, 'no database handle found');
+        report(contextNode, 'sqlitedb ' + id + ': no database handle found; the flows\' database connection is not serialized');
         continue;
       }
       if (db[MARK]) continue;
@@ -67,7 +66,7 @@ module.exports = function (RED) {
         db.serialize();
         db[MARK] = true;
       } catch (e) {
-        report(contextNode, id, 'serialize() failed: ' + (e && e.message ? e.message : e));
+        report(contextNode, 'sqlitedb ' + id + ': serialize() failed: ' + (e && e.message ? e.message : e) + '; the flows\' database connection is not serialized');
       }
     }
   }
@@ -76,7 +75,10 @@ module.exports = function (RED) {
     try {
       serializeAll();
     } catch (e) {
-      RED.log.error('[osi-sqlite-serialize] ' + (e && e.message ? e.message : e) + '; the flows\' database connection may not be serialized');
+      // Counted like the failures above, through any running node's context.
+      let contextNode = null;
+      try { RED.nodes.eachNode((n) => { if (!contextNode) contextNode = RED.nodes.getNode(n.id); }); } catch (_) { /* reported below without a node */ }
+      report(contextNode, (e && e.message ? e.message : e) + '; the flows\' database connection may not be serialized');
     }
   });
 };

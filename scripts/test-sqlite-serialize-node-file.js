@@ -101,6 +101,20 @@ test('serialize() that throws: one error line, counted, no throw', () => {
   assert.equal(rt.global.get('error_counts').total, 1);
 });
 
+test('an unexpected throw while serializing: one error line, counted, no throw', () => {
+  const rt = standIn([
+    { config: { id: 'cfg', type: 'sqlitedb' }, live: { db: fakeDb() } },
+    { config: { id: 'q', type: 'sqlite', mydb: 'cfg' }, live: {} },
+  ]);
+  const eachNode = rt.RED.nodes.eachNode;
+  let calls = 0;
+  rt.RED.nodes.eachNode = (fn) => { calls += 1; if (calls === 1) throw new Error('runtime changed'); return eachNode(fn); };
+  assert.doesNotThrow(() => rt.start());
+  assert.equal(rt.logs.length, 1);
+  assert.match(rt.logs[0][1], /runtime changed; the flows' database connection may not be serialized/);
+  assert.equal(rt.global.get('error_counts').total, 1);
+});
+
 test('an unused configuration node and a sqlite node on a disabled tab are left alone', () => {
   const rt = standIn([
     { config: { id: 'unused', type: 'sqlitedb' }, live: {} },

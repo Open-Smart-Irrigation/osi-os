@@ -31,6 +31,8 @@ jobs:
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
       - name: Node file serializes the flows' SQLite connection (three package layouts)
         run: node --test scripts/test-sqlite-serialize-node-file.js
+      - name: Deploy keeps a working node file when its fetch fails
+        run: node --test scripts/test-deploy-node-files.js
       - name: Failure-list policy
         run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
       - name: Reject broken late and caught handlers (serial negative controls)
