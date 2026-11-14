@@ -200,9 +200,12 @@ deploy again, the same way.
 - Cut after the last migration and before the switch: the boot switches
   forward to the new payload (`unverified`, its health check owed to the
   next deploy).
-- The health check of the new payload saw no failure but could not see the
-  boot node's completion line (a full log ring): the payload keeps running,
-  `unverified`; the next deploy checks it again. Only an observed failure
+- The health check of the new payload saw no failure but either could not
+  see the boot node's completion line (a full log ring) while the service
+  runs and `/gui` answers, or saw the completion line and `/gui` answering
+  while the service state could not be read (reason: "the service state
+  could not be read"): the payload keeps running, `unverified`; the next
+  deploy checks it again. Only an observed failure
   (an error line of the start, the service not running, `/gui` not
   answering) rolls back or holds.
 - A dropped SSH session (HUP), Ctrl-C (INT) or TERM ends the deploy through

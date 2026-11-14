@@ -275,6 +275,7 @@ test('a boot schema decision that throws holds, with the error in the log', asyn
   const first = boot(g);
   assert.equal(first.started, false, first.log);
   assert.match(first.log, /the payload schema check failed, so nothing proves the active payload fits the database: .*refusing to overwrite existing metadata/);
+  assert.match(first.log, /Run the deploy again, the same way\./, 'the hold line names the remedy');
   assert.equal(swap.currentStamp(g.root), 'old', 'nothing switched');
 });
 

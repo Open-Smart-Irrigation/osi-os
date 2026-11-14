@@ -1727,7 +1727,7 @@ deploy_exit_handler() {
             :
         elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ] && \
             ! restart_previous_payload; then
-            echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped" >&2
+            echo "ERROR: fallback payload is not proven compatible with the current database; keeping services stopped. Run the deploy again, the same way." >&2
             # Never stopped with nothing written: the state goes first.
             swap_call writePayloadState "$(swap_call currentStamp 2>/dev/null || true)" held "this deploy was refused after it stopped Node-RED, and no payload is proven to fit the database as the deploy left it; run the deploy again" deploy.sh >/dev/null 2>&1 || true
             DEPLOY_HOLD_SERVICES=1
@@ -2612,7 +2612,7 @@ process.stdout.write(String(applied.length));
     # schema decision end
 
     if [ "$migration_rc" = "3" ]; then
-        swap_call writePayloadState "${PRE_STOP_ACTIVE:-}" held "the migration failed and the restore of its pre-migration copy failed its integrity check; see the deploy log" deploy.sh >/dev/null 2>&1 || true
+        swap_call writePayloadState "${PRE_STOP_ACTIVE:-}" held "the migration failed and the restore of its pre-migration copy failed its integrity check; the database needs an operator before anything starts: check it, and restore the pre-migration copy kept in ${backup_dir:-/data/backups/migrate} (see the deploy log)" deploy.sh >/dev/null 2>&1 || true
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
         echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped" >&2

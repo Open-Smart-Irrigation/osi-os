@@ -398,7 +398,7 @@ payload_schema_check() {
         # writable): nothing proves the active payload fits the database, so
         # Node-RED is not started. The state file may be unwritable, so the
         # caller holds on this return.
-        logger -t node-red.init "HELD: Node-RED not started: the payload schema check failed, so nothing proves the active payload fits the database: $report"
+        logger -t node-red.init "HELD: Node-RED not started: the payload schema check failed, so nothing proves the active payload fits the database: $report. Run the deploy again, the same way."
         return 1
     fi
 }
@@ -411,7 +411,7 @@ payload_schema_check() {
 payload_hold_check() {
     local state="/srv/$PACKAGE_NAME/payload-state.json"
     grep -q '"state":"held"' "$state" 2>/dev/null || return 0
-    logger -t node-red.init "HELD: Node-RED not started. $(cat "/srv/$PACKAGE_NAME/DEPLOY-HELD" 2>/dev/null || echo "See $state.")"
+    logger -t node-red.init "HELD: Node-RED not started. $(cat "/srv/$PACKAGE_NAME/DEPLOY-HELD" 2>/dev/null || echo "See $state; run the deploy again, the same way.")"
     return 1
 }
 # payload switch repair end

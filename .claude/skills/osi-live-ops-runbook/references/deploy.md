@@ -125,9 +125,10 @@ dev workstation unless noted.
    and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
 
    When the check is inconclusive (no failure observed, but the completion
-   line was not seen, for example because the log ring evicted it), the new
-   payload keeps running as `unverified`, the next deploy checks it again,
-   and the deploy exits 0 with this as its last line:
+   line was not seen, for example because the log ring evicted it; or the
+   completion line was seen and `/gui` answers but the service state could
+   not be read), the new payload keeps running as `unverified`, the next
+   deploy checks it again, and the deploy exits 0 with this as its last line:
    ```text
    UNVERIFIED: payloads/<stamp> runs, but its start could not be confirmed: <reason>. The next deploy checks it again.
    ```
@@ -323,9 +324,12 @@ Reading straight through the script, in order:
       `OK: local health self-check PASSED …` then `OK: committing payload
       <stamp>` and prunes old payload directories to `PAYLOAD_KEEP_N`
       (default 5).
-    - **Unverified (inconclusive):** no failure observed, but the completion
-      line not seen (the marker evicted from a full log ring, `logread` absent
-      or empty) while the service runs and `/gui` answers. The new payload
+    - **Unverified (inconclusive):** no failure observed, but either the
+      completion line not seen (the marker evicted from a full log ring,
+      `logread` absent or empty) while the service runs and `/gui` answers,
+      or the completion line seen and `/gui` answering while the service
+      state could not be read (reason: "the service state could not be
+      read"). The new payload
       keeps running, `payload-state.json` says `unverified`, nothing is
       pruned or rolled back, the next deploy runs the check again, and the
       deploy exits 0 with `UNVERIFIED: …` as its last line.
