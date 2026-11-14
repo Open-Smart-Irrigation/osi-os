@@ -43,3 +43,24 @@ test('an unlisted module file that calls the writer is reported', () => {
     assert.deepEqual(unlistedDelegatedCallers(root, policy), ['osi-new-helper/index.js']);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+const bindingGuard = require('./verify-osi-lib-db-caller-binding');
+const profileRoot = path.join(__dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share');
+const dendroNode = JSON.parse(fs.readFileSync(path.join(profileRoot, 'flows.json'), 'utf8')).find(n => n.id === 'dendro-compute-fn');
+const dendroIndex = fs.readFileSync(path.join(profileRoot, 'node-red/osi-dendro-analytics/index.js'), 'utf8');
+const dendroWeather = fs.readFileSync(path.join(profileRoot, 'node-red/osi-dendro-analytics/weather-inputs.js'), 'utf8');
+
+test('the shipped awaited dendro/rain delegation chain passes', () => {
+  assert.equal(bindingGuard.dendroWeatherDelegationProblem(dendroNode, dendroIndex, dendroWeather), null);
+});
+for (const mutation of ['factory await', 'zone await', 'first rain await', 'second rain await', 'module binding']) {
+  test(`dendro/rain delegation refuses missing ${mutation}`, () => {
+    let node = { ...dendroNode }, index = dendroIndex, weather = dendroWeather;
+    if (mutation === 'factory await') node.func = node.func.replace('await DA.createWeatherInputs(', 'DA.createWeatherInputs(');
+    if (mutation === 'zone await') node.func = node.func.replace('await weatherInputs.forZone(', 'weatherInputs.forZone(');
+    if (mutation === 'first rain await') weather = weather.replace('await R.resolveAdviceRain(', 'R.resolveAdviceRain(');
+    if (mutation === 'second rain await') weather = weather.replace('providerEnabled?adv:await R.resolveAdviceRain(', 'providerEnabled?adv:R.resolveAdviceRain(');
+    if (mutation === 'module binding') index = index.replace("require('./weather-inputs').createWeatherInputs", "require('./wrong-file').createWeatherInputs");
+    assert.ok(bindingGuard.dendroWeatherDelegationProblem(node, index, weather));
+  });
+}

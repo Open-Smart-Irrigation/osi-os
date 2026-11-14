@@ -2480,6 +2480,10 @@ fetch_required "osi-dendro-analytics index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/index.js" \
     "$MODULE_STAGE/osi-dendro-analytics/index.js"
 
+fetch_required "osi-dendro-analytics weather-inputs.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics/weather-inputs.js" \
+    "$MODULE_STAGE/osi-dendro-analytics/weather-inputs.js"
+
 fetch_required "osi-zone-env package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/package.json" \
     "$MODULE_STAGE/osi-zone-env/package.json"

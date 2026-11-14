@@ -298,16 +298,19 @@ test('weather transport cleans up a synchronous request-construction failure', a
   await assert.rejects(da.requestJson('GET', null), TypeError);
 });
 
-test('provider irrigation setting follows the existing default-off operator-switch semantics', async () => {
-  const { providerIrrigationEnabled, PROVIDER_IRRIGATION_SETTING_KEY } = require('./weather-inputs');
-  for (const value of [null, undefined, '', '0', 'false', 'no', 'off', 'invalid', '1', ' true ', 'YES', 'on']) {
+for (const value of [null, undefined, '', '0', 'false', 'no', 'off', 'invalid', ' ON ', '2', 'true', ' true ', 'YES', 'yes', 'on', 'ON', ' 1 ', '1', 1, true]) {
+  test(`provider irrigation setting requires exact string 1: ${JSON.stringify(value)}`, async () => {
+    const { providerIrrigationEnabled, PROVIDER_IRRIGATION_SETTING_KEY } = require('./weather-inputs');
     const enabled = await providerIrrigationEnabled({ get: async (sql, params) => {
       assert.match(sql, /SELECT value FROM app_settings/);
       assert.deepEqual(params, [PROVIDER_IRRIGATION_SETTING_KEY]);
-      return value == null ? undefined : { value };
+      return value === undefined ? undefined : { value };
     } }, () => assert.fail('a readable setting must not warn'));
-    assert.equal(enabled, ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase()), String(value));
-  }
+    assert.equal(enabled, value === '1');
+  });
+}
+test('an unreadable provider irrigation setting warns and stays off', async () => {
+  const { providerIrrigationEnabled } = require('./weather-inputs');
   const warnings = [];
   assert.equal(await providerIrrigationEnabled({ get: async () => { throw new Error('fixture unreadable'); } }, m => warnings.push(m)), false);
   assert.match(warnings.join('\n'), /setting unreadable: fixture unreadable/);

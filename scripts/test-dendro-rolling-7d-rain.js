@@ -294,12 +294,14 @@ for (const profile of PROFILES) {
     });
   }
   for (const highVpd of [false, true]) {
-    for (const mode of ['off', 'absent', 'unreadable']) {
+    for (const mode of ['off', 'absent', 'unreadable', 'NULL', ' ON ', '2', '', 'true', 'on', ' 1 ', 'ON']) {
       test(`[${tag}] provider control default-off: ${highVpd ? 'high VPD' : '5.4 mm rain'}, setting ${mode}`, async t => {
-        const setting = mode === 'absent' ? null : mode === 'off' ? '0' : '1';
+        const setting = mode === 'absent' ? null : mode === 'off' ? '0' : mode === 'unreadable' ? '1' : mode;
         const observed = controlFixture(setting, highVpd);
         const unreachable = controlFixture(setting, highVpd);
         const baseline = controlFixture(setting, highVpd);
+        if (mode === 'NULL') for (const fixture of [observed, unreachable, baseline])
+          fixture.prepare('UPDATE app_settings SET value=NULL WHERE key=?').run(PROVIDER_SETTING);
         t.after(() => { observed.close(); unreachable.close(); baseline.close(); });
         const weather = openMeteoDay(highVpd ? 0 : 5.4);
         if (highVpd) {
@@ -315,6 +317,14 @@ for (const profile of PROFILES) {
         assert.equal(row.rainfall_mm, highVpd ? 0 : 5.4, 'provider rain is still stored');
         assert.equal(row.vpd_source, 'open_meteo');
         if (highVpd) assert.ok(row.vpd_max_kpa > 2, 'high provider VPD is still stored');
+        assert.equal(json.rain.daily_status, recommendation(baseline, '2026-10-08').json.rain.daily_status,
+          'mirrored rain status stays identical to main while provider control is off');
+        // The server storedRainKnown predicate reads only rain.daily_status;
+        // provider observations must not contribute to its decision rain sum.
+        assert.equal(json.rain.daily_status, 'unknown');
+        assert.equal(json.weather_control.observed_rain.daily_status, 'observed');
+        assert.equal(json.weather_control.observed_rain.daily_mm, row.rainfall_mm);
+        assert.equal(json.rain.daily_status !== 'unknown' ? row.rainfall_mm : 0, 0);
         assert.equal(json.weather_control.provider_irrigation_enabled, false);
         assert.equal(json.weather_control.decision_vpd.available, false);
         assert.equal(json.weather_control.decision_rain.daily_mm, null);
