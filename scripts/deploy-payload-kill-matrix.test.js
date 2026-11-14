@@ -97,13 +97,19 @@ function served(g) {
 
 // osi-c is new in this release: deploy.sh links it before the stop for npm
 // install, and the old flows never load it.
+// Node files are judged on their own (below): they do not depend on the
+// flows' version (#656), and they convert last in a switch without a base.
+function withoutNodeFiles(state) {
+  return Object.fromEntries(Object.entries(state).filter(([key]) => !key.startsWith('nodes/')));
+}
+
 function sameOld(state, old) {
-  const strip = ({ 'osi-c': _new, ...rest }) => JSON.stringify(rest);
+  const strip = ({ 'osi-c': _new, ...rest }) => JSON.stringify(withoutNodeFiles(rest));
   return strip(state) === strip(old);
 }
 
 function same(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return JSON.stringify(withoutNodeFiles(a)) === JSON.stringify(withoutNodeFiles(b));
 }
 
 function bootRepair(g) {
@@ -372,7 +378,10 @@ for (const c of CASES) {
         const state = served(g);
         const kind = classify(g, state, plan.olds, plan.after);
         for (const name of NODE_FILES) {
-          assert.notEqual(state[`nodes/${name}`], 'absent', `${c.label} k=${k}: node file ${name} is missing after the cut`);
+          const key = `nodes/${name}`;
+          assert.notEqual(state[key], 'absent', `${c.label} k=${k}: node file ${name} is missing after the cut`);
+          assert.ok([...plan.olds.map((o) => o[key]), plan.after[key]].includes(state[key]),
+            `${c.label} k=${k}: node file ${name} is neither the old nor the new version: ${state[key]}`);
         }
         if (loose) {
           assert.ok(kind || state.flows === 'absent' || c.row === 'S3', `${c.label} k=${k}: ${JSON.stringify(state)}`);

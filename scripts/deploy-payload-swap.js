@@ -785,6 +785,10 @@ function baseMismatch(root, base, stamp, guiRoot, entries) {
   for (const entry of entries) {
     if (entry.copy) {
       if (sameContent(entry.link, entry.copy, entry.kind)) continue;
+      // A node file does not depend on the flows' version (#656): routing it
+      // through <base> serves <base>'s copy, never a missing file. A cut
+      // switch can leave one node file converted and the other not.
+      if (entry.nodeFile) continue;
       if (entry.label === 'GUI' && !statOrNull(entry.link)) {
         entry.restores = true;
         continue;
@@ -1083,6 +1087,14 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     // With no flows served, the links are made before payloads/active, and a
     // link left from an earlier payload must not bring its flows back first.
     if (!statOrNull(flowsLink(root))) {
+      // A node file served through payloads/active would go with it: keep a
+      // real copy in its place first (renamed over the link, never absent).
+      for (const entry of entries) {
+        if (!entry.nodeFile || !isFile(entry.link) || !lstatOrNull(entry.link).isSymbolicLink()) continue;
+        const temp = `${path.dirname(entry.link)}/.${path.basename(entry.link)}.flip-${process.pid}-${Date.now()}`;
+        writeDurable(temp, fs.readFileSync(entry.link));
+        fs.renameSync(temp, entry.link);
+      }
       fs.rmSync(activeLink(root), { force: true });
       fs.rmSync(legacyActiveLink(root), { force: true });
     }
@@ -1090,9 +1102,17 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
     try {
       for (const entry of entries) {
         if (entry.name && modules.unlink.includes(entry.name)) continue;
+        // A node file is linked once payloads/active leads to <stamp> (below):
+        // routed earlier, it would lead nowhere and Node-RED would not load it.
+        if (entry.nodeFile) continue;
         if (!linksTo(entry.link, entry.via)) switched.push(atomicSymlink(entry.link, entry.via, `${entry.label} link`, { keepBackup: true }));
       }
       pointActive(root, stamp);
+      // Each rename replaces the served file with a link to <stamp>'s copy:
+      // the path is never absent, and a cut leaves each file old or new.
+      for (const entry of entries) {
+        if (entry.nodeFile && !linksTo(entry.link, entry.via)) atomicSymlink(entry.link, entry.via, `${entry.label} link`, { replaceable: true });
+      }
     } catch (error) {
       const failures = restoreSwitched(switched);
       if (failures.length) error.message += `; could not restore: ${failures.join('; ')}`;

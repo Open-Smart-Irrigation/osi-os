@@ -502,6 +502,15 @@ const STATE_TABLE = [
     freshImage(g);
     moduleDeploy(g, 'deployed');
     const payloads = path.join(g.root, 'payloads');
+    // That version never linked node files: a node file it served is a real file.
+    const nodes = path.join(g.root, 'nodes');
+    for (const name of fs.existsSync(nodes) ? fs.readdirSync(nodes) : []) {
+      const at = path.join(nodes, name);
+      if (!fs.lstatSync(at).isSymbolicLink()) continue;
+      const bytes = fs.readFileSync(at);
+      fs.rmSync(at);
+      fs.writeFileSync(at, bytes);
+    }
     fs.renameSync(path.join(payloads, 'active'), path.join(payloads, '.active'));
     for (const at of [g.flowsPath, g.guiRoot, ...TABLE_MODULES.map((name) => path.join(g.root, name))]) {
       const text = fs.readlinkSync(at).replace(/(^|\/)payloads\/active\//, '$1payloads/.active/');
