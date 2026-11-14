@@ -126,7 +126,7 @@ test('an unused configuration node and a sqlite node on a disabled tab are left 
   assert.equal(rt.global.get('error_counts'), undefined);
 });
 
-// ---------- part 2: real starts in the three layouts ----------
+// ---------- part 2: real starts in the three package layouts, and the linked node files ----------
 const FIXTURE_MODULES = path.join(ROOT, 'scripts/fixtures/release-smoke/node_modules');
 const roots = [FIXTURE_MODULES, ...String(process.env.OSI_NODE_RED_EXTRA_ROOTS || '').split(':').filter(Boolean)];
 const SQLITE_PACKAGES = ['sqlite3', 'bindings', 'file-uri-to-path'];
@@ -142,7 +142,8 @@ function realCopy(from, to) {
   fs.cpSync(from, to, { recursive: true, dereference: true });
 }
 
-function buildLayout(mods, layout, work) {
+function buildLayout(mods, packageLayout, work) {
+  const layout = packageLayout === 'linked' ? 'factory' : packageLayout;
   const fw = path.join(work, 'fw/node_modules');
   const user = path.join(work, 'userdir');
   fs.mkdirSync(path.dirname(fw), { recursive: true });
@@ -199,13 +200,26 @@ async function waitFor(fn, ms, what) {
 
 for (const mods of roots) {
   const version = require(path.join(mods, 'node-red/package.json')).version;
-  for (const layout of ['field', 'factory', 'factory-npm']) {
+  // linked: the factory package layout with the node files as #636 leaves
+  // them: real files in payloads/<stamp>/nodes/, and nodes/<file> a link
+  // through payloads/active (Node-RED loads them by path through the link).
+  for (const layout of ['field', 'factory', 'factory-npm', 'linked']) {
     test(`Node-RED ${version}, ${layout} layout: serialized after start and after a restart, one sqlite3 addon`, { skip: !fs.existsSync('/proc/self/maps') && 'needs /proc/self/maps' }, async () => {
       const work = fs.mkdtempSync(path.join(os.tmpdir(), `osi-serialize-${layout}-`));
       let child;
       try {
         const { fw, user } = buildLayout(mods, layout, work);
-        for (const f of fs.readdirSync(NODE_DIR)) fs.copyFileSync(path.join(NODE_DIR, f), path.join(user, 'nodes', f));
+        if (layout === 'linked') {
+          const payloadNodes = path.join(user, 'payloads', '20261114T000000Z', 'nodes');
+          fs.mkdirSync(payloadNodes, { recursive: true });
+          fs.symlinkSync('20261114T000000Z', path.join(user, 'payloads', 'active'));
+          for (const f of fs.readdirSync(NODE_DIR)) {
+            fs.copyFileSync(path.join(NODE_DIR, f), path.join(payloadNodes, f));
+            fs.symlinkSync(path.join(user, 'payloads', 'active', 'nodes', f), path.join(user, 'nodes', f));
+          }
+        } else {
+          for (const f of fs.readdirSync(NODE_DIR)) fs.copyFileSync(path.join(NODE_DIR, f), path.join(user, 'nodes', f));
+        }
         fs.writeFileSync(path.join(user, 'nodes/zz-osi-test-evidence.js'), EVIDENCE_NODE);
         fs.writeFileSync(path.join(user, 'nodes/zz-osi-test-evidence.html'), '');
         const port = await freePort();
@@ -230,7 +244,7 @@ for (const mods of roots) {
         assert.doesNotMatch(nrLog, /osi-sqlite-serialize/, 'no error line from the node file');
         assert.deepEqual(first.seen, [{ id: 'cfg1', handle: 1, marked: true }], 'serialized after the start');
         assert.deepEqual(second.seen, [{ id: 'cfg1', handle: 2, marked: true }], 'a new handle, serialized after the restart');
-        const expected = layout === 'factory' ? path.join(fw, 'node-red-node-sqlite/node_modules/sqlite3') : path.join(user, 'node_modules/sqlite3');
+        const expected = layout === 'factory' || layout === 'linked' ? path.join(fw, 'node-red-node-sqlite/node_modules/sqlite3') : path.join(user, 'node_modules/sqlite3');
         for (const e of [first, second]) {
           assert.equal(e.maps.length, 1, 'exactly one node_sqlite3.node mapped: ' + e.maps.join(', '));
           assert.ok(e.maps[0].startsWith(fs.realpathSync(expected) + path.sep), `the ${layout} layout's copy: ${e.maps[0]}`);

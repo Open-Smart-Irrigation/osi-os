@@ -92,8 +92,6 @@ COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
-NODE_FILES_STAGE_ROOT="${NODE_FILES_STAGE_ROOT:-/srv/node-red}"
-NODE_FILES_STAGE="$NODE_FILES_STAGE_ROOT/.osi-node-files-stage.$$"
 OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
 export SWAP_ROOT
@@ -124,7 +122,6 @@ release_deploy_lock() {
 cleanup() {
     rm -rf "$TMP_DIR"
     rm -rf "$COMMAND_LEDGER_STAGE"
-    rm -rf "$NODE_FILES_STAGE"
     release_deploy_lock
 }
 # A signal ends the deploy through its exit path; a handler that only cleaned
@@ -3587,34 +3584,35 @@ fetch_required "Agroscope uplink transform" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
 # Node-RED loads node files from /srv/node-red/nodes at start. This one puts
-# the flows' shared SQLite connection into serialized mode (F-7); it does not
-# depend on the flows' version, so it stays in place like the codecs. It lives
-# outside the payload, so nothing would put a damaged copy back: a fetch cut
-# short can leave valid JavaScript that does nothing. Both files are fetched
-# beside /srv/node-red/nodes, checked against the SHA-256 values above, and
-# only then moved into place. On any failure the copies already there stay as
-# they were and the deploy stops here.
-install_node_files() {
-    rm -rf "$NODE_FILES_STAGE_ROOT"/.osi-node-files-stage.* || return 1
-    mkdir -m 700 -p "$NODE_FILES_STAGE" "$NODE_FILES_DIR" || return 1
+# the flows' shared SQLite connection into serialized mode (F-7). It goes into
+# the staged payload with everything else (payloads/<stamp>/nodes/), checked
+# against the SHA-256 values above; /srv/node-red/nodes/<file> is a link
+# through payloads/active, so the one switch moves it with the flows
+# (deploy-payload-swap.js, node files). A fetch cut short can leave valid
+# JavaScript that does nothing: on any failure the staged copies go, the
+# served node files stay as they are, and the deploy stops before anything is
+# stopped.
+stage_node_files() {
+    nf_dir="$PAYLOADS_ROOT/$DEPLOY_STAMP/nodes"
+    if ! { rm -rf "$nf_dir" && mkdir -p "$nf_dir"; }; then
+        echo "ERROR: could not create $nf_dir" >&2
+        return 1
+    fi
     if fetch_required "osi-sqlite-serialize node file" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.js" \
-        "$NODE_FILES_STAGE/osi-sqlite-serialize.js" \
+        "$nf_dir/osi-sqlite-serialize.js" \
         && fetch_required "osi-sqlite-serialize node file (.html)" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.html" \
-        "$NODE_FILES_STAGE/osi-sqlite-serialize.html" \
-        && [ "$(file_sha256 "$NODE_FILES_STAGE/osi-sqlite-serialize.js")" = "$OSI_SQLITE_SERIALIZE_JS_SHA256" ] \
-        && [ "$(file_sha256 "$NODE_FILES_STAGE/osi-sqlite-serialize.html")" = "$OSI_SQLITE_SERIALIZE_HTML_SHA256" ] \
-        && mv -f "$NODE_FILES_STAGE/osi-sqlite-serialize.html" "$NODE_FILES_DIR/osi-sqlite-serialize.html" \
-        && mv -f "$NODE_FILES_STAGE/osi-sqlite-serialize.js" "$NODE_FILES_DIR/osi-sqlite-serialize.js"; then
-        rm -rf "$NODE_FILES_STAGE"
+        "$nf_dir/osi-sqlite-serialize.html" \
+        && [ "$(file_sha256 "$nf_dir/osi-sqlite-serialize.js")" = "$OSI_SQLITE_SERIALIZE_JS_SHA256" ] \
+        && [ "$(file_sha256 "$nf_dir/osi-sqlite-serialize.html")" = "$OSI_SQLITE_SERIALIZE_HTML_SHA256" ]; then
         return 0
     fi
-    echo "ERROR: the osi-sqlite-serialize node files did not arrive intact; $NODE_FILES_DIR is unchanged" >&2
-    rm -rf "$NODE_FILES_STAGE"
+    echo "ERROR: the osi-sqlite-serialize node files did not arrive intact; $NODE_FILES_DIR is unchanged and the deploy stops before anything is stopped" >&2
+    rm -rf "$nf_dir"
     return 1
 }
-install_node_files
+stage_node_files || exit 1
 
 # module payload staging begin
 # The helper modules above went into payloads/$DEPLOY_STAMP/modules/; the
@@ -3636,6 +3634,12 @@ if [ -n "${PREV_STAMP:-}" ]; then
         exit 1
     fi
     [ -z "$module_capture_report" ] || printf '%s\n' "$module_capture_report"
+    # The rollback payload keeps the node files that run (a payload from
+    # before the node files moved into payloads has none).
+    if ! swap_call ensureNodeFiles "$PREV_STAMP" >/dev/null; then
+        echo "ERROR: could not keep the live node files with payloads/$PREV_STAMP; refusing the deploy before anything is stopped" >&2
+        exit 1
+    fi
 fi
 if ! module_link_report="$(swap_call linkNewModules "$DEPLOY_STAMP" "${PREV_STAMP:-}")"; then
     echo "ERROR: could not link the helper modules new in this release; refusing the deploy before anything is stopped" >&2

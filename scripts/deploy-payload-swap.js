@@ -145,6 +145,69 @@ function moduleTarget(root, stamp, name) {
   return path.join(modulesDir(root, stamp), name);
 }
 
+// Node files (#656, folded into the payload): Node-RED loads them by path from
+// /srv/node-red/nodes at start. Each payload carries its own in
+// payloads/<stamp>/nodes/, and /srv/node-red/nodes/<file> is a link through
+// payloads/active, so the one switch moves them with the flows. The
+// conversion from a real file renames a temporary link over it: the path is
+// never absent.
+const NODE_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(js|html)$/;
+
+function nodesDir(root) {
+  return path.join(root, 'nodes');
+}
+
+function nodeLink(root, name) {
+  return path.join(nodesDir(root), name);
+}
+
+function viaNode(root, name) {
+  return path.join(activeLink(root), 'nodes', name);
+}
+
+function nodeTarget(root, stamp, name) {
+  return path.join(payloadDir(root, stamp), 'nodes', name);
+}
+
+// The node files served now (real files, or links that resolve).
+function servedNodeFiles(root) {
+  let names = [];
+  try {
+    names = fs.readdirSync(nodesDir(root));
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  return names.filter((name) => NODE_FILE_NAME.test(name) && isFile(nodeLink(root, name))).sort();
+}
+
+function payloadNodeFiles(root, stamp) {
+  let names = [];
+  try {
+    names = fs.readdirSync(path.join(payloadDir(root, stamp), 'nodes'));
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  return names.filter((name) => NODE_FILE_NAME.test(name) && isFile(nodeTarget(root, stamp, name))).sort();
+}
+
+// Gives payloads/<stamp> a copy of each node file served now that it does
+// not carry. A payload from before the fold (0.8.1, 0.8.2, a capture of what
+// ran) has no nodes/: a switch into it keeps the node files that run, so the
+// flows' database connection stays serialized (#656). A payload that carries
+// its own keeps them. Returns the names copied.
+function ensureNodeFiles(root, stamp) {
+  if (!stamp || !isDirectory(payloadDir(root, stamp))) return [];
+  const copied = [];
+  for (const name of servedNodeFiles(root)) {
+    const target = nodeTarget(root, stamp, name);
+    if (lstatOrNull(target)) continue;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    writeDurable(target, fs.readFileSync(nodeLink(root, name)));
+    copied.push(name);
+  }
+  return copied;
+}
+
 function hashFile(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
@@ -698,6 +761,11 @@ function switchEntries(root, stamp, guiRoot, modules, base) {
     const sealed = Boolean(copy && baseManifest.captured[name] === undefined);
     entries.push({ link: moduleLink(root, name), via: viaModule(root, name), copy, sealed, kind: 'dir', label: `module ${name}`, name });
   }
+  const nodeNames = new Set([...servedNodeFiles(root), ...payloadNodeFiles(root, stamp)]);
+  for (const name of [...nodeNames].sort()) {
+    const copy = base && isFile(nodeTarget(root, base, name)) ? nodeTarget(root, base, name) : null;
+    entries.push({ link: nodeLink(root, name), via: viaNode(root, name), copy, kind: 'file', label: `node file ${name}`, nodeFile: name });
+  }
   return entries;
 }
 
@@ -733,6 +801,7 @@ function baseMismatch(root, base, stamp, guiRoot, entries) {
     // fine; a module the flows' own payload carries is not.
     const stat = lstatOrNull(entry.link);
     if (!stat || !statOrNull(entry.link)) continue;
+    if (entry.nodeFile) return `the live ${entry.label} is not held by payloads/${base}`;
     if (!stat.isSymbolicLink()) return `the live ${entry.label} is a directory payloads/${base} does not hold`;
     const into = moduleLinkStamp(root, entry.name);
     if (into && into !== base && (into === currentStamp(root) || into === activeStamp(root))) {
@@ -763,6 +832,18 @@ function switchPaths(root, guiRoot) {
     if (MODULE_NAME.test(base)) modules.add(base);
   }
   for (const name of [...modules].sort()) paths.push(moduleLink(root, name));
+  let nodeNames = [];
+  try {
+    nodeNames = fs.readdirSync(nodesDir(root));
+  } catch (error) {
+    if (!absent(error)) throw error;
+  }
+  const nodes = new Set();
+  for (const name of nodeNames) {
+    const base = name.replace(/^\./, '').replace(/\.(osi-old|flip)-.*$/, '');
+    if (NODE_FILE_NAME.test(base)) nodes.add(base);
+  }
+  for (const name of [...nodes].sort()) paths.push(nodeLink(root, name));
   return paths;
 }
 
@@ -871,6 +952,9 @@ function resumeInterruptedSwitch(root, guiRoot) {
     }
     for (const name of manifest ? manifest.modules : []) {
       restore.push([moduleLink(root, name), viaModule(root, name), moduleTarget(root, active, name)]);
+    }
+    for (const name of payloadNodeFiles(root, active)) {
+      restore.push([nodeLink(root, name), viaNode(root, name), nodeTarget(root, active, name)]);
     }
     for (const [link, via, copy] of restore) {
       if (lstatOrNull(link) || !statOrNull(copy)) continue;
@@ -981,7 +1065,13 @@ function flipTo(root, stamp, guiRoot = null, fromStamp = '') {
   // or absent: finish that first (it only restores what was served), so the
   // rollback and the HELD restore command start from a whole entry.
   resumeInterruptedSwitch(root, guiRoot);
+  // Every payload this switch may route through keeps the node files that
+  // run (see ensureNodeFiles); copies into payloads change nothing served.
+  for (const candidate of new Set([stamp, fromStamp, activeStamp(root), currentStamp(root)].filter(Boolean))) {
+    ensureNodeFiles(root, candidate);
+  }
   const { base, entries, modules } = planSwitch(root, stamp, guiRoot, fromStamp);
+  if (entries.some((entry) => entry.nodeFile)) fs.mkdirSync(nodesDir(root), { recursive: true });
   syncStorage();
   if (base) {
     if (linkedStamp(root, activeLink(root)) !== base) pointActive(root, base);
@@ -1810,6 +1900,8 @@ module.exports = {
   readPayloadState,
   unverifiedActive,
   recordBootState,
+  ensureNodeFiles,
+  servedNodeFiles,
   staleStages,
   staleStageSizes,
   clearStaleStages,

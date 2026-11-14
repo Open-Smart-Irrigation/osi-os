@@ -1304,3 +1304,52 @@ test('sync runs before activation is recorded and before a switch changes a link
   assert.ok(calls.indexOf('sync') !== -1 && calls.indexOf('sync') < first, `flipTo: ${calls.join(', ')}`);
   assert.equal(swap.currentStamp(root), '20261102');
 });
+
+// #656's node files, folded into the payload (#636). A switch serves each
+// payload's own node files through payloads/active; a switch back to a payload
+// from before the fold (0.8.1, 0.8.2: no nodes/) keeps the node files that
+// run, so the flows' database connection stays serialized and no node file
+// link is left leading nowhere.
+function writeNodeFiles(dir, version) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'osi-sqlite-serialize.js'), `// ${version}\n`);
+  fs.writeFileSync(path.join(dir, 'osi-sqlite-serialize.html'), `<!-- ${version} -->\n`);
+}
+const servedNode = (root) => fs.readFileSync(path.join(root, 'nodes', 'osi-sqlite-serialize.js'), 'utf8');
+
+test('node files: a switch serves the payload\'s own, and a switch back serves the old payload\'s', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  writeNodeFiles(path.join(root, 'nodes'), 'installed in place by #656');
+  stageWithModules(root, '20261101', { 'osi-a': '' });
+  writeNodeFiles(path.join(root, 'payloads', '20261101', 'nodes'), 'old payload');
+  flipTo(root, '20261101', guiRoot);
+  assert.ok(fs.lstatSync(path.join(root, 'nodes', 'osi-sqlite-serialize.js')).isSymbolicLink(), 'converted to a link');
+  assert.equal(servedNode(root), '// old payload\n');
+  stageWithModules(root, '20261102', { 'osi-a': '' });
+  writeNodeFiles(path.join(root, 'payloads', '20261102', 'nodes'), 'new payload');
+  flipTo(root, '20261102', guiRoot, '20261101');
+  assert.equal(servedNode(root), '// new payload\n');
+  flipTo(root, '20261101', guiRoot);
+  assert.equal(servedNode(root), '// old payload\n', 'the rollback serves the old payload\'s node file');
+});
+
+test('node files: a switch back to a payload from before the fold keeps the node files that run', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'gui');
+  stageWithModules(root, '20261101', { 'osi-a': '' });         // a 0.8.2 payload: no nodes/
+  flipTo(root, '20261101', guiRoot);
+  writeNodeFiles(path.join(root, 'nodes'), 'installed in place by #656');
+  stageWithModules(root, '20261102', { 'osi-a': '' });
+  writeNodeFiles(path.join(root, 'payloads', '20261102', 'nodes'), 'new payload');
+  assert.deepEqual(swap.ensureNodeFiles(root, '20261101').sort(), ['osi-sqlite-serialize.html', 'osi-sqlite-serialize.js']);
+  assert.equal(swap.switchPreflight(root, '20261102', guiRoot, '20261101'), null);
+  flipTo(root, '20261102', guiRoot, '20261101');
+  assert.equal(servedNode(root), '// new payload\n');
+  // A payload from before the fold that never got a copy (a rollback straight
+  // after a downgrade): the switch gives it the node files that run.
+  fs.rmSync(path.join(root, 'payloads', '20261101', 'nodes'), { recursive: true, force: true });
+  flipTo(root, '20261101', guiRoot);
+  assert.equal(servedNode(root), '// new payload\n', 'the serializer that ran stays loaded');
+  assert.ok(fs.statSync(path.join(root, 'nodes', 'osi-sqlite-serialize.html')).isFile(), 'no node file link leads nowhere');
+});

@@ -34,6 +34,22 @@ const KILLED = 86;
 const MODULES = ['osi-a', 'osi-b', 'osi-c'];
 // The release this deploy brings: it keeps osi-a, drops osi-b, adds osi-c.
 const NEW_MODULES = { 'osi-a': '', 'osi-c': '' };
+// #656's node files, folded into the payload: every row's gateway serves a
+// real pair in nodes/ (as #656 installed it), and each deploy stages its own
+// pair in payloads/<stamp>/nodes/. A cut anywhere, also between the two files,
+// leaves each one loadable as the old or the new version, never missing.
+const NODE_FILES = ['osi-node.js', 'osi-node.html'];
+
+function seedLiveNodeFiles(g) {
+  fs.mkdirSync(path.join(g.root, 'nodes'), { recursive: true });
+  for (const name of NODE_FILES) fs.writeFileSync(path.join(g.root, 'nodes', name), `${name}@live\n`);
+}
+
+function stageNodeFiles(g, stamp) {
+  const dir = path.join(g.root, 'payloads', stamp, 'nodes');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const name of NODE_FILES) fs.writeFileSync(path.join(dir, name), `${name}@${stamp}\n`);
+}
 
 // Rows deploy.sh refuses before Node-RED stops, with the refusal's reason.
 // The table's REFUSE rows, plus the rows the resume step turns into one.
@@ -75,6 +91,7 @@ function readOr(file, fallback) {
 function served(g) {
   const out = { flows: readOr(g.flowsPath, 'absent'), gui: readOr(path.join(g.guiRoot, 'index.html'), 'absent') };
   for (const name of MODULES) out[name] = readOr(path.join(g.root, name, 'index.js'), 'absent');
+  for (const name of NODE_FILES) out[`nodes/${name}`] = readOr(path.join(g.root, 'nodes', name), 'absent');
   return out;
 }
 
@@ -146,6 +163,7 @@ function deployDecision(g, stamp, outcome = 'pass') {
     const owed = owedCheck(g, outcome);
     if (owed) return owed;
     table.stageWithModules(g.root, stamp, NEW_MODULES);
+    stageNodeFiles(g, stamp);
     swap.markStaged(g.root, stamp);
     let prev = swap.currentStamp(g.root) || '';
     const prevGui = swap.guiStamp(g.root, g.guiRoot);
@@ -162,6 +180,7 @@ function deployDecision(g, stamp, outcome = 'pass') {
     if (prev) {
       swap.captureGui(g.root, prev, g.guiRoot);
       swap.captureModules(g.root, prev, stamp);
+      swap.ensureNodeFiles(g.root, prev);
     }
     swap.linkNewModules(g.root, stamp, prev);
     const notes = swap.switchPreflight(g.root, stamp, g.guiRoot, prev) || '';
@@ -259,6 +278,7 @@ function withRow(build, stale, fn) {
   try {
     const g = table.tableGateway(root);
     fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+    seedLiveNodeFiles(g);
     build(g);
     if (stale) table.staleMarker(g.marker, 'gone-previous');
     const decision = deployDecision(g, 'new');
@@ -284,7 +304,8 @@ function retryAndRollback(g, label) {
   swap.flipTo(g.root, 'retry', g.guiRoot, retry.served);
   assert.equal(swap.verifyPair(g.root, 'retry', g.guiRoot), true, `${label}: the retry activates completely`);
   const state = served(g);
-  for (const [key, want] of [['flows', 'retry'], ['gui', 'retry'], ['osi-a', 'osi-a@retry'], ['osi-c', 'osi-c@retry']]) {
+  for (const [key, want] of [['flows', 'retry'], ['gui', 'retry'], ['osi-a', 'osi-a@retry'], ['osi-c', 'osi-c@retry'],
+    ...NODE_FILES.map((name) => [`nodes/${name}`, `${name}@retry`])]) {
     assert.ok(state[key].includes(want), `${label}: the retry serves ${key} from payloads/retry: ${state[key]}`);
   }
   assert.deepEqual(leftovers(g), [], `${label}: the retry leaves nothing a killed switch left behind`);
@@ -350,6 +371,9 @@ for (const c of CASES) {
         assert.equal(killed(g, k, 'flipTo', ['new', g.guiRoot, decision.served]).status, KILLED);
         const state = served(g);
         const kind = classify(g, state, plan.olds, plan.after);
+        for (const name of NODE_FILES) {
+          assert.notEqual(state[`nodes/${name}`], 'absent', `${c.label} k=${k}: node file ${name} is missing after the cut`);
+        }
         if (loose) {
           assert.ok(kind || state.flows === 'absent' || c.row === 'S3', `${c.label} k=${k}: ${JSON.stringify(state)}`);
         } else {
@@ -567,6 +591,7 @@ function withImageRow(build, fn) {
   try {
     const g = table.tableGateway(root);
     fs.copyFileSync(SWAP_JS, path.join(root, '.payload-swap.js'));
+    seedLiveNodeFiles(g);
     build(g);
     const gui = fs.lstatSync(g.guiRoot);
     if (!gui.isDirectory() || gui.isSymbolicLink()) return null;
