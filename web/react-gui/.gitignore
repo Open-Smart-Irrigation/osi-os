@@ -6,3 +6,6 @@ dist
 /demo-build/
 /test-results/
 /playwright-report/
+
+/public-demo-build/
+/website-demo-build/

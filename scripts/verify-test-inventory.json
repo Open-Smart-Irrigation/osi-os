@@ -74,6 +74,18 @@
       "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
     },
     {
+      "path": "web/react-gui/demo/tests/presentation-mode.spec.ts",
+      "reason": "Manual presentation-artifact browser check (npm run demo:test:browser); no CI workflow builds and runs the presentation site"
+    },
+    {
+      "path": "web/react-gui/demo/tests/storage-isolation.spec.ts",
+      "reason": "Manual presentation-artifact browser check (npm run demo:test:browser); no CI workflow builds and runs the presentation site"
+    },
+    {
+      "pattern": "web/react-gui/demo/tests/public/**/*.spec.ts",
+      "reason": "Manual public-release browser acceptance suite (npm run demo:test:public -- --workers=1); no CI workflow builds and runs all three browser projects"
+    },
+    {
       "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
       "reason": "production-build Playwright matrix run by npm run test:browser:mobile-history; it uses paired flag-off/flag-on production builds, CDP CPU throttling and frame-timing acceptance, so it remains a controlled local release gate tracked by #516 rather than a shared pull-request runner test"
     },

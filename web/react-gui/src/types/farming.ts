@@ -919,7 +919,7 @@ export interface LocalSensorDevice {
 
 export interface OnlineEnvironment {
   available: boolean;
-  source: 'openagri' | 'open_meteo' | 'unavailable';
+  source: 'openagri' | 'open_meteo' | 'meteoswiss' | 'unavailable';
   cacheStatus: 'live' | 'stale' | 'miss';
   observedAt: string | null;
   expiresAt: string | null;
@@ -961,7 +961,7 @@ export interface AgronomicCurrent {
 
 export interface ForecastEnvironment {
   available: boolean;
-  source: 'openagri' | 'open_meteo' | 'unavailable';
+  source: 'openagri' | 'open_meteo' | 'meteoswiss' | 'unavailable';
   cacheStatus: 'live' | 'stale' | 'miss';
   observedAt: string | null;
   expiresAt: string | null;

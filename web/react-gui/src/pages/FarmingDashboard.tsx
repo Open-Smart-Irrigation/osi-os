@@ -30,6 +30,7 @@ import { useGatewayModules } from '../hooks/useGatewayModules';
 import type { Device, IrrigationZone, ValveSchedule, ValveSummary } from '../types/farming';
 import { Button, EmptyState } from '../ui-core';
 import type { IrrigationActuationsResponse } from '../services/api';
+import { isPublicSimulatorBuild } from '../utils/publicSimulatorDeviceDefaults';
 
 const devicesFetcher = () => devicesAPI.getAll();
 const zonesFetcher = () => irrigationZonesAPI.getAll();
@@ -43,6 +44,7 @@ export const FarmingDashboard: React.FC = () => {
   const { t: tc } = useTranslation('common');
   const { t: td } = useTranslation('devices');
   const { modules } = useDisplayPreferences();
+  const publicSimulatorBuild = isPublicSimulatorBuild();
   // Gateway-level module switches (the hub card), separate from the per-browser
   // display preferences above.
   const gatewayModules = useGatewayModules();
@@ -299,6 +301,7 @@ export const FarmingDashboard: React.FC = () => {
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
                     canWrite={canWrite}
+                    initiallyExpanded={publicSimulatorBuild && zone.id === 1}
                   />
                 ))}
               </div>

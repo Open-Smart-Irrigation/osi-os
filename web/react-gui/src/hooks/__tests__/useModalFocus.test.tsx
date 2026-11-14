@@ -26,3 +26,19 @@ it('only the topmost dialog traps focus and Escape, then restores each opener', 
   expect(next).toHaveFocus();
   fireEvent.keyDown(next, {key: 'Escape'}); expect(launch).toHaveFocus();
 });
+
+it('leaves browser-native in-dialog Tab stops to the browser', () => {
+  render(<><button>Launch native stop</button><Modal title="Native stops" isOpen onClose={() => {}}>
+    <button>First</button><div contentEditable aria-label="Native browser stop" />
+    <details><summary>Compiled week</summary><button>Hidden detail action</button></details>
+    <button>Last</button>
+  </Modal></>);
+  const pane = screen.getByLabelText('Native browser stop');
+  pane.focus();
+  const event = new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, cancelable: true});
+  document.activeElement?.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(pane).toHaveFocus();
+  expect(screen.getByText('Compiled week')).toBeVisible();
+  expect(screen.getByText('Hidden detail action').closest('details')).not.toHaveAttribute('open');
+});

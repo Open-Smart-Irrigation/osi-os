@@ -37,7 +37,7 @@ const SCHEDULE_HELP={scheduleHelp:'Weekly schedules run on each valve.',schedule
 // cancelCollateral.planStillRunning (owner ruling 2026-10-24, R19 residual 1) is translated in every edge locale except lg (English, ledger).
 // settingsDialog.title (now "Settings for {{name}}") and settingsDialog.flowFromZone (#166) are translated in every edge locale except lg (English, ledger).
 // commandNoAnswer.* (valve command with no answer, v0.8.2 fix campaign) are translated in every edge locale except lg (English, ledger).
-const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel',...PENDING_TRANSLATION,'resumeRefusedClearPending','irrigationPolicy.vwcDisabled','cancelCollateral.planStillRunning','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton','settingsDialog.title','settingsDialog.flowFromZone','commandNoAnswer.open','commandNoAnswer.close','commandNoAnswer.other'];
+const PENDING_HUMAN_LUGANDA=['scheduleDialog.saveSucceeded','scheduleHelp','scheduleHelpLabel',...PENDING_TRANSLATION,'resumeRefusedClearPending','irrigationPolicy.vwcDisabled','cancelCollateral.planStillRunning','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton','settingsDialog.title','settingsDialog.flowFromZone','commandNoAnswer.open','commandNoAnswer.close','commandNoAnswer.other'];
 // D04 (owner decision 2026-10-18): the cancel help text is verbatim.
 test('cancel help is the verbatim D04 text',()=>{
   assert.equal(english.cancelHelp,'Cancel deletes the pending command. It does not close a valve that is already open.');

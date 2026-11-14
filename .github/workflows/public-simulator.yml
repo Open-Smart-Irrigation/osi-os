@@ -1,0 +1,44 @@
+name: Public Simulator Build Isolation
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web/react-gui/**'
+      - 'web/history-uplot-core/**'
+      - '.github/workflows/public-simulator.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/react-gui/**'
+      - 'web/history-uplot-core/**'
+      - '.github/workflows/public-simulator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    working-directory: web/react-gui
+jobs:
+  build-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/react-gui/package-lock.json
+      - run: npm ci
+      - name: Typecheck simulator
+        run: ./node_modules/.bin/tsc -p demo/tsconfig.json --noEmit
+      - name: Build production GUI
+        run: npm run build
+      - name: Build public simulator
+        run: npm run demo:build:public
+      - name: Package website assets
+        run: npm run demo:build:website
+      - name: Reject simulator code in production artifacts
+        run: node demo/check-build-isolation.mjs --production build --public public-demo-build --source src

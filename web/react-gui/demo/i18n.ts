@@ -29,12 +29,23 @@ for (const [language, resource] of Object.entries(resources)) {
   (resource.devices as {irrigationOutcomes: {empty: string}}).irrigationOutcomes.empty = sessionEmpty[language];
   const dashboard = resource.dashboard as {title: string};
   dashboard.title = dashboard.title.replace('Open Smart Irrigation', 'OSI OS');
-  const water = (resource.devices as {zone: {water: {subtitle: string; rainToday: string; measured: string; drivenByBalance: string}}}).zone.water;
+  const water = (resource.devices as {zone: {water: {subtitle: string; rainToday: string; measured: string; drivenByBalance: string; trendNoteMeasured?: string}}}).zone.water;
   water.measured = WATER_COPY[language].measured;
   water.drivenByBalance = WATER_COPY[language].advice;
   water.subtitle = `${water.rainToday} · ${water.measured}`;
+  if (language === 'lg') {
+    const environmentWater = (resource.devices as {environment: {water: {trendNoteMeasured?: string}}}).environment.water;
+    environmentWater.trendNoteMeasured = 'Compare rainfall with measured effective irrigation over the last week.';
+  }
 }
-void i18n.use(initReactI18next).init({resources, lng: 'en', fallbackLng: 'en', supportedLngs: SUPPORTED_LANGUAGES.map(({code}) => code),
+// Demo presentation uses the main locale resources, whose pending human locale
+// families intentionally remain English. Supply this demo-only key in the
+// English fallback bundle; public mode overrides it with demo-specific copy.
+(resources.en.devices as {environment: {water: {trendNoteMeasured?: string}}}).environment.water.trendNoteMeasured =
+  'Compare rainfall with measured effective irrigation over the last week.';
+const requestedLanguage = new URLSearchParams(location.search).get('lang');
+const initialLanguage = SUPPORTED_LANGUAGES.some(({code}) => code === requestedLanguage) ? requestedLanguage! : 'en';
+void i18n.use(initReactI18next).init({resources, lng: initialLanguage, fallbackLng: 'en', supportedLngs: SUPPORTED_LANGUAGES.map(({code}) => code),
   defaultNS: 'common', fallbackNS: ['common'], interpolation: {escapeValue: false}, react: {useSuspense: false}});
 // Keep machine-translated Luganda scoped to this build; never edit production copy.
 for (const [key, value] of Object.entries(lugandaValves)) i18n.addResource('lg', 'valves', key, value);
