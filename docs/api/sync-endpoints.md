@@ -11,7 +11,7 @@ lives in [`docs/contracts/sync-schema/`](../contracts/sync-schema/README.md).
 | Endpoint | Method | Purpose | Cadence |
 |----------|--------|---------|---------|
 | `/auth/local-sync` | POST | Account link + sync token | On-demand |
-| `/auth/refresh-sync` | POST | Refresh sync token | Hourly |
+| `/auth/refresh-sync` | POST | Refresh sync token; renews a correctly signed expired token for up to 365 days | Hourly |
 | `/api/v1/sync/edge/bootstrap` | POST | Full state snapshot upload | Every 6 h |
 | `/api/v1/sync/edge/events` | POST | Outbox event delivery | Every 30 s |
 | `/api/v1/sync/gateways/{eui}/pending-commands` | GET | Pull cloud-originated commands | Every 30 s |
@@ -21,6 +21,17 @@ lives in [`docs/contracts/sync-schema/`](../contracts/sync-schema/README.md).
 | `/api/v1/sync/gateways/{eui}/environment-bundles` | GET | Zone environment | On-demand |
 
 `/api/v1/sync/gateways/{eui}/status` and `/reconciliation` are cloud diagnostics; the edge never calls them, nor the legacy `/api/v1/devices/claim-bulk`.
+
+The cloud accepts an expired sync token on `/auth/refresh-sync` only, up to the
+configured `jwt.sync-refresh-grace-ms` limit (365 days by default). Other sync
+routes still require an unexpired token. Refresh refuses a token superseded by
+a newer token presented at bootstrap or revoked by an active cloud unlink;
+reclaiming does not restore a revoked token. Password changes and force-sync do
+not revoke tokens. A deployed gateway retries refresh hourly and recovers after
+the cloud upgrade without an edge change. A manual account re-link is needed
+when the token is more than 365 days past expiry, the gateway was unlinked in
+the cloud, or the local database was restored from a backup with a superseded
+token.
 
 ## Cloud to edge command types
 

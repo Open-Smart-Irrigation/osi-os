@@ -16,3 +16,18 @@ age threshold. Green means the DR net is actually current.
 On-device note: this uses the `sqlite3` CLI. If a gateway lacks it (per project memory,
 only some Pis have it installed), run the check from a workstation against a pulled copy,
 or port it to the on-device node-sqlite3 binding.
+
+## Cloud sync token expiry
+
+An expired cloud sync token can appear as `401` from `/auth/refresh-sync` and
+`403` from pending-commands. Check `GET /api/sync/state` on the gateway for
+`lastError`; a pending-commands `403` there means cloud sync has not recovered.
+
+After the cloud receives its upgrade, leave the gateway linked and allow its
+hourly refresh retry to run. The edge keeps the stored token after a failed
+refresh, so no edge update or local unlink is needed. If refresh still returns
+`401` after the cloud upgrade, re-link with the cloud account password when the
+token is more than 365 days past expiry, the gateway was unlinked in the cloud,
+or `farming.db` was restored from an older backup after expiry and its token was
+superseded. A local `DELETE /api/account-link` only unlinks the gateway locally;
+it does not revoke a token in the cloud.
