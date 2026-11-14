@@ -71,6 +71,12 @@
 
 'use strict';
 
+// osi-bootstrap runs the deployed /srv/node-red copy or the image copy,
+// whichever carries the higher revision (a copy without this line counts as
+// 0). Raise it with every change to this file; CI refuses a change that does
+// not (scripts/verify-bootstrap-revision.js).
+const OSI_BOOTSTRAP_REVISION = 1;
+
 const fs = require('fs');
 const path = require('path');
 const { execSync, execFileSync } = require('child_process');

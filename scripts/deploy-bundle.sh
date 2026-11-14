@@ -21,7 +21,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$script_dir/.." && pwd)}"
-REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-$1}"
+REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-${1:-}}"
 REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-$REPO_ROOT/react_gui.tar.gz}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist}"
 

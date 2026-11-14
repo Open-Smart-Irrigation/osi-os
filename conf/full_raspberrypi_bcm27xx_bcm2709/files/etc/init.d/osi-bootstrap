@@ -12,6 +12,51 @@ stamp_valid() {
 	return 0
 }
 
+# The OSI_BOOTSTRAP_REVISION a bootstrap script declares. Supported range:
+# 1 to 999999, digits only, no leading zero; scripts/verify-bootstrap-revision.js
+# enforces the same rule in CI. A copy without the line counts as 0. A value
+# outside the range counts as 0 too, with one log line, so the -ge comparison
+# below never sees a number the shell cannot compare.
+bootstrap_revision() {
+	local line revision
+	if [ ! -r "$1" ]; then
+		logger -t osi-bootstrap "cannot read $1 for OSI_BOOTSTRAP_REVISION; counting it as 0"
+		echo 0
+		return 0
+	fi
+	line="$(grep '^const OSI_BOOTSTRAP_REVISION' "$1" 2>/dev/null | head -n 1)"
+	if [ -z "$line" ]; then
+		echo 0
+		return 0
+	fi
+	revision="$(printf '%s\n' "$line" | sed -n 's/^const OSI_BOOTSTRAP_REVISION = \([0-9][0-9]*\);[[:space:]]*$/\1/p')"
+	case "$revision" in
+		[1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9][0-9])
+			echo "$revision" ;;
+		*)
+			logger -t osi-bootstrap "OSI_BOOTSTRAP_REVISION in $1 is not 1 to 999999; counting it as 0"
+			echo 0 ;;
+	esac
+}
+
+# deploy.sh writes the current script to /srv/node-red and leaves the image
+# copy alone; a sysupgrade replaces the image copy and keeps /srv. Of the two,
+# the higher revision runs, and the deployed copy on a tie: an image from
+# before the revision mark counts as 0.
+select_bootstrap_script() {
+	if [ -f "$BOOTSTRAP_FALLBACK" ] && [ -f "$BOOTSTRAP_ROM" ]; then
+		if [ "$(bootstrap_revision "$BOOTSTRAP_FALLBACK")" -ge "$(bootstrap_revision "$BOOTSTRAP_ROM")" ]; then
+			echo "$BOOTSTRAP_FALLBACK"
+		else
+			echo "$BOOTSTRAP_ROM"
+		fi
+	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
+		echo "$BOOTSTRAP_FALLBACK"
+	elif [ -f "$BOOTSTRAP_ROM" ]; then
+		echo "$BOOTSTRAP_ROM"
+	fi
+}
+
 boot() {
 	start
 }
@@ -21,13 +66,9 @@ start() {
 		return 0
 	fi
 
-	local bootstrap_script=""
+	local bootstrap_script
 	local provisioned_this_boot=0
-	if [ -f "$BOOTSTRAP_ROM" ]; then
-		bootstrap_script="$BOOTSTRAP_ROM"
-	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
-		bootstrap_script="$BOOTSTRAP_FALLBACK"
-	fi
+	bootstrap_script="$(select_bootstrap_script)"
 
 	if [ -z "$bootstrap_script" ]; then
 		logger -t osi-bootstrap "bootstrap script not found, will retry next boot"
@@ -50,7 +91,10 @@ start() {
 	fi
 
 	logger -t osi-bootstrap "running $(basename "$bootstrap_script")..."
-	if node "$bootstrap_script"; then
+	# The script writes the ChirpStack API key to .chirpstack.env. An older
+	# image's script creates that file with the process umask, so every file it
+	# creates here is owner-only.
+	if (umask 077 && exec node "$bootstrap_script"); then
 		if touch /etc/osi-bootstrap.done; then
 			provisioned_this_boot=1
 			logger -t osi-bootstrap "bootstrap completed successfully"
