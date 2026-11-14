@@ -16,22 +16,11 @@ const ENV = { OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F1000001', CHIRPSTACK
 test('A1: post-devices-insert persists chirpstack_app_id on a fresh SDI-12 registration', async () => {
   const db = seedTestDb();
   try {
-    // Drive the node exactly as the local /api/devices POST handler chain does:
-    // seed the flow-context values post-devices-insert reads instead of msg.payload.
-    // (Read the node's source first -- it reads flow.get('new_device_*'), not msg.)
-    // Fill in the exact flow.set(...) calls the upstream auth/validate node performs,
-    // matching scripts/test-scoped-access-writes.js's existing device-registration tests.
+    // The upstream auth stage supplies request-local normalized values.
     const response = await executeFunction(loadNode('post-devices-insert'), {
-      msg: { payload: [] }, // no existing row
-      env: ENV,
-      db,
-      flowState: {
-        new_device_user_id: 1,
-        new_device_deveui: 'A840410000000101',
-        new_device_name: 'Bench SDI-12',
-        new_device_type: 'DRAGINO_SDI12',
-        new_device_appkey: '00000000000000000000000000000001',
-      },
+      msg: { payload: [], device: { user_id: 1, deveui: 'A840410000000101',
+        name: 'Bench SDI-12', type: 'DRAGINO_SDI12', appkey: '00000000000000000000000000000001' } },
+      env: ENV, db,
     });
     assert.equal(response.result[0].topic.includes('chirpstack_app_id'), true, 'INSERT SQL must set chirpstack_app_id');
     // Actually run the SQL against db and assert the persisted column, matching

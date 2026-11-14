@@ -378,13 +378,31 @@ function findNodeById(id) {
   return flows.find((node) => node.id === id);
 }
 
+// These nodes now delegate their former bodies to existing registered helpers.
+// Keep the stage-specific guards on the exported body and require the wiring
+// call as well, so an unused helper cannot satisfy a broken node's checks.
+const requestStageBodies = new Map([
+  ['al-link-handle-auth', require(path.join(nodeRedRoot, 'osi-installation-helper')).requestAlLinkHandleAuth],
+  ['al-link-store-mqtt', require(path.join(nodeRedRoot, 'osi-installation-helper')).requestAlLinkStoreMqtt],
+  ['cs-register-device-fn', require(path.join(nodeRedRoot, 'osi-irrigation-policy', 'routes.js')).requestCsRegisterDeviceFn],
+]);
+function checkedRequestStageSource(node) {
+  const delegate = requestStageBodies.get(node.id);
+  if (!delegate) return String(node.func || '');
+  if (!String(node.func || '').includes('.' + delegate.name + '(')) {
+    fail(`${node.id} missing request helper call ${delegate.name}`);
+    return '';
+  }
+  return delegate.toString();
+}
+
 function expectIncludes(nodeName, needle, description) {
   const node = findNodeByName(nodeName);
   if (!node) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = checkedRequestStageSource(node);
   if (!func.includes(needle)) {
     fail(`${nodeName} missing ${description}`);
   } else {
@@ -398,7 +416,7 @@ function expectExcludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = checkedRequestStageSource(node);
   if (func.includes(needle)) {
     fail(`${nodeName} still contains ${description}`);
   } else {
@@ -1480,8 +1498,8 @@ expectIncludes('Validate & decode token', 'ALLOW_INSECURE_SERVER_URL', 'accepts 
 expectIncludes('Validate & decode token', 'allow_private_target', 'accepts the persisted UCI private-target override flag');
 expectIncludes('Validate & decode token', "normalizeGatewayDeviceEui(env.get('DEVICE_EUI'))", 'uses the canonical runtime gateway identity');
 expectIncludes('Validate & decode token', "env.get('DEVICE_EUI_CONFIDENCE')", 'reads runtime gateway identity confidence');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
+expectIncludes('Validate & decode token', "msg.link.gateway_device_eui_source =", 'stores resolved gateway identity metadata on the link request');
+expectIncludes('Validate & decode token', "msg.link.gateway_device_eui_confidence =", 'stores resolved gateway identity confidence on the link request');
 expectIncludes('Validate & decode token', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'blocks account linking while gateway identity remains provisional');
 expectExcludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc ChirpStack log gateway probing');
 expectExcludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing');
@@ -1493,8 +1511,8 @@ expectIncludes('Handle server auth response', "requiredFieldErrors.push('offline
 expectIncludes('Handle server auth response', "requiredFieldErrors.push('MQTT password')", 'requires MQTT password on successful link');
 expectIncludes('Handle server auth response', "requiredFieldErrors.push('MQTT broker URL')", 'requires MQTT broker URL on successful link');
 expectIncludes('Handle server auth response', 'const mqttPassword = String(data.mqttPassword || data.mqtt_password || \'\').trim();', 'accepts MQTT credentials from local-sync');
-expectIncludes('Handle server auth response', "flow.set('al_mqtt_password', mqttPassword);", 'stores MQTT password from local-sync');
-expectIncludes('Handle server auth response', "flow.set('al_mqtt_broker_url', mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
+expectIncludes('Handle server auth response', "msg.link.mqtt_password = (mqttPassword);", 'stores MQTT password from local-sync');
+expectIncludes('Handle server auth response', "msg.link.mqtt_broker_url = (mqttBrokerUrl);", 'stores MQTT broker URL from local-sync');
 expectIncludes('Handle server auth response', 'function extractHostFromAbsoluteUrl(value)', 'uses a runtime-compatible MQTT URL parser');
 expectIncludes('Handle server auth response', "const match = text.match(new RegExp('^[a-z][a-z0-9+.-]*://([^/?#]+)', 'i'));", 'falls back to regex host extraction when URL is unavailable');
 expectExcludes('Handle server auth response', 'new URL(mqttBrokerUrl);', 'a direct MQTT broker URL constructor check that can fail on older runtimes');
@@ -4165,7 +4183,7 @@ expectExcludesById('post-zone-auth', "if (!name || name.trim() === '') {", 'the 
 expectIncludesById('scoped-zone-create-router', "osiLib.require('entity-name')", 'applies the shared name rule to scoped zone creation');
 expectIncludesById('scoped-zone-create-router', 'if (error && error.reason) msg.payload.reason = String(error.reason);', 'surfaces the name reason code on a scoped 400');
 expectIncludesById('post-devices-auth', "osiLib.require('entity-name')", 'applies the shared name rule to device creation');
-expectIncludesById('post-devices-auth', "flow.set('new_device_name', normalizedDeviceName);", 'hands post-devices-insert the normalized device name');
+expectIncludesById('post-devices-auth', "name: normalizedDeviceName", 'hands post-devices-insert the normalized device name');
 
 // Fix round 1 (reviewer findings I1/I2 on the three HTTP create-path nodes;
 // controller ruling T9-M4). I1: only the four reviewed normalizeEntityName

@@ -25,6 +25,7 @@ const WRAPPERS = {
 // Do not use globalThis here: Node's host realm adds crypto, URL, fetch,
 // process, require, etc., none of which Node-RED injects into the VM.
 const INTRINSICS = vm.runInNewContext('Object.getOwnPropertyNames(globalThis)');
+const RESERVED_LIB_NAMES = new Set([...SANDBOX, ...INTRINSICS, ...Object.values(WRAPPERS).flat()]);
 const linter = new Linter();
 const EXCEPTIONS = require('./flows-sandbox-exceptions.json');
 
@@ -43,7 +44,7 @@ function checkSource(source, field, libs = []) {
   return linter.verify(wrapped, {
     languageOptions: { ecmaVersion: 2022, sourceType: 'script', globals },
     linterOptions: { noInlineConfig: true },
-    rules: { 'no-undef': ['error', { typeof: false }] },
+    rules: { 'no-undef': ['error', { typeof: false }], 'no-with': 'error' },
   }).map((finding) => ({ ...finding, line: finding.line - 1 }));
 }
 
@@ -56,6 +57,15 @@ function checkFlows(flows, exceptions = EXCEPTIONS) {
   for (const node of flows) {
     if (!node || node.type !== 'function') continue;
     functionNodes++;
+    const libraryNames = new Set();
+    for (const lib of node.libs || []) {
+      if (!lib.var) continue;
+      if (RESERVED_LIB_NAMES.has(lib.var) || libraryNames.has(lib.var)) {
+        failures.push({ id: node.id, name: node.name, field: 'libs',
+          message: 'library variable ' + lib.var + ' conflicts with a sandbox/wrapper name or another library variable' });
+      }
+      libraryNames.add(lib.var);
+    }
     for (const field of Object.keys(WRAPPERS)) {
       const source = node[field] || '';
       const applicable = exceptions.filter((entry) => entry.id === node.id && entry.field === field);

@@ -175,14 +175,14 @@ async function runAssignDeviceChain(flows, native, { userId, username, zoneId, d
   execSqliteTopicNode(native, afterAuth); // assign-device-lookup
 
   const verifyZoneNode = findNode(flows, 'assign-device-verify-zone');
-  const zoneOut = routeOutputs(verifyZoneNode, await executeFunctionNode(verifyZoneNode, afterAuth, { flowStore, env }));
+  const zoneOut = routeOutputs(verifyZoneNode, await executeFunctionNode(verifyZoneNode, afterAuth, { flowStore, env, scope: lifecycleLibs(native) }));
   if (zoneOut[1]) return { stage: 'verify-zone', msg: zoneOut[1] };
   const afterZone = zoneOut[0];
 
   execSqliteTopicNode(native, afterZone); // assign-device-verify-zone-db
 
   const verifyDeviceNode = findNode(flows, 'assign-device-verify-device');
-  const deviceOut = routeOutputs(verifyDeviceNode, await executeFunctionNode(verifyDeviceNode, afterZone, { flowStore, env }));
+  const deviceOut = routeOutputs(verifyDeviceNode, await executeFunctionNode(verifyDeviceNode, afterZone, { flowStore, env, scope: lifecycleLibs(native) }));
   if (deviceOut[1]) return { stage: 'verify-device', msg: deviceOut[1] };
   const afterDevice = deviceOut[0];
 

@@ -743,35 +743,28 @@ function makeFlowStub(initial) {
 }
 
 function runCheckExistingDevice(userId, deveui) {
-  const msg = { payload: [{ id: userId }] };
-  const flow = makeFlowStub({ new_device_deveui: deveui });
-  const execute = new Function('msg', 'flow', byId['check-existing-device'].func);
-  const out = execute(msg, flow);
-  return { out, flow, sql: msg.topic };
+  const msg = { payload: [{ id: userId }], device: { user_id: userId, deveui } };
+  const execute = new Function('msg', byId['check-existing-device'].func);
+  const out = execute(msg);
+  return { out, msg, sql: msg.topic };
 }
 
-function runPostDevicesInsert({ flow, payloadRows, envVars }) {
-  const msg = { payload: payloadRows };
+function runPostDevicesInsert({ device, payloadRows, envVars }) {
+  const msg = { payload: payloadRows, device };
   const node = noopNode();
-  const execute = new Function('msg', 'flow', 'env', 'node', byId['post-devices-insert'].func);
-  const out = execute(msg, flow, makeEnv(envVars), node);
+  const execute = new Function('msg', 'env', 'node', byId['post-devices-insert'].func);
+  const out = execute(msg, makeEnv(envVars), node);
   return { out, msg, node };
 }
 
-// Chains check-existing-device's real SQL through a real database and into
-// post-devices-insert, exactly as the two nodes are wired in production (check-existing-device
-// -> a sqlite node -> post-devices-insert). This is what makes a `LEFT JOIN` dropped from
-// check-existing-device's SQL text observable here: the rows a mutant's SQL actually returns
-// from a real database, not what the SQL string happens to contain.
+// Follow the request-local registration values through the actual lookup SQL.
 async function runRegistrationSelectAndInsert({ db, userId, deveui, requestedGeneration }) {
-  const { flow, sql } = runCheckExistingDevice(userId, deveui);
-  if (requestedGeneration) flow.set('new_device_strega_generation', requestedGeneration);
-  flow.set('new_device_name', 'Test Valve');
-  flow.set('new_device_type', 'STREGA_VALVE');
-  flow.set('new_device_appkey', APPKEY);
+  const { msg: lookup, sql } = runCheckExistingDevice(userId, deveui);
+  Object.assign(lookup.device, { name: 'Test Valve', type: 'STREGA_VALVE', appkey: APPKEY });
+  if (requestedGeneration) lookup.device.strega_generation = requestedGeneration;
   const rows = await db.all(sql);
-  const { out, msg, node } = runPostDevicesInsert({ flow, payloadRows: rows, envVars: REG_ENV });
-  return { out, msg, node, flow, rows };
+  const { out, msg, node } = runPostDevicesInsert({ device: lookup.device, payloadRows: rows, envVars: REG_ENV });
+  return { out, msg, node, rows };
 }
 
 test('registration path (execution): stored GEN2, generation omitted on re-registration -> stays GEN2', async () => {
@@ -804,8 +797,8 @@ test('registration path (execution): existing device with NO valve_settings row 
   // the SELECT entirely, and post-devices-insert would then wrongly try to CREATE it again
   // instead of recognising the existing row (this is exactly what MAJOR-2's fix round changed
   // an implicit non-join SELECT into a LEFT JOIN to prevent).
-  const { msg, flow } = await runRegistrationSelectAndInsert({ db, userId: 1, deveui: eui, requestedGeneration: '' });
-  assert.equal(flow.get('device_action'), 'updated', 'the device must be recognised as existing (an INNER JOIN would silently drop it and re-"create" it)');
+  const { msg } = await runRegistrationSelectAndInsert({ db, userId: 1, deveui: eui, requestedGeneration: '' });
+  assert.equal(msg.device.action, 'updated', 'the device must be recognised as existing (an INNER JOIN would silently drop it and re-"create" it)');
   assert.equal(msg.deviceRegistration.stregaGeneration, 'GEN1');
   assert.equal(msg.deviceRegistration.deviceProfileId, GEN1_UUID);
   raw.close();
@@ -837,13 +830,13 @@ test('registration path (execution): a brand-new device (no devices row at all) 
   const { db, raw } = await tempDb();
   const eui = '0016C001F1002099';
   const gen2 = await runRegistrationSelectAndInsert({ db, userId: 1, deveui: eui, requestedGeneration: 'GEN2' });
-  assert.equal(gen2.flow.get('device_action'), 'created');
+  assert.equal(gen2.msg.device.action, 'created');
   assert.equal(gen2.msg.deviceRegistration.stregaGeneration, 'GEN2');
   assert.equal(gen2.msg.deviceRegistration.deviceProfileId, GEN2_UUID);
 
   const eui2 = '0016C001F1002098';
   const absent = await runRegistrationSelectAndInsert({ db, userId: 1, deveui: eui2, requestedGeneration: '' });
-  assert.equal(absent.flow.get('device_action'), 'created');
+  assert.equal(absent.msg.device.action, 'created');
   assert.equal(absent.msg.deviceRegistration.stregaGeneration, 'GEN1');
   assert.equal(absent.msg.deviceRegistration.deviceProfileId, GEN1_UUID);
   raw.close();
@@ -865,10 +858,11 @@ async function runCsRegisterDeviceFn({ raw, registration, topicSql, envVars }) {
   const osiLib = {
     require: (name) => {
       if (name === 'osi-valve-control') return { ok: true, value: valveControl };
+      if (name === 'osi-irrigation-policy') return { ok: true, value: require(path.join(path.dirname(FLOWS_PATH), 'node-red/osi-irrigation-policy')) };
       throw new Error('unexpected osiLib.require: ' + name);
     },
   };
-  const msg = { deviceRegistration: registration, topic: topicSql };
+  const msg = { deviceRegistration: registration, topic: topicSql, device: {} };
   const execute = new Function('osiDb', 'chirpstack', 'osiLib', 'env', 'node', 'msg', 'flow', byId['cs-register-device-fn'].func);
   const out = await execute(osiDb, chirpstack, osiLib, makeEnv(envVars), node, msg, flow);
   return { out, calls, node };
@@ -952,6 +946,7 @@ async function runCsRegCloudFn({ raw, payload, envVars, osiDb }) {
     require: (name) => {
       if (name === 'entity-name') return { ok: true, value: entityNameModule };
       if (name === 'osi-valve-control') return { ok: true, value: valveControl };
+      if (name === 'osi-irrigation-policy') return { ok: true, value: require(path.join(path.dirname(FLOWS_PATH), 'node-red/osi-irrigation-policy')) };
       throw new Error('unexpected osiLib.require: ' + name);
     },
   };

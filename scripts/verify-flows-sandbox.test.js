@@ -40,6 +40,28 @@ test('checks lexical scope, closures and each node\'s own declared modules', () 
   assert.deepEqual(checkSource('const value = { missing: "missing" }; return value.missing;', 'func'), []);
 });
 
+test('rejects library names that collide with sandbox names, wrappers or each other', () => {
+  for (const name of ['util', 'Buffer', 'context', 'node', 'msg', '__send__', '__done__', '__msgid__', 'results', '__initSend__']) {
+    const result = checkFlows([{ id: 'collision', type: 'function', func: 'return null;', libs: [{ var: name, module: 'crypto' }] }], []);
+    assert.ok(result.failures.some((f) => /library variable/.test(f.message)), name);
+  }
+  assert.ok(checkFlows([{ id: 'duplicate', type: 'function', func: 'return null;',
+    libs: [{ var: 'crypto', module: 'crypto' }, { var: 'crypto', module: 'crypto' }] }], []).failures.length);
+});
+
+test('rejects with statements in every function source field', () => {
+  for (const field of ['func', 'initialize', 'finalize']) {
+    assert.ok(checkSource('with ({}) { missing; }', field).some((f) => f.ruleId === 'no-with'), field);
+  }
+});
+
+test('checks destructuring defaults, interpolations and inline global declarations', () => {
+  for (const code of ['const {x = missingDefault} = {};', 'return `${missingInterpolation}`;', '/* global missingName */ return missingName;']) {
+    assert.ok(checkSource(code, 'func').some((f) => f.ruleId === 'no-undef'));
+  }
+  assert.deepEqual(checkSource('// missingName is a comment\nreturn "missingName";', 'func'), []);
+});
+
 test('checks setup and close independently with their actual wrapper names', () => {
   const result = checkFlows([{ id: 'three-fields', type: 'function',
     func: 'return missingBody;', initialize: 'await missingSetup();', finalize: 'missingClose();' }], []);

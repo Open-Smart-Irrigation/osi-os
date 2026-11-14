@@ -80,23 +80,23 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
       };
     },
   };
+  msg.link = {
+      local_username: 'identity-test',
+      verified_server_username: 'server-user',
+      offline_verifier: 'offline-verifier',
+      offline_verifier_version: 2,
+      server_url: SERVER_URL,
+      server_sync_token: 'sync-token',
+      server_sync_token_expires_at: Date.now() + 3600000,
+      cloud_user_id: 42,
+      installation_uuid: INSTALLATION_UUID,
+      gateway_device_eui: eui,
+  };
   const sent = JSON.parse(JSON.stringify(msg));
   const execution = await executeFunction(FINALIZE_NODE, {
     db,
     msg,
     env: { DEVICE_EUI: 'FFEEDDCCBBAA0099' },
-    flowState: {
-      al_local_username: 'identity-test',
-      al_verified_server_username: 'server-user',
-      al_offline_verifier: 'offline-verifier',
-      al_offline_verifier_version: 2,
-      al_server_url: SERVER_URL,
-      al_server_sync_token: 'sync-token',
-      al_server_sync_token_expires_at: Date.now() + 3600000,
-      al_cloud_user_id: 42,
-      al_installation_uuid: INSTALLATION_UUID,
-      al_gateway_device_eui: eui,
-    },
     libOverrides: {
       osiDb: database,
       osiLib: {
