@@ -26,8 +26,8 @@ An expired cloud sync token can appear as `401` from `/auth/refresh-sync` and
 After the cloud receives its upgrade, leave the gateway linked and allow its
 hourly refresh retry to run. The edge keeps the stored token after a failed
 refresh, so no edge update or local unlink is needed. If refresh still fails
-(`401` or `403`) after the cloud upgrade, re-link with the cloud account password when the
-token is more than 365 days past expiry, the gateway was unlinked in the cloud,
-or `farming.db` was restored from an older backup after expiry and its token was
-superseded. A local `DELETE /api/account-link` only unlinks the gateway locally;
-it does not revoke a token in the cloud.
+(`401` or `403`) after the cloud upgrade, re-link with the cloud account
+password when the token is more than 365 days past expiry, the gateway was
+unlinked in the cloud, or `farming.db` was restored from an older backup and its
+token is both expired and superseded. A local `DELETE /api/account-link` only
+unlinks the gateway locally; it does not revoke a token in the cloud.

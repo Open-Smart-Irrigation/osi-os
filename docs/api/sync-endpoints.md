@@ -24,14 +24,15 @@ lives in [`docs/contracts/sync-schema/`](../contracts/sync-schema/README.md).
 
 The cloud accepts an expired sync token on `/auth/refresh-sync` only, up to the
 configured `jwt.sync-refresh-grace-ms` limit (365 days by default). Other sync
-routes still require an unexpired token. Refresh refuses a token superseded by
-a newer token presented at bootstrap or revoked by an active cloud unlink;
-reclaiming does not restore a revoked token. Password changes and force-sync do
-not revoke tokens. A deployed gateway retries refresh hourly and recovers after
-the cloud upgrade without an edge change. A manual account re-link is needed
-when the token is more than 365 days past expiry, the gateway was unlinked in
-the cloud, or the local database was restored from a backup with a superseded
-token.
+routes still require an unexpired token. Refresh refuses any token revoked by
+an active cloud unlink; reclaiming does not restore a revoked token. It also
+refuses an expired token that a newer token presented at bootstrap has
+superseded; an unexpired token is not checked for supersession. Password changes
+and force-sync do not revoke tokens. A deployed gateway retries refresh hourly
+and recovers after the cloud upgrade without an edge change. A manual account
+re-link is needed when the token is more than 365 days past expiry, the gateway
+was unlinked in the cloud, or the local database was restored from a backup and
+its token is both expired and superseded.
 
 ## Cloud to edge command types
 
