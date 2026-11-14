@@ -89,11 +89,17 @@ COMMAND_LEDGER_HELPER_SHA256="48ae6cd244908c614d2e0f8d78a60e8a119b64853e2e49cefe
 COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
+NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
+NODE_FILES_STAGE_ROOT="${NODE_FILES_STAGE_ROOT:-/srv/node-red}"
+NODE_FILES_STAGE="$NODE_FILES_STAGE_ROOT/.osi-node-files-stage.$$"
+OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
+OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
 export SWAP_ROOT
 
 cleanup() {
     rm -rf "$TMP_DIR"
     rm -rf "$COMMAND_LEDGER_STAGE"
+    rm -rf "$NODE_FILES_STAGE"
 }
 trap cleanup EXIT INT TERM
 
@@ -104,6 +110,10 @@ fetch() {
     dest="$2"
     mkdir -p "$(dirname "$dest")"
     curl -fsSLo "$dest" "$BASE/$src"
+}
+
+file_sha256() {
+    node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
 fetch_required() {
@@ -3101,6 +3111,36 @@ fetch_required "Tektelic KIWI/CLOVER codec" \
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
+
+# Node-RED loads node files from /srv/node-red/nodes at start. This one puts
+# the flows' shared SQLite connection into serialized mode (F-7); it does not
+# depend on the flows' version, so it stays in place like the codecs. It lives
+# outside the payload, so nothing would put a damaged copy back: a fetch cut
+# short can leave valid JavaScript that does nothing. Both files are fetched
+# beside /srv/node-red/nodes, checked against the SHA-256 values above, and
+# only then moved into place. On any failure the copies already there stay as
+# they were and the deploy stops here.
+install_node_files() {
+    rm -rf "$NODE_FILES_STAGE_ROOT"/.osi-node-files-stage.* || return 1
+    mkdir -m 700 -p "$NODE_FILES_STAGE" "$NODE_FILES_DIR" || return 1
+    if fetch_required "osi-sqlite-serialize node file" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.js" \
+        "$NODE_FILES_STAGE/osi-sqlite-serialize.js" \
+        && fetch_required "osi-sqlite-serialize node file (.html)" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/nodes/osi-sqlite-serialize.html" \
+        "$NODE_FILES_STAGE/osi-sqlite-serialize.html" \
+        && [ "$(file_sha256 "$NODE_FILES_STAGE/osi-sqlite-serialize.js")" = "$OSI_SQLITE_SERIALIZE_JS_SHA256" ] \
+        && [ "$(file_sha256 "$NODE_FILES_STAGE/osi-sqlite-serialize.html")" = "$OSI_SQLITE_SERIALIZE_HTML_SHA256" ] \
+        && mv -f "$NODE_FILES_STAGE/osi-sqlite-serialize.html" "$NODE_FILES_DIR/osi-sqlite-serialize.html" \
+        && mv -f "$NODE_FILES_STAGE/osi-sqlite-serialize.js" "$NODE_FILES_DIR/osi-sqlite-serialize.js"; then
+        rm -rf "$NODE_FILES_STAGE"
+        return 0
+    fi
+    echo "ERROR: the osi-sqlite-serialize node files did not arrive intact; $NODE_FILES_DIR is unchanged" >&2
+    rm -rf "$NODE_FILES_STAGE"
+    return 1
+}
+install_node_files
 
 # module payload staging begin
 # The helper modules above went into payloads/$DEPLOY_STAMP/modules/; the

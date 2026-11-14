@@ -2488,6 +2488,41 @@
     ]
   },
   {
+    "id": "f7-scheduler-write-catch",
+    "type": "catch",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Scheduler write failed",
+    "scope": [
+      "2cb3b5c1a3d0e5f7",
+      "3a0d9d0f1a1b2c3d"
+    ],
+    "uncaught": false,
+    "x": 840,
+    "y": 440,
+    "wires": [
+      [
+        "f7-scheduler-write-log"
+      ]
+    ]
+  },
+  {
+    "id": "f7-scheduler-write-log",
+    "type": "debug",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Log scheduler write failure",
+    "active": true,
+    "tosidebar": false,
+    "console": true,
+    "tostatus": false,
+    "complete": "\"scheduler write failed: \" & error.source.name & \" (\" & error.source.id & \"): \" & error.message",
+    "targetType": "jsonata",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1080,
+    "y": 440,
+    "wires": []
+  },
+  {
     "id": "6c0c0e8f9a1b2c3d",
     "type": "debug",
     "z": "c2b43a6c6e7d2c11",
@@ -2571,7 +2606,7 @@
     "type": "sqlite",
     "z": "c2b43a6c6e7d2c11",
     "mydb": "734737e846d06893",
-    "sqlquery": "msg.topic",
+    "sqlquery": "batch",
     "sql": "",
     "name": "",
     "x": 600,
@@ -3132,6 +3167,40 @@
         "a1ba5f5866ef6511"
       ]
     ]
+  },
+  {
+    "id": "f7-actuator-log-write-catch",
+    "type": "catch",
+    "z": "8a18de184886c8a8",
+    "name": "Actuator log write failed",
+    "scope": [
+      "e681a40093c3798d"
+    ],
+    "uncaught": false,
+    "x": 1180,
+    "y": 420,
+    "wires": [
+      [
+        "f7-actuator-log-write-log"
+      ]
+    ]
+  },
+  {
+    "id": "f7-actuator-log-write-log",
+    "type": "debug",
+    "z": "8a18de184886c8a8",
+    "name": "Log actuator log write failure",
+    "active": true,
+    "tosidebar": false,
+    "console": true,
+    "tostatus": false,
+    "complete": "\"valve write failed: \" & error.source.name & \" (\" & error.source.id & \"): \" & error.message",
+    "targetType": "jsonata",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1420,
+    "y": 420,
+    "wires": []
   },
   {
     "id": "d32f3a7a70821d54",

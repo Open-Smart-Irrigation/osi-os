@@ -16,9 +16,10 @@ fs.mkdirSync(path.join(RUN, 'var/run'), {recursive:true});
 const nr = path.join(SRC, 'usr/share/node-red');
 const dependencies = {};
 for (const e of fs.readdirSync(nr, {withFileTypes:true})) {
-  if (e.isDirectory() && (e.name.startsWith('osi-') || e.name === 'codecs')) {
+  // nodes/ is the user directory's node files (osi-sqlite-serialize), loaded by Node-RED itself.
+  if (e.isDirectory() && (e.name.startsWith('osi-') || e.name === 'codecs' || e.name === 'nodes')) {
     fs.cpSync(path.join(nr,e.name), path.join(RUN,e.name), {recursive:true});
-    if (e.name !== 'codecs') dependencies[e.name] = 'file:' + e.name;
+    if (e.name.startsWith('osi-')) dependencies[e.name] = 'file:' + e.name;
   }
 }
 fs.mkdirSync(path.join(RUN,'node_modules'), {recursive:true});
