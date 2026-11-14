@@ -45,3 +45,4 @@ __pycache__/
 
 # Release smoke dependencies
 /scripts/fixtures/release-smoke/node_modules
+/scripts/fixtures/release-smoke-stock/node_modules

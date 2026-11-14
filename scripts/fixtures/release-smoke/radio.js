@@ -1,11 +1,11 @@
 'use strict';
 // A real gRPC boundary: the shipped osi-chirpstack-helper serializes requests.
-const grpc = require('@grpc/grpc-js');
-const { DeviceServiceService } = require('@chirpstack/chirpstack-api/api/device_grpc_pb');
-const pb = require('@chirpstack/chirpstack-api/api/device_pb');
-const { Empty } = require('google-protobuf/google/protobuf/empty_pb');
 const { randomUUID } = require('node:crypto');
-exports.start = async function (state) {
+exports.start = async function (state,load=require) {
+  const grpc = load('@grpc/grpc-js');
+  const { DeviceServiceService } = load('@chirpstack/chirpstack-api/api/device_grpc_pb');
+  const pb = load('@chirpstack/chirpstack-api/api/device_pb');
+  const { Empty } = load('google-protobuf/google/protobuf/empty_pb');
   const server = new grpc.Server();
   server.addService(DeviceServiceService, {
     enqueue(call, callback) {
