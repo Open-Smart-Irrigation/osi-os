@@ -501,11 +501,10 @@ function recordError(msg, state = {}) {
 // state is published synchronously, before the first await, so the heartbeat
 // built from the same tick carries it. Only when the driver could not be
 // obtained (connections refused) is no connection attempted.
-// A database fault replaces the gathered state; "not checked" (a 10 s
-// timeout on a large file, say) only replaces "healthy", so it never hides
+// A database fault replaces the gathered state. "checking" (the start-up
+// check is still reading) and "not checked" (it could not run, or passed its
+// bound) rank below degraded: they replace only healthy, so they never hide
 // crash_looping or degraded.
-// "checking" (the start-up check is still reading) and "not checked" rank
-// below degraded: they replace only healthy.
 const WEAK_DATABASE_STATES = new Set(['database_checking', 'database_not_checked']);
 function withDatabaseState(gathered, databaseState) {
   if (!databaseState) return gathered;

@@ -18,7 +18,7 @@ Figures marked `<builder: …>` are measurements the image builder has not yet d
 The start-up check reads the file once, read-only, beside the flows (the state reads `checking` until it answers). A damaged file gives:
 
 - in the gateway log (`logread`), once per start:
-  `[osi-db-startup] ERROR farm database start-up check: damaged (<SQLite's first message>); reported only, nothing was changed; see docs/operations/damaged-farm-database.md`
+  `[osi-db-startup] ERROR farm database start-up check: damaged (<SQLite's first message>); reported only, no file was moved or repaired; see docs/operations/damaged-farm-database.md (osi-os repository)`
 - in `GET /api/system/stats` (logged in): `"database": {"status": "damaged", "health_state": "database_damaged", …}`
 - in the heartbeat the cloud receives, from the first tick after the verdict: `"health": {"health_state": "database_damaged", …}`
 
@@ -90,11 +90,20 @@ Until step 6 is done, send valve commands one at a time, several seconds apart, 
 
    ```sh
    /etc/init.d/node-red stop
-   i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
-   pgrep -f '[n]ode-red' >/dev/null 2>&1 && echo "STOP: Node-RED still running" || echo "Node-RED stopped"
+   if ! command -v pgrep >/dev/null 2>&1; then
+     echo "STOP: pgrep is not available; cannot see whether Node-RED stopped"
+   else
+     i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
+     pgrep -f '[n]ode-red' >/dev/null 2>&1; rc=$?
+     case "$rc" in
+       0) echo "STOP: Node-RED still running" ;;
+       1) echo "Node-RED stopped" ;;
+       *) echo "STOP: pgrep could not run (exit $rc)" ;;
+     esac
+   fi
    ```
 
-   It must print `Node-RED stopped`. While it is stopped: no schedule fires; no manual command can be sent; sensor readings arriving meanwhile are not stored; timed opens already sent still close on the valve's own timer. Do not reboot during the procedure: Node-RED starts again at boot. If the gateway reboots, run this step again.
+   It must print `Node-RED stopped`; any `STOP` line ends the procedure here. While it is stopped: no schedule fires; no manual command can be sent; sensor readings arriving meanwhile are not stored; timed opens already sent still close on the valve's own timer. Do not reboot during the procedure: Node-RED starts again at boot. If the gateway reboots, run this step again.
 3. **Copy the database with all its side files in one go**, then the configuration files the deploy would overwrite without a copy, into a new directory on the same filesystem (outside `/data/db/backups`: this is not a backup to restore from):
 
    ```sh
@@ -102,26 +111,32 @@ Until step 6 is done, send valve commands one at a time, several seconds apart, 
    ls -l /data/db/farming.db*
    TS=$(date +%Y%m%d-%H%M%S)
    BK=/data/db/damaged-$TS
-   mkdir "$BK" && echo "$BK" > /tmp/osi-damaged-backup-dir
-   cp -a /data/db/farming.db /data/db/farming.db-* "$BK"/
-   cp -aL /srv/node-red/settings.js "$BK/settings.js"
-   cp -aL /etc/init.d/node-red "$BK/node-red.init"
-   cp -aL /srv/node-red/flows.json "$BK/flows.json"
-   cp -aL /srv/node-red/flows_cred.json "$BK/flows_cred.json"
+   mkdir "$BK" && echo "$BK" > /tmp/osi-damaged-backup-dir || echo "STOP: cannot create $BK"
+   for f in farming.db farming.db-wal farming.db-shm farming.db-journal; do
+     if [ -e "/data/db/$f" ]; then
+       cp -a "/data/db/$f" "$BK/$f" && echo "copied: $f" || echo "STOP: copy of $f failed"
+     fi
+   done
+   for f in /srv/node-red/settings.js /etc/init.d/node-red /srv/node-red/flows.json /srv/node-red/flows_cred.json; do
+     n=$(basename "$f"); [ "$n" = node-red ] && n=node-red.init
+     cp -aL "$f" "$BK/$n" && echo "copied: $n" || echo "STOP: copy of $n failed"
+   done
    ```
 
-   `df -k` must show free space of at least twice the database's size. If `ls` shows no `-wal`, `-shm` or `-journal`, the glob copies nothing for them, and that is right.
+   `df -k` must show free space of at least twice the database's size. A side file that does not exist (after a clean stop there may be none) is not copied and not missed. Any `STOP` line ends the procedure here.
 4. **See that the copy is complete:** compare every copied database file with its original, byte for byte, and keep the checksums:
 
    ```sh
    BK=$(cat /tmp/osi-damaged-backup-dir)
-   for f in /data/db/farming.db /data/db/farming.db-*; do
-     [ -e "$f" ] && { cmp "$f" "$BK/$(basename "$f")" && echo "same: $(basename "$f")"; }
+   for f in farming.db farming.db-wal farming.db-shm farming.db-journal; do
+     if [ -e "/data/db/$f" ]; then
+       cmp "/data/db/$f" "$BK/$f" && echo "same: $f" || echo "STOP: $f differs"
+     fi
    done
-   ( cd "$BK" && sha256sum farming.db* > SHA256SUMS && cat SHA256SUMS )
+   ( cd "$BK" && for f in farming.db farming.db-wal; do [ -e "$f" ] && sha256sum "$f"; done > SHA256SUMS && cat SHA256SUMS )
    ```
 
-   Every file beside the database must print `same`. Node-RED is stopped, so nothing changes between the copy and the comparison.
+   Every file beside the database must print `same`. Node-RED is stopped, so nothing changes between the copy and the comparison. The manifest `SHA256SUMS` binds the main file and the write-ahead log only: a read-only check of the copy (step 3) may change its `-shm` index, which holds nothing of the data.
 
    If a deploy was already refused on this gateway, `settings.js` and the init script are already the new release's. Get the old `settings.js` from the tag the gateway ran (`git show v0.8.0:feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` on a workstation) and copy it to the gateway as `$BK/settings.js.old`.
 
@@ -177,17 +192,14 @@ done
 
 Each backup is checked on a copy in `$W`, which is removed after it, so nothing is created beside the backup itself. A `.bak-` or `.premigrate-` file is one self-contained file; it needs no side file.
 
-Take the newest one that answers `ok`. Put it in place with Node-RED stopped:
+Take the newest one that answers `ok` and make it the candidate, with Node-RED stopped; step 5 checks it before it is put in place:
 
 ```sh
-B=<the backup you chose>
-cp -a "$B" /data/db/farming.db.restore && \
-  rm -f /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal && \
-  mv /data/db/farming.db.restore /data/db/farming.db
-sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check;"
+B='<the backup you chose>'   # replace with its path; the copy fails with STOP if it is not
+cp -a "$B" /data/db/farming.db.restore && echo "candidate ready" || echo "STOP: copy failed"
 ```
 
-**Lost:** everything written after that backup. That is sensor readings, valve runs and their records, schedule, zone and device changes, user and password changes, and the sync state: undelivered outbox events and sync versions are rolled back. The cloud keeps what the gateway sent it before the backup's time and after it, up to the damage. It does not send readings or history back to the gateway. Pending cloud commands not yet acknowledged arrive again. On a gateway linked to the cloud, stop and ask before restoring: a rolled-back sync state may be refused by the cloud.
+**Lost:** everything written after that backup. That is sensor readings, valve runs and their records, schedule, zone and device changes, user and password changes, and the sync state: undelivered outbox events and sync versions are rolled back. The cloud keeps what the gateway sent it before the backup's time and after it, up to the damage. It does not send readings or history back to the gateway. Pending cloud commands not yet acknowledged arrive again. A one-time watering that was pending in the backup and cancelled since is pending again: step 5 goes through those with the owner before the file is used.
 
 ### (b) Recover off the gateway and copy back
 
@@ -261,21 +273,13 @@ echo "verify exit: $?"
 
 Exit `0` is required. The file that goes back is `recovered.db`, not `verify-copy.db`. The deploy in step 6 checks the schema again on the gateway and refuses on any difference.
 
-**Copy back and clean up**, with Node-RED stopped on the gateway:
+**Copy back as the candidate and clean up**, with Node-RED stopped on the gateway:
 
 ```sh
 scp recovered.db 'root@<gateway>:/data/db/farming.db.restore'
 ```
 
-On the gateway:
-
-```sh
-rm -f /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal && \
-  mv /data/db/farming.db.restore /data/db/farming.db
-sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check; PRAGMA journal_mode;"
-```
-
-It must print `ok` and `wal`. On the workstation, the same day: `cd .. && rm -rf recover-work recover-src`.
+Step 5 checks it on the gateway before it is put in place. On the workstation, the same day: `cd .. && rm -rf recover-work recover-src`. A recovered file can also lack rows of the sync and command tables (`applied_commands`, dispatch intents, receipts, cursors, outbox); step 5's stop for a linked gateway covers that.
 
 If any test above fails, do not repair the recovered file by hand: fall back to (a) or (c), delete the workstation copies the same day.
 
@@ -299,13 +303,53 @@ mkdir -p /data/db/replaced && mv /data/db/farming.db* /data/db/replaced/
 
 Zones, devices and schedules are then entered again in the GUI. The saved `config-*.sql` files are a record to read from, not files to load.
 
-## 5. Before the deploy
+## 5. Check the candidate and go through its schedules, before it is put in place
+
+After (a) or (b) the candidate is `/data/db/farming.db.restore`; the live file is still the damaged one and Node-RED is still stopped. After (c) there is no candidate: go to step 6.
 
 ```sh
-sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check;"
+C=/data/db/farming.db.restore
 ```
 
-This must answer `ok` (after (a) or (b)), or the file must be absent (after (c)). Node-RED stays stopped.
+1. **A gateway linked to the cloud: stop and ask** before going on, for (a) and for (b). A restored file rolls the sync state back, and a recovered one may lack rows of the sync and command tables; the cloud may refuse that state, and a person who knows the sync side decides. To see whether it is linked:
+
+   ```sh
+   sqlite3 -readonly "$C" "SELECT linked FROM sync_link_state WHERE peer_node='cloud';"
+   ```
+
+   `1` means linked: stop here and ask.
+2. **Integrity and relations.** Both must hold:
+
+   ```sh
+   sqlite3 -readonly "$C" "PRAGMA integrity_check;"
+   sqlite3 -readonly "$C" "PRAGMA foreign_key_check;"
+   ```
+
+   The first must print `ok`; the second must print nothing. Any line from `foreign_key_check` names a row whose parent row is gone (for example a schedule whose valve is missing, which the scheduler would then silently skip). That is a stop for a separate decision: do not delete the child rows and do not restamp anything.
+3. **Go through the waterings the candidate would start, with the owner.** A one-time watering that was pending in the file and cancelled since would open its valve at its time. List the enabled one-time waterings and the open dispatch intents:
+
+   ```sh
+   sqlite3 -readonly -header "$C" "SELECT schedule_uuid, device_eui, fire_at, duration_minutes FROM valve_schedules WHERE kind='ONCE' AND once_state='PENDING' AND enabled=1 AND deleted_at IS NULL ORDER BY fire_at;"
+   sqlite3 -readonly -header "$C" "SELECT schedule_uuid, state, created_at FROM valve_once_dispatch_intents WHERE state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT');"
+   ```
+
+   The owner confirms or disables each. For each one the owner does not confirm, disable it in the candidate and write the line into the session log:
+
+   ```sh
+   sqlite3 "$C" "UPDATE valve_schedules SET enabled=0 WHERE schedule_uuid='<schedule uuid>';"
+   ```
+
+   A disabled schedule is not claimed by the scheduler, also when it has a dispatch intent. Weekly plans run on the valves themselves; check them in the GUI after step 6 and send a plan again where it differs from what the owner wants. Until the owner has gone through the whole list, the gateway stays stopped.
+4. **Put the candidate in place.** The read-only reads above may have left empty side files beside the candidate; they hold nothing, and the live file's side files belong to the damaged file, of which step 2 kept a copy:
+
+   ```sh
+   for s in -wal -shm; do [ -s "$C$s" ] && echo "STOP: $C$s is not empty"; done
+   rm -f "$C-wal" "$C-shm" /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal && \
+     mv "$C" /data/db/farming.db && echo "in place" || echo "STOP: could not put the candidate in place"
+   sqlite3 -readonly /data/db/farming.db "PRAGMA integrity_check;"
+   ```
+
+   It must print `in place` and `ok`. Node-RED stays stopped until step 6.
 
 ## 6. Put the fixed release on, in the same session
 

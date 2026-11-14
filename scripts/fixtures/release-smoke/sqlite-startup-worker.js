@@ -33,7 +33,9 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
   const radioBefore=h.state.cs.calls.length;
   const open=await h.http('POST','/api/valve/A840410000000001',{action:'OPEN_FOR_DURATION',duration_seconds:60},token,15000);
   await h.settle();
-  const openRadio=h.state.cs.calls.slice(radioBefore).filter(c=>c.eui==='A840410000000001').length;
+  // Only the open frame counts (an enqueue on port 2 with bytes 4101, as the
+  // valve cases assert it); the radio stand-in also records flush and delete.
+  const openRadio=h.state.cs.calls.slice(radioBefore).filter(c=>c.fn==='enqueue'&&c.eui==='A840410000000001'&&c.port===2&&c.hex==='4101').length;
   // A late verdict: wait for it, then the next tick's heartbeat must carry it.
   let later=null;
   if(fault==='damaged_late') {
