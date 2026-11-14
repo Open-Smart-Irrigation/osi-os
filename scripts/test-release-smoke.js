@@ -4,6 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawnSync}=require('node:child_process');
 const {isDeepStrictEqual}=require('node:util');
+const {runtimeConfig,checkRuntime,knownFailures}=require('./lib/release-smoke-runtimes');
 const ROOT=path.resolve(__dirname,'..'),fixture=path.join(__dirname,'fixtures/release-smoke');
 
 // Reduce observations to stable failure symptoms; timestamps, UUIDs and generated
@@ -52,10 +53,12 @@ function parity() {
   console.log('PROFILE PARITY:',count,'flow/helper files byte-identical');
 }
 function main(argv,options={}) {
-  if(argv.some(a=>!['--release','--strict'].includes(a)))throw new Error('usage: node scripts/test-release-smoke.js [--release|--strict]');
+  if(argv.some(a=>!['--release','--strict','--runtime=image','--runtime=stock'].includes(a))||argv.filter(a=>a.startsWith('--runtime=')).length>1)throw new Error('usage: node scripts/test-release-smoke.js [--runtime=image|--runtime=stock] [--release|--strict]');
+  const config=runtimeConfig(argv.find(a=>a.startsWith('--runtime='))?.split('=')[1]||'image');
+  checkRuntime(config);
   parity();
   const expected=/PKG_VERSION:=(\S+)/.exec(fs.readFileSync(path.join(ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/Makefile'),'utf8'))[1];
-  const actual=require(path.join(fixture,'node_modules/node-red/package.json')).version;
+  const actual=runtimeConfig('image').nodeRed;
   if(expected!==actual)throw new Error(`image Node-RED ${expected} differs from smoke runtime ${actual}; update the lockfile`);
   const run=fs.mkdtempSync(path.join(os.tmpdir(),'osi-release-smoke-'));
   console.log('EVIDENCE:',run);
@@ -64,19 +67,21 @@ function main(argv,options={}) {
     if(r.error)throw r.error;
     return r;
   }
+  if(config.name==='stock')require('./fixtures/release-smoke-stock/install-user').install(ROOT,run);
   const seed=command(process.execPath,['scripts/build-seed-db.js','--out',path.join(run,'data/db/farming.db')]);
   fs.writeFileSync(path.join(run,'seed.log'),seed.stdout+seed.stderr);
   if(seed.status!==0)throw new Error('seed build failed: '+seed.stderr);
   const runtimeLog=path.join(run,'runtime.log');
   const fd=fs.openSync(runtimeLog,'w');
   let child;
-  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',OSI_SMOKE_RUN:run,OSI_SMOKE_CONTROL:options.control||''},stdio:['ignore',fd,fd]});}
+  try {child=command(process.execPath,['--max-old-space-size=1536',path.join(fixture,'worker.js')],{env:{PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:run,OSI_SMOKE_RUNTIME:config.name,OSI_SMOKE_RUN:run,OSI_SMOKE_CONTROL:options.control||''},stdio:['ignore',fd,fd]});}
   finally {fs.closeSync(fd);}
   if(child.status!==0)throw new Error('runtime failed: '+fs.readFileSync(runtimeLog,'utf8'));
   const evidence=JSON.parse(fs.readFileSync(path.join(run,'results.json'),'utf8'));
   if(evidence.maxRSSKiB>=4*1024*1024)throw new Error('runtime exceeded 4 GiB RSS');
   if(evidence.seconds>=10*60)throw new Error('runtime exceeded 10 minutes');
-  const known=JSON.parse(fs.readFileSync(path.join(fixture,'known-failures.json'),'utf8'));
+  for(const file of ['runtime.log','seed.log'])if(/Disk quota exceeded|EDQUOT|ENOSPC/i.test(fs.readFileSync(path.join(run,file),'utf8')))throw new Error('quota-contaminated runtime rejected');
+  const known=JSON.parse(fs.readFileSync(config.knownFile,'utf8'));
   const summary=classify(evidence.cases,known);
   for(const c of summary.passed)console.log('PASS',c.id);
   for(const c of summary.knownToFail)console.log('KNOWN TO FAIL',c.finding,c.id,JSON.stringify(c.failures.map(signature)));
@@ -85,7 +90,10 @@ function main(argv,options={}) {
   fs.writeFileSync(path.join(run,'summary.json'),JSON.stringify(summary,null,2)+'\n');
   options.onSummary?.(summary,evidence,run);
   if(summary.failed.length)return 1;
-  if((argv.includes('--release')||argv.includes('--strict'))&&known.length){console.error('RELEASE REFUSED:',known.length,'known failing cases remain');return 1;}
+  if(argv.includes('--release')||argv.includes('--strict')) {
+    const all=knownFailures();
+    if(all.length){console.error('RELEASE REFUSED:',all.length,'known runtime/case failures remain across both deployed runtimes');return 1;}
+  }
   return 0;
 }
 if(require.main===module){try{process.exitCode=main(process.argv.slice(2));}catch(e){console.error(e.stack);process.exitCode=2;}}

@@ -1,0 +1,11 @@
+{
+  "name": "osi-smoke-stock-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "node-red": "4.0.9",
+    "express": "4.21.2",
+    "aedes": "0.51.3",
+    "mqtt": "4.3.7"
+  }
+}

@@ -412,6 +412,23 @@ function judgeContinueOnError(value, gate) {
   else gate.undecidable.push(`cannot decide whether continue-on-error: ${value} is false`);
 }
 
+// Only setup-node's env.NAME form is resolvable. Retain quote provenance:
+// parseYaml intentionally represents both plain and quoted scalars as strings.
+function workflowVersionPins(text, env = {}) {
+  const pins = {};
+  let inEnv = false;
+  let childIndent;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^env:\s*(?:#.*)?$/.test(line)) { inEnv = true; childIndent = undefined; continue; }
+    if (/^\S/.test(line) && !line.startsWith('#')) inEnv = false;
+    if (!inEnv || /^\s*(?:#.*)?$/.test(line)) continue;
+    childIndent ??= /^ */.exec(line)[0].length;
+    const match = /^( +)([A-Za-z_][A-Za-z0-9_]*):\s*(['"])(\d+\.\d+\.\d+)\3\s*(?:#.*)?$/.exec(line);
+    if (match && match[1].length === childIndent && Object.hasOwn(env, match[2]) && env[match[2]] === match[4]) pins[match[2]] = match[4];
+  }
+  return pins;
+}
+
 function loadWorkflows(root, errors) {
   const dir = path.join(root, WORKFLOW_DIR);
   let names;
@@ -427,9 +444,10 @@ function loadWorkflows(root, errors) {
   const steps = [];
   for (const name of names) {
     const rel = `${WORKFLOW_DIR}/${name}`;
-    let doc;
+    let doc, text;
     try {
-      doc = parseYaml(fs.readFileSync(path.join(root, rel), 'utf8'), name);
+      text = fs.readFileSync(path.join(root, rel), 'utf8');
+      doc = parseYaml(text, name);
     } catch (err) {
       errors.push(`${rel}: ${err.message}`);
       continue;
@@ -471,6 +489,11 @@ function loadWorkflows(root, errors) {
           label,
           uses: step.uses,
           with: step.with || {},
+          workflowVersionPins: workflowVersionPins(text, doc.env),
+          overriddenEnv: { ...(job.env || {}), ...(step.env || {}) },
+          precedingEnvWrites: job.steps.slice(0, idx)
+            .filter(previous => typeof previous?.run === 'string' && /\bGITHUB_ENV\b/.test(previous.run))
+            .map(previous => previous.run),
           env: { ...(doc.env || {}), ...(job.env || {}), ...(step.env || {}) },
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
@@ -967,10 +990,15 @@ function checkSetupNode(ctx, step) {
     ctx.errors.push(`${where}: node-version-file is not supported; pin node-version`);
     return;
   }
-  const v = step.with['node-version'];
+  let v = step.with['node-version'];
   if (v === undefined || v === null) {
     ctx.errors.push(`${where}: setup-node without node-version`);
     return;
+  }
+  const expression = /^\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(String(v));
+  if (expression && !Object.hasOwn(step.overriddenEnv, expression[1]) &&
+      !step.precedingEnvWrites.some(run => new RegExp('\\b' + expression[1] + '\\b').test(run))) {
+    v = step.workflowVersionPins[expression[1]] || v;
   }
   if (!/^\d+(\.\d+){0,2}$/.test(String(v))) ctx.errors.push(`${where}: node-version ${v} is not a pinned version (use a major such as '22')`);
 }
@@ -1097,4 +1125,4 @@ function main(argv) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
 
-module.exports = { parseYaml, shellCommands, isTestFile, verify, main };
+module.exports = { parseYaml, workflowVersionPins, shellCommands, isTestFile, verify, main };

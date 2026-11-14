@@ -1,0 +1,2762 @@
+{
+  "base": "103e4c547d431a8a49009eceb4d03aecbbe11c7e",
+  "node": "20.18.3",
+  "pool": "2 (unchanged harness; product reader pending F-7)",
+  "runtimes": {
+    "image": {
+      "nodeRed": "3.1.15",
+      "packages": {
+        "node-red-node-sqlite": "1.1.1",
+        "sqlite3": "5.1.7",
+        "@chirpstack/chirpstack-api": "4.12.1",
+        "@grpc/grpc-js": "1.14.3",
+        "bcryptjs": "3.0.3",
+        "google-protobuf": "3.21.4",
+        "protobufjs": "7.6.6",
+        "@grpc/proto-loader": "0.8.1"
+      },
+      "nativeAddonCount": 1
+    },
+    "stock": {
+      "nodeRed": "4.0.9",
+      "packages": {
+        "node-red-node-sqlite": "1.1.1",
+        "sqlite3": "5.1.7",
+        "@chirpstack/chirpstack-api": "4.12.1",
+        "@grpc/grpc-js": "1.14.3",
+        "bcryptjs": "3.0.3",
+        "google-protobuf": "3.21.4",
+        "protobufjs": "7.5.4",
+        "@grpc/proto-loader": "0.8.0"
+      },
+      "nativeAddonCount": 1
+    }
+  },
+  "frequency": {
+    "image": {
+      "runs": 5,
+      "busyRuns": 0,
+      "busyDeliveries": 0
+    },
+    "stock": {
+      "runs": 5,
+      "busyRuns": 1,
+      "busyDeliveries": 1
+    }
+  },
+  "runs": [
+    {
+      "pair": 1,
+      "runtime": "image",
+      "exit": 0,
+      "seconds": 27.193,
+      "peakMiB": 239.39453125,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 1,
+      "runtime": "stock",
+      "exit": 1,
+      "seconds": 28.175,
+      "peakMiB": 235.57421875,
+      "atOnceBusy": 1
+    },
+    {
+      "pair": 2,
+      "runtime": "image",
+      "exit": 0,
+      "seconds": 26.716,
+      "peakMiB": 239.828125,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 2,
+      "runtime": "stock",
+      "exit": 0,
+      "seconds": 27.287,
+      "peakMiB": 237.44921875,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 3,
+      "runtime": "image",
+      "exit": 0,
+      "seconds": 26.846,
+      "peakMiB": 239.37890625,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 3,
+      "runtime": "stock",
+      "exit": 0,
+      "seconds": 26.956,
+      "peakMiB": 238.41015625,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 4,
+      "runtime": "image",
+      "exit": 0,
+      "seconds": 26.828,
+      "peakMiB": 240.05078125,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 4,
+      "runtime": "stock",
+      "exit": 0,
+      "seconds": 27.489,
+      "peakMiB": 238.40625,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 5,
+      "runtime": "image",
+      "exit": 0,
+      "seconds": 26.716,
+      "peakMiB": 239.08203125,
+      "atOnceBusy": 0
+    },
+    {
+      "pair": 5,
+      "runtime": "stock",
+      "exit": 0,
+      "seconds": 26.815,
+      "peakMiB": 238.88671875,
+      "atOnceBusy": 0
+    }
+  ],
+  "cases": [
+    {
+      "id": "runtime-started",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "login-and-lists",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:close-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:close-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:open-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:open-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:interval",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:interval",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:timed-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:timed-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:magnet",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:magnet",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:partial-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:partial-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-accepted:flushing",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-refused:flushing",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-invalid:{\"action\":\"OPEN\"}",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-invalid:{\"action\":\"OPEN_FOR_DURATION\",\"duration_minutes\":0}",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "command-invalid:{\"action\":\"OPEN_FOR_DURATION\",\"duration_minutes\":256}",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-report-close-open",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-no-report-open-later",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-no-report-open-at-once",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-clock-open-report-close-open",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-clock-open-no-report-open-later",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-clock-open-no-report-open-at-once",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-clock-safety-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-after:close-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-at-once-after:close-duration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-after:timed-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-at-once-after:timed-close",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-after:flushing",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "open-at-once-after:flushing",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "lifecycle:assign",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "lifecycle:remove",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "lifecycle:delete-device",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "lifecycle:delete-zone",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "weekly-save",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "weekly-change",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "weekly-delete",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "scheduler-irrigates",
+      "finding": "F-7",
+      "image": {
+        "pass": 0,
+        "fail": 5
+      },
+      "stock": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    {
+      "id": "no-token:POST /auth/register",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /auth/login",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /auth/*",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /download/database",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/catalog",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/devices/:deveui",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/*",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/irrigation-zones",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/irrigation-zones/:id",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:id/devices/:deveui",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/irrigation-zones/:id/devices/:deveui",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:id/schedule",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/irrigation-zones/schedules/disable-all",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/valve/:deveui",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /download-sensordata",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/dendro-history",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/dendro",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/temp",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/sensor-history",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/rain-history",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/system/stats",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/system/reboot",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/system/fan",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/system/*",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/account-link/status",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/account-link",
+      "finding": "F-13",
+      "image": {
+        "pass": 0,
+        "fail": 5
+      },
+      "stock": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/account-link",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/account-link",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/dendrometer/:deveui/daily",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones/:zone_id/recommendations",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/dendrometer/:deveui/readings",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/reference-tree",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:zone_id/timezone",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/dendrometer/*",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/irrigation-zones/:zone_id/recommendations",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/devices/:deveui/reference-tree",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:zone_id/location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/irrigation-zones/:zone_id/location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:zone_id/config",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/irrigation-zones/:zone_id/config",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/sync/state",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/sync/force",
+      "finding": "F-13",
+      "image": {
+        "pass": 0,
+        "fail": 5
+      },
+      "stock": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/lsn50/mode",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/lsn50/interval",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/kiwi/interval",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/kiwi/temperature-humidity/enable",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/interval",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/lsn50/interrupt-mode",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/lsn50/5v-warmup",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/model",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/timed-action",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/magnet",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/partial-opening",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/strega/flushing",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/gateway/location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/gateways/:gatewayEui/location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones/:zone_id/environment-summary",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:OPTIONS /api/irrigation-zones/:zone_id/environment-summary",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/rain-gauge",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/flow-meter",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/zone-assignments",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/zone-assignments",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/soil-moisture-depths",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/chameleon",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/dendro-config",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/dendro-baseline/reset",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/v1/valves/:deveui/cancel",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/valve/:deveui/cancel",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/v1/devices/:deveui/today-liters",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/chameleon/refresh-calibration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/chameleon/depth",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/watermark/calibration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/watermark/calibration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/devices/:deveui/watermark/calibration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation/recent-actuations",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/irrigation-zones/:id/calibration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones/:zone_id/rain-source",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:zone_id/rain-source",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/zones/:zoneId/cards",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/zones/:zoneId/cards/:cardId/data",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/zones/:zoneId/cards/:cardId/advanced",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/gateways/:gatewayEui/cards",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/gateways/:gatewayEui/cards/:cardId/data",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/gateways/:gatewayEui/cards/:cardId/advanced",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/workspaces",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/history/workspaces",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/history/workspaces/:id",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/history/workspaces/:id",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/history/zones/:zoneId/cards/:cardId/preferences",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/history/zones/:zoneId/cards/:cardId/opened",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/history/gateways/:gatewayEui/cards/:cardId/opened",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/system/features",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/history/rollups/run",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/zones/:zoneId/export.csv",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/history/export.csv",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/analysis/views/:id",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/analysis/channels",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/analysis/series",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/analysis/views",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/analysis/views",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/improvement-requests",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/improvement-requests/diagnostics-preview",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/improvement-requests",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/catalog",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/entries",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/journal/entries",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/journal/entries/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/journal/entries/:uuid/void",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/journal/custom-vocab",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/journal/custom-vocab/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/plots",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/journal/plots",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/journal/plots/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/plot-groups",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/journal/plot-groups",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/journal/plot-groups/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/export.csv",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/export.package",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/export.json",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/journal/export.adapt.json",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/sdi12/recipe/rollback",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/sdi12/recipe/apply",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/sdi12/config",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/sdi12/probe-profiles",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/devices/:deveui/sdi12/identify",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/valves",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/valves/:deveui/schedules",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/valves/:deveui/schedules",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/valves/:deveui/schedules/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/valves/:deveui/schedules/:uuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/valves/:deveui/plan/resend",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/valves/:deveui/scheduler-status",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/valves/:deveui/settings",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/system/settings",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/system/settings",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/me",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/users",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/users",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/users/:uuid/password-reset",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/users/:uuid/role",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/users/:uuid/disabled",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/grants/zone",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/grants/zone/:assignmentUuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/grants/plot",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:DELETE /api/grants/plot/:assignmentUuid",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/network/observations",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/installation-location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/installation-location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/installation-location/revisions",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/radio-configuration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/radio-configuration",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/devices/:deveui/radio-configuration/revisions",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/gateway/location",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:id/name",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/devices/:deveui/name",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/sync/outbox/recover",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones/:id/irrigation-policy",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:PUT /api/irrigation-zones/:id/irrigation-policy",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/irrigation-zones/:id/irrigation-policy/pause",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:POST /api/irrigation-zones/:id/irrigation-policy/retry-valve",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "no-token:GET /api/irrigation-zones/:id/irrigation-policy/decisions",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "enabled-inject-sweep",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "dendro-weather-transport",
+      "finding": "NEW-1",
+      "image": {
+        "pass": 0,
+        "fail": 5
+      },
+      "stock": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    {
+      "id": "caught-node-errors",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 4,
+        "fail": 1
+      }
+    },
+    {
+      "id": "network-contained",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "flows-unchanged",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "helpers-unchanged",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "startup-node-errors",
+      "finding": "F-14",
+      "image": {
+        "pass": 0,
+        "fail": 5
+      },
+      "stock": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    {
+      "id": "startup-function-errors",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    },
+    {
+      "id": "database-integrity",
+      "finding": null,
+      "image": {
+        "pass": 5,
+        "fail": 0
+      },
+      "stock": {
+        "pass": 5,
+        "fail": 0
+      }
+    }
+  ],
+  "difference": {
+    "case": "caught-node-errors",
+    "finding": "F-7",
+    "listed": false,
+    "scenario": "open-no-report-open-at-once",
+    "source": "DB: insert actuator_log",
+    "type": "sqlite",
+    "message": "Error: SQLITE_BUSY: database is locked",
+    "imageRows": 3,
+    "stockRows": 2,
+    "expectedRows": 3
+  },
+  "coreDependencies": {
+    "image": {
+      "nodes:mqtt": "4.3.7",
+      "nodes:got": "12.6.0",
+      "nodes:body-parser": "1.20.3",
+      "nodes:cronosjs": "1.7.1",
+      "nodes:ws": "7.5.10",
+      "runtime:express": "4.21.2",
+      "util:jsonata": "1.8.7"
+    },
+    "stock": {
+      "nodes:mqtt": "5.7.0",
+      "nodes:got": "12.6.1",
+      "nodes:body-parser": "1.20.3",
+      "nodes:cronosjs": "1.7.1",
+      "nodes:ws": "7.5.10",
+      "runtime:express": "4.21.2",
+      "util:jsonata": "2.0.5"
+    },
+    "jsonataNodes": []
+  },
+  "sqliteNodeSourceComparison": {
+    "feedVersion": "1.1.0",
+    "fixtureVersion": "1.1.1",
+    "feedTarSha256": "bc19564d9c9c089e4f3e865acffed03badae6927618aaa1ed96fa1745df5fdce",
+    "sourceByteIdentical": true
+  }
+}

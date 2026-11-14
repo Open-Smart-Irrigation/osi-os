@@ -11,9 +11,9 @@ function gate(known,{ci=false,event,ref}={}) {
 if(require.main===module) {
   const args=process.argv.slice(2);
   if(args.length>1||args.some(a=>a!=='--ci'))throw new Error('usage: node scripts/release-smoke-gate.js [--ci]');
-  const known=require('./fixtures/release-smoke/known-failures.json');
+  const known=require('./lib/release-smoke-runtimes').knownFailures();
   process.exitCode=gate(known,{ci:args.includes('--ci'),event:process.env.GITHUB_EVENT_NAME,ref:process.env.GITHUB_REF});
-  if(process.exitCode){console.error('RELEASE REFUSED: '+known.length+' known failing cases remain');for(const c of known)console.error(c.finding+' '+c.id);}
+  if(process.exitCode){console.error('RELEASE REFUSED: '+known.length+' known failing cases remain');for(const c of known)console.error(c.runtime+' '+c.finding+' '+c.id);}
   else console.log(args.includes('--ci')&&!releaseEvent(process.env.GITHUB_EVENT_NAME,process.env.GITHUB_REF)?'RELEASE LIST: ordinary PR/branch run; runtime suite enforces known signatures':'RELEASE LIST: empty');
 }
 module.exports={gate,releaseEvent};

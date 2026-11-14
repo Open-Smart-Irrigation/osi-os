@@ -4,6 +4,7 @@
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http');
 const os = require('node:os'), net = require('node:net'), dns = require('node:dns');
 const Module = require('node:module');
+const layout = require('./layout');
 const ROOT = path.resolve(__dirname, '../../..');
 const SRC = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
 const RUN = process.env.OSI_SMOKE_RUN;
@@ -14,6 +15,7 @@ const state = { marker: true, markerOverride: null, cs: { queue: {}, calls: [] }
 fs.mkdirSync(path.dirname(DBFILE), {recursive:true});
 fs.mkdirSync(path.join(RUN, 'var/run'), {recursive:true});
 const nr = path.join(SRC, 'usr/share/node-red');
+if(layout.config.name==='image') {
 const dependencies = {};
 for (const e of fs.readdirSync(nr, {withFileTypes:true})) {
   // nodes/ is the user directory's node files (osi-sqlite-serialize), loaded by Node-RED itself.
@@ -30,6 +32,7 @@ for (const name of fs.readdirSync(path.join(__dirname,'node_modules'))) {
 fs.copyFileSync(path.join(nr,'edge-channels.json'),path.join(RUN,'edge-channels.json'));
 for (const name of ['bcryptjs','sqlite3']) dependencies[name] = require('./package.json').dependencies[name];
 fs.writeFileSync(path.join(RUN,'package.json'),JSON.stringify({private:true,dependencies}));
+}
 fs.copyFileSync(path.join(SRC,'usr/share/flows.json'),path.join(RUN,'flows.json'));
 // Negative controls alter only this disposable copy, never either image profile.
 const controls={late:'valve-observe-fn',caught:'sync-outbox-build'};
@@ -137,7 +140,7 @@ for (const fn of ['writeFileSync', 'renameSync', 'unlinkSync', 'mkdirSync', 'exi
 
 
 // Keep the actual sqlite3 binding. Only absolute image paths are relocated.
-const nativeSqlite = require('sqlite3');
+const nativeSqlite = layout.load('sqlite3');
 const NativeDatabase = nativeSqlite.Database;
 let observation;
 // Observe completion of native operations that already have callbacks. Keep
@@ -174,7 +177,7 @@ async function start() {
   fakeFs.renameSync('/data/smoke-fs-check.tmp','/data/smoke-fs-check.txt');
   if(fs.readFileSync(path.join(RUN,'data/smoke-fs-check.txt'),'utf8')!=='isolated')throw new Error('filesystem path mapping failed');
   fakeFs.unlinkSync('/data/smoke-fs-check.txt');
-  const broker = require('aedes')();
+  const broker = layout.firmware('aedes')();
   const mqttServer = net.createServer(broker.handle);
   await new Promise(r=>mqttServer.listen(0,'127.0.0.1',r));
   mqttPort=mqttServer.address().port;
@@ -189,13 +192,13 @@ async function start() {
   await new Promise(r=>weather.listen(0,'127.0.0.1',r));
   process.env.OPENAGRI_WEATHER_URL='http://127.0.0.1:'+weather.address().port;
   process.env.OPENAGRI_WEATHER_BEARER_TOKEN='synthetic-weather';
-  const radio = await require('./radio').start(state);
+  const radio = await require('./radio').start(state,layout.load);
   process.env.CHIRPSTACK_API_URL=radio.url;
-  const RED=require('node-red'), express=require('express');
+  const RED=layout.firmware('node-red'), express=layout.firmware('express');
   const app=express(), server=http.createServer(app);
   // Use the image settings, including exactly os/fs/cp in global context.
   const settings=require(path.join(ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js'));
-  RED.init(server,{...settings,functionGlobalContext:{...settings.functionGlobalContext,fs:fakeFs,cp:fakeCp},userDir:RUN,flowFile:path.join(RUN,'flows.json'),httpStatic:undefined,
+  RED.init(server,{...settings,nodesExcludes:layout.config.name==='stock'?['field-tester-server']:settings.nodesExcludes,functionGlobalContext:{...settings.functionGlobalContext,fs:fakeFs,cp:fakeCp},userDir:RUN,flowFile:path.join(RUN,'flows.json'),httpStatic:undefined,
     externalModules:{modules:{allowInstall:false}},credentialSecret:false,
     logging:{console:{level:'off',metrics:false,audit:false}}});
   app.use('/',RED.httpNode);
@@ -215,9 +218,9 @@ async function start() {
   // explicitly, independent of host speed; no schedule or flow bytes change.
   require('./observation').pauseInjectTimers(RED,flows);
   await observation.settle(sleep);
-  const client=require('mqtt').connect('mqtt://127.0.0.1:'+mqttPort);
+  const client=layout.firmware('mqtt').connect('mqtt://127.0.0.1:'+mqttPort);
   await new Promise((resolve,reject)=>{client.once('connect',resolve);client.once('error',reject);});
-  const h={RED,state,RUN,DBFILE,sleep,
+  const h={RED,state,RUN,DBFILE,sleep,metadata:layout.evidence(),
     flows,
     settle:()=>observation.settle(sleep),
     async sweepInjects(before=async()=>{},after=async()=>{}) {
@@ -270,4 +273,4 @@ async function start() {
   };
   return h;
 }
-module.exports={start};
+module.exports={start,state};

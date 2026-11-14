@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+env:
+  OSI_SMOKE_NODE_VERSION: '20.18.3'
+  OSI_SMOKE_IMAGE_NODE_RED_VERSION: '3.1.15'
+  OSI_SMOKE_STOCK_NODE_RED_VERSION: '4.0.9'
+
 jobs:
   release-runtime-smoke:
     name: release-runtime-smoke
@@ -22,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.OSI_SMOKE_NODE_VERSION }}
           cache: npm
           cache-dependency-path: scripts/fixtures/release-smoke/package-lock.json
       - name: Install SQLite CLI
@@ -47,8 +52,54 @@ jobs:
         with:
           name: release-runtime-smoke
           path: |
+            /tmp/osi-release-smoke-*/runtime.json
             /tmp/osi-release-smoke-*/results.json
             /tmp/osi-release-smoke-*/runtime.log
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
+            /tmp/osi-release-smoke-*/install.log
+          retention-days: 7
+
+  release-stock-runtime-smoke:
+    name: release-stock-runtime-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.OSI_SMOKE_NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            scripts/fixtures/release-smoke/package-lock.json
+            scripts/fixtures/release-smoke-stock/package-lock.json
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json
+      - name: Install SQLite CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Install pinned stock firmware runtime (no SQLite)
+        run: npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
+      - name: Install pinned packages for the node-file layouts and external lock holder
+        run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: Node file serializes the flows' SQLite connection on both runtimes
+        run: node scripts/test-release-smoke-stock-node-file.js
+      - name: Start stock runtime with the deploy-style user install
+        run: node scripts/test-release-smoke.js --runtime=stock
+      - name: Reject broken late and caught stock handlers (serial negative controls)
+        run: node scripts/test-release-smoke-controls.js --runtime=stock
+      - name: Refuse a release with known failures on either runtime
+        run: node scripts/release-smoke-gate.js --ci
+      - name: Preserve stock runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-stock-runtime-smoke
+          path: |
+            /tmp/osi-release-smoke-*/runtime.json
+            /tmp/osi-release-smoke-*/results.json
+            /tmp/osi-release-smoke-*/runtime.log
+            /tmp/osi-release-smoke-*/seed.log
+            /tmp/osi-release-smoke-*/summary.json
+            /tmp/osi-release-smoke-*/install.log
           retention-days: 7
