@@ -55,7 +55,7 @@ marked otherwise. The live identity daemon notes in section 2 were verified on
 
 | Surface | Defined | Consumed | Live inspect |
 |---|---|---|---|
-| SQLite operator gate `dendro_provider_irrigation_enabled` | Existing gateway `app_settings` table, absent means off | `osi-dendro-analytics/weather-inputs.js`, once per run | [Dendrometer provider control](../../../docs/development/dendro-provider-control.md) |
+| SQLite operator gate `dendro_provider_irrigation_enabled` | Existing gateway `app_settings` table; only exact string `1` enables, every other value is off | `osi-dendro-analytics/weather-inputs.js`, once per run | Set (owner approval required): `sqlite3 /data/db/farming.db "INSERT INTO app_settings(key,value) VALUES('dendro_provider_irrigation_enabled','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value"`; check: `sqlite3 /data/db/farming.db "SELECT value FROM app_settings WHERE key='dendro_provider_irrigation_enabled'"`. Check next day's `weather_control.provider_irrigation_enabled`; [conditions](../../../docs/development/dendro-provider-control.md). |
 | UCI `osi-server.cloud.*` | `conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config` | `node-red.init` (procd env), `chirpstack-bootstrap.js`, flows.json (account-link nodes) | `uci show osi-server` |
 | Gateway identity (`DEVICE_EUI*`) | `usr/libexec/osi-gateway-identity.sh` (resolution logic) + UCI persistence | `node-red.init` → Node-RED process env → flows.json | `/usr/libexec/osi-gateway-identity.sh resolve` |
 | `.chirpstack.env` (legacy fallback) | Written by `chirpstack-bootstrap.js` | Read per-key by `node-red.init` (`load_chirpstack_env_value`) and `settings.js` compat loader | `cat /srv/node-red/.chirpstack.env` (never commit/paste secrets) |

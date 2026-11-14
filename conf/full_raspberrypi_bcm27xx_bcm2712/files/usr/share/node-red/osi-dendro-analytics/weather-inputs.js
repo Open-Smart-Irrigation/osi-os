@@ -14,7 +14,7 @@ const RECOMMENDATION_CHANGED_WHERE=' WHERE '+[...recommendationColumns.map(c=>`z
 async function providerIrrigationEnabled(db,warn){
   try{
     const row=await db.get('SELECT value FROM app_settings WHERE key = ?',[PROVIDER_IRRIGATION_SETTING_KEY]);
-    return ['1','true','yes','on'].includes(String(row?.value??'').trim().toLowerCase());
+    return row?.value === '1';
   }catch(error){
     warn('Dendro provider control setting unreadable: '+String(error&&error.message||error));
     return false;
@@ -245,8 +245,12 @@ async function createWeatherInputs({db:_db,q,env,node,now:NOW,rain:R,analytics:D
     });
     const controlAdvice=providerEnabled?adv:await R.resolveAdviceRain(_db,zone.zone_id,ANALYTICS_DATE,null,{nowMs:NOW.getTime()});
     const decisionRain=providerEnabled?rain:buildRain(controlAdvice,controlRows);
+    // The cloud treats this legacy status as permission to count rainfall_mm.
+    // Preserve main's decision-rain status while storing the provider observation.
+    const observedRain={...rain};
+    if(!providerEnabled)rain.daily_status=decisionRain.daily_status;
     const weatherControl={setting_key:PROVIDER_IRRIGATION_SETTING_KEY,provider_irrigation_enabled:providerEnabled,
-      decision_vpd:vpd,decision_rain:decisionRain,provider_reused_from_computed_at:reusedFrom};
+      observed_rain:observedRain,observed_vpd:observedVpd,decision_vpd:vpd,decision_rain:decisionRain,provider_reused_from_computed_at:reusedFrom};
     return {vpd,observedVpd,rain,decisionRain,weatherControl,localFlowLiters,phenoMod,zoneTimezone};
   }};
 }
