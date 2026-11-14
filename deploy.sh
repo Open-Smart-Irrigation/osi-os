@@ -2127,7 +2127,33 @@ cleanup_failed_first_payload() {
 }
 # deploy payload lifecycle end
 
+# NEW-23 and #651 (S7): the live database is checked as it is, before the
+# deploy writes anything to it, and a damaged one is refused untouched. The
+# check reads through a read-only connection: a normal sqlite3 connection
+# that is the last one to close a WAL database checkpoints it on close,
+# rewriting the damaged file and removing its -wal. A read-only reader may
+# create or rebuild -shm (the WAL index, no data of its own). It runs in the
+# preflight with Node-RED still running (busy timeout), and again before the
+# pre-migration checkpoint, which therefore never touches a refused file.
+DAMAGED_DB_DOC="docs/operations/damaged-farm-database.md"
+check_live_db_readonly() {
+    [ -e "$DB_PATH" ] || return 0
+    command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
+    if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
+        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+    if [ "$cldb_result" != "ok" ]; then
+        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+}
+
 checkpoint_live_db() {
+    # Check first: a refused database is never checkpointed.
+    if ! check_live_db_readonly; then
+        return 1
+    fi
     if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
         echo "ERROR: failed to checkpoint $DB_PATH before migration" >&2
         echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
@@ -2667,6 +2693,8 @@ run_native_sqlite3_preflight || exit 1
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
 same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
+# A damaged database is refused here, before anything on the gateway changes.
+check_live_db_readonly || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
 if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
