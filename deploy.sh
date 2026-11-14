@@ -2695,6 +2695,72 @@ process.stdout.write(String(applied.length));
     return 1
 }
 
+# NEW-23: what can refuse because of the gateway's state is checked before
+# the deploy's first change, so a refusal leaves the gateway as it found it.
+# The checks below are read-only (the runner and the ledger installer go into
+# the deploy's own $TMP_DIR); each late check they mirror stays where it is
+# as a second line.
+gateway_state_preflight() {
+    echo "--- Gateway state preflight (read-only) ---"
+    gsp_refuse() { echo "ERROR: $1; refusing before anything is changed" >&2; return 1; }
+    if [ ! -e "$DB_PATH" ] && { [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; }; then
+        gsp_refuse "$DB_PATH is missing but SQLite sidecar files exist; inspect $DB_DIR" || return 1
+    fi
+    if [ ! -x "$IRRIGATION_CLOCK_HOOK" ]; then
+        [ -x "$IRRIGATION_SYSNTPD_INIT" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_SYSNTPD_INIT"; return 1; }
+        [ -x "$IRRIGATION_NTPD_HOTPLUG" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_NTPD_HOTPLUG"; return 1; }
+        "$IRRIGATION_SYSNTPD_INIT" enabled >/dev/null 2>&1 || { gsp_refuse "sysntpd is not enabled (the deploy does not enable it implicitly)"; return 1; }
+        case "$("$IRRIGATION_UCI" -q get system.ntp.enabled 2>/dev/null || true)" in
+            0|false|False|FALSE|off|OFF|no|NO) gsp_refuse "system.ntp.enabled is explicitly false"; return 1 ;;
+        esac
+    fi
+    if ! { fetch "scripts/deploy-command-ledger-dependency.js" "$COMMAND_LEDGER_INSTALLER" && [ "$(file_sha256 "$COMMAND_LEDGER_INSTALLER")" = "$COMMAND_LEDGER_HELPER_SHA256" ]; }; then
+        gsp_refuse "the command-ledger dependency installer did not arrive intact (SHA-256)" || return 1
+    fi
+    [ -e "$DB_PATH" ] || return 0
+    fetch_migration_runner || { gsp_refuse "the migration runner could not be fetched and verified"; return 1; }
+    # Free space for the migration: twice the database plus the margin, as the
+    # late check needs, against what is free plus the pre-migration copies the
+    # late check's prune may remove (an upper bound: never stricter than it).
+    gsp_backup="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
+    gsp_at="$gsp_backup"
+    while [ ! -d "$gsp_at" ] && [ "$gsp_at" != / ]; do gsp_at="$(dirname "$gsp_at")"; done
+    gsp_db_kb=0
+    for gsp_file in "$DB_PATH" "$DB_PATH-wal"; do
+        [ -e "$gsp_file" ] && gsp_db_kb=$((gsp_db_kb + ($(ls -ln "$gsp_file" | awk '{print $5}') + 1023) / 1024))
+    done
+    gsp_reclaim_kb=0
+    for gsp_file in "$gsp_backup"/"$(basename "$DB_PATH")".premigrate-*; do
+        [ -f "$gsp_file" ] && gsp_reclaim_kb=$((gsp_reclaim_kb + ($(ls -ln "$gsp_file" | awk '{print $5}') + 1023) / 1024))
+    done
+    gsp_need_kb=$((2 * gsp_db_kb + ${MIGRATE_MIN_FREE_MARGIN_MB:-128} * 1024))
+    gsp_avail_kb="$(df -k "$gsp_at" 2>/dev/null | tail -1 | awk '{print $(NF-2)}')"
+    case "$gsp_avail_kb" in
+        ''|*[!0-9]*) ;;
+        *) [ $((gsp_avail_kb + gsp_reclaim_kb)) -ge "$gsp_need_kb" ] || { gsp_refuse "insufficient disk for a safe schema migration on $gsp_backup: need ~${gsp_need_kb}KB, have ${gsp_avail_kb}KB plus ${gsp_reclaim_kb}KB in earlier pre-migration copies"; return 1; } ;;
+    esac
+    # A repair_required ledger row whose checksum already matches the release
+    # stops the migration runner, and nothing in the deploy clears it.
+    gsp_repair="$(sqlite3 -readonly "$DB_PATH" "SELECT version || ':' || checksum FROM schema_migrations WHERE status='repair_required'" 2>/dev/null || true)"
+    if [ -n "$gsp_repair" ] && printf '%s\n' "$gsp_repair" | node -e '
+        const rows = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+        const manifest = require(process.argv[1]).readMigrationManifest(process.argv[2]);
+        process.exit(rows.some((row) => { const [v, c] = row.split(":"); const e = manifest.find((m) => m.version === Number(v)); return e && e.checksum === c; }) ? 0 : 1);
+    ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir"; then
+        gsp_refuse "the migration ledger has a repair_required row whose checksum matches this release; clear it with the ledger reconciliation tool's --clear-repair-required (runbook, \"Foreign-numbered ledger recovery\")" || return 1
+    fi
+    # The rollback payload's schema record, when the served payload is a
+    # complete pair that needs no capture (the late check's case).
+    gsp_served="$(swap_call currentStamp 2>/dev/null || true)"
+    if [ -n "$gsp_served" ] && swap_call verifyPair "$gsp_served" "$GUI_ROOT" >/dev/null 2>&1; then
+        gsp_prev="$(swap_call rollbackTarget "$gsp_served" "$DEPLOY_STAMP" 2>/dev/null || true)"
+        if [ -n "$gsp_prev" ] && ! swap_call compatibilityExists "$gsp_prev" >/dev/null 2>&1; then
+            gsp_refuse "the retained payload $gsp_prev has no schema compatibility record" || return 1
+        fi
+    fi
+    echo "OK: gateway state preflight passed"
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 check_command_ledger_hold
@@ -2707,6 +2773,7 @@ fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
 same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
 # A damaged database is refused here, before anything on the gateway changes.
 check_live_db_readonly || exit 1
+gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
 if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
