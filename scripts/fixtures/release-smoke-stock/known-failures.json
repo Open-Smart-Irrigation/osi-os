@@ -35,31 +35,6 @@
     ]
   },
   {
-    "id": "scheduler-irrigates",
-    "finding": "F-7",
-    "failures": [
-      {
-        "code": "scheduler-persistence",
-        "actual": {
-          "eventStored": false,
-          "lastTriggered": false,
-          "errors": [
-            {
-              "sourceId": "2cb3b5c1a3d0e5f7",
-              "sourceType": "sqlite",
-              "message": "Error: SQLITE_BUSY: database is locked"
-            },
-            {
-              "sourceId": "3a0d9d0f1a1b2c3d",
-              "sourceType": "sqlite",
-              "message": "Error: SQLITE_BUSY: database is locked"
-            }
-          ]
-        }
-      }
-    ]
-  },
-  {
     "id": "dendro-weather-transport",
     "finding": "NEW-1",
     "failures": [
