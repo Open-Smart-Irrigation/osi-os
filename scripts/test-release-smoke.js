@@ -33,7 +33,7 @@ function classify(cases,known) {
     else if(actual.length)failed.push(result);
     else passed.push(result);
   }
-  for(const entry of known)if(!seen.has(entry.id))failed.push({id:entry.id,reason:'known case was not executed'});
+  for(const entry of known)if(!seen.has(entry.id))failed.push({id:entry.id,reason:'known case was not executed',failures:[]});
   return {passed,failed,knownToFail};
 }
 function parity() {
@@ -54,6 +54,9 @@ function parity() {
 function main(argv,options={}) {
   if(argv.some(a=>!['--release','--strict'].includes(a)))throw new Error('usage: node scripts/test-release-smoke.js [--release|--strict]');
   parity();
+  // The workflow's setup-node pin is the one place the image's Node version is written.
+  const pinned=(/^\s*node-version:\s*'(\d+\.\d+\.\d+)'\s*$/m.exec(fs.readFileSync(path.join(ROOT,'.github/workflows/release-smoke.yml'),'utf8'))||[])[1];
+  if(!pinned||process.version!=='v'+pinned)throw new Error(`release smoke runs under the image's Node ${pinned} (.github/workflows/release-smoke.yml); this is ${process.version}`);
   const expected=/PKG_VERSION:=(\S+)/.exec(fs.readFileSync(path.join(ROOT,'feeds/chirpstack-openwrt-feed/apps/node-red/Makefile'),'utf8'))[1];
   const actual=require(path.join(fixture,'node_modules/node-red/package.json')).version;
   if(expected!==actual)throw new Error(`image Node-RED ${expected} differs from smoke runtime ${actual}; update the lockfile`);
@@ -76,7 +79,21 @@ function main(argv,options={}) {
   const evidence=JSON.parse(fs.readFileSync(path.join(run,'results.json'),'utf8'));
   if(evidence.maxRSSKiB>=4*1024*1024)throw new Error('runtime exceeded 4 GiB RSS');
   if(evidence.seconds>=10*60)throw new Error('runtime exceeded 10 minutes');
+  // NEW-15: overlapping valve commands in the gateway's dependency layouts,
+  // each in its own Node-RED process (scripts/test-release-sqlite-overlap.js).
+  // The negative controls exercise only the runtime suite.
+  if(!options.control) {
+    const sqliteCases=require('./test-release-sqlite-overlap');
+    for(const layout of ['dual','npm','stock'])evidence.cases.push(sqliteCases.run({layout}));
+    // Start-up state: healthy, damaged file, two native addons.
+    for(const fault of ['none','damaged','conflict','damaged_late'])evidence.cases.push(sqliteCases.startupCase({fault}));
+    // The field layout (stock base, only the user copy): one addon, no fault.
+    evidence.cases.push(sqliteCases.startupCase({fault:'none',layout:'stock'}));
+  }
   const known=JSON.parse(fs.readFileSync(path.join(fixture,'known-failures.json'),'utf8'));
+  return report(evidence,known,run,argv,options);
+}
+function report(evidence,known,run,argv=[],options={}) {
   const summary=classify(evidence.cases,known);
   for(const c of summary.passed)console.log('PASS',c.id);
   for(const c of summary.knownToFail)console.log('KNOWN TO FAIL',c.finding,c.id,JSON.stringify(c.failures.map(signature)));
@@ -89,4 +106,4 @@ function main(argv,options={}) {
   return 0;
 }
 if(require.main===module){try{process.exitCode=main(process.argv.slice(2));}catch(e){console.error(e.stack);process.exitCode=2;}}
-module.exports={classify,signature,parity,main};
+module.exports={classify,signature,parity,main,report};

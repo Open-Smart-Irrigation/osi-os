@@ -1,0 +1,419 @@
+'use strict';
+// NEW-15: farm database start-up state in osi-db-helper/startup.js. Every case
+// builds its own state with injected files, process runner and clock; none
+// touches /data or the process-wide state.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const HELPER = path.resolve(__dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper');
+const { createStartupState, classify, CHECK_TIMEOUT_MS } = require(path.join(HELPER, 'startup.js'));
+
+const mapsLine = (inode, file = '/firmware/sqlite3/build/Release/node_sqlite3.node') =>
+  `7f0000000000-7f0000001000 r-xp 00000000 b3:02 ${inode}                 ${file}`;
+
+const { EventEmitter } = require('node:events');
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+// A stand-in for the sqlite3 child: answers on a microtask, or when the test
+// calls complete() (manual), the way a slow read on an SD card would.
+function fakeChild(result, manual) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.killedWith = null;
+  child.kill = (signal) => { child.killedWith = signal; queueMicrotask(() => child.emit('close', null, signal)); };
+  child.complete = () => {
+    if (result.error) { child.emit('error', result.error); return; }
+    if (result.stdout) child.stdout.emit('data', result.stdout);
+    if (result.stderr) child.stderr.emit('data', result.stderr);
+    child.emit('close', result.status);
+  };
+  if (!manual) queueMicrotask(child.complete);
+  return child;
+}
+
+function fixture({ addons = [], stat = () => ({}), result = { status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' }, clock = [0, 12], manual = false } = {}) {
+  const logs = [], calls = [], children = [], timers = [], exits = [];
+  let maps = addons;
+  let tick = 0;
+  const state = createStartupState({
+    files: {
+      readFileSync: (file) => { assert.equal(file, '/proc/self/maps'); return ['00400000-00401000 r-xp 00000000 08:01 1 /usr/bin/node', ...maps].join('\n'); },
+      statSync: (file) => stat(file),
+    },
+    spawn: (...args) => { calls.push(args); const child = fakeChild(typeof result === 'function' ? result() : result, manual); children.push(child); return child; },
+    setTimer: (fn, ms) => { const timer = { fn, ms, cleared: false }; timers.push(timer); return timer; },
+    clearTimer: (timer) => { timer.cleared = true; },
+    onProcessExit: (fn) => { exits.push(fn); return () => { const i = exits.indexOf(fn); if (i >= 0) exits.splice(i, 1); }; },
+    monotonicNow: () => clock[Math.min(tick++, clock.length - 1)],
+    log: (message) => logs.push(message),
+  });
+  return { state, logs, calls, children, timers, exits, setAddons: (value) => { maps = value; } };
+}
+
+test('a healthy file is checked once, read-only, with quick_check and the core tables', async () => {
+  const f = fixture();
+  f.state.check();
+  f.state.check();
+  f.state.beforeOpen('node_red');
+  await flush();
+  const health = f.state.getHealth();
+  assert.equal(f.calls.length, 1);
+  const [cmd, args] = f.calls[0];
+  assert.equal(cmd, 'sqlite3');
+  assert.deepEqual(args.slice(0, 2), ['-readonly', '/data/db/farming.db']);
+  assert.match(args[2], /^PRAGMA quick_check\(1\);/);
+  assert.match(args[2], /'users','devices','irrigation_zones'/);
+  assert.equal(f.timers[0].ms, CHECK_TIMEOUT_MS);
+  assert.equal(f.timers[0].cleared, true);
+  assert.equal(health.status, 'healthy');
+  assert.equal(health.health_state, null);
+  assert.equal(health.check_ms, 12);
+  assert.deepEqual(f.logs, []);
+});
+
+test('no SQLite addon loaded yet (settings.js time) is not a conflict', async () => {
+  const f = fixture({ addons: [] });
+  f.state.check();
+  await flush();
+  f.state.recordDriver('node_red');
+  assert.equal(f.state.getHealth().native_addons, 0);
+  f.setAddons([mapsLine(11467)]);
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
+  const health = f.state.getHealth();
+  assert.equal(health.native_addons, 1);
+  assert.equal(health.module_conflict, false);
+  assert.equal(health.health_state, null);
+});
+
+test('several mappings of one addon file count once', () => {
+  const f = fixture({ addons: [mapsLine(11467), mapsLine(11467).replace('r-xp', 'r--p'), mapsLine(11467).replace('r-xp', 'rw-p')] });
+  f.state.check();
+  f.state.recordDriver('node_red');
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
+  assert.equal(f.state.getHealth().native_addons, 1);
+});
+
+test('a second SQLite library is reported loudly, with both paths, and refuses nothing', async () => {
+  const f = fixture({ addons: [mapsLine(11467), mapsLine(3773, '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node')] });
+  f.state.check();
+  await flush();
+  f.state.recordDriver('node_red');
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'), 'a new connection opens');
+  assert.doesNotThrow(() => f.state.guard(), 'an open connection keeps working');
+  const health = f.state.getHealth();
+  assert.equal(health.module_conflict, true);
+  assert.equal(health.health_state, 'sqlite_module_conflict');
+  assert.deepEqual(health.module_paths, ['/firmware/sqlite3/build/Release/node_sqlite3.node', '/srv/node-red/node_modules/sqlite3/build/Release/node_sqlite3.node'].map((p) => p.startsWith('/srv/') ? p : '<outside the firmware and user directories>'));
+  const lines = f.logs.filter((l) => /a second SQLite library is loaded in this process \(2 native modules: .*\/srv\/node-red\/node_modules\/sqlite3/.test(l));
+  assert.equal(lines.length, 1, 'one line when seen');
+  f.setAddons([mapsLine(11467)]);
+  assert.equal(f.state.getHealth().health_state, 'sqlite_module_conflict', 'latched until Node-RED restarts');
+});
+
+test('a module path outside the firmware and user trees is never reported', () => {
+  const f = fixture({ addons: [mapsLine(1, '/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3/build/Release/node_sqlite3.node'), mapsLine(2, '/home/someone/project/node_modules/sqlite3/build/Release/node_sqlite3.node')] });
+  f.state.recordDriver('node_red');
+  assert.deepEqual(f.state.getHealth().module_paths, [
+    '/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3/build/Release/node_sqlite3.node',
+    '<outside the firmware and user directories>',
+  ]);
+});
+
+test('a second addon loaded later is seen at the next open and at the next health read, and refuses nothing', async () => {
+  const f = fixture({ addons: [mapsLine(11467)] });
+  f.state.check();
+  await flush();
+  f.state.recordDriver('node_red');
+  f.state.beforeOpen('node_red');
+  f.setAddons([mapsLine(11467), mapsLine(3773, '/srv/node-red/other/node_sqlite3.node (deleted)')]);
+  assert.equal(f.state.getHealth().health_state, 'sqlite_module_conflict');
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
+});
+
+test('a driver failure refuses and reports without a module path', () => {
+  const f = fixture();
+  f.state.driverFailed(new Error("Cannot find module 'sqlite3'\nRequire stack:\n- /usr/lib/node/node-red/node_modules/x.js"));
+  assert.throws(() => f.state.beforeOpen('node_red'), { code: 'OSI_SQLITE_REFUSED', statusCode: 503, message: /sqlite_driver_unavailable/ });
+  assert.throws(() => f.state.guard(), { code: 'OSI_SQLITE_REFUSED', statusCode: 503 });
+  const health = f.state.getHealth();
+  assert.equal(health.health_state, 'sqlite_driver_unavailable');
+  assert.equal(health.driver_error, "Cannot find module 'sqlite3'");
+  assert.equal(f.logs.length, 1);
+});
+
+test('standalone processes neither run the start-up check nor count addons', () => {
+  const f = fixture({ addons: [mapsLine(1), mapsLine(2, '/b/node_sqlite3.node')] });
+  f.state.recordDriver('standalone');
+  assert.doesNotThrow(() => f.state.beforeOpen('standalone'));
+  assert.equal(f.calls.length, 0);
+});
+
+test('every unhealthy result is reported, none of them as healthy, and nothing is changed', async () => {
+  const cases = [
+    // A file damaged by the overlapping round, verbatim from the two gateway builds:
+    // our images' sqlite3 3.46.1 and the stock base's opkg sqlite3 3.53.1.
+    [{ status: 11, stdout: '', stderr: 'Error: stepping, database disk image is malformed (11)\n' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: '', stderr: 'Error in 3rd command line argument: database disk image is malformed\n' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: 'Error in 3rd command line argument: database disk image is malformed\n', stderr: '' }, 'damaged', 'database_damaged'],
+    [{ status: 1, stdout: '', stderr: 'Error: no such table: sqlite_master\n' }, 'not_checked', 'database_not_checked'],
+    [{ status: 0, stdout: '*** in database main ***\nPage 4: btreeInitPage() returns error code 11\ncore_tables=3\n', stderr: '' }, 'damaged', 'database_damaged'],
+    [{ status: 26, stdout: '', stderr: 'Error: file is not a database (26)\n' }, 'damaged', 'database_damaged'],
+    [{ status: 0, stdout: 'ok\ncore_tables=0\n', stderr: '' }, 'missing_core_tables', 'database_missing_core_tables'],
+    [{ status: 1, stdout: '', stderr: 'Error: unable to open database "/data/db/farming.db": unable to open database file\n' }, 'unreadable', 'database_unreadable'],
+    [{ status: null, error: Object.assign(new Error('spawn sqlite3 ENOENT'), { code: 'ENOENT' }), stdout: '', stderr: '' }, 'not_checked', 'database_not_checked'],
+    [{ status: 5, stdout: '', stderr: 'Error: database is locked (5)\n' }, 'not_checked', 'database_not_checked'],
+    [{ status: 0, stdout: '', stderr: '' }, 'not_checked', 'database_not_checked'],
+  ];
+  for (const [result, status, healthState] of cases) {
+    const f = fixture({ result });
+    f.state.check();
+    await flush();
+    const health = f.state.getHealth();
+    assert.equal(health.status, status, JSON.stringify(result));
+    assert.equal(health.health_state, healthState, JSON.stringify(result));
+    assert.match(f.logs.join('\n'), /reported only, no file was moved or repaired/);
+    if (['damaged', 'missing_core_tables', 'unreadable'].includes(status)) assert.match(f.logs.join('\n'), /see docs\/operations\/damaged-farm-database\.md/);
+    else assert.doesNotMatch(f.logs.join('\n'), /damaged-farm-database/);
+    // Detection only: the helper still opens a damaged or unexamined file.
+    assert.doesNotThrow(() => f.state.beforeOpen('node_red'));
+  }
+});
+
+test('a missing file is not checked and says so; an unstattable one is unreadable', async () => {
+  const missing = fixture({ stat: () => { throw Object.assign(new Error('nope'), { code: 'ENOENT' }); } });
+  assert.equal(missing.state.check().health_state, 'database_missing');
+  assert.equal(missing.calls.length, 0);
+  const denied = fixture({ stat: () => { throw Object.assign(new Error('nope'), { code: 'EACCES' }); } });
+  assert.equal(denied.state.check().health_state, 'database_unreadable');
+});
+
+test('the duration comes from the monotonic clock, not the wall clock', async () => {
+  const realNow = Date.now;
+  Date.now = () => { throw new Error('wall clock read'); };
+  try {
+    const f = fixture({ clock: [1000.25, 1030.75] });
+    f.state.check();
+    await flush();
+    assert.equal(f.state.getHealth().check_ms, 31);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('the bound is set from the field figure: minutes, not seconds', () => {
+  // About 12 s per 100 MB on the production gateway's card: 500 MB needs a
+  // minute; ten minutes leaves room for files many times that size.
+  assert.equal(CHECK_TIMEOUT_MS, 10 * 60 * 1000);
+  assert.equal(classify({ status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' }).status, 'healthy');
+});
+
+test('both helper copies share one process-wide state', () => {
+  const key = Symbol.for('osi.farming-sqlite.startup');
+  const first = require(path.join(HELPER, 'startup.js'));
+  assert.equal(globalThis[key], first);
+  assert.equal(typeof first.getHealth, 'function');
+});
+
+// Gather Edge Health (osi-health-helper.refreshGlobal) and the first heartbeat.
+const HEALTH = path.resolve(HELPER, '../osi-health-helper/index.js');
+function contextGlobal() {
+  const values = new Map();
+  return { values, get: (key) => values.get(key), set: (key, value) => values.set(key, value) };
+}
+
+test('an unavailable driver reaches edge_health synchronously, without a connection', () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  let opened = 0;
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'sqlite_driver_unavailable', module_conflict: false, driver_error: 'x' }),
+    Database: function Database() { opened++; },
+  };
+  const pending = refreshGlobal({ global, osiDb });
+  // Before any await: the heartbeat built from the same tick reads this.
+  const health = global.get('edge_health');
+  assert.equal(health.health_state, 'sqlite_driver_unavailable');
+  assert.ok(Number.isFinite(health.at));
+  assert.equal(opened, 0);
+  // Build Heartbeat replaces health_state when crash_count is null.
+  assert.notEqual(health.crash_count, null);
+  return pending;
+});
+
+test('a module conflict is published at once and the gather goes on', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  let opened = 0;
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'sqlite_module_conflict', module_conflict: true, driver_error: null }),
+    Database: function Database() { opened++; this.all = (s, cb) => cb(null, []); this.get = (s, cb) => cb(null, undefined); this.close = (cb) => cb(); },
+  };
+  const pending = refreshGlobal({ global, osiDb, options: { timeoutMs: 300, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') } });
+  assert.equal(global.get('edge_health').health_state, 'sqlite_module_conflict');
+  await pending;
+  assert.equal(opened, 1, 'the gather opened its connection');
+  assert.equal(global.get('edge_health').health_state, 'sqlite_module_conflict');
+  assert.notEqual(global.get('edge_health').disk_free_pct, null);
+});
+
+test('a damaged file is published at once and kept after the regular gather', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  let closed = 0;
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'database_damaged', module_conflict: false, driver_error: null }),
+    Database: function Database() {
+      this.all = (sql, cb) => cb(new Error('SQLITE_CORRUPT: database disk image is malformed'));
+      this.get = (sql, cb) => cb(new Error('SQLITE_CORRUPT: database disk image is malformed'));
+      this.close = (cb) => { closed++; cb(); };
+    },
+  };
+  const pending = refreshGlobal({ global, osiDb, options: { timeoutMs: 200, diskPath: __dirname } });
+  assert.equal(global.get('edge_health').health_state, 'database_damaged');
+  await pending;
+  assert.equal(global.get('edge_health').health_state, 'database_damaged');
+  assert.equal(closed, 1);
+});
+
+test('"not checked" never hides crash_looping or degraded; a fault replaces them', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const fs = require('node:fs'), os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-crash-'));
+  const crashFilePath = path.join(dir, 'crash');
+  fs.writeFileSync(crashFilePath, JSON.stringify({ count: 5, startedAt: Date.now() }));
+  try {
+    for (const [state, expected] of [['database_not_checked', 'crash_looping'], ['database_damaged', 'database_damaged']]) {
+      const global = contextGlobal();
+      const osiDb = { startupHealth: () => ({ health_state: state, module_conflict: false, driver_error: null }),
+        Database: function Database() { this.all = (s, cb) => cb(new Error('x')); this.get = (s, cb) => cb(new Error('x')); this.close = (cb) => cb(); } };
+      const pending = refreshGlobal({ global, osiDb, options: { crashFilePath, timeoutMs: 200, diskPath: __dirname } });
+      assert.equal(global.get('edge_health').health_state, expected, state);
+      await pending;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('"not checked" keeps the gathered figures and a degraded state on every tick', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  global.set('error_counts', { total: 3 });
+  const rows = (sql) => /sqlite_master/.test(sql) ? [{ type: 'table', name: 'devices', sql: 'CREATE TABLE devices(x)' }] : [{ n: 2 }];
+  const osiDb = {
+    startupHealth: () => ({ health_state: 'database_not_checked', module_conflict: false, driver_error: null }),
+    Database: function Database() { this.all = (sql, cb) => cb(null, rows(sql)); this.get = (sql, cb) => cb(null, rows(sql)[0]); this.close = (cb) => cb(); },
+  };
+  const options = { timeoutMs: 500, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') };
+  await refreshGlobal({ global, osiDb, options });
+  const gathered = global.get('edge_health');
+  assert.equal(gathered.health_state, 'degraded', 'degraded is not hidden by not checked');
+  assert.notEqual(gathered.disk_free_pct, null);
+  // The next tick publishes before its gather: the figures stay, so does degraded.
+  const pending = refreshGlobal({ global, osiDb, options });
+  const published = global.get('edge_health');
+  assert.equal(published.health_state, 'degraded');
+  assert.equal(published.disk_free_pct, gathered.disk_free_pct);
+  assert.equal(published.rtc_present, gathered.rtc_present);
+  await pending;
+});
+
+test('a database state survives a gather that times out (Build Heartbeat refills a null crash_count)', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  const osiDb = { startupHealth: () => ({ health_state: 'database_damaged', module_conflict: false, driver_error: null }),
+    Database: function Database() { this.all = () => {}; this.get = () => {}; this.close = (cb) => cb(); } };
+  await refreshGlobal({ global, osiDb, options: { timeoutMs: 100, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') } });
+  const health = global.get('edge_health');
+  assert.equal(health.health_state, 'database_damaged');
+  assert.notEqual(health.crash_count, null);
+});
+
+test('the check runs beside the flows: "checking" first, connections open meanwhile, then the verdict', async () => {
+  const f = fixture({ addons: [mapsLine(11467)], manual: true, result: { status: 1, stdout: '', stderr: 'Error in 3rd command line argument: database disk image is malformed\n' } });
+  const first = f.state.check();
+  assert.equal(first.status, 'checking');
+  assert.equal(first.health_state, 'database_checking');
+  f.state.recordDriver('node_red');
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'), 'a connection opens while the check reads');
+  assert.equal(f.calls.length, 1, 'no second check');
+  await flush();
+  assert.equal(f.state.getHealth().status, 'checking', 'still reading');
+  f.children[0].complete();
+  const health = f.state.getHealth();
+  assert.equal(health.status, 'damaged');
+  assert.equal(health.health_state, 'database_damaged');
+  assert.equal(f.logs.filter((l) => /start-up check: damaged/.test(l)).length, 1);
+  assert.doesNotThrow(() => f.state.beforeOpen('node_red'), 'a damaged file is reported, not refused');
+});
+
+test('a check that passes the bound is killed and reads "not checked", never healthy', async () => {
+  const f = fixture({ manual: true });
+  f.state.check();
+  assert.equal(f.state.getHealth().status, 'checking');
+  f.timers[0].fn();
+  assert.equal(f.children[0].killedWith, 'SIGKILL');
+  assert.equal(f.state.getHealth().status, 'not_checked_timeout');
+  assert.equal(f.state.getHealth().health_state, 'database_not_checked');
+  await flush();
+  f.children[0].complete();
+  assert.equal(f.state.getHealth().status, 'not_checked_timeout', 'a late answer does not overwrite it');
+});
+
+test('"checking" ranks with "not checked": it replaces only healthy', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const global = contextGlobal();
+  global.set('error_counts', { total: 2 });
+  const osiDb = { startupHealth: () => ({ health_state: 'database_checking', module_conflict: false, driver_error: null }),
+    Database: function Database() { this.all = (s, cb) => cb(null, []); this.get = (s, cb) => cb(null, undefined); this.close = (cb) => cb(); } };
+  const pending = refreshGlobal({ global, osiDb, options: { timeoutMs: 300, diskPath: __dirname, crashFilePath: path.join(__dirname, 'no-such-crash-file') } });
+  assert.equal(global.get('edge_health').health_state, 'degraded');
+  await pending;
+  assert.equal(global.get('edge_health').health_state, 'degraded');
+});
+
+test('the reader is killed when Node-RED exits, and the exit hook is removed once it answers', async () => {
+  const f = fixture({ manual: true });
+  f.state.check();
+  assert.equal(f.exits.length, 1);
+  f.exits[0]();
+  assert.equal(f.children[0].killedWith, 'SIGKILL');
+  const g = fixture();
+  g.state.check();
+  await flush();
+  assert.equal(g.exits.length, 0, 'no hook left after the verdict');
+});
+
+test('"not checked" gets one more attempt after the stated interval, then stands', async () => {
+  const { RETRY_MS } = require(path.join(HELPER, 'startup.js'));
+  assert.equal(RETRY_MS, 15 * 60 * 1000);
+  const f = fixture({ manual: true });
+  f.state.check();
+  f.timers[0].fn();                       // the first attempt passes its bound
+  let health = f.state.getHealth();
+  assert.equal(health.status, 'not_checked_timeout');
+  assert.equal(health.attempts, 1);
+  assert.equal(health.retry_in_ms, RETRY_MS);
+  const retry = f.timers.find((timer) => timer.ms === RETRY_MS);
+  assert.ok(retry, 'one retry is scheduled');
+  retry.fn();                              // fifteen minutes later
+  assert.equal(f.state.getHealth().status, 'checking');
+  assert.equal(f.calls.length, 2);
+  f.timers[f.timers.length - 1].fn();     // the second attempt passes its bound too
+  health = f.state.getHealth();
+  assert.equal(health.status, 'not_checked_timeout');
+  assert.equal(health.attempts, 2);
+  assert.equal(health.retry_in_ms, null);
+  assert.equal(f.timers.filter((timer) => timer.ms === RETRY_MS).length, 1, 'no third attempt');
+});
+
+test('a second attempt that answers gives the verdict', async () => {
+  const f = fixture({ manual: true, result: { status: 0, stdout: 'ok\ncore_tables=3\n', stderr: '' } });
+  f.state.check();
+  f.timers[0].fn();
+  f.timers.find((timer) => timer.ms === 15 * 60 * 1000).fn();
+  f.children[1].complete();
+  assert.equal(f.state.getHealth().status, 'healthy');
+  assert.equal(f.state.getHealth().health_state, null);
+});

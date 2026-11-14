@@ -15,14 +15,16 @@ jobs:
   release-runtime-smoke:
     name: release-runtime-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The NEW-15 SQLite cases add seven Node-RED runs, about six minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # The Node version the image ships; scripts/test-release-smoke.js reads it here.
+          node-version: '20.18.3'
           cache: npm
           cache-dependency-path: scripts/fixtures/release-smoke/package-lock.json
       - name: Install SQLite CLI
@@ -34,7 +36,7 @@ jobs:
       - name: Deploy keeps a working node file when its fetch fails
         run: node --test scripts/test-deploy-node-files.js
       - name: Failure-list policy
-        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
+        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js scripts/test-farming-sqlite-startup.js scripts/test-farming-sqlite-driver.js
       - name: Reject broken late and caught handlers (serial negative controls)
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
@@ -51,4 +53,8 @@ jobs:
             /tmp/osi-release-smoke-*/runtime.log
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
           retention-days: 7

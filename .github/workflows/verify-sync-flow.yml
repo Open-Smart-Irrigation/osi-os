@@ -168,6 +168,10 @@ jobs:
       # stop commands still run with the gateway clock ahead of their expiry.
       - name: Valve command safety path
         run: node --test scripts/test-valve-command-safety-path.js
+      # NEW-15: a refusal latched after a farm handle is open stops every
+      # further operation on it (node:sqlite adapter, so Node 22 here).
+      - name: Farm database refusal latch
+        run: node --test scripts/test-farming-sqlite-latch.js
       # The eight local STREGA commands that answer after the transport decides
       # (valve CLOSE/CLOSE_FOR_DURATION/OPEN_FOR_DURATION, interval, timed action,
       # magnet, partial opening, flushing) answer exactly once, through a link in

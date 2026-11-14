@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const childProcess = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 
 // Crash-loop escalation (refactor-program item 1.A4).
 //
@@ -496,6 +497,73 @@ function recordError(msg, state = {}) {
   return { counts, warned, warning };
 }
 
+// Gather Edge Health (inject every 60 s, once at start). A farm database
+// state is published synchronously, before the first await, so the heartbeat
+// built from the same tick carries it. Only when the driver could not be
+// obtained (connections refused) is no connection attempted.
+// A database fault replaces the gathered state. "checking" (the start-up
+// check is still reading) and "not checked" (it could not run, or passed its
+// bound) rank below degraded: they replace only healthy, so they never hide
+// crash_looping or degraded.
+const WEAK_DATABASE_STATES = new Set(['database_checking', 'database_not_checked']);
+function withDatabaseState(gathered, databaseState) {
+  if (!databaseState) return gathered;
+  if (!WEAK_DATABASE_STATES.has(databaseState)) return databaseState;
+  return gathered === 'healthy' || gathered == null ? databaseState : gathered;
+}
+
+// The last real gather and when it finished (monotonic ms). The heartbeat
+// built from a tick reads the gather of the tick before, so the database
+// state is laid over that sample; it is used while Build Heartbeat would
+// still call it fresh.
+const GATHERED_FRESH_MS = 180000;
+let lastGathered = null;
+
+// The state gatherWork gives from the crash file, the error count and the
+// recent sync rejections, for a tick whose own gather has not finished.
+function baseState(crash, errorsTotal, sample) {
+  if (crash.crash_looping) return 'crash_looping';
+  const rejected = Number(sample && sample.sync_rejected_recent);
+  return (Number.isFinite(errorsTotal) && errorsTotal > 0) || (Number.isFinite(rejected) && rejected > 0) ? 'degraded' : 'healthy';
+}
+
+async function refreshGlobal({ global, osiDb, options = {} }) {
+  const errCounts = global.get('error_counts') || {};
+  const errorsTotal = Number.isFinite(errCounts.total) ? errCounts.total : null;
+  const errorsLastAt = errCounts.last && Number.isFinite(errCounts.last.at) ? errCounts.last.at : null;
+  const meta = { at: Date.now(), errors_total: errorsTotal, errors_last_at: errorsLastAt };
+  const database = osiDb.startupHealth();
+  if (database.health_state) {
+    // Published before the first await, so the heartbeat of this tick
+    // carries it, over the last gathered figures (schema signature, sync
+    // counters, disk) rather than in place of them. The crash state is
+    // carried too: Build Heartbeat refills a null crash_count and then sets
+    // health_state itself.
+    const crash = readCrashState(options);
+    const sample = lastGathered && performance.now() - lastGathered.at < GATHERED_FRESH_MS ? lastGathered.health : null;
+    global.set('edge_health', Object.assign(allNullHealth(), sample || {}, meta, crash, {
+      health_state: withDatabaseState(baseState(crash, errorsTotal, sample), database.health_state)
+    }));
+    // Only an unavailable driver refuses connections; a conflict is reported
+    // and the gather goes on.
+    if (database.driver_error) return null;
+  }
+  const _db = new osiDb.Database('/data/db/farming.db');
+  try {
+    const health = await gatherEdgeHealth(_db, Object.assign({}, options, { errorCount: errorsTotal }));
+    // A gather that timed out answers all fields null; it is not a sample.
+    if (health.crash_count != null || health.schema_sig != null) lastGathered = { health: Object.assign({}, health), at: performance.now() };
+    if (database.health_state) {
+      if (health.crash_count == null) Object.assign(health, readCrashState(options));
+      health.health_state = withDatabaseState(health.health_state || baseState(health, errorsTotal, health), database.health_state);
+    }
+    global.set('edge_health', Object.assign(meta, health));
+  } finally {
+    _db.close(() => {});
+  }
+  return null;
+}
+
 module.exports = {
   structuralSignature,
   gatherEdgeHealth,
@@ -504,5 +572,6 @@ module.exports = {
   readCrashState,
   isAuthRejection,
   recordError,
-  rtcHealth
+  rtcHealth,
+  refreshGlobal
 };

@@ -8,6 +8,8 @@ exports.observe = function(RED,state) {
     touch();
     const node=event.destination.node,msg=event.msg;
     state.received.push(node.id);
+    // The heartbeat as it reaches its MQTT output, including the first one at start.
+    if(node.id==='d769e9face3844d5')state.heartbeats.push({t:Date.now(),topic:msg?.topic,qos:msg?.qos,payload:msg?.payload});
     if(node.type==='function') {
       const key=node.id+':'+msg?._msgid;
       pending.set(key,(pending.get(key)||0)+1);

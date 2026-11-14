@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {classify}=require('./test-release-smoke');
+const {classify,report}=require('./test-release-smoke');
 const known=[{id:'case',finding:'F-1',failures:[{code:'http',symptom:'http-timeout'}]}];
 const failed={id:'case',failures:[{code:'http',actual:{timeout:true}}]};
 test('exact known failure is counted separately',()=>{
@@ -60,4 +60,15 @@ test('expected refusals are exact by scenario, source, type and full message',()
     assert.equal(isExpectedRefusal({...refusal,...changed},[refusal]),false);
   }
   assert.equal(isExpectedRefusal({...refusal,message:'SQLITE_BUSY: database is locked'},[refusal]),false);
+});
+test('a listed case that was not executed fails with exit 1 and a summary',()=>{
+  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+  const run=fs.mkdtempSync(path.join(os.tmpdir(),'osi-release-smoke-policy-'));
+  try {
+    const errors=console.error;console.error=()=>{};
+    let code;try{code=report({cases:[],seconds:1,maxRSSKiB:1},known,run);}finally{console.error=errors;}
+    assert.equal(code,1);
+    const summary=JSON.parse(fs.readFileSync(path.join(run,'summary.json'),'utf8'));
+    assert.deepEqual(summary.failed.map(c=>[c.id,c.reason,c.failures]),[['case','known case was not executed',[]]]);
+  } finally {fs.rmSync(run,{recursive:true,force:true});}
 });
