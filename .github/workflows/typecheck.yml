@@ -42,6 +42,23 @@ jobs:
         run: npm run test:browser:conditional
       - name: Device registration browser tests
         run: npm run test:browser:device-registration
+  # Production build of the dashboard. The typecheck job above never runs
+  # the bundler, so a broken import or an unresolved module is invisible to it.
+  gui-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --version && npm --version
+      - run: npm ci
+      - run: npm run build
   # Upgrade lane: does the same lockfile still install on the next Node LTS
   # (npm 11)? Informational: with job-level continue-on-error a failure
   # shows this job red in the checks list while the workflow run stays
