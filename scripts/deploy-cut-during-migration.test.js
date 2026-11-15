@@ -23,7 +23,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const swap = require('./deploy-payload-swap');
 const { buildReference } = require('./baseline-existing-db');
 const { readMigrationManifest, loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
@@ -358,4 +358,57 @@ exec ${JSON.stringify(real)} "$@"
   const r = boot(g);
   assert.equal(r.started, false, r.log);
   assert.match(r.log, /HELD: Node-RED not started: the database's stamped schema fingerprints could not be read, .*then run the deploy again, the same way\./);
+});
+
+// A transient lock is not a failed read: the boot's reads wait up to the
+// flows' 5000 ms busy timeout. A WAL reader is never made busy by a writer,
+// so the fixture is switched to a rollback journal, where another process's
+// BEGIN EXCLUSIVE makes every reader busy until it ends.
+function exclusiveLock(g, seconds, name) {
+  const marker = path.join(g.root, `${name}.locked`);
+  const done = path.join(g.root, `${name}.done`);
+  return {
+    marker, done,
+    script: `{ echo 'BEGIN EXCLUSIVE;'; echo ${JSON.stringify(`.shell touch '${marker}'`)}; sleep ${seconds}; echo 'COMMIT;'; } | sqlite3 ${JSON.stringify(g.db)}; touch ${JSON.stringify(done)}`,
+  };
+}
+const waitFor = (file) => spawnSync('sh', ['-c', `i=0; while [ ! -e ${JSON.stringify(file)} ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; [ -e ${JSON.stringify(file)} ]`]).status === 0;
+
+test('a lock released after about a second: the boot waits and takes its normal decision (c1 starts unverified)', async () => {
+  const g = await gateway();
+  assert.equal(migrate(g.db, { commit: 1 }).signal, 'SIGKILL');
+  assert.equal(spawnSync('sqlite3', [g.db, 'PRAGMA journal_mode=DELETE;'], { encoding: 'utf8' }).stdout.trim(), 'delete');
+  const lock = exclusiveLock(g, 1, 'short');
+  spawn('sh', ['-c', lock.script], { stdio: 'ignore', detached: true }).unref();
+  assert.ok(waitFor(lock.marker), 'the lock is held before the boot reads');
+  const r = boot(g);
+  assert.ok(waitFor(lock.done));
+  assert.equal(r.started, true, r.log);
+  assert.match(r.log, /was cut during its migration; running the deploy again completes it/);
+  assert.equal(swap.readPayloadState(g.root).state, 'unverified');
+});
+
+test('a lock held past the 5 s timeout at the fingerprint read: held, with the fingerprint line', async () => {
+  const g = await gateway();
+  assert.equal(migrate(g.db, { commit: 1 }).signal, 'SIGKILL');
+  assert.equal(spawnSync('sqlite3', [g.db, 'PRAGMA journal_mode=DELETE;'], { encoding: 'utf8' }).stdout.trim(), 'delete');
+  // The ledger reads; the lock is taken just before the fingerprint table
+  // check, and held for 7 s.
+  const lock = exclusiveLock(g, 7, 'long');
+  const real = spawnSync('sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' }).stdout.trim();
+  fs.mkdirSync(path.join(g.root, 'boot-bin'), { recursive: true });
+  fs.writeFileSync(path.join(g.root, 'boot-bin', 'sqlite3'), `#!/bin/sh
+case "$*" in *sqlite_master*)
+  ( ${lock.script.replace('| sqlite3 ', `| ${real} `)} ) >/dev/null 2>&1 &
+  while [ ! -e ${JSON.stringify(lock.marker)} ]; do sleep 0.1; done ;;
+esac
+exec ${JSON.stringify(real)} "$@"
+`, { mode: 0o755 });
+  const started = Date.now();
+  const r = boot(g);
+  const waited = Date.now() - started;
+  assert.ok(waitFor(lock.done));
+  assert.equal(r.started, false, r.log);
+  assert.match(r.log, /HELD: Node-RED not started: the database's stamped schema fingerprints could not be read/);
+  assert.ok(waited >= 4500, `the read waited for the busy timeout (${waited} ms)`);
 });

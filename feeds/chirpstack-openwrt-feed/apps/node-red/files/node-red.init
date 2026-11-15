@@ -375,7 +375,7 @@ payload_schema_check() {
         logger -t node-red.init "WARN: sqlite3 is unavailable; the payload was not checked against the database"
         return 0
     fi
-    if ! schema="$(sqlite3 -readonly "$OSI_DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
+    if ! schema="$(sqlite3 -readonly -cmd '.timeout 5000' "$OSI_DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
         logger -t node-red.init "WARN: could not read the database's schema ledger; the payload was not checked against it"
         return 0
     fi
@@ -383,8 +383,8 @@ payload_schema_check() {
     # the old payload may start (bootSchemaDecision, rule (g)).
     # A database from before the fingerprint table has nothing stamped; a
     # read that fails is no evidence, so it holds.
-    if ! stamped="$(sqlite3 -readonly "$OSI_DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_object_fingerprints'" 2>/dev/null)" || \
-       { [ -n "$stamped" ] && ! stamped="$(sqlite3 -readonly "$OSI_DB_PATH" "SELECT object_type || ' ' || object_name || ' ' || fingerprint FROM schema_object_fingerprints" 2>/dev/null)"; }; then
+    if ! stamped="$(sqlite3 -readonly -cmd '.timeout 5000' "$OSI_DB_PATH" "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_object_fingerprints'" 2>/dev/null)" || \
+       { [ -n "$stamped" ] && ! stamped="$(sqlite3 -readonly -cmd '.timeout 5000' "$OSI_DB_PATH" "SELECT object_type || ' ' || object_name || ' ' || fingerprint FROM schema_object_fingerprints" 2>/dev/null)"; }; then
         logger -t node-red.init "HELD: Node-RED not started: the database's stamped schema fingerprints could not be read, so nothing proves the active payload fits the database. Check $OSI_DB_PATH (sqlite3 -readonly $OSI_DB_PATH 'PRAGMA integrity_check'), then run the deploy again, the same way."
         return 1
     fi
