@@ -205,7 +205,10 @@ deploy again, the same way.
   database first, as the `HELD:` line says.
 - Cut after the last migration and before the switch: the boot switches
   forward to the new payload (`unverified`, its health check owed to the
-  next deploy).
+  next deploy). Run the deploy again, the same way: it runs the owed check
+  and writes the release version. Until then
+  `uci get osi-server.cloud.firmware_version` and the heartbeat still show
+  the old version.
 - The health check of the new payload saw no failure but either could not
   see the boot node's completion line (a full log ring) while the service
   runs and `/gui` answers, or saw the completion line and `/gui` answering
