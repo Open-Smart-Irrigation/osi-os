@@ -672,6 +672,25 @@ test('captureModules refuses a live module that changed after it was captured', 
   assert.throws(() => swap.captureModules(root, 'prev', 'second'), /refusing to recapture changed live module osi-a/);
 });
 
+test('captureModules refuses a changed module before it copies any other (NEW-23)', (t) => {
+  const root = moduleRoot(t);
+  stagePayload(root, 'prev', fakeFlowsSrcAt(root, 'prev'), fakeGuiSrcAt(root, 'prev'));
+  writeModule(path.join(root, 'osi-b'), 'osi-b@live');
+  stageWithModules(root, 'first', { 'osi-b': '' });
+  swap.captureModules(root, 'prev', 'first');
+
+  // osi-a, new in this release and served from a real directory, sorts
+  // before the changed osi-b: the refusal must not have copied it.
+  writeModule(path.join(root, 'osi-a'), 'osi-a@live');
+  fs.appendFileSync(path.join(root, 'osi-b', 'index.js'), '// changed in place\n');
+  stageWithModules(root, 'second', { 'osi-a': '', 'osi-b': '' });
+  const before = fs.readdirSync(path.join(root, 'payloads', 'prev', 'modules')).sort();
+  const manifestBefore = fs.readFileSync(path.join(root, 'payloads', 'prev', 'modules.json'), 'utf8');
+  assert.throws(() => swap.captureModules(root, 'prev', 'second'), /refusing to recapture changed live module osi-b/);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'payloads', 'prev', 'modules')).sort(), before);
+  assert.equal(fs.readFileSync(path.join(root, 'payloads', 'prev', 'modules.json'), 'utf8'), manifestBefore);
+});
+
 test('captureModules keeps a payload-staged copy over a real directory and warns', (t) => {
   const root = moduleRoot(t);
   const guiRoot = path.join(root, 'gui');
@@ -1369,4 +1388,31 @@ test('a pending record merges its predecessors\' hazard lists; an unreadable or 
   fs.writeFileSync(path.join(root, 'payloads', '20261101', 'pending-switch.json'), '{ not json');
   swap.writePendingSwitch(root, '20261103', '80', 'L80', '74', 'L74', '[]');
   assert.equal(swap.readPendingSwitches(root).find((r) => r.payload_stamp === '20261103').boot_owned, null);
+});
+
+// Round 2 on #659: the schema record and the legacy-capture marker are
+// published through writeDurable (the file and its directory fsynced), so a
+// power cut cannot keep a capture and lose the record it depends on.
+test('the schema record and the capture marker are published with fsync', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'live-gui');
+  fs.mkdirSync(guiRoot);
+  fs.writeFileSync(path.join(guiRoot, 'index.html'), 'live\n');
+  const flows = path.join(root, 'live-flows.json');
+  fs.writeFileSync(flows, '[]\n');
+  const real = fs.fsyncSync;
+  let calls = 0;
+  fs.fsyncSync = (fd) => { calls += 1; return real(fd); };
+  try {
+    swap.captureExisting(root, 'cap', flows, guiRoot);
+    const afterMarker = calls;
+    assert.ok(afterMarker >= 2, `the marker: file and directory fsynced (${afterMarker})`);
+    swap.writeCompatibility(root, 'cap', '80', '80:x');
+    assert.ok(calls - afterMarker >= 2, `the record: file and directory fsynced (${calls - afterMarker})`);
+  } finally {
+    fs.fsyncSync = real;
+  }
+  assert.equal(swap.compatibilityExists(root, 'cap'), true);
+  fs.writeFileSync(path.join(root, 'payloads', 'cap', 'compatibility.json'), '');
+  assert.equal(swap.compatibilityExists(root, 'cap'), false, 'an empty record counts as missing');
 });

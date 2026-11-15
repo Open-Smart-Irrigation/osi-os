@@ -120,6 +120,12 @@ release_deploy_lock() {
 }
 
 cleanup() {
+    # A refusal between staging and the exit handler's takeover (it discards
+    # the stage itself) leaves no staged payload behind, nor the links
+    # linkNewModules made into it.
+    if [ "${DISCARD_STAGE_ON_EXIT:-0}" = 1 ] && [ -n "${DEPLOY_STAMP:-}" ]; then
+        swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
+    fi
     rm -rf "$TMP_DIR"
     rm -rf "$COMMAND_LEDGER_STAGE"
     release_deploy_lock
@@ -156,6 +162,18 @@ check_gateway_commands() {
 }
 check_gateway_commands || exit 1
 # command check end
+
+# NEW-24: a stock base accepts root over SSH with no password at first boot.
+# A warning, never a refusal (a refusal could lock an operator out of an
+# upgrade in the field). It reads only whether root's password field in the
+# shadow file is empty, and never prints it.
+warn_root_password() {
+    rp_shadow="${SHADOW_FILE:-/etc/shadow}"
+    [ -r "$rp_shadow" ] || return 0
+    [ "$(awk -F: '$1 == "root" { print ($2 == "" ? "empty" : "set") }' "$rp_shadow")" = empty ] || return 0
+    echo "WARN: root has no password on this gateway: anyone who reaches it over the network can log in as root. Set one now with 'passwd' (README, Path B, Step 1)." >&2
+}
+warn_root_password
 
 # deploy lock begin
 take_deploy_lock || exit 1
@@ -705,6 +723,36 @@ print_bootstrap_note() {
         echo "        ChirpStack (runs $pbn_script and writes the stamp):"
         echo "        $OSI_BOOTSTRAP_INIT enable && $OSI_BOOTSTRAP_INIT start"
     fi
+}
+
+# /etc/config/osi-server and its section "cloud" exist only where the image's
+# uci-defaults script 96_osi_server_config ran at first boot. On a gateway
+# installed on a stock base (README "Path B") they are missing, uci cannot
+# create a package by "uci set", and the first "uci set osi-server.cloud.*"
+# ended the deploy half configured (NEW-23). Where the section is absent the
+# deploy runs that same script, from the release, so the defaults have one
+# source; where it exists, nothing is changed. The identity it records stays
+# empty on a stock base (the identity helper is not installed yet);
+# osi-identityd, installed by this deploy, resolves and persists it at its
+# first start. firmware_version is left unset until the switch writes it.
+ensure_osi_server_config() {
+    if uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "OK: osi-server configuration present; left as it is"
+        return 0
+    fi
+    echo "--- osi-server configuration (absent: created with the image's defaults) ---"
+    osc_script="$TMP_DIR/96_osi_server_config"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "$osc_script"; then
+        echo "ERROR: could not fetch the osi-server defaults script" >&2
+        return 1
+    fi
+    if ! sh "$osc_script" || ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "ERROR: could not create the osi-server configuration section" >&2
+        return 1
+    fi
+    uci -q delete osi-server.cloud.firmware_version 2>/dev/null || true
+    uci commit osi-server || { echo "ERROR: could not commit the osi-server configuration; refusing before settings.js is replaced" >&2; return 1; }
+    echo "OK: osi-server configuration created"
 }
 
 ensure_journal_media_defaults() {
@@ -2097,7 +2145,33 @@ cleanup_failed_first_payload() {
 }
 # deploy payload lifecycle end
 
+# NEW-23 and #651 (S7): the live database is checked as it is, before the
+# deploy writes anything to it, and a damaged one is refused untouched. The
+# check reads through a read-only connection: a normal sqlite3 connection
+# that is the last one to close a WAL database checkpoints it on close,
+# rewriting the damaged file and removing its -wal. A read-only reader may
+# create or rebuild -shm (the WAL index, no data of its own). It runs in the
+# preflight with Node-RED still running (busy timeout), and again before the
+# pre-migration checkpoint, which therefore never touches a refused file.
+DAMAGED_DB_DOC="docs/operations/damaged-farm-database.md"
+check_live_db_readonly() {
+    [ -e "$DB_PATH" ] || return 0
+    command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
+    if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
+        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+    if [ "$cldb_result" != "ok" ]; then
+        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+}
+
 checkpoint_live_db() {
+    # Check first: a refused database is never checkpointed.
+    if ! check_live_db_readonly; then
+        return 1
+    fi
     if ! sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null; then
         echo "ERROR: failed to checkpoint $DB_PATH before migration" >&2
         echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
@@ -2374,7 +2448,7 @@ run_schema_migration() {
     esac
 
     if [ -n "${PREV_STAMP:-}" ]; then
-        if [ "${PREV_CAPTURED:-0}" = "1" ]; then
+        if [ "${PREV_CAPTURED:-0}" = "1" ] && ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null 2>&1; then
             if ! write_payload_compatibility "$PREV_STAMP"; then
                 echo "ERROR: could not record the retained payload's pre-migration schema compatibility" >&2
                 return 1
@@ -2627,6 +2701,79 @@ process.stdout.write(String(applied.length));
     return 1
 }
 
+# NEW-23: what can refuse because of the gateway's state is checked before
+# the deploy's first change, so a refusal leaves the gateway as it found it.
+# The checks below are read-only (the runner and the ledger installer go into
+# the deploy's own $TMP_DIR); each late check they mirror stays where it is
+# as a second line.
+gateway_state_preflight() {
+    echo "--- Gateway state preflight (read-only) ---"
+    gsp_refuse() { echo "ERROR: $1; refusing before anything is changed" >&2; return 1; }
+    if [ ! -e "$DB_PATH" ] && { [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; }; then
+        gsp_refuse "$DB_PATH is missing but SQLite sidecar files exist; inspect $DB_DIR" || return 1
+    fi
+    if [ ! -x "$IRRIGATION_CLOCK_HOOK" ]; then
+        [ -x "$IRRIGATION_SYSNTPD_INIT" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_SYSNTPD_INIT"; return 1; }
+        [ -x "$IRRIGATION_NTPD_HOTPLUG" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_NTPD_HOTPLUG"; return 1; }
+        "$IRRIGATION_SYSNTPD_INIT" enabled >/dev/null 2>&1 || { gsp_refuse "sysntpd is not enabled (the deploy does not enable it implicitly)"; return 1; }
+        case "$("$IRRIGATION_UCI" -q get system.ntp.enabled 2>/dev/null || true)" in
+            0|false|False|FALSE|off|OFF|no|NO) gsp_refuse "system.ntp.enabled is explicitly false"; return 1 ;;
+        esac
+    fi
+    if ! { fetch "scripts/deploy-command-ledger-dependency.js" "$COMMAND_LEDGER_INSTALLER" && [ "$(file_sha256 "$COMMAND_LEDGER_INSTALLER")" = "$COMMAND_LEDGER_HELPER_SHA256" ]; }; then
+        gsp_refuse "the command-ledger dependency installer did not arrive intact (SHA-256)" || return 1
+    fi
+    [ -e "$DB_PATH" ] || return 0
+    fetch_migration_runner || { gsp_refuse "the migration runner could not be fetched and verified"; return 1; }
+    # A repair_required ledger row whose checksum already matches the release
+    # stops the migration runner, and nothing in the deploy clears it.
+    gsp_repair="$(sqlite3 -readonly "$DB_PATH" "SELECT version || ':' || checksum FROM schema_migrations WHERE status='repair_required'" 2>/dev/null || true)"
+    if [ -n "$gsp_repair" ] && printf '%s\n' "$gsp_repair" | node -e '
+        const rows = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+        const manifest = require(process.argv[1]).readMigrationManifest(process.argv[2]);
+        process.exit(rows.some((row) => { const [v, c] = row.split(":"); const e = manifest.find((m) => m.version === Number(v)); return e && e.checksum === c; }) ? 0 : 1);
+    ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir"; then
+        gsp_refuse "the migration ledger has a repair_required row whose checksum matches this release; clear it with the ledger reconciliation tool's --clear-repair-required (runbook, \"Foreign-numbered ledger recovery\")" || return 1
+    fi
+    # The rollback payload's schema record, when the served payload is a
+    # complete pair that needs no capture (the late check's case).
+    gsp_served="$(swap_call currentStamp 2>/dev/null || true)"
+    if [ -n "$gsp_served" ] && swap_call verifyPair "$gsp_served" "$GUI_ROOT" >/dev/null 2>&1; then
+        gsp_prev="$(swap_call rollbackTarget "$gsp_served" "$DEPLOY_STAMP" 2>/dev/null || true)"
+        if [ -n "$gsp_prev" ] && ! swap_call compatibilityExists "$gsp_prev" >/dev/null 2>&1; then
+            gsp_refuse "the retained payload $gsp_prev has no schema compatibility record" || return 1
+        fi
+    fi
+    echo "OK: gateway state preflight passed"
+}
+
+# The late disk gate's decision, made before the first configuration change:
+# after stale stages are cleared and this deploy's payload is staged, so df
+# already counts both, and crediting only the pre-migration copies the prune
+# will remove (migrate-cli.js --prune-plan: the same retention, newest
+# MIGRATE_BACKUP_KEEP kept). The late gate stays as the race guard.
+early_disk_check() {
+    edc_backup="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
+    edc_at="$edc_backup"
+    while [ ! -d "$edc_at" ] && [ "$edc_at" != / ]; do edc_at="$(dirname "$edc_at")"; done
+    edc_db_kb=0
+    for edc_file in "$DB_PATH" "$DB_PATH-wal"; do
+        [ -e "$edc_file" ] && edc_db_kb=$((edc_db_kb + ($(ls -ln "$edc_file" | awk '{print $5}') + 1023) / 1024))
+    done
+    edc_need_kb=$((2 * edc_db_kb + ${MIGRATE_MIN_FREE_MARGIN_MB:-128} * 1024))
+    edc_free_kb=0
+    [ -z "${migrations_dir:-}" ] || edc_free_kb="$(node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$edc_backup" --migrations-dir "$migrations_dir" --prune-plan 2>/dev/null || echo 0)"
+    case "$edc_free_kb" in ''|*[!0-9]*) edc_free_kb=0 ;; esac
+    edc_avail_kb="$(df -k "$edc_at" 2>/dev/null | tail -1 | awk '{print $(NF-2)}')"
+    case "$edc_avail_kb" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    if [ $((edc_avail_kb + edc_free_kb)) -lt "$edc_need_kb" ]; then
+        echo "ERROR: insufficient disk for a safe schema migration on $edc_backup: need ~${edc_need_kb}KB, have ${edc_avail_kb}KB plus ${edc_free_kb}KB in pre-migration copies the prune removes; refusing before any configuration is changed" >&2
+        return 1
+    fi
+}
+
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
 check_command_ledger_hold
@@ -2637,6 +2784,9 @@ run_native_sqlite3_preflight || exit 1
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
 same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
+# A damaged database is refused here, before anything on the gateway changes.
+check_live_db_readonly || exit 1
+gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
 if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
@@ -2760,64 +2910,6 @@ else
     echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
 fi
 
-fetch_required "Node-RED settings.js" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
-    "/srv/node-red/settings.js"
-
-fetch_required "Node-RED init script" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red"
-chmod 755 /etc/init.d/node-red
-ensure_journal_media_defaults
-
-fetch_required "Gateway identity helper" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
-    "/usr/libexec/osi-gateway-identity.sh"
-chmod 755 /usr/libexec/osi-gateway-identity.sh
-
-fetch_required "Gateway identity daemon" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
-    "/usr/libexec/osi-identityd.sh"
-chmod 755 /usr/libexec/osi-identityd.sh
-
-fetch_required "Gateway identity service" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
-    "/etc/init.d/osi-identityd"
-chmod 755 /etc/init.d/osi-identityd
-
-fetch_required "Gateway identity service enable script" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
-    "/etc/uci-defaults/94_osi_identityd_enable"
-chmod 755 /etc/uci-defaults/94_osi_identityd_enable
-
-fetch_required "chirpstack-bootstrap.js" \
-    "scripts/chirpstack-bootstrap.js" \
-    "/srv/node-red/chirpstack-bootstrap.js"
-
-# issue-183 early secure begin
-if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
-    :
-else
-    cs_env_rc=$?
-    echo "ERROR: ChirpStack credential env-file safety check failed; refusing deploy" >&2
-    exit "$cs_env_rc"
-fi
-# issue-183 early secure end
-
-fetch_required "ChirpStack bootstrap service" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
-    "/etc/init.d/osi-bootstrap"
-chmod 755 /etc/init.d/osi-bootstrap
-enable_osi_bootstrap
-
-echo "--- Remove legacy gateway GPS sidecar ---"
-if [ -x /etc/init.d/osi-gateway-gps ]; then
-    /etc/init.d/osi-gateway-gps stop || true
-    /etc/init.d/osi-gateway-gps disable || true
-fi
-rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
-echo "OK"
-
 echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
@@ -2828,7 +2920,11 @@ mkdir -p "$STAGED_GUI"
 tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
 # Recorded "staged" before anything is copied in: a staged payload is no
 # rollback target until its health check passes, also when a cut leaves it
-# half copied.
+# half copied. Staging comes before settings.js and every other change to
+# the running gateway, so the switch preflight, the module digest check and
+# the rollback target can refuse while nothing has changed; a refusal
+# discards the stage.
+DISCARD_STAGE_ON_EXIT=1
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null
 # The release each payload belongs to, for the HELD restore command, which
 # puts osi-server.cloud.firmware_version back with the payload it returns to.
@@ -2870,17 +2966,31 @@ fi
 if [ -n "${PREV_STAMP:-}" ]; then
     swap_call captureGui "$PREV_STAMP" "$GUI_ROOT" >/dev/null
 fi
+# legacy capture compatibility begin
+# A capture's schema record is written now, before anything is configured, so
+# a deploy that stops later (a failed download) leaves a capture the retry can
+# use. A capture an earlier attempt left without its record is completed only
+# while its bytes still match the live files (legacyCaptureStamp) and no
+# migration attempt is recorded: every deploy that migrates writes the record
+# first and leaves a pending-switch record. A migration run by hand outside
+# the deploy is not covered.
+if [ -n "${PREV_STAMP:-}" ] && ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null 2>&1; then
+    if [ "${PREV_CAPTURED:-0}" != 1 ] && [ "$PREV_STAMP" = "${PREV_LEGACY_STAMP:-}" ]; then
+        if lcc_pending="$(swap_call pendingSwitchFiles 2>/dev/null)" && [ -n "$lcc_pending" ]; then
+            echo "ERROR: the legacy capture payloads/$PREV_STAMP has no schema record and a migration attempt is recorded; refusing before anything is changed. The attempt's record: $lcc_pending." >&2
+            echo "If that record's from_ledger equals the database's ledger (sqlite3 -readonly $DB_PATH \"SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)\"), the database is untouched: remove that pending-switch.json and run the deploy again, the same way. If they differ, the database was migrated: keep the file and escalate." >&2
+            exit 1
+        fi
+        PREV_CAPTURED=1
+        echo "OK: completing the schema record of the legacy capture payloads/$PREV_STAMP (its files still match the live ones)"
+    fi
+    if [ "${PREV_CAPTURED:-0}" = 1 ] && [ -f "$DB_PATH" ] && ! write_payload_compatibility "$PREV_STAMP"; then
+        echo "ERROR: could not record the schema of payloads/$PREV_STAMP; refusing before anything is changed" >&2
+        exit 1
+    fi
+fi
+# legacy capture compatibility end
 echo "OK: staged paired payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
-
-seed_db_if_missing
-
-fetch_required "Node-RED runtime package.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \
-    "/srv/node-red/package.json"
-
-fetch_required "Node-RED runtime package-lock.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" \
-    "/srv/node-red/package-lock.json"
 
 fetch_required "osi-chirpstack-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json" \
@@ -3137,8 +3247,6 @@ fetch_required "osi-journal-replication index.js" \
 fetch_required "osi-journal-replication canonicalization.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js" \
     "$MODULE_STAGE/osi-journal-replication/canonicalization.js"
-
-stage_command_ledger_dependency
 
 fetch_required "osi-zone-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/package.json" \
@@ -3556,46 +3664,6 @@ fetch_required "osi-system-settings api.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/api.js" \
     "$MODULE_STAGE/osi-system-settings/api.js"
 
-fetch_required "edge-channels.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
-    "/srv/node-red/edge-channels.json"
-
-fetch_required "STREGA codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
-    "/srv/node-red/codecs/strega_gen1_decoder.js"
-
-fetch_required "STREGA Gen2 codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
-    "/srv/node-red/codecs/strega_gen2_decoder.js"
-
-fetch_required "LSN50 codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
-    "/srv/node-red/codecs/dragino_lsn50_decoder.js"
-
-fetch_required "S2120 codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
-    "/srv/node-red/codecs/sensecap_s2120_decoder.js"
-
-fetch_required "LoRain codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
-    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
-
-fetch_required "UC512 codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
-    "/srv/node-red/codecs/milesight_uc512_decoder.js"
-
-fetch_required "SDI12 codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
-    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
-
-fetch_required "Tektelic KIWI/CLOVER codec" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
-    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
-
-fetch_required "Agroscope uplink transform" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
-    "/srv/node-red/codecs/agroscope_uplink_transform.js"
-
 # Node-RED loads node files from /srv/node-red/nodes at start. This one puts
 # the flows' shared SQLite connection into serialized mode (F-7). It goes into
 # the staged payload with everything else (payloads/<stamp>/nodes/), checked
@@ -3629,7 +3697,8 @@ stage_node_files || exit 1
 
 # module payload staging begin
 # The helper modules above went into payloads/$DEPLOY_STAMP/modules/; the
-# runtime package files, edge-channels.json and the codecs stay in place.
+# runtime package files, edge-channels.json and the codecs stay in place and
+# are written after settings.js.
 # Seal the module set, keep a copy of each live module it replaces with the
 # previous payload (on the first deploy with this layout the live modules are
 # real directories), and link modules this gateway does not have yet into the
@@ -3695,6 +3764,122 @@ if [ -n "$SERVED_STAMP" ]; then
     fi
 fi
 # rollback target end
+
+early_disk_check || exit 1
+
+# osi-server configuration begin
+ensure_osi_server_config || exit 1
+# osi-server configuration end
+
+fetch_required "Node-RED settings.js" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
+    "/srv/node-red/settings.js"
+
+fetch_required "Node-RED init script" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
+    "/etc/init.d/node-red"
+chmod 755 /etc/init.d/node-red
+ensure_journal_media_defaults
+
+fetch_required "Gateway identity helper" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
+    "/usr/libexec/osi-gateway-identity.sh"
+chmod 755 /usr/libexec/osi-gateway-identity.sh
+
+fetch_required "Gateway identity daemon" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
+    "/usr/libexec/osi-identityd.sh"
+chmod 755 /usr/libexec/osi-identityd.sh
+
+fetch_required "Gateway identity service" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
+    "/etc/init.d/osi-identityd"
+chmod 755 /etc/init.d/osi-identityd
+
+fetch_required "Gateway identity service enable script" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
+    "/etc/uci-defaults/94_osi_identityd_enable"
+chmod 755 /etc/uci-defaults/94_osi_identityd_enable
+
+fetch_required "chirpstack-bootstrap.js" \
+    "scripts/chirpstack-bootstrap.js" \
+    "/srv/node-red/chirpstack-bootstrap.js"
+
+# issue-183 early secure begin
+if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+    :
+else
+    cs_env_rc=$?
+    echo "ERROR: ChirpStack credential env-file safety check failed; refusing deploy" >&2
+    exit "$cs_env_rc"
+fi
+# issue-183 early secure end
+
+fetch_required "ChirpStack bootstrap service" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
+    "/etc/init.d/osi-bootstrap"
+chmod 755 /etc/init.d/osi-bootstrap
+enable_osi_bootstrap
+
+echo "--- Remove legacy gateway GPS sidecar ---"
+if [ -x /etc/init.d/osi-gateway-gps ]; then
+    /etc/init.d/osi-gateway-gps stop || true
+    /etc/init.d/osi-gateway-gps disable || true
+fi
+rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
+echo "OK"
+
+seed_db_if_missing
+
+fetch_required "Node-RED runtime package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \
+    "/srv/node-red/package.json"
+
+fetch_required "Node-RED runtime package-lock.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" \
+    "/srv/node-red/package-lock.json"
+
+stage_command_ledger_dependency
+
+fetch_required "edge-channels.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
+    "/srv/node-red/edge-channels.json"
+
+fetch_required "STREGA codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
+    "/srv/node-red/codecs/strega_gen1_decoder.js"
+
+fetch_required "STREGA Gen2 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
+    "/srv/node-red/codecs/strega_gen2_decoder.js"
+
+fetch_required "LSN50 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
+    "/srv/node-red/codecs/dragino_lsn50_decoder.js"
+
+fetch_required "S2120 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
+    "/srv/node-red/codecs/sensecap_s2120_decoder.js"
+
+fetch_required "LoRain codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
+    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
+
+fetch_required "UC512 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
+    "/srv/node-red/codecs/milesight_uc512_decoder.js"
+
+fetch_required "SDI12 codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
+    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
+
+fetch_required "Tektelic KIWI/CLOVER codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
+    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
+
+fetch_required "Agroscope uplink transform" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
+    "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
 # issue-183 Gen2 begin
 if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
@@ -3800,6 +3985,8 @@ verify_native_sqlite3_after_npm || exit 1
 
 install_irrigation_clock_hook || exit 1
 
+# The exit handler discards a stage itself from here on.
+DISCARD_STAGE_ON_EXIT=0
 install_deploy_exit_trap
 quiesce_identityd_for_deploy || exit 1
 run_schema_migration || exit 1

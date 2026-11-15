@@ -153,6 +153,8 @@ write_payload_compatibility() { echo "STUB write_payload_compatibility $*"; retu
 apply_release_firmware_version() { echo "STUB apply_release_firmware_version $*"; return 0; }
 fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 0; }
 
+DAMAGED_DB_DOC=docs/operations/damaged-farm-database.md
+${extractFunction('check_live_db_readonly')}
 ${extractFunction('checkpoint_live_db')}
 ${extractFunction('schema_compatibility_metadata')}
 ${extractFunction('deploy_time')}

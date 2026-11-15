@@ -593,12 +593,14 @@ function captureModules(root, prevStamp, deployStamp) {
   const dir = modulesDir(root, prevStamp);
   const lines = [];
   let changed = !prev;
-  fs.mkdirSync(dir, { recursive: true });
   // The new payload's modules, and every module served from another payload
   // that the new payload drops (through the flows' payload, payloads/active,
   // or a link an older deploy.sh made): a switch back must restore it too.
   const names = new Set(next.modules);
   for (const [name, linked] of payloadModuleLinks(root)) if (linked !== deployStamp) names.add(name);
+  // Every check first, then the copies: a refusal leaves the previous
+  // payload as it was.
+  const copies = [];
   for (const name of [...names].sort()) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
@@ -625,6 +627,10 @@ function captureModules(root, prevStamp, deployStamp) {
       }
       continue;
     }
+    copies.push({ name, live, liveHash, target });
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  for (const { name, live, liveHash, target } of copies) {
     const temp = path.join(dir, `.${name}.capture-${process.pid}-${Date.now()}`);
     try {
       copyTree(live, temp);
@@ -1188,14 +1194,9 @@ function captureExisting(root, stamp, flowsPath, guiRoot) {
     return payloadDir(root, existing.stamp);
   }
   const staged = stagePayload(root, stamp, flowsPath, guiRoot);
-  const metadata = { format: 1, stamp, ...evidence };
-  const temp = `${marker}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(metadata)}\n`, { flag: 'wx' });
-    fs.renameSync(temp, marker);
-  } finally {
-    fs.rmSync(temp, { force: true });
-  }
+  // The captured files reach storage before the marker that publishes them.
+  syncStorage();
+  writeDurable(marker, `${JSON.stringify({ format: 1, stamp, ...evidence })}\n`);
   return staged;
 }
 
@@ -1396,30 +1397,24 @@ function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
     schema_ledger: String(schemaLedger),
   };
   const target = compatibilityPath(root, stamp);
-  if (fs.existsSync(target)) {
-    let existing;
-    try {
-      existing = JSON.parse(fs.readFileSync(target, 'utf8'));
-    } catch (error) {
-      throw new Error(`writeCompatibility: existing metadata is unreadable: ${error.message}`);
-    }
-    if (JSON.stringify(existing) !== JSON.stringify(metadata)) {
+  // A valid record is immutable; an empty or invalid one counts as missing.
+  if (compatibilityExists(root, stamp)) {
+    if (fs.readFileSync(target, 'utf8') !== `${JSON.stringify(metadata)}\n`) {
       throw new Error(`writeCompatibility: refusing to overwrite existing metadata: ${target}`);
     }
     return target;
   }
-  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(metadata)}\n`, { flag: 'wx' });
-    fs.renameSync(temp, target);
-  } finally {
-    fs.rmSync(temp, { force: true });
-  }
+  writeDurable(target, `${JSON.stringify(metadata)}\n`);
   return target;
 }
 
 function compatibilityExists(root, stamp) {
-  return fs.existsSync(compatibilityPath(root, stamp));
+  try {
+    const m = JSON.parse(fs.readFileSync(compatibilityPath(root, stamp), 'utf8'));
+    return m.format === 1 && m.payload_stamp === stamp && typeof m.schema_head === 'string' && typeof m.schema_ledger === 'string';
+  } catch (_) {
+    return false;
+  }
 }
 
 function verifyCompatibility(root, stamp, schemaHead, schemaLedger) {
@@ -1687,6 +1682,12 @@ function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fro
   })}\n`);
 }
 
+// The pending-switch records any payload carries, readable or not, one per
+// line (a deploy recorded a migration attempt there), or null.
+function pendingSwitchFiles(root) {
+  return listStamps(root).map((stamp) => pendingSwitchPath(root, stamp)).filter((f) => fs.existsSync(f)).join('\n') || null;
+}
+
 function readPendingSwitches(root) {
   const records = [];
   for (const stamp of listStamps(root)) {
@@ -1943,6 +1944,7 @@ module.exports = {
   clearStaleStages,
   writePendingSwitch,
   readPendingSwitches,
+  pendingSwitchFiles,
   clearPendingSwitch,
   clearOtherPendingSwitches,
   readCompatibility,

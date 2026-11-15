@@ -12,7 +12,7 @@ if [ ! -f "$AUTHKEY_FILE" ]; then
     exit 0
 fi
 
-AUTHKEY=$(cat "$AUTHKEY_FILE" | tr -d '[:space:]')
+AUTHKEY=$(cat "$AUTHKEY_FILE" | tr -d ' \t\r\n')
 
 if [ -z "$AUTHKEY" ]; then
     logger -t tailscale-init "Authkey file is empty — skipping auto-connect"

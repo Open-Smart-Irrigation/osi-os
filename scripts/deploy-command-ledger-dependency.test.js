@@ -638,6 +638,8 @@ ${shellFunction('check_fetched_manifest')}
 ${shellFunction('check_fetched_js_files')}
 ${identity}
 ${payload}
+DAMAGED_DB_DOC=docs/operations/damaged-farm-database.md
+${shellFunction('check_live_db_readonly')}
 ${shellFunction('checkpoint_live_db')}
 ${shellFunction('ensure_sqlite3_cli')}
 ${shellFunction('restart_node_red').replaceAll(initPath, '"$NODE_RED_INIT"')}

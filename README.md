@@ -197,9 +197,16 @@ No further setup required. See [Step 4 — Install Tailscale](#step-4--install-t
 
 ### Step 1 — Flash ChirpStack Gateway OS
 
-Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a microSD card and boot the Pi. Connect to it via SSH — either through the default Wi-Fi AP (`192.168.0.1`) or your local network IP.
+1. Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a microSD card and boot the Pi.
+2. Connect to it over its own Wi-Fi access point only (`192.168.0.1`), not yet over your local network. A gateway on a stock base image accepts `root` over SSH with no password at first boot.
+3. Set a root password before the gateway goes on any other network:
+   ```bash
+   ssh -t root@192.168.0.1 passwd
+   ```
+   `passwd` is BusyBox's and works on the stock base. A password keeps the console login (keyboard and screen on the Pi) as the way back in. Closing password login over SSH (`uci set dropbear.@dropbear[0].PasswordAuth='off'`, `uci set dropbear.@dropbear[0].RootPasswordAuth='off'`, `uci commit dropbear`, `/etc/init.d/dropbear restart`) is possible once a key is in `/etc/dropbear/authorized_keys`; it is not the default here, because a lost key then leaves only the console. An operator locked out logs in at the console and runs `passwd` there.
+4. Then connect the gateway to your local network.
 
-Default SSH credentials: `root` / _(no password on first boot, or set during flash)_
+`deploy.sh` warns, and carries on, when root still has no password.
 
 ### Step 2 — Deploy OSI OS components
 
