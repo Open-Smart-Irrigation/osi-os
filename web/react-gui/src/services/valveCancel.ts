@@ -58,6 +58,32 @@ export function valveCancelResultFromError(error: unknown): ValveCancelResult | 
   return parseValveCancelResult(data);
 }
 
+/**
+ * The run a cancel names (V9): the expectation id of the active run the gateway reports, in
+ * either casing, or null when it reports none. normaliseValveActiveActuation stores a missing
+ * id as '', which names nothing.
+ */
+export function activeRunExpectationId(
+  actuation: { expectationId?: string | null; expectation_id?: string | null } | null | undefined,
+): string | null {
+  for (const id of [actuation?.expectationId, actuation?.expectation_id]) {
+    if (typeof id === 'string' && id.trim() !== '') return id;
+  }
+  return null;
+}
+
+/**
+ * The gateway's own explanation of a refused cancel (409 without an outcome, such as
+ * ambiguous_actuation), or null when the reply carries none. Read valveCancelResultFromError
+ * first: a handed-off 409 is shown as its outcome.
+ */
+export function valveCancelRefusalMessage(error: unknown): string | null {
+  const response = (error as { response?: { status?: unknown; data?: unknown } } | null)?.response;
+  if (response?.status !== 409 || !response.data || typeof response.data !== 'object') return null;
+  const message = (response.data as Record<string, unknown>).message;
+  return typeof message === 'string' && message.trim() !== '' ? message : null;
+}
+
 /** The collateral items the flush actually took out of the device queue. */
 export function removedCollateral(result: ValveCancelResult): ValveCancelCollateralItem[] {
   return result.collateral.filter((item) => item.inQueue === true);

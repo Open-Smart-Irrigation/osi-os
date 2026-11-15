@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ComponentProps } from 'react';
+import { SWRConfig } from 'swr';
 
 import { ValveControlPanel } from '../ValveControlPanel';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
@@ -312,6 +313,94 @@ describe('ValveControlPanel', () => {
     expect(status).toHaveTextContent('The open may already have been sent to the valve, so it was not deleted.');
     expect(status).toHaveTextContent('Cancel deletes the pending command. It does not close a valve that is already open.');
     expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+  });
+
+  it('shows an uncertain cancel as that outcome instead of a generic failure', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+      response: { status: 503, data: { error: 'cancel_uncertain', outcome: 'uncertain', collateral: [], message: 'Queue state unknown' } },
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The gateway could not confirm that the pending open was deleted.');
+    expect(screen.queryByText('Queue state unknown')).not.toBeInTheDocument();
+    expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+  });
+
+  // V9 (v0.8.2): with several opens queued the gateway refuses an unnamed cancel as
+  // ambiguous_actuation, so the panel names the active run the gateway reports.
+  describe('cancel names the active run (V9)', () => {
+    const activeRun = {
+      expectationId: 'vae-2',
+      reconciliationState: 'PENDING_OBSERVATION',
+      commandedAt: '2026-11-15T08:00:00Z',
+      expectedCloseAt: '2026-11-15T08:10:00Z',
+      durationSeconds: 600,
+      trigger: 'manual',
+    };
+    const ambiguousMessage = 'More than one actuation is active; name the one to cancel (expectation_id)';
+    // A fresh SWR cache per test: the shared one would hand this test the previous test's valve list.
+    const renderPanel = () => render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <ValveControlPanel onUpdate={vi.fn()} canWrite />
+      </SWRConfig>,
+    );
+
+    it('sends the expectation_id of the reported active run', async () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: activeRun })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
+      renderPanel();
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
+      await waitFor(() => expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1));
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith('0016C001F1000001', { expectationId: 'vae-2' });
+    });
+
+    it('names no run when the gateway reports no active run', async () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: null })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
+      renderPanel();
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
+      await waitFor(() => expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1));
+      const [eui, options] = vi.mocked(devicesAPI.cancelIrrigation).mock.calls[0];
+      expect(eui).toBe('0016C001F1000001');
+      expect(options?.expectationId ?? null).toBeNull();
+    });
+
+    it("shows the gateway's message for a refused (409) cancel instead of the generic failure", async () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: activeRun })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'ambiguous_actuation', ambiguity: 'several_queued', message: ambiguousMessage } },
+      });
+      renderPanel();
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
+      expect(await screen.findByText(ambiguousMessage)).toBeInTheDocument();
+      expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('keeps the generic failure for a 409 without a message', async () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: activeRun })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'ambiguous_actuation' } },
+      });
+      renderPanel();
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
+      expect(await screen.findByText('The action could not be completed.')).toBeInTheDocument();
+    });
+
+    it('still shows a handed-off 409 as that outcome, not as its message', async () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: activeRun })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'actuation_handed_off', outcome: 'handed_off', collateral: [], message: 'Open already handed off' } },
+      });
+      renderPanel();
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('The open may already have been sent to the valve, so it was not deleted.');
+      expect(screen.queryByText('Open already handed off')).not.toBeInTheDocument();
+      expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+    });
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {

@@ -13,7 +13,7 @@ import { ValveSettingsDialog } from './ValveSettingsDialog';
 import { ValveServiceDialog } from './ValveServiceDialog';
 import { ValveControlHelp } from '../shared/ValveControlHelp';
 import { ValveCancelOutcome } from './ValveCancelOutcome';
-import { valveCancelResultFromError, type ValveCancelResult } from '../../../services/valveCancel';
+import { activeRunExpectationId, valveCancelRefusalMessage, valveCancelResultFromError, type ValveCancelResult } from '../../../services/valveCancel';
 import { holdValveOpen, isNoAnswerTimeout, isUnknownValveOutcome, isValveOpenHeld } from '../../../services/valveCommandHold';
 import { fetchValveReading } from '../../../services/valveReading';
 
@@ -147,13 +147,14 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
 
   // A cancel reports its outcome and flush collateral (D19/Q01 = (a)); a handed-off or
   // uncertain outcome arrives as a 409/503 whose body says so, and is shown as that outcome,
-  // not as a generic failure.
+  // not as a generic failure. The cancel names the active run the gateway reports (V9); a refusal
+  // without an outcome (409 ambiguous_actuation) shows the gateway's message.
   const handleCancel = async (valve: ValveSummary) => {
     setActionBusyEui(valve.deviceEui);
     setActionError(null);
     setCancelNotice(null);
     try {
-      const result = await devicesAPI.cancelIrrigation(valve.deviceEui);
+      const result = await devicesAPI.cancelIrrigation(valve.deviceEui, { expectationId: activeRunExpectationId(valve.activeActuation) });
       if (result) setCancelNotice({ name: valve.name, result });
       await refresh();
     } catch (err) {
@@ -162,7 +163,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
         setCancelNotice({ name: valve.name, result });
         refresh().catch((refreshErr) => console.warn('Failed to refresh the valve list after a cancel', refreshErr));
       } else {
-        setActionError(t('actionFailed'));
+        setActionError(valveCancelRefusalMessage(err) ?? t('actionFailed'));
       }
     } finally {
       setActionBusyEui(null);

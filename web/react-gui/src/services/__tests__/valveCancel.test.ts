@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseValveCancelResult, removedCollateral, valveCancelResultFromError } from '../valveCancel';
+import {
+  activeRunExpectationId,
+  parseValveCancelResult,
+  removedCollateral,
+  valveCancelRefusalMessage,
+  valveCancelResultFromError,
+} from '../valveCancel';
 
 const collateral = [
   { owner_type: 'push', owner_id: 'p-mon', purpose: 'WEEKDAY_PLAN', weekday: 1, queue_id: 'q1', phase_before: 'ACCEPTED', in_queue: true },
@@ -35,5 +41,30 @@ describe('valve cancel result parsing (D19/Q01 = (a))', () => {
   it('returns null for an error that carries no cancel outcome', () => {
     expect(valveCancelResultFromError(new Error('boom'))).toBeNull();
     expect(valveCancelResultFromError({ response: { status: 409, data: { message: 'More than one actuation is active' } } })).toBeNull();
+  });
+});
+
+// V9: the cancel names the active run the gateway reports, and a refused cancel shows the
+// gateway's own explanation.
+describe('valve cancel naming and refusal message (V9)', () => {
+  it('names the reported active run in either casing, and nothing without one', () => {
+    expect(activeRunExpectationId({ expectationId: 'vae-1' })).toBe('vae-1');
+    expect(activeRunExpectationId({ expectation_id: 'vae-2' })).toBe('vae-2');
+    expect(activeRunExpectationId({ expectationId: '', expectation_id: 'vae-3' })).toBe('vae-3');
+    // normaliseValveActiveActuation stores a missing id as ''.
+    expect(activeRunExpectationId({ expectationId: '' })).toBeNull();
+    expect(activeRunExpectationId({ expectationId: null, expectation_id: null })).toBeNull();
+    expect(activeRunExpectationId(null)).toBeNull();
+    expect(activeRunExpectationId(undefined)).toBeNull();
+  });
+
+  it('reads the message of a 409 refusal, and nothing else', () => {
+    const message = 'More than one actuation is active; name the one to cancel (expectation_id)';
+    expect(valveCancelRefusalMessage({ response: { status: 409, data: { error: 'ambiguous_actuation', ambiguity: 'several_queued', message } } })).toBe(message);
+    expect(valveCancelRefusalMessage({ response: { status: 409, data: { error: 'ambiguous_actuation' } } })).toBeNull();
+    expect(valveCancelRefusalMessage({ response: { status: 409, data: { message: '  ' } } })).toBeNull();
+    expect(valveCancelRefusalMessage({ response: { status: 500, data: { message } } })).toBeNull();
+    expect(valveCancelRefusalMessage(new Error('boom'))).toBeNull();
+    expect(valveCancelRefusalMessage(null)).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { devicesAPI } from '../../services/api';
+import { activeRunExpectationId } from '../../services/valveCancel';
 import type { Device } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
@@ -26,7 +27,10 @@ export default function ValveCancelButton({ device, onUpdate, onError }: Props) 
         setBusy(true);
         setError(null);
         try {
-            await devicesAPI.cancelIrrigation(device.deveui);
+            // V9: name the active run the gateway reports; with several opens queued an unnamed
+            // cancel is refused as ambiguous_actuation.
+            const expectationId = activeRunExpectationId(device.activeValveActuation ?? device.active_valve_actuation);
+            await devicesAPI.cancelIrrigation(device.deveui, { expectationId });
             onUpdate?.();
         } catch (err: any) {
             const message = getApiMessage(err);

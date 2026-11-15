@@ -204,7 +204,7 @@ describe('StregaValveCard', () => {
         const cancelBtn = await screen.findByRole('button', { name: /cancel queued open/i });
         fireEvent.click(cancelBtn);
         await waitFor(() => {
-            expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith(mockDevice.deveui);
+            expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith(mockDevice.deveui, { expectationId: 'vae-1' });
         });
         expect(devicesAPI.controlValve).not.toHaveBeenCalledWith(mockDevice.deveui, {
             action: 'CLOSE',
