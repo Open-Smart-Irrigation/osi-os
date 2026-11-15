@@ -137,3 +137,62 @@ test('B2: a capture without its record while a migration attempt is recorded: re
     assert.ok(!fs.existsSync(path.join(g.srv, 'payloads', capture, 'compatibility.json')), 'an old capture is not blessed');
   } finally { g.cleanup(); }
 });
+
+// Round 2 (CTO ruling): the schema record is published durably, an invalid
+// one counts as missing, and a capture without its record while a migration
+// attempt is recorded is refused with the remedy in plain words.
+function ledger(g) {
+  return require('node:child_process').spawnSync('sqlite3', [g.db, "SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)"], { encoding: 'utf8' }).stdout.trim();
+}
+
+function orphanedCapture(g, fromLedger) {
+  runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_DEST: '/srv/node-red/settings.js' });
+  const capture = fs.readdirSync(path.join(g.srv, 'payloads')).find((p) => p.endsWith('-previous'));
+  fs.rmSync(path.join(g.srv, 'payloads', capture, 'compatibility.json'), { force: true });
+  const pending = path.join(g.srv, 'payloads/20261115T000009Z/pending-switch.json');
+  fs.mkdirSync(path.dirname(pending), { recursive: true });
+  fs.writeFileSync(pending, `${JSON.stringify({ format: 2, payload_stamp: '20261115T000009Z', from_ledger: fromLedger })}\n`);
+  return { capture, pending };
+}
+
+const REMEDY = /If that record's from_ledger equals the database's ledger \(sqlite3 -readonly \S+farming\.db "SELECT group_concat\(version \|\| ':' \|\| checksum, ','\) FROM \(SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version\)"\), the database is untouched: remove that pending-switch\.json and run the deploy again, the same way\. If they differ, the database was migrated: keep the file and escalate\./;
+
+for (const [when, migrated] of [['before the first migration commit', false], ['after a migration commit', true]]) {
+  test(`round 2: a capture without its record and a pending record ${when}: refused with the remedy, the tree unchanged`, () => {
+    const g = gateway({ layout: 'image' });
+    try {
+      const { pending } = orphanedCapture(g, migrated ? '1:not-this-database' : ledger(g));
+      const before = g.manifest();
+      const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+      assert.notEqual(r.status, 0, r.stdout + r.stderr);
+      assert.doesNotMatch(r.stdout, /CONFIGURATION_REACHED/);
+      assert.ok(r.stderr.includes(`a migration attempt is recorded; refusing before anything is changed. The attempt's record: ${pending}.`), r.stderr);
+      assert.match(r.stderr, REMEDY);
+      assert.deepEqual(g.manifest(), before, 'the gateway-side tree is unchanged');
+    } finally { g.cleanup(); }
+  });
+}
+
+test('round 2: an empty schema record counts as missing: completed, and the retry activates', () => {
+  const g = gateway({ layout: 'image' });
+  try {
+    const first = runPrefix(g, BEFORE_SETTINGS, 'kill -9 $$');
+    assert.equal(first.signal, 'SIGKILL');
+    const capture = fs.readdirSync(path.join(g.srv, 'payloads')).find((p) => p.endsWith('-previous'));
+    const record = path.join(g.srv, 'payloads', capture, 'compatibility.json');
+    fs.writeFileSync(record, '');
+    const out = retryEndsInActivation(g);
+    assert.match(out, /completing the schema record of the legacy capture/);
+    assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).payload_stamp, capture);
+  } finally { g.cleanup(); }
+});
+
+test('round 2: a stock gateway without a database reaches the configuration with no unset-variable line', () => {
+  const g = gateway({ layout: 'stock', database: false });
+  try {
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /CONFIGURATION_REACHED/);
+    assert.doesNotMatch(r.stdout + r.stderr, /parameter not set|unbound variable/);
+  } finally { g.cleanup(); }
+});

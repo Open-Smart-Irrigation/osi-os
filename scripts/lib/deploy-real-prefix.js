@@ -48,8 +48,10 @@ function manifest(dir, skip = (rel) => rel.endsWith('-shm')) {
 }
 
 // layout: 'image' (a regular flows.json and a regular GUI directory, as an
-// image-installed or sysupgraded gateway serves them) or 'linked' (a served
-// payload pair with its schema record, the swap helper already installed).
+// image-installed or sysupgraded gateway serves them), 'linked' (a served
+// payload pair with its schema record, the swap helper already installed) or
+// 'stock' (no flows and no GUI yet, as on a stock base before the first
+// deploy).
 function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-real-prefix-'));
   const gw = path.join(root, 'gw');
@@ -71,7 +73,7 @@ function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = tr
     fs.writeFileSync(path.join(g.srv, 'flows.json'), '[{"id":"served","type":"tab"}]\n');
     fs.mkdirSync(g.gui, { recursive: true });
     fs.writeFileSync(path.join(g.gui, 'index.html'), 'served GUI\n');
-  } else {
+  } else if (layout === 'linked') {
     const swap = require(path.join(REPO, 'scripts/deploy-payload-swap.js'));
     const src = path.join(root, 'old-src');
     fs.mkdirSync(path.join(src, 'gui'), { recursive: true });

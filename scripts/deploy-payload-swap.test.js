@@ -1389,3 +1389,30 @@ test('a pending record merges its predecessors\' hazard lists; an unreadable or 
   swap.writePendingSwitch(root, '20261103', '80', 'L80', '74', 'L74', '[]');
   assert.equal(swap.readPendingSwitches(root).find((r) => r.payload_stamp === '20261103').boot_owned, null);
 });
+
+// Round 2 on #659: the schema record and the legacy-capture marker are
+// published through writeDurable (the file and its directory fsynced), so a
+// power cut cannot keep a capture and lose the record it depends on.
+test('the schema record and the capture marker are published with fsync', (t) => {
+  const root = moduleRoot(t);
+  const guiRoot = path.join(root, 'live-gui');
+  fs.mkdirSync(guiRoot);
+  fs.writeFileSync(path.join(guiRoot, 'index.html'), 'live\n');
+  const flows = path.join(root, 'live-flows.json');
+  fs.writeFileSync(flows, '[]\n');
+  const real = fs.fsyncSync;
+  let calls = 0;
+  fs.fsyncSync = (fd) => { calls += 1; return real(fd); };
+  try {
+    swap.captureExisting(root, 'cap', flows, guiRoot);
+    const afterMarker = calls;
+    assert.ok(afterMarker >= 2, `the marker: file and directory fsynced (${afterMarker})`);
+    swap.writeCompatibility(root, 'cap', '80', '80:x');
+    assert.ok(calls - afterMarker >= 2, `the record: file and directory fsynced (${calls - afterMarker})`);
+  } finally {
+    fs.fsyncSync = real;
+  }
+  assert.equal(swap.compatibilityExists(root, 'cap'), true);
+  fs.writeFileSync(path.join(root, 'payloads', 'cap', 'compatibility.json'), '');
+  assert.equal(swap.compatibilityExists(root, 'cap'), false, 'an empty record counts as missing');
+});

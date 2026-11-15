@@ -2761,7 +2761,8 @@ early_disk_check() {
         [ -e "$edc_file" ] && edc_db_kb=$((edc_db_kb + ($(ls -ln "$edc_file" | awk '{print $5}') + 1023) / 1024))
     done
     edc_need_kb=$((2 * edc_db_kb + ${MIGRATE_MIN_FREE_MARGIN_MB:-128} * 1024))
-    edc_free_kb="$(node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$edc_backup" --migrations-dir "$migrations_dir" --prune-plan 2>/dev/null || echo 0)"
+    edc_free_kb=0
+    [ -z "${migrations_dir:-}" ] || edc_free_kb="$(node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$edc_backup" --migrations-dir "$migrations_dir" --prune-plan 2>/dev/null || echo 0)"
     case "$edc_free_kb" in ''|*[!0-9]*) edc_free_kb=0 ;; esac
     edc_avail_kb="$(df -k "$edc_at" 2>/dev/null | tail -1 | awk '{print $(NF-2)}')"
     case "$edc_avail_kb" in
@@ -2975,8 +2976,9 @@ fi
 # the deploy is not covered.
 if [ -n "${PREV_STAMP:-}" ] && ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null 2>&1; then
     if [ "${PREV_CAPTURED:-0}" != 1 ] && [ "$PREV_STAMP" = "${PREV_LEGACY_STAMP:-}" ]; then
-        if swap_call hasPendingSwitch >/dev/null 2>&1; then
-            echo "ERROR: the legacy capture payloads/$PREV_STAMP has no schema record and a migration attempt is recorded; refusing before anything is changed" >&2
+        if lcc_pending="$(swap_call pendingSwitchFiles 2>/dev/null)" && [ -n "$lcc_pending" ]; then
+            echo "ERROR: the legacy capture payloads/$PREV_STAMP has no schema record and a migration attempt is recorded; refusing before anything is changed. The attempt's record: $lcc_pending." >&2
+            echo "If that record's from_ledger equals the database's ledger (sqlite3 -readonly $DB_PATH \"SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)\"), the database is untouched: remove that pending-switch.json and run the deploy again, the same way. If they differ, the database was migrated: keep the file and escalate." >&2
             exit 1
         fi
         PREV_CAPTURED=1

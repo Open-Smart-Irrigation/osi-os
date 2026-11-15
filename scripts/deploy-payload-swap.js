@@ -1194,14 +1194,9 @@ function captureExisting(root, stamp, flowsPath, guiRoot) {
     return payloadDir(root, existing.stamp);
   }
   const staged = stagePayload(root, stamp, flowsPath, guiRoot);
-  const metadata = { format: 1, stamp, ...evidence };
-  const temp = `${marker}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(metadata)}\n`, { flag: 'wx' });
-    fs.renameSync(temp, marker);
-  } finally {
-    fs.rmSync(temp, { force: true });
-  }
+  // The captured files reach storage before the marker that publishes them.
+  syncStorage();
+  writeDurable(marker, `${JSON.stringify({ format: 1, stamp, ...evidence })}\n`);
   return staged;
 }
 
@@ -1402,30 +1397,24 @@ function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
     schema_ledger: String(schemaLedger),
   };
   const target = compatibilityPath(root, stamp);
-  if (fs.existsSync(target)) {
-    let existing;
-    try {
-      existing = JSON.parse(fs.readFileSync(target, 'utf8'));
-    } catch (error) {
-      throw new Error(`writeCompatibility: existing metadata is unreadable: ${error.message}`);
-    }
-    if (JSON.stringify(existing) !== JSON.stringify(metadata)) {
+  // A valid record is immutable; an empty or invalid one counts as missing.
+  if (compatibilityExists(root, stamp)) {
+    if (fs.readFileSync(target, 'utf8') !== `${JSON.stringify(metadata)}\n`) {
       throw new Error(`writeCompatibility: refusing to overwrite existing metadata: ${target}`);
     }
     return target;
   }
-  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(metadata)}\n`, { flag: 'wx' });
-    fs.renameSync(temp, target);
-  } finally {
-    fs.rmSync(temp, { force: true });
-  }
+  writeDurable(target, `${JSON.stringify(metadata)}\n`);
   return target;
 }
 
 function compatibilityExists(root, stamp) {
-  return fs.existsSync(compatibilityPath(root, stamp));
+  try {
+    const m = JSON.parse(fs.readFileSync(compatibilityPath(root, stamp), 'utf8'));
+    return m.format === 1 && m.payload_stamp === stamp && typeof m.schema_head === 'string' && typeof m.schema_ledger === 'string';
+  } catch (_) {
+    return false;
+  }
 }
 
 function verifyCompatibility(root, stamp, schemaHead, schemaLedger) {
@@ -1693,10 +1682,10 @@ function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fro
   })}\n`);
 }
 
-// True when any payload carries a pending-switch record, readable or not: a
-// deploy recorded a migration attempt there.
-function hasPendingSwitch(root) {
-  return listStamps(root).some((stamp) => fs.existsSync(pendingSwitchPath(root, stamp)));
+// The pending-switch records any payload carries, readable or not, one per
+// line (a deploy recorded a migration attempt there), or null.
+function pendingSwitchFiles(root) {
+  return listStamps(root).map((stamp) => pendingSwitchPath(root, stamp)).filter((f) => fs.existsSync(f)).join('\n') || null;
 }
 
 function readPendingSwitches(root) {
@@ -1955,7 +1944,7 @@ module.exports = {
   clearStaleStages,
   writePendingSwitch,
   readPendingSwitches,
-  hasPendingSwitch,
+  pendingSwitchFiles,
   clearPendingSwitch,
   clearOtherPendingSwitches,
   readCompatibility,
