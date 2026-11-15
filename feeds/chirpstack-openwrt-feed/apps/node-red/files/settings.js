@@ -35,6 +35,16 @@ function loadChirpstackEnvFile(filePath) {
 
 loadChirpstackEnvFile(chirpstackEnvPath);
 
+// Read-only check of the farm database (NEW-15), started here in a child
+// process beside the flows, which do not wait for it. It reports only. If it
+// cannot load, Node-RED still starts and osi-db-helper starts the check at
+// its first connection.
+try {
+    require('/srv/node-red/osi-db-helper/startup').check();
+} catch (error) {
+    console.error('[osi-db-startup] ERROR farm database start-up check did not run: ' + (error && error.message ? error.message : error));
+}
+
 module.exports = {
     flowFile: "flows.json",
     userDir: "/srv/node-red",

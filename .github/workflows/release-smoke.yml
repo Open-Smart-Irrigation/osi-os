@@ -20,7 +20,8 @@ jobs:
   release-runtime-smoke:
     name: release-runtime-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The NEW-15 SQLite cases add eight Node-RED runs on this runtime.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,7 +40,7 @@ jobs:
       - name: Deploy keeps a working node file when its fetch fails
         run: node --test scripts/test-deploy-node-files.js
       - name: Failure-list policy
-        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
+        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js scripts/test-farming-sqlite-startup.js scripts/test-farming-sqlite-driver.js
       - name: Reject broken late and caught handlers (serial negative controls)
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
@@ -60,12 +61,17 @@ jobs:
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
             /tmp/osi-release-smoke-*/install.log
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
           retention-days: 7
 
   release-stock-runtime-smoke:
     name: release-stock-runtime-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The NEW-15 SQLite cases add five Node-RED runs on this runtime.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,4 +110,8 @@ jobs:
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
             /tmp/osi-release-smoke-*/install.log
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
           retention-days: 7

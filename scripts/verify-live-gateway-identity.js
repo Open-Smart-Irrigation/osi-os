@@ -1110,9 +1110,11 @@ if (silentCatchBaseline) {
   // visible node.warn while both nodes move to one scoped db.transaction: 80 -> 77.
   // The dendrometer weather transport repair makes its three remaining empty
   // catches visible as warnings, ratcheting the maintained profiles 77 -> 74.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 74 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 74,
-    'silent-catch baseline records 74 for both maintained profiles',
-    'silent-catch baseline must be 74 for both maintained profiles');
+  // NEW-15: DENDRO SIM SETUP opens the farm file through osi-db-helper and its
+  // close() catch gains a visible node.warn: 74 -> 73.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 73 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 73,
+    'silent-catch baseline records 73 for both maintained profiles',
+    'silent-catch baseline must be 73 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

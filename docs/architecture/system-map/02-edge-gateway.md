@@ -47,7 +47,7 @@ Plus three one-shot **boot services** (OpenWrt init scripts in
 | Init script | Plain-language job |
 |---|---|
 | `osi-bootstrap` (START=99) | First-boot self-provisioning (see next section). On later boots it checks its "done" stamp and exits immediately. |
-| `osi-db-integrity` (START=90) | Before Node-RED starts, runs a database health check (`/usr/share/node-red/osi-db-integrity/index.js`) that detects SD-card corruption early and logs the verdict; boot always continues. |
+| `osi-db-integrity` (START=90) | Linked at boot but never runs: its init script's `USE_PROCD=0` header makes `rc.common` call a `start_service` the script lacks. Left so on purpose; the farm database check now runs inside Node-RED's start-up ([farm-database-startup-check.md](../../operations/farm-database-startup-check.md)). |
 | `osi-rootfs-resize` | Part of the one-shot "grow the filesystem to fill the SD card" path (with `files/etc/uci-defaults/90_osi_rootfs_grow`): resizes the partition, reboots, then grows the filesystem. |
 
 There is also a small **nginx access snippet**,
