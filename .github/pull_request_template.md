@@ -31,7 +31,7 @@
 
 - Tests added:
 - Tests removed:
-- Core time before and after: <!-- `core: none yet` until the repository's core runner is merged -->
+- Core time before and after: <!-- From the core receipt; `core: none yet` until the repository's core runner is merged -->
 
 ## Verification evidence
 
