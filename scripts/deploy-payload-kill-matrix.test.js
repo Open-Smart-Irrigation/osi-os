@@ -755,7 +755,7 @@ test('S1: boot-forward on a factory image switches through the captured base, ki
   const TO = '70:a,80:b';
   let k = 1;
   for (;; k += 1) {
-    const status = withImageRow(s9, (g, decision) => {
+    const attempt = withImageRow(s9, (g, decision) => {
       assert.ok(decision.served && !decision.refused && !decision.held, JSON.stringify(decision));
       swap.writePendingSwitch(g.root, 'new', '80', TO, '70', FROM, '[]', decision.served);
       const run = killed(g, k, 'bootSchemaDecision', [g.guiRoot, '80', TO, '']);
@@ -767,10 +767,13 @@ test('S1: boot-forward on a factory image switches through the captured base, ki
       assert.deepEqual(leftovers(g), [], `k=${k}: nothing a killed switch left behind`);
       const state = swap.readPayloadState(g.root);
       assert.notEqual(state && state.state, 'held', `k=${k}: the gateway starts`);
-      return run.status;
+      return run;
     });
-    assert.notEqual(status, null, 'the S9 row has an image-layer GUI');
-    if (status !== KILLED) break;
+    assert.notEqual(attempt, null, 'the S9 row has an image-layer GUI');
+    if (attempt.status !== KILLED) {
+      assert.equal(attempt.status, 0, `k=${k}: the attempt that was not killed exits 0: ${attempt.stdout}${attempt.stderr}`);
+      break;
+    }
   }
   assert.ok(k > 3, `the forward switch took ${k} steps`);
 });

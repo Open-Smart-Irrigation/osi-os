@@ -1746,3 +1746,62 @@ printf '%s\\n' refused
     }
   });
 }
+
+// The HELD line a held boot logs (payload_hold_check), with the note in
+// DEPLOY-HELD, or the remedy text when there is none.
+function heldBootLine(root) {
+  const begin = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair begin');
+  const end = NODE_RED_INIT_SOURCE.indexOf('# payload switch repair end');
+  const block = NODE_RED_INIT_SOURCE.slice(begin, end).split('/srv/$PACKAGE_NAME').join(root);
+  const bin = path.join(root, 'boot-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const log = path.join(root, 'boot.log');
+  fs.writeFileSync(path.join(bin, 'logger'), `#!/bin/sh\nshift 2\necho "$*" >> ${JSON.stringify(log)}\n`, { mode: 0o755 });
+  const run = spawnSync('sh', ['-c', `${block}\nif payload_hold_check; then echo NODE_RED_STARTS; else echo NODE_RED_HELD; fi`],
+    { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /NODE_RED_HELD/);
+  return fs.readFileSync(log, 'utf8').trim();
+}
+
+// Sol F1: a writer cut after its redirection created DEPLOY-HELD and before
+// it wrote leaves the note empty; the boot still names the remedy.
+test('a held boot with an empty DEPLOY-HELD logs the remedy', () => {
+  const root = fakeRoot();
+  try {
+    swap.writePayloadState(root, 'old', 'held', 'fixture', 'deploy.sh');
+    fs.writeFileSync(path.join(root, 'DEPLOY-HELD'), '');
+    assert.match(heldBootLine(root), /^HELD: Node-RED not started\. See .*payload-state\.json; run the deploy again, the same way\.$/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Astra F3: a migration whose pre-migration restore failed its integrity
+// check holds with its own remedy, and the boot shows that one, not "run the
+// deploy again".
+test('a failed restore of the pre-migration copy holds with its own remedy, shown at boot', () => {
+  const root = fakeRoot();
+  try {
+    const rc3 = fragment('    if [ "$migration_rc" = "3" ]; then\n', '\n    echo "ERROR: schema migration failed;');
+    const backup = path.join(root, 'backups');
+    const run = spawnSync('sh', ['-c', `SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+export SWAP_ROOT SWAP_JS
+${swapCallFunction()}
+f() {
+migration_rc=3
+backup_dir=${JSON.stringify(backup)}
+PRE_STOP_ACTIVE=old
+if true; then
+${rc3}
+}
+f || echo RC3_HELD`], { encoding: 'utf8', env: { ...process.env, PATH: `${path.dirname(process.execPath)}:${process.env.PATH}` } });
+    assert.match(run.stdout, /RC3_HELD/, run.stderr);
+    const line = heldBootLine(root);
+    assert.match(line, new RegExp(`check the database, and restore the pre-migration copy kept in ${backup.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'));
+    assert.doesNotMatch(line, /run the deploy again/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

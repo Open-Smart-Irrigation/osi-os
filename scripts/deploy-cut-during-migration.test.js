@@ -341,3 +341,21 @@ for (const k of [1, 3]) {
     finishAttempt(g, 'retry2');
   });
 }
+
+// CodeRabbit r4575758732 (S5): the ledger reads, then the fingerprint read
+// fails. An empty answer would read as "nothing stamped" and start the old
+// payload; a failed read is no evidence, so the boot holds. The state is c1,
+// which starts the old payload unverified when the read succeeds (above).
+test('a ledger that reads and stamped fingerprints that do not: held, with the cause and the remedy', async () => {
+  const g = await gateway();
+  assert.equal(migrate(g.db, { commit: 1 }).signal, 'SIGKILL');
+  const real = spawnSync('sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' }).stdout.trim();
+  fs.mkdirSync(path.join(g.root, 'boot-bin'), { recursive: true });
+  fs.writeFileSync(path.join(g.root, 'boot-bin', 'sqlite3'), `#!/bin/sh
+case "$*" in *"FROM schema_object_fingerprints"*) echo "Error: disk I/O error" >&2; exit 1 ;; esac
+exec ${JSON.stringify(real)} "$@"
+`, { mode: 0o755 });
+  const r = boot(g);
+  assert.equal(r.started, false, r.log);
+  assert.match(r.log, /HELD: Node-RED not started: the database's stamped schema fingerprints could not be read, .*then run the deploy again, the same way\./);
+});

@@ -194,9 +194,15 @@ deploy again, the same way.
   reason; no refusal ends with services stopped and nothing written.
 - Cut during the migration (power, KILL): at the next boot the database
   ledger lies between the old payload's and the new one's. The gateway is
-  held: "the upgrade was interrupted while the database was being updated".
-  The old code is not started, so the gateway does not irrigate until the
-  deploy is run again. The deploy run again applies the rest and switches.
+  held ("the upgrade was interrupted while the database was being updated")
+  only when a new body of an object the old payload's boot node rewrites is
+  already stamped, or when that evidence is unavailable (no readable
+  pending-switch record, or the stamped fingerprints cannot be read). The
+  old code is then not started, and the gateway does not irrigate until the
+  deploy is run again. Any other such cut starts the old payload as
+  `unverified`. Either way, running the deploy again, the same way, applies
+  the rest and switches; when the fingerprints could not be read, check the
+  database first, as the `HELD:` line says.
 - Cut after the last migration and before the switch: the boot switches
   forward to the new payload (`unverified`, its health check owed to the
   next deploy).

@@ -2612,6 +2612,7 @@ process.stdout.write(String(applied.length));
     # schema decision end
 
     if [ "$migration_rc" = "3" ]; then
+        printf '%s\n' "HELD: Node-RED stopped. The migration failed and the restore of its pre-migration copy failed its integrity check. Check the database, and restore the pre-migration copy kept in ${backup_dir:-/data/backups/migrate} (see the deploy log)." > "${DEPLOY_HELD_FILE:-${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD}" 2>/dev/null || true
         swap_call writePayloadState "${PRE_STOP_ACTIVE:-}" held "the migration failed and the restore of its pre-migration copy failed its integrity check; the database needs an operator before anything starts: check it, and restore the pre-migration copy kept in ${backup_dir:-/data/backups/migrate} (see the deploy log)" deploy.sh >/dev/null 2>&1 || true
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
