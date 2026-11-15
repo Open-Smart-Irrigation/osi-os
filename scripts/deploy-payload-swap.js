@@ -1693,6 +1693,12 @@ function writePendingSwitch(root, stamp, schemaHead, schemaLedger, fromHead, fro
   })}\n`);
 }
 
+// True when any payload carries a pending-switch record, readable or not: a
+// deploy recorded a migration attempt there.
+function hasPendingSwitch(root) {
+  return listStamps(root).some((stamp) => fs.existsSync(pendingSwitchPath(root, stamp)));
+}
+
 function readPendingSwitches(root) {
   const records = [];
   for (const stamp of listStamps(root)) {
@@ -1949,6 +1955,7 @@ module.exports = {
   clearStaleStages,
   writePendingSwitch,
   readPendingSwitches,
+  hasPendingSwitch,
   clearPendingSwitch,
   clearOtherPendingSwitches,
   readCompatibility,

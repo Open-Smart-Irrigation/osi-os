@@ -159,10 +159,9 @@ refusedUnchanged('the command-ledger installer does not match its pin', (g) => {
   g.pinOverride = '0'.repeat(64);
 }, /installer did not arrive intact \(SHA-256\); refusing before anything is changed/);
 
-refusedUnchanged('too little free space for the migration', (g) => {
-  seedDatabase(g);
-  g.dfKb = 1024;
-}, /insufficient disk for a safe schema migration .*refusing before anything is changed/);
+// Free space is checked after staging, before the first configuration
+// change (early_disk_check): scripts/test-deploy-real-prefix.js runs it in
+// the deploy's own sequence.
 
 refusedUnchanged('a repair_required ledger row whose checksum matches the release', (g) => {
   seedDatabase(g);
@@ -239,7 +238,7 @@ for name in osi-a osi-b osi-c; do
   printf '{"name":"%s","version":"2.0.0"}\\n' "$name" > "$MODULE_STAGE/$name/package.json"
   printf 'exports.marker = "%s@new";\\n' "$name" > "$MODULE_STAGE/$name/index.js"
 done
-${between('# module payload staging begin\n', '\nensure_osi_server_config || exit 1')}
+${between('# module payload staging begin\n', '\nearly_disk_check || exit 1')}
 echo STAGED_AND_CHECKED
 ${after}
 `;
@@ -302,6 +301,8 @@ test('the staging checks run before settings.js and every write to a live path',
   const lastCheck = at('PREV_STAMP="$(swap_call rollbackTarget "$SERVED_STAMP" "$DEPLOY_STAMP")"');
   assert.ok(at('swap_call captureModules "$PREV_STAMP" "$DEPLOY_STAMP"') < lastCheck);
   assert.ok(at('swap_call switchPreflight "$DEPLOY_STAMP"') < lastCheck);
+  assert.ok(lastCheck < at('\nearly_disk_check || exit 1\n'), 'the disk check follows the staging checks');
+  assert.ok(at('\nearly_disk_check || exit 1\n') < at('\nensure_osi_server_config || exit 1\n'), 'and precedes the first configuration change');
   for (const change of [
     '\nensure_osi_server_config || exit 1\n',
     'fetch_required "Node-RED settings.js"',

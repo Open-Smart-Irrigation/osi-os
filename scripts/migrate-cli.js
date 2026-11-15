@@ -10,7 +10,7 @@ const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { applyPending } = require('../lib/osi-migrate');
 const { loadMigrationCorpus, resolveCorpus } = require('../lib/osi-migrate/migrations-loader');
 const { ensureLedger, getApplied } = require('../lib/osi-migrate/ledger');
-const { pruneByPrefix } = require('../lib/osi-migrate/backup');
+const { pruneByPrefix, pruneCandidates, SIDE_FILE_SUFFIXES } = require('../lib/osi-migrate/backup');
 
 const REPO = path.resolve(__dirname, '..');
 const DEFAULT_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
@@ -92,9 +92,10 @@ async function runMigrateCli({
   migrationsDir = DEFAULT_MIGRATIONS_DIR,
   log = console.error,
   pruneOnly = false,
+  prunePlan = false,
 }) {
   if (!dbPath) {
-    throw new Error('usage: migrate-cli.js <db> --backup-dir <dir> [--migrations-dir <dir>] [--prune-only]');
+    throw new Error('usage: migrate-cli.js <db> --backup-dir <dir> [--migrations-dir <dir>] [--prune-only | --prune-plan]');
   }
   if (!backupDir) {
     throw new Error('refusing: --backup-dir is required (persistent pre-migration backup)');
@@ -108,6 +109,16 @@ async function runMigrateCli({
   // and tolerates its failure (`|| true`).
   const corpus = loadMigrationCorpus(migrationsDir);
   const keep = resolveKeep();
+
+  if (prunePlan) {
+    // --prune-plan: the KiB the prune would free, with the same retention
+    // (newest MIGRATE_BACKUP_KEEP kept). Reads only; creates nothing.
+    const { present, excess } = pruneCandidates(backupDir, `${path.basename(dbPath)}.premigrate-`, keep);
+    let bytes = 0;
+    for (const f of excess) for (const name of [f, ...SIDE_FILE_SUFFIXES.map((s) => f + s)]) if (present.has(name)) bytes += fs.statSync(path.join(backupDir, name)).size;
+    process.stdout.write(`${Math.floor(bytes / 1024)}\n`);
+    return { prunePlanKb: Math.floor(bytes / 1024) };
+  }
 
   if (pruneOnly) {
     // --prune-only touches only backup FILES under backupDir, never the DB —
@@ -170,7 +181,7 @@ async function runMigrateCli({
 }
 
 function parseArgs(argv) {
-  const opts = { dbPath: null, backupDir: null, migrationsDir: DEFAULT_MIGRATIONS_DIR, pruneOnly: false };
+  const opts = { dbPath: null, backupDir: null, migrationsDir: DEFAULT_MIGRATIONS_DIR, pruneOnly: false, prunePlan: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--backup-dir') {
@@ -179,6 +190,8 @@ function parseArgs(argv) {
       opts.migrationsDir = path.resolve(argv[++i] || '');
     } else if (arg === '--prune-only') {
       opts.pruneOnly = true;
+    } else if (arg === '--prune-plan') {
+      opts.prunePlan = true;
     } else if (!opts.dbPath) {
       opts.dbPath = arg;
     } else {

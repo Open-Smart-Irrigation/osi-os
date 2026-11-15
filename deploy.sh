@@ -2448,7 +2448,7 @@ run_schema_migration() {
     esac
 
     if [ -n "${PREV_STAMP:-}" ]; then
-        if [ "${PREV_CAPTURED:-0}" = "1" ]; then
+        if [ "${PREV_CAPTURED:-0}" = "1" ] && ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null 2>&1; then
             if ! write_payload_compatibility "$PREV_STAMP"; then
                 echo "ERROR: could not record the retained payload's pre-migration schema compatibility" >&2
                 return 1
@@ -2725,26 +2725,6 @@ gateway_state_preflight() {
     fi
     [ -e "$DB_PATH" ] || return 0
     fetch_migration_runner || { gsp_refuse "the migration runner could not be fetched and verified"; return 1; }
-    # Free space for the migration: twice the database plus the margin, as the
-    # late check needs, against what is free plus the pre-migration copies the
-    # late check's prune may remove (an upper bound: never stricter than it).
-    gsp_backup="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
-    gsp_at="$gsp_backup"
-    while [ ! -d "$gsp_at" ] && [ "$gsp_at" != / ]; do gsp_at="$(dirname "$gsp_at")"; done
-    gsp_db_kb=0
-    for gsp_file in "$DB_PATH" "$DB_PATH-wal"; do
-        [ -e "$gsp_file" ] && gsp_db_kb=$((gsp_db_kb + ($(ls -ln "$gsp_file" | awk '{print $5}') + 1023) / 1024))
-    done
-    gsp_reclaim_kb=0
-    for gsp_file in "$gsp_backup"/"$(basename "$DB_PATH")".premigrate-*; do
-        [ -f "$gsp_file" ] && gsp_reclaim_kb=$((gsp_reclaim_kb + ($(ls -ln "$gsp_file" | awk '{print $5}') + 1023) / 1024))
-    done
-    gsp_need_kb=$((2 * gsp_db_kb + ${MIGRATE_MIN_FREE_MARGIN_MB:-128} * 1024))
-    gsp_avail_kb="$(df -k "$gsp_at" 2>/dev/null | tail -1 | awk '{print $(NF-2)}')"
-    case "$gsp_avail_kb" in
-        ''|*[!0-9]*) ;;
-        *) [ $((gsp_avail_kb + gsp_reclaim_kb)) -ge "$gsp_need_kb" ] || { gsp_refuse "insufficient disk for a safe schema migration on $gsp_backup: need ~${gsp_need_kb}KB, have ${gsp_avail_kb}KB plus ${gsp_reclaim_kb}KB in earlier pre-migration copies"; return 1; } ;;
-    esac
     # A repair_required ledger row whose checksum already matches the release
     # stops the migration runner, and nothing in the deploy clears it.
     gsp_repair="$(sqlite3 -readonly "$DB_PATH" "SELECT version || ':' || checksum FROM schema_migrations WHERE status='repair_required'" 2>/dev/null || true)"
@@ -2765,6 +2745,32 @@ gateway_state_preflight() {
         fi
     fi
     echo "OK: gateway state preflight passed"
+}
+
+# The late disk gate's decision, made before the first configuration change:
+# after stale stages are cleared and this deploy's payload is staged, so df
+# already counts both, and crediting only the pre-migration copies the prune
+# will remove (migrate-cli.js --prune-plan: the same retention, newest
+# MIGRATE_BACKUP_KEEP kept). The late gate stays as the race guard.
+early_disk_check() {
+    edc_backup="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
+    edc_at="$edc_backup"
+    while [ ! -d "$edc_at" ] && [ "$edc_at" != / ]; do edc_at="$(dirname "$edc_at")"; done
+    edc_db_kb=0
+    for edc_file in "$DB_PATH" "$DB_PATH-wal"; do
+        [ -e "$edc_file" ] && edc_db_kb=$((edc_db_kb + ($(ls -ln "$edc_file" | awk '{print $5}') + 1023) / 1024))
+    done
+    edc_need_kb=$((2 * edc_db_kb + ${MIGRATE_MIN_FREE_MARGIN_MB:-128} * 1024))
+    edc_free_kb="$(node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH" --backup-dir "$edc_backup" --migrations-dir "$migrations_dir" --prune-plan 2>/dev/null || echo 0)"
+    case "$edc_free_kb" in ''|*[!0-9]*) edc_free_kb=0 ;; esac
+    edc_avail_kb="$(df -k "$edc_at" 2>/dev/null | tail -1 | awk '{print $(NF-2)}')"
+    case "$edc_avail_kb" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    if [ $((edc_avail_kb + edc_free_kb)) -lt "$edc_need_kb" ]; then
+        echo "ERROR: insufficient disk for a safe schema migration on $edc_backup: need ~${edc_need_kb}KB, have ${edc_avail_kb}KB plus ${edc_free_kb}KB in pre-migration copies the prune removes; refusing before any configuration is changed" >&2
+        return 1
+    fi
 }
 
 echo "=== OSI OS Deploy ==="
@@ -2959,6 +2965,29 @@ fi
 if [ -n "${PREV_STAMP:-}" ]; then
     swap_call captureGui "$PREV_STAMP" "$GUI_ROOT" >/dev/null
 fi
+# legacy capture compatibility begin
+# A capture's schema record is written now, before anything is configured, so
+# a deploy that stops later (a failed download) leaves a capture the retry can
+# use. A capture an earlier attempt left without its record is completed only
+# while its bytes still match the live files (legacyCaptureStamp) and no
+# migration attempt is recorded: every deploy that migrates writes the record
+# first and leaves a pending-switch record. A migration run by hand outside
+# the deploy is not covered.
+if [ -n "${PREV_STAMP:-}" ] && ! swap_call compatibilityExists "$PREV_STAMP" >/dev/null 2>&1; then
+    if [ "${PREV_CAPTURED:-0}" != 1 ] && [ "$PREV_STAMP" = "${PREV_LEGACY_STAMP:-}" ]; then
+        if swap_call hasPendingSwitch >/dev/null 2>&1; then
+            echo "ERROR: the legacy capture payloads/$PREV_STAMP has no schema record and a migration attempt is recorded; refusing before anything is changed" >&2
+            exit 1
+        fi
+        PREV_CAPTURED=1
+        echo "OK: completing the schema record of the legacy capture payloads/$PREV_STAMP (its files still match the live ones)"
+    fi
+    if [ "${PREV_CAPTURED:-0}" = 1 ] && [ -f "$DB_PATH" ] && ! write_payload_compatibility "$PREV_STAMP"; then
+        echo "ERROR: could not record the schema of payloads/$PREV_STAMP; refusing before anything is changed" >&2
+        exit 1
+    fi
+fi
+# legacy capture compatibility end
 echo "OK: staged paired payloads/$DEPLOY_STAMP (current: ${PREV_STAMP:-none}; activation deferred)"
 
 fetch_required "osi-chirpstack-helper package.json" \
@@ -3733,6 +3762,8 @@ if [ -n "$SERVED_STAMP" ]; then
     fi
 fi
 # rollback target end
+
+early_disk_check || exit 1
 
 # osi-server configuration begin
 ensure_osi_server_config || exit 1
