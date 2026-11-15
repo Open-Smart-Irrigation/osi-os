@@ -412,3 +412,16 @@ exec ${JSON.stringify(real)} "$@"
   assert.match(r.log, /HELD: Node-RED not started: the database's stamped schema fingerprints could not be read/);
   assert.ok(waited >= 4500, `the read waited for the busy timeout (${waited} ms)`);
 });
+
+// Builder's trial (chain-s2): with no readable record the hold named
+// "schema 74 of ?, upgrade to payloads/?". The unknown values are left out.
+test('a hold with no readable pending-switch record names only what is known', async () => {
+  const g = await gateway();
+  assert.equal(migrate(g.db, { commit: 3 }).signal, 'SIGKILL');
+  swap.clearPendingSwitch(g.root, 'new');
+  const first = boot(g);
+  assert.equal(first.started, false, first.log);
+  const note = fs.readFileSync(path.join(g.root, 'DEPLOY-HELD'), 'utf8');
+  assert.match(note, /^HELD: Node-RED not started: the upgrade was interrupted while the database was being updated \(schema 73\); no readable pending-switch record proves the retry can finish\. Run the deploy again, the same way/);
+  assert.doesNotMatch(note + first.log, /\?/);
+});

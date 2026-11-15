@@ -140,3 +140,37 @@ test('every path computeFetchList returns exists in the repo, except the built G
   const missing = list.filter((p) => !fs.existsSync(path.join(REPO_ROOT, p)));
   assert.deepEqual(missing, []);
 });
+
+// Every file deploy.sh fetches runs from the fetched copy, so every relative
+// require() it makes must be fetched too, followed transitively. A missing
+// one fails only when that code path runs on the gateway (the migration
+// runner's reference grace path loads verify-runtime-schema-parity.js, which
+// requires verify-devices-rebuild-fence.js).
+test('every relative require() of a fetched file is itself fetched, followed transitively', () => {
+  const list = computeFetchList(REPO_ROOT);
+  const fetched = new Set(list);
+  const resolve = (from, spec) => {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec));
+    for (const candidate of [base, `${base}.js`, `${base}.json`, `${base}/index.js`]) {
+      const full = path.join(REPO_ROOT, candidate);
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) return candidate;
+    }
+    return null;
+  };
+  const missing = [];
+  const seen = new Set();
+  const queue = list.filter((file) => file.endsWith('.js'));
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const text = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
+    for (const [, spec] of text.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+      const target = resolve(file, spec);
+      if (!target) { missing.push(`${file} requires ${spec}, which is not in the repository`); continue; }
+      if (!fetched.has(target)) missing.push(`${file} requires ${target}, which deploy.sh does not fetch`);
+      if (target.endsWith('.js')) queue.push(target);
+    }
+  }
+  assert.deepEqual(missing, []);
+});

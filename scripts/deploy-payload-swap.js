@@ -1818,7 +1818,7 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
   // stamped schema and the retry completes. A record that cannot tell (old
   // format, or the fingerprints not derived) holds.
   const holdFor = (reason, stamp, head) => {
-    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead} of ${head}, upgrade to payloads/${stamp}); ${reason}. Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
+    const line = `HELD: Node-RED not started: ${INTERRUPTED_REASON} (schema ${dbHead}${stamp ? ` of ${head}, upgrade to payloads/${stamp}` : ''}); ${reason}. Run the deploy again, the same way: it completes the update and starts the new release. Until then the gateway does not irrigate.`;
     writePayloadState(root, active || stamp, 'held', `${INTERRUPTED_REASON}; ${reason}; run the deploy again to complete it`, 'node-red.init');
     writeDurable(path.join(root, 'DEPLOY-HELD'), `${line}\n`);
     return line;
@@ -1842,7 +1842,7 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
   // No usable record, but the database is ahead of the active payload's
   // schema: nothing proves a retry can finish after the old payload starts.
   if (activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger)) {
-    return holdFor('no readable pending-switch record proves the retry can finish', '?', '?');
+    return holdFor('no readable pending-switch record proves the retry can finish', '', '');
   }
   if (activeCompat) {
     const reason = `payloads/${active} was recorded for schema ${activeCompat.schema_head}, the database is at schema ${dbHead}`;

@@ -2219,7 +2219,8 @@ fetch_migration_runner() {
         semantic-schema-compare.js \
         restamp-fingerprints.js \
         verify-head-cli.js \
-        verify-runtime-schema-parity.js
+        verify-runtime-schema-parity.js \
+        verify-devices-rebuild-fence.js
     do
         fetch_required "Migration script $script" "scripts/$script" "$TMP_DIR/scripts/$script" || return 1
         set -- "$@" "$TMP_DIR/scripts/$script"
