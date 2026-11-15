@@ -3952,8 +3952,9 @@ verify_native_sqlite3_after_npm || exit 1
 
 install_irrigation_clock_hook || exit 1
 
-install_deploy_exit_trap
+# The exit handler discards a stage itself from here on.
 DISCARD_STAGE_ON_EXIT=0
+install_deploy_exit_trap
 quiesce_identityd_for_deploy || exit 1
 run_schema_migration || exit 1
 activate_command_ledger_dependency || exit 1
