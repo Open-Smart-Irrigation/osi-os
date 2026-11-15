@@ -751,7 +751,7 @@ ensure_osi_server_config() {
         return 1
     fi
     uci -q delete osi-server.cloud.firmware_version 2>/dev/null || true
-    uci commit osi-server
+    uci commit osi-server || { echo "ERROR: could not commit the osi-server configuration; refusing before settings.js is replaced" >&2; return 1; }
     echo "OK: osi-server configuration created"
 }
 

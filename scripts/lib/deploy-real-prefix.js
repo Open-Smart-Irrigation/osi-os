@@ -52,7 +52,7 @@ function manifest(dir, skip = (rel) => rel.endsWith('-shm')) {
 // payload pair with its schema record, the swap helper already installed) or
 // 'stock' (no flows and no GUI yet, as on a stock base before the first
 // deploy).
-function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = true } = {}) {
+function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = true, osiServer = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-real-prefix-'));
   const gw = path.join(root, 'gw');
   const bin = path.join(root, 'bin');
@@ -62,7 +62,7 @@ function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = tr
   writeExec(path.join(gw, 'usr/sbin/ntpd-hotplug'), '#!/bin/sh\nexit 0\n');
   fs.writeFileSync(path.join(gw, 'etc/shadow'), 'root:$1$fixture$notarealhashxxxxxxxxx:1:0:99999:7:::\n');
   fs.writeFileSync(path.join(g.srv, 'settings.js'), '// settings before the deploy\n');
-  fs.writeFileSync(path.join(gw, 'etc/config/osi-server'), `${JSON.stringify({ cloud: { '.type': 'osi_server', enabled: '1', device_type: 'GATEWAY' } })}\n`);
+  if (osiServer) fs.writeFileSync(path.join(gw, 'etc/config/osi-server'), `${JSON.stringify({ cloud: { '.type': 'osi_server', enabled: '1', device_type: 'GATEWAY' } })}\n`);
   if (database) fs.copyFileSync(SEED, g.db);
   // Node-RED: the init stand-in records starts and stops in a state file.
   fs.writeFileSync(path.join(root, 'node-red.state'), '1');
@@ -119,7 +119,7 @@ let a = process.argv.slice(2);
 if (a[0] === '-q') a = a.slice(1);
 const cfg = ${JSON.stringify(path.join(gw, 'etc/config'))};
 const op = (cmd, arg = '') => {
-  if (cmd === 'commit') return;
+  if (cmd === 'commit') { if (process.env.UCI_FAIL_COMMIT) { console.error('uci: I/O error'); process.exit(1); } return; }
   if (cmd === 'get' && arg === 'system.ntp.enabled') process.exit(1);
   const eq = arg.indexOf('='); const key = eq < 0 ? arg : arg.slice(0, eq); const value = eq < 0 ? '' : arg.slice(eq + 1);
   const [pkg, sec, opt] = key.split('.');

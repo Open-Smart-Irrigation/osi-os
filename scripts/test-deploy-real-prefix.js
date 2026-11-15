@@ -43,8 +43,9 @@ test('B1: copies beyond the retained three supply the space: passes, and the lat
   try {
     backups(g, 5, 20);
     g.setCapacityKb(g.usedKb() + 30 * MB);
-    const r = runPrefix(g, AFTER_SETTINGS, 'stage_command_ledger_dependency\nrun_schema_migration || echo "MIGRATION_RC=$?"\necho RAN', { MIGRATE_MIN_FREE_MARGIN_MB: '40' });
+    const r = runPrefix(g, AFTER_SETTINGS, 'stage_command_ledger_dependency\nrun_schema_migration || exit $?\necho RAN', { MIGRATE_MIN_FREE_MARGIN_MB: '40' });
     const out = r.stdout + r.stderr;
+    assert.equal(r.status, 0, out);
     assert.match(out, /RAN/, out);
     assert.doesNotMatch(out, /insufficient disk/);
     assert.match(out, /--- Stop Node-RED for schema migration ---/);
@@ -194,5 +195,24 @@ test('round 2: a stock gateway without a database reaches the configuration with
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /CONFIGURATION_REACHED/);
     assert.doesNotMatch(r.stdout + r.stderr, /parameter not set|unbound variable/);
+  } finally { g.cleanup(); }
+});
+
+// CodeRabbit r4577406811: a failed commit of the new osi-server configuration
+// stops the deploy before settings.js. The tree is compared without
+// etc/config/osi-server: the image's defaults script pre-creates that file
+// before its uci batch (CGOS cannot create a package from scratch), and this
+// uci stand-in writes each set at once, where uci stages it until the commit.
+test('a failed commit of the osi-server configuration refuses before settings.js, the rest of the tree unchanged', () => {
+  const g = gateway({ layout: 'linked', osiServer: false });
+  try {
+    const without = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => k !== 'etc/config/osi-server'));
+    const before = without(g.manifest());
+    const r = runPrefix(g, AFTER_SETTINGS, 'echo SETTINGS_REACHED', { UCI_FAIL_COMMIT: '1' });
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /SETTINGS_REACHED/);
+    assert.match(r.stderr, /could not commit the osi-server configuration; refusing before settings\.js is replaced/);
+    assert.equal(fs.readFileSync(path.join(g.srv, 'settings.js'), 'utf8'), '// settings before the deploy\n');
+    assert.deepEqual(without(g.manifest()), before, 'the gateway-side tree is unchanged');
   } finally { g.cleanup(); }
 });
