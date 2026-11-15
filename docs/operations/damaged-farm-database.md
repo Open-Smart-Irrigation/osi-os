@@ -311,13 +311,23 @@ After (a) or (b) the candidate is `/data/db/farming.db.restore`; the live file i
 C=/data/db/farming.db.restore
 ```
 
-1. **A gateway linked to the cloud: stop and ask** before going on, for (a) and for (b). A restored file rolls the sync state back, and a recovered one may lack rows of the sync and command tables; the cloud may refuse that state, and a person who knows the sync side decides. To see whether it is linked:
+1. **A gateway linked to the cloud: stop and ask** before going on, for (a) and for (b). A restored file rolls the sync state back, and a recovered one may lack rows of the sync and command tables; the cloud may refuse that state, and a person who knows the sync side decides. Whether it is linked is read from the gateway as it is now, never from the candidate: a backup taken before the gateway was linked says nothing about today. The account link writes the cloud server host and broker address into the gateway's settings, and the live database records the link if it can still be read:
 
    ```sh
-   sqlite3 -readonly "$C" "SELECT linked FROM sync_link_state WHERE peer_node='cloud';"
+   if ! uci -q show osi-server.cloud >/dev/null; then
+     echo "STOP: the cloud settings cannot be read; treat the gateway as linked and ask"
+   else
+     H="$(uci -q get osi-server.cloud.server_host)$(uci -q get osi-server.cloud.mqtt_broker_url)"
+     D="$(sqlite3 -readonly /data/db/farming.db "SELECT linked FROM sync_link_state WHERE peer_node='cloud';" 2>/dev/null)"
+     if [ -n "$H" ] || [ "$D" = "1" ]; then
+       echo "STOP: the gateway is linked to the cloud, or was; ask before going on"
+     else
+       echo "not linked: no cloud server in the settings; live database answered: ${D:-nothing}"
+     fi
+   fi
    ```
 
-   `1` means linked: stop here and ask.
+   It prints no setting's value. A `STOP` line ends the procedure here, as every `STOP` in this document does: no later line runs until a person who knows the sync side has decided. Only `not linked` lets step 2 follow.
 2. **Integrity and relations.** Both must hold:
 
    ```sh
@@ -370,13 +380,26 @@ OK
 
 then the migration lines, `--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---`, and exit 0. On a gateway with no file (after (c)) the deploy seeds a new one.
 
-Then confirm the end state:
+Before the deploy, write a boundary line into the gateway's log, so that the check afterwards reads only the new start. The log keeps older lines, among them the damaged start's own `[osi-db-startup]` line, which must not count against a good repair:
 
 ```sh
-logread | grep osi-db-startup
+M="osi-damaged-db-boundary-$(date +%Y%m%d-%H%M%S)-$$"
+logger -t osi-damaged-db "$M" && echo "$M" > /tmp/osi-damaged-boundary && echo "boundary: $M"
 ```
 
-The line must be absent. In `GET /api/system/stats` the `database` object must read `"status": "healthy"`, `"native_addons": 1` and `"health_state": null`, and the next heartbeat must not report a `database_` or `sqlite_` state. If the deploy refuses again, stop and ask.
+It must print `boundary:` and the line's text. After the deploy, confirm the end state:
+
+```sh
+M=$(cat /tmp/osi-damaged-boundary)
+if [ -z "$M" ] || ! logread | grep -qF "$M"; then
+  echo "boundary not in the log (a reboot or a full log): the stats answer below decides alone"
+else
+  logread | awk -v m="$M" 'seen { print } index($0, m) { seen = 1 }' | grep osi-db-startup
+  echo "end of the lines after the boundary"
+fi
+```
+
+Between the boundary and `end of the lines after the boundary` no `osi-db-startup` line may appear. In `GET /api/system/stats` the `database` object must read `"status": "healthy"`, `"native_addons": 1` and `"health_state": null`, and the next heartbeat must not report a `database_` or `sqlite_` state. If the deploy refuses again, stop and ask.
 
 ## What the start-up check cannot see
 
