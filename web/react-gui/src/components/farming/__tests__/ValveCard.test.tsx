@@ -203,11 +203,41 @@ describe('StregaValveCard', () => {
         } as Partial<Device>);
         const cancelBtn = await screen.findByRole('button', { name: /cancel queued open/i });
         fireEvent.click(cancelBtn);
+        // No valve-list row: the cancel names no run (the device list's record is not a
+        // cancellable-only projection, review B1), exactly as before V9.
         await waitFor(() => {
-            expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith(mockDevice.deveui, { expectationId: 'vae-1' });
+            expect(devicesAPI.cancelIrrigation).toHaveBeenLastCalledWith(mockDevice.deveui, { expectationId: null });
         });
         expect(devicesAPI.controlValve).not.toHaveBeenCalledWith(mockDevice.deveui, {
             action: 'CLOSE',
+        });
+    });
+
+    // Review B1: the device list names a newer CLOSE owner (duration 0) that the gateway's cancel
+    // refuses (409 actuation_not_active); the valve list's cancellable-only pass names the older
+    // queued open, and that is the run the card's cancel names.
+    it("names the valve list's cancellable open, not the device list's newer CLOSE owner", async () => {
+        renderCard(
+            {
+                current_state: 'OPEN',
+                activeValveActuation: { expectationId: 'vae-close-b', reconciliationState: 'PENDING_OBSERVATION' },
+            } as Partial<Device>,
+            {
+                valve: makeValveSummary({
+                    activeActuation: {
+                        expectationId: 'vae-open-a',
+                        reconciliationState: 'PENDING_OBSERVATION',
+                        commandedAt: '2026-11-15T08:00:00Z',
+                        expectedCloseAt: '2026-11-15T08:10:00Z',
+                        durationSeconds: 600,
+                        trigger: 'manual',
+                    },
+                }),
+            },
+        );
+        fireEvent.click(await screen.findByRole('button', { name: /cancel queued open/i }));
+        await waitFor(() => {
+            expect(devicesAPI.cancelIrrigation).toHaveBeenLastCalledWith(mockDevice.deveui, { expectationId: 'vae-open-a' });
         });
     });
 

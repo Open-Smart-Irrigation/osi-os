@@ -1098,6 +1098,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           <div className="flex items-end">
             <ValveCancelButton
               device={device}
+              valve={valve}
               onUpdate={onUpdate}
               onError={(message) => setError(message)}
             />

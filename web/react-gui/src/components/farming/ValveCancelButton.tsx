@@ -2,11 +2,16 @@ import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { devicesAPI } from '../../services/api';
 import { activeRunExpectationId } from '../../services/valveCancel';
-import type { Device } from '../../types/farming';
+import type { Device, ValveSummary } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
 interface Props {
     device: Device;
+    // The valve-list row (GET /api/valves). Its activeActuation is the gateway's cancellable-only
+    // pass (listValvesForUser), so the cancel names that run. The device list's newest active
+    // record is not filtered that way (a newer CLOSE owner can sit above a queued open, review B1),
+    // so it is never named; without the row the cancel names no run, as before V9.
+    valve?: ValveSummary | null;
     onUpdate?: () => void;
     onError?: (message: string) => void;
 }
@@ -15,7 +20,7 @@ function getApiMessage(error: any): string {
     return error?.response?.data?.message || error?.response?.data?.error || 'Failed to cancel queued open';
 }
 
-export default function ValveCancelButton({ device, onUpdate, onError }: Props) {
+export default function ValveCancelButton({ device, valve, onUpdate, onError }: Props) {
     const { t } = useTranslation('devices');
     const { t: tValves } = useTranslation('valves');
     // D04 (owner decision 2026-10-18), verbatim, as the button's description and in a help button.
@@ -27,9 +32,8 @@ export default function ValveCancelButton({ device, onUpdate, onError }: Props) 
         setBusy(true);
         setError(null);
         try {
-            // V9: name the active run the gateway reports; with several opens queued an unnamed
-            // cancel is refused as ambiguous_actuation.
-            const expectationId = activeRunExpectationId(device.activeValveActuation ?? device.active_valve_actuation);
+            // V9: with several opens queued an unnamed cancel is refused as ambiguous_actuation.
+            const expectationId = activeRunExpectationId(valve?.activeActuation);
             await devicesAPI.cancelIrrigation(device.deveui, { expectationId });
             onUpdate?.();
         } catch (err: any) {
