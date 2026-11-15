@@ -379,36 +379,6 @@ describe('ValveControlPanel', () => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
 
-    // Review B2 (panel): the cached row can name a run that ended outside this browser (the
-    // scheduler, the cloud, another tab) within one 10 s poll. The cancel reads the list fresh.
-    it("names the fresh valve list's run, not the cached row's ended run", async () => {
-      vi.mocked(valvesAPI.list)
-        .mockResolvedValue([makeValve({ activeActuation: { ...activeRun, expectationId: 'vae-b' } })])
-        .mockResolvedValueOnce([makeValve({ activeActuation: { ...activeRun, expectationId: 'vae-a' } })]);
-      vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
-      renderPanel();
-      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
-      await waitFor(() => expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1));
-      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledWith('0016C001F1000001', { expectationId: 'vae-b' });
-    });
-
-    it('sends an unnamed cancel when the fresh valve-list read fails', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      vi.mocked(valvesAPI.list)
-        .mockResolvedValue([makeValve({ activeActuation: activeRun })])
-        .mockResolvedValueOnce([makeValve({ activeActuation: activeRun })])
-        .mockRejectedValueOnce(new Error('timeout of 10000ms exceeded'));
-      vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
-      renderPanel();
-      fireEvent.click(await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' }));
-      await waitFor(() => expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1));
-      const [eui, options] = vi.mocked(devicesAPI.cancelIrrigation).mock.calls[0];
-      expect(eui).toBe('0016C001F1000001');
-      expect(options?.expectationId ?? null).toBeNull();
-      expect(warn).toHaveBeenCalled();
-      warn.mockRestore();
-    });
-
     it('keeps the generic failure for a 409 without a message', async () => {
       vi.mocked(valvesAPI.list).mockResolvedValue([makeValve({ activeActuation: activeRun })]);
       vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({

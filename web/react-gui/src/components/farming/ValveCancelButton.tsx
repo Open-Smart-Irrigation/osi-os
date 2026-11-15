@@ -1,7 +1,6 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { devicesAPI } from '../../services/api';
-import { freshCancellableRunId } from '../../services/valveCancelTarget';
 import type { Device } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
@@ -27,9 +26,7 @@ export default function ValveCancelButton({ device, onUpdate, onError }: Props) 
         setBusy(true);
         setError(null);
         try {
-            // V9: with several opens queued an unnamed cancel is refused as ambiguous_actuation.
-            const expectationId = await freshCancellableRunId(device.deveui);
-            await devicesAPI.cancelIrrigation(device.deveui, { expectationId });
+            await devicesAPI.cancelIrrigation(device.deveui);
             onUpdate?.();
         } catch (err: any) {
             const message = getApiMessage(err);
