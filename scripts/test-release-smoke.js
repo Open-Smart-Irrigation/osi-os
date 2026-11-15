@@ -84,7 +84,13 @@ function main(argv,options={}) {
   // NEW-15: overlapping valve commands in the gateway's dependency layouts,
   // each in its own Node-RED process (scripts/test-release-sqlite-overlap.js).
   // The negative controls exercise only the runtime suite.
-  if(!options.control) {
+  if(!options.control&&config.name==='stock') {
+    // The deployed stock runtime: each case copies the user directory npm
+    // installed above, the only SQLite in that process.
+    const sqliteCases=require('./test-release-sqlite-overlap'),stock={runtime:'stock',layout:'stock',userTree:run};
+    evidence.cases.push(sqliteCases.run(stock));
+    for(const fault of ['none','damaged','conflict','damaged_late'])evidence.cases.push(sqliteCases.startupCase({...stock,fault}));
+  } else if(!options.control) {
     const sqliteCases=require('./test-release-sqlite-overlap');
     for(const layout of ['dual','npm','stock'])evidence.cases.push(sqliteCases.run({layout}));
     // Start-up state: healthy, damaged file, two native addons.

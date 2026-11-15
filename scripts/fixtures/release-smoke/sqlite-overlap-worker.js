@@ -54,7 +54,7 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
     clearInterval(timer);clearInterval(radio);
     const files=fs.readdirSync('/proc/self/fd').flatMap(fd=>{try{return [fs.readlinkSync('/proc/self/fd/'+fd)];}catch(error){if(error.code==='ENOENT')return [];throw error;}}).filter(file=>/farming\.db|radio\.db|activity\.sqlite/.test(file));
     report={replies,addons:addons(),openDatabaseFiles:files,logs:h.state.logs,caught:h.state.caught,radio:h.state.cs.calls,
-      node:process.version,seconds:(Date.now()-started)/1000,maxRSSKiB:process.resourceUsage().maxRSS};
+      node:process.version,nodeRed:h.RED.version(),seconds:(Date.now()-started)/1000,maxRSSKiB:process.resourceUsage().maxRSS};
     fs.writeFileSync(path.join(h.RUN,'overlap.json'),JSON.stringify(report,null,2)+'\n');
     await h.stop();clearTimeout(watchdog);
   }

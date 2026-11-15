@@ -296,6 +296,44 @@ test('"not checked" never hides crash_looping or degraded; a fault replaces them
   }
 });
 
+test('one health_state, in the order an operator must act on it, with the payload state of the deploy', async () => {
+  const { refreshGlobal } = require(HEALTH);
+  const fs = require('node:fs'), os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-precedence-'));
+  const crashFilePath = path.join(dir, 'crash'), payloadStatePath = path.join(dir, 'payload-state.json');
+  const setCrash = (looping) => fs.writeFileSync(crashFilePath, JSON.stringify(looping ? { count: 5, startedAt: Date.now() } : { count: 0, startedAt: null }));
+  const setPayload = (state) => state ? fs.writeFileSync(payloadStatePath, JSON.stringify({ format: 1, state })) : fs.rmSync(payloadStatePath, { force: true });
+  // [database health_state, crash looping, payload state, expected]
+  const table = [
+    ['sqlite_driver_unavailable', true, 'unverified', 'sqlite_driver_unavailable'],
+    ['sqlite_module_conflict', true, 'held', 'sqlite_module_conflict'],
+    ['database_damaged', true, 'held', 'database_damaged'],
+    ['database_unreadable', false, 'unverified', 'database_unreadable'],
+    ['database_not_checked', true, 'held', 'crash_looping'],
+    ['database_not_checked', false, 'held', 'held'],
+    ['database_checking', false, 'unverified', 'unverified'],
+    ['database_not_checked', false, 'unverified', 'unverified'],
+    ['database_not_checked', false, null, 'database_not_checked'],
+    [null, false, 'unverified', 'unverified'],
+  ];
+  try {
+    for (const [state, looping, payload, expected] of table) {
+      setCrash(looping); setPayload(payload);
+      const global = contextGlobal();
+      const osiDb = { startupHealth: () => ({ health_state: state, module_conflict: state === 'sqlite_module_conflict', driver_error: state === 'sqlite_driver_unavailable' ? 'x' : null }),
+        Database: function Database() { this.all = (s, cb) => cb(null, []); this.get = (s, cb) => cb(null, undefined); this.close = (cb) => cb(); } };
+      const options = { crashFilePath, payloadStatePath, timeoutMs: 300, diskPath: __dirname };
+      const pending = refreshGlobal({ global, osiDb, options });
+      const label = JSON.stringify([state, looping, payload]);
+      if (state) assert.equal(global.get('edge_health').health_state, expected, 'first heartbeat: ' + label);
+      await pending;
+      assert.equal(global.get('edge_health').health_state, expected, 'after the gather: ' + label);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('"not checked" keeps the gathered figures and a degraded state on every tick', async () => {
   const { refreshGlobal } = require(HEALTH);
   const global = contextGlobal();

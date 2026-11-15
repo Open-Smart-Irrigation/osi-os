@@ -537,10 +537,14 @@ function withDatabaseState(gathered, databaseState) {
 const GATHERED_FRESH_MS = 180000;
 let lastGathered = null;
 
-// The state gatherWork gives from the crash file, the error count and the
-// recent sync rejections, for a tick whose own gather has not finished.
-function baseState(crash, errorsTotal, sample) {
+// The state gatherWork gives from the crash file, the payload state of the
+// deploy, the error count and the recent sync rejections, for a tick whose
+// own gather has not finished. Same order as gatherWork: crash_looping, then
+// held or unverified, then degraded, then healthy.
+function baseState(crash, errorsTotal, sample, options) {
   if (crash.crash_looping) return 'crash_looping';
+  const payloadState = readPayloadState(options);
+  if (payloadState) return payloadState;
   const rejected = Number(sample && sample.sync_rejected_recent);
   return (Number.isFinite(errorsTotal) && errorsTotal > 0) || (Number.isFinite(rejected) && rejected > 0) ? 'degraded' : 'healthy';
 }
@@ -560,7 +564,7 @@ async function refreshGlobal({ global, osiDb, options = {} }) {
     const crash = readCrashState(options);
     const sample = lastGathered && performance.now() - lastGathered.at < GATHERED_FRESH_MS ? lastGathered.health : null;
     global.set('edge_health', Object.assign(allNullHealth(), sample || {}, meta, crash, {
-      health_state: withDatabaseState(baseState(crash, errorsTotal, sample), database.health_state)
+      health_state: withDatabaseState(baseState(crash, errorsTotal, sample, options), database.health_state)
     }));
     // Only an unavailable driver refuses connections; a conflict is reported
     // and the gather goes on.
@@ -573,7 +577,7 @@ async function refreshGlobal({ global, osiDb, options = {} }) {
     if (health.crash_count != null || health.schema_sig != null) lastGathered = { health: Object.assign({}, health), at: performance.now() };
     if (database.health_state) {
       if (health.crash_count == null) Object.assign(health, readCrashState(options));
-      health.health_state = withDatabaseState(health.health_state || baseState(health, errorsTotal, health), database.health_state);
+      health.health_state = withDatabaseState(health.health_state || baseState(health, errorsTotal, health, options), database.health_state);
     }
     global.set('edge_health', Object.assign(meta, health));
   } finally {

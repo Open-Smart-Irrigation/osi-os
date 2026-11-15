@@ -7,7 +7,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {spawnSync}=require('node:child_process');
 const ROOT=path.resolve(__dirname,'..'),FIXTURE=path.join(__dirname,'fixtures/release-smoke');
-const LAYOUTS=['dual','single','npm','stock'];
+const LAYOUTS=['dual','single','npm','stock'],RUNTIMES=['image','stock'];
 
 // Reproduce the firmware/user-directory dependency boundary. Copies have
 // different inodes, including the native addon; hard links cannot test this.
@@ -45,6 +45,29 @@ function prepareLayout(run,layout,worker='sqlite-overlap-worker.js') {
   return entry;
 }
 
+// The deployed stock runtime (Node-RED 4.0.9, no firmware SQLite): each case
+// gets a copy of the user directory that scripts/fixtures/release-smoke-stock/
+// install-user.js built for the suite run with npm, the deploy's install.
+// Relative links stay relative, so the helpers resolve inside the copy.
+function prepareStockRuntime(run,userTree,worker) {
+  if(!userTree||!fs.existsSync(path.join(userTree,'node_modules/node-red-node-sqlite')))throw new Error('stock runtime needs the installed user directory');
+  for(const entry of fs.readdirSync(userTree,{withFileTypes:true})) {
+    const keep=['package.json','package-lock.json','edge-channels.json','node_modules','codecs','nodes'].includes(entry.name)||(entry.isDirectory()&&entry.name.startsWith('osi-'));
+    if(keep)fs.cpSync(path.join(userTree,entry.name),path.join(run,entry.name),{recursive:true,verbatimSymlinks:true});
+  }
+  const entry=path.join(run,'firmware/red.js');
+  fs.mkdirSync(path.dirname(entry),{recursive:true});
+  fs.writeFileSync(entry,`require(${JSON.stringify(path.join(FIXTURE,worker))});\n`);
+  return entry;
+}
+// A second copy of the user's sqlite3, for the stray loader of the conflict
+// case: another inode, so another native library in the process.
+function strayCopy(run) {
+  const target=path.join(run,'stray/node_modules/sqlite3');
+  fs.cpSync(path.join(run,'node_modules/sqlite3'),target,{recursive:true,dereference:true});
+  return target;
+}
+
 // The parent never loads a SQLite library: each step is a separate sqlite3
 // CLI process, before the runtime starts or after it has exited.
 function cli(dbfile,sql,{readonly=true}={}) {
@@ -64,15 +87,15 @@ function seedFarm(source,run,dbfile,env) {
   {readonly:false});
 }
 
-function run({source=ROOT,layout='dual'}={}) {
-  if(!LAYOUTS.includes(layout))throw new Error('invalid sqlite layout');
+function run({source=ROOT,layout='dual',runtime='image',userTree=null}={}) {
+  if(!LAYOUTS.includes(layout)||!RUNTIMES.includes(runtime)||(runtime==='stock'&&layout!=='stock'))throw new Error('invalid sqlite layout');
   const run=fs.mkdtempSync(path.join(os.tmpdir(),'osi-sqlite-overlap-'));
-  console.log('OVERLAP EVIDENCE:',layout,run);
+  console.log('OVERLAP EVIDENCE:',runtime,layout,run);
   const dbfile=path.join(run,'data/db/farming.db');
   // libuv's default pool of 4 threads, as on the image.
-  const env={PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:os.tmpdir(),OSI_SMOKE_RUN:run,OSI_SMOKE_SOURCE:source,UV_THREADPOOL_SIZE:'4'};
+  const env={PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:os.tmpdir(),OSI_SMOKE_RUN:run,OSI_SMOKE_SOURCE:source,OSI_SMOKE_RUNTIME:runtime,UV_THREADPOOL_SIZE:'4'};
   seedFarm(source,run,dbfile,env);
-  const entry=prepareLayout(run,layout),logfile=path.join(run,'runtime.log');
+  const entry=runtime==='stock'?prepareStockRuntime(run,userTree,'sqlite-overlap-worker.js'):prepareLayout(run,layout),logfile=path.join(run,'runtime.log');
   const fd=fs.openSync(logfile,'w');let child;
   try {child=spawnSync(process.execPath,['--max-old-space-size=1536',entry],{cwd:ROOT,env,stdio:['ignore',fd,fd],timeout:190000});}
   finally {fs.closeSync(fd);}
@@ -80,11 +103,11 @@ function run({source=ROOT,layout='dual'}={}) {
   const failures=[],check=(code,ok,actual)=>{if(!ok)failures.push({code,actual});};
   check('scratch-capacity',!/(?:Disk quota exceeded|EDQUOT|ENOSPC)/.test(text+fs.readFileSync(path.join(run,'seed.log'),'utf8')),'quota or disk-space error in the logs');
   check('runtime-exit',!child.error&&child.status===0,{status:child.status,error:child.error?.message||null});
-  let evidence={layout,run};
+  let evidence={runtime,layout,run};
   const observation=path.join(run,'overlap.json');
   if(fs.existsSync(observation)) {
     const result=JSON.parse(fs.readFileSync(observation,'utf8'));
-    evidence={...evidence,node:result.node,addons:result.addons,openDatabaseFiles:result.openDatabaseFiles,seconds:result.seconds,maxRSSKiB:result.maxRSSKiB};
+    evidence={...evidence,node:result.node,nodeRed:result.nodeRed,addons:result.addons,openDatabaseFiles:result.openDatabaseFiles,seconds:result.seconds,maxRSSKiB:result.maxRSSKiB};
     const corrupt=result.logs.filter(l=>/SQLITE_CORRUPT|malformed/i.test(l.msg));
     evidence.corruptLines=corrupt.length;
     check('single-native-addon',result.addons.length===1,result.addons.length);
@@ -93,6 +116,7 @@ function run({source=ROOT,layout='dual'}={}) {
       result.replies.map(r=>r.kind+':'+(r.response.status||'none')).join(','));
     check('radio',result.radio.filter(c=>c.fn==='enqueue'&&c.port===2&&c.hex==='4101').length===19,'open frames sent: '+result.radio.filter(c=>c.fn==='enqueue'&&c.port===2&&c.hex==='4101').length);
     check('runtime-budget',result.maxRSSKiB<4*1024*1024&&result.seconds<180,null);
+    check('node-red-runtime',result.nodeRed===expectedNodeRed(runtime),result.nodeRed);
   } else check('observation',false,'runtime wrote no overlap.json');
   let intact=false;
   try {
@@ -110,9 +134,9 @@ function run({source=ROOT,layout='dual'}={}) {
   }
   // Prove the harness copied the shipped payload without editing its code.
   check('flows-unchanged',fs.readFileSync(path.join(source,'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json')).equals(fs.readFileSync(path.join(run,'flows.json'))),null);
-  const result={id:'overlapping-valves-integrity'+(layout==='dual'?'':'-'+layout+'-layout'),failures,evidence};
+  const result={id:'overlapping-valves-integrity'+caseSuffix(runtime,layout),failures,evidence};
   fs.writeFileSync(path.join(run,'summary.json'),JSON.stringify(result,null,2)+'\n');
-  console.log(failures.length?'OVERLAP FAIL':'OVERLAP PASS',layout,JSON.stringify(failures.map(f=>f.code)),JSON.stringify({addons:evidence.addons?.length,corruptLines:evidence.corruptLines,integrity:evidence.integrity}));
+  console.log(failures.length?'OVERLAP FAIL':'OVERLAP PASS',runtime,layout,JSON.stringify(failures.map(f=>f.code)),JSON.stringify({addons:evidence.addons?.length,corruptLines:evidence.corruptLines,integrity:evidence.integrity}));
   return result;
 }
 // Start-up state cases: the file check and the addon count reach the first
@@ -127,13 +151,23 @@ const STARTUP_FAULTS={
     log:/\[osi-db-startup\] ERROR farm database start-up check: damaged .*no file was moved or repaired; see docs\/operations\/damaged-farm-database\.md/},
 };
 const STANDIN_DELAY_S=12;
-function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
+// The Node-RED version the workflow pins for the runtime a case asked for.
+function expectedNodeRed(runtime) {
+  return require('./lib/release-smoke-runtimes').runtimeConfig(runtime).nodeRed;
+}
+// Case ids: the factory layout has none; an emulated layout on the image
+// runtime is named by its layout; the deployed stock runtime by its runtime.
+function caseSuffix(runtime,layout) {
+  if(runtime==='stock')return '-stock-runtime';
+  return layout==='dual'?'':'-'+layout+'-layout';
+}
+function startupCase({source=ROOT,fault='none',layout='dual',runtime='image',userTree=null}={}) {
   const expected=STARTUP_FAULTS[fault];
-  if(!expected||!LAYOUTS.includes(layout)||(fault==='conflict'&&layout!=='dual'))throw new Error('invalid start-up case');
+  if(!expected||!LAYOUTS.includes(layout)||!RUNTIMES.includes(runtime)||(runtime==='stock'&&layout!=='stock')||(fault==='conflict'&&runtime==='image'&&layout!=='dual'))throw new Error('invalid start-up case');
   const run=fs.mkdtempSync(path.join(os.tmpdir(),'osi-sqlite-overlap-'));
-  console.log('STARTUP EVIDENCE:',fault,layout,run);
+  console.log('STARTUP EVIDENCE:',runtime,fault,layout,run);
   const dbfile=path.join(run,'data/db/farming.db');
-  const env={PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:os.tmpdir(),OSI_SMOKE_RUN:run,OSI_SMOKE_SOURCE:source,UV_THREADPOOL_SIZE:'4',OSI_STARTUP_FAULT:fault};
+  const env={PATH:process.env.PATH,HOME:run,LANG:'C.UTF-8',TZ:'UTC',TMPDIR:os.tmpdir(),OSI_SMOKE_RUN:run,OSI_SMOKE_SOURCE:source,UV_THREADPOOL_SIZE:'4',OSI_STARTUP_FAULT:fault,OSI_SMOKE_RUNTIME:runtime};
   seedFarm(source,run,dbfile,env);
   if(fault==='damaged_late') {
     // A stand-in sqlite3 for the runtime only: it waits, then runs the real one.
@@ -150,7 +184,8 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
     const fd=fs.openSync(dbfile,'r+');
     try {fs.writeSync(fd,Buffer.from([0]),0,1,(rootpage-1)*pageSize);} finally {fs.closeSync(fd);}
   }
-  const entry=prepareLayout(run,layout,'sqlite-startup-worker.js'),logfile=path.join(run,'runtime.log');
+  const entry=runtime==='stock'?prepareStockRuntime(run,userTree,'sqlite-startup-worker.js'):prepareLayout(run,layout,'sqlite-startup-worker.js'),logfile=path.join(run,'runtime.log');
+  if(fault==='conflict')env.OSI_SMOKE_STRAY_SQLITE=runtime==='stock'?strayCopy(run):path.join(run,'node_modules/sqlite3');
   const fd=fs.openSync(logfile,'w');let child;
   try {child=spawnSync(process.execPath,['--max-old-space-size=1536',entry],{cwd:ROOT,env,stdio:['ignore',fd,fd],timeout:160000});}
   finally {fs.closeSync(fd);}
@@ -158,7 +193,7 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
   const failures=[],check=(code,ok,actual)=>{if(!ok)failures.push({code,actual});};
   check('runtime-exit',!child.error&&child.status===0,{status:child.status,error:child.error?.message||null});
   const observation=path.join(run,'startup.json');
-  let evidence={fault,layout,run};
+  let evidence={runtime,fault,layout,run};
   if(fs.existsSync(observation)) {
     const r=JSON.parse(fs.readFileSync(observation,'utf8'));
     // What is shown: the first heartbeat message reaching its MQTT output node
@@ -173,7 +208,7 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
       &&first.health&&typeof first.health==='object'&&'health_state' in first.health&&'schema_sig' in first.health&&'crash_count' in first.health,
       message&&{topic:message.topic,qos:message.qos,keys:first&&Object.keys(first)});
     const database=r.stats.json&&r.stats.json.database;
-    evidence={...evidence,statsStatus:r.stats.status,addons:r.addons.length,firstHeartbeatHealth:first?.health?.health_state,database,
+    evidence={...evidence,node:r.node,nodeRed:r.nodeRed,statsStatus:r.stats.status,addons:r.addons.length,firstHeartbeatHealth:first?.health?.health_state,database,
       check:r.exec.filter(e=>/^sqlite3 -readonly/.test(e.cmd)).length};
     check('startup-check-ran',evidence.check===1,evidence.check);
     check('tick-order',JSON.stringify(r.tickOrder)===JSON.stringify(['2a4f142e3e9b6d80','062a0f9bf66d9789']),r.tickOrder);
@@ -196,14 +231,15 @@ function startupCase({source=ROOT,fault='none',layout='dual'}={}) {
       check('open-still-accepted',r.open.status===202&&r.openRadio===1,{status:r.open.status,error:r.open.json?.error??null,radio:r.openRadio});
       check('conflict-paths',Array.isArray(database?.module_paths)&&database.module_paths.length===2&&database.module_paths.every(p=>/node_sqlite3\.node$/.test(p)),database?.module_paths);
     }
+    check('node-red-runtime',r.nodeRed===expectedNodeRed(runtime),r.nodeRed);
   } else check('observation',false,'runtime wrote no startup.json');
   if(expected.log)check('loud-log',expected.log.test(text),'no start-up error line');
   else check('quiet-log',!/\[osi-db-startup\]/.test(text),'unexpected start-up error line');
   // Report only: the file is where it was, under its name.
   check('file-kept',fs.existsSync(dbfile)&&fs.readdirSync(path.dirname(dbfile)).every(name=>/^farming\.db(?:-wal|-shm)?$/.test(name)),fs.readdirSync(path.dirname(dbfile)));
-  const result={id:expected.id+(layout==='dual'?'':'-'+layout+'-layout'),failures,evidence};
+  const result={id:expected.id+caseSuffix(runtime,layout),failures,evidence};
   fs.writeFileSync(path.join(run,'summary.json'),JSON.stringify(result,null,2)+'\n');
-  console.log(failures.length?'STARTUP FAIL':'STARTUP PASS',fault,layout,JSON.stringify(failures.map(f=>f.code)),JSON.stringify(evidence.database||null));
+  console.log(failures.length?'STARTUP FAIL':'STARTUP PASS',runtime,fault,layout,JSON.stringify(failures.map(f=>f.code)),JSON.stringify(evidence.database||null));
   return result;
 }
 

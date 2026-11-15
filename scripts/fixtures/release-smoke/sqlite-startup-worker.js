@@ -3,7 +3,7 @@
 // (startupCase) in the gateway's dependency layout. OSI_STARTUP_FAULT:
 //   none     a healthy file;
 //   damaged  the parent damaged an index page before start;
-//   conflict a stray loader maps the user-directory sqlite3 addon before
+//   conflict a stray loader maps a second sqlite3 addon (OSI_SMOKE_STRAY_SQLITE) before
 //            Node-RED starts, so two native addons are in the process;
 //   damaged_late  damaged, with a stand-in sqlite3 that answers 12 s late:
 //            the flows run meanwhile and the verdict arrives afterwards.
@@ -17,7 +17,9 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
   // runtime.js links the fixture's modules into the user directory when it
   // loads; the stray copy needs them (bindings) before Node-RED starts.
   const runtime=require('./runtime');
-  if(fault==='conflict')require(path.join(process.env.OSI_SMOKE_RUN,'node_modules/sqlite3'));
+  // The stray copy is named by the parent: the user directory's own on the
+  // image layouts, a second copy of it on the stock runtime.
+  if(fault==='conflict')require(process.env.OSI_SMOKE_STRAY_SQLITE);
   const h=await runtime.start();
   // The harness pauses inject timers before this tick's 5 s delay runs out;
   // send the heartbeat tick once, the first one this process sees.
@@ -49,7 +51,7 @@ const addons=()=>[...new Set(fs.readFileSync('/proc/self/maps','utf8').split('\n
   const report={fault,addons:addons(),heartbeats:h.state.heartbeats,statsWithout:{status:statsWithout.status},
     stats:{status:stats.status,json:stats.json},open:{status:open.status,json:open.json},openRadio,later,
     published:h.state.mqtt.filter(m=>/\/heartbeat$/.test(m.topic)),exec:h.state.exec,
-    logs:h.state.logs,tickOrder,edgeHealth,node:process.version};
+    logs:h.state.logs,tickOrder,edgeHealth,node:process.version,nodeRed:h.RED.version()};
   fs.writeFileSync(path.join(h.RUN,'startup.json'),JSON.stringify(report,null,2)+'\n');
   await h.stop();clearTimeout(watchdog);
   console.log('startup stopped',JSON.stringify({fault,addons:report.addons.length}));

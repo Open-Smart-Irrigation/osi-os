@@ -20,7 +20,7 @@ jobs:
   release-runtime-smoke:
     name: release-runtime-smoke
     runs-on: ubuntu-latest
-    # The NEW-15 SQLite cases add seven Node-RED runs, about six minutes.
+    # The NEW-15 SQLite cases add eight Node-RED runs on this runtime.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,8 @@ jobs:
   release-stock-runtime-smoke:
     name: release-stock-runtime-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The NEW-15 SQLite cases add five Node-RED runs on this runtime.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,4 +110,8 @@ jobs:
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
             /tmp/osi-release-smoke-*/install.log
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
           retention-days: 7
