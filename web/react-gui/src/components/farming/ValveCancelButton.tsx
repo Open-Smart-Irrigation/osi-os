@@ -1,26 +1,37 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { devicesAPI } from '../../services/api';
+import { devicesAPI, valvesAPI } from '../../services/api';
 import { activeRunExpectationId } from '../../services/valveCancel';
-import type { Device, ValveSummary } from '../../types/farming';
+import type { Device } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
 interface Props {
     device: Device;
-    // The valve-list row (GET /api/valves). Its activeActuation is the gateway's cancellable-only
-    // pass (listValvesForUser), so the cancel names that run. The device list's newest active
-    // record is not filtered that way (a newer CLOSE owner can sit above a queued open, review B1),
-    // so it is never named; without the row the cancel names no run, as before V9.
-    valve?: ValveSummary | null;
     onUpdate?: () => void;
     onError?: (message: string) => void;
+}
+
+// The run a cancel names (V9): the activeActuation of this valve's row in a fresh read of
+// GET /api/valves, the gateway's cancellable-only pass (listValvesForUser). Never the device list's
+// newest active record, which that pass does not filter (a newer CLOSE owner can sit above a queued
+// open, review B1), and never the dashboard's cached row, which can name a run a card action has
+// already ended (review B2). No row, no run or a failed read names no run, as before V9.
+async function cancellableRunId(deveui: string): Promise<string | null> {
+    try {
+        const eui = deveui.toUpperCase();
+        const row = (await valvesAPI.list()).find((valve) => valve.deviceEui.toUpperCase() === eui);
+        return activeRunExpectationId(row?.activeActuation);
+    } catch (e: any) {
+        console.warn('ValveCancelButton: valve list unreadable, cancelling without naming a run: ' + (e && e.message ? e.message : e));
+        return null;
+    }
 }
 
 function getApiMessage(error: any): string {
     return error?.response?.data?.message || error?.response?.data?.error || 'Failed to cancel queued open';
 }
 
-export default function ValveCancelButton({ device, valve, onUpdate, onError }: Props) {
+export default function ValveCancelButton({ device, onUpdate, onError }: Props) {
     const { t } = useTranslation('devices');
     const { t: tValves } = useTranslation('valves');
     // D04 (owner decision 2026-10-18), verbatim, as the button's description and in a help button.
@@ -33,7 +44,7 @@ export default function ValveCancelButton({ device, valve, onUpdate, onError }: 
         setError(null);
         try {
             // V9: with several opens queued an unnamed cancel is refused as ambiguous_actuation.
-            const expectationId = activeRunExpectationId(valve?.activeActuation);
+            const expectationId = await cancellableRunId(device.deveui);
             await devicesAPI.cancelIrrigation(device.deveui, { expectationId });
             onUpdate?.();
         } catch (err: any) {

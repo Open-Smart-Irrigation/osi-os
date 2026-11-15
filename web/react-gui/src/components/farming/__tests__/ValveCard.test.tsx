@@ -4,7 +4,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { StregaValveCard, getStregaTargetIntent } from '../StregaValveCard';
-import { devicesAPI } from '../../../services/api';
+import { devicesAPI, valvesAPI } from '../../../services/api';
 import type { IrrigationActuation } from '../../../services/api';
 import type { Device, ValveSummary } from '../../../types/farming';
 
@@ -42,6 +42,9 @@ vi.mock('../../../services/api', () => ({
     },
     valveAPI: {
         getTodayLiters: vi.fn().mockResolvedValue({ liters: null, source: 'unknown' }),
+    },
+    valvesAPI: {
+        list: vi.fn().mockResolvedValue([]),
     },
     sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
 }));
@@ -203,8 +206,8 @@ describe('StregaValveCard', () => {
         } as Partial<Device>);
         const cancelBtn = await screen.findByRole('button', { name: /cancel queued open/i });
         fireEvent.click(cancelBtn);
-        // No valve-list row: the cancel names no run (the device list's record is not a
-        // cancellable-only projection, review B1), exactly as before V9.
+        // The valve list has no row for this valve: the cancel names no run (the device list's
+        // record is not a cancellable-only projection, review B1), exactly as before V9.
         await waitFor(() => {
             expect(devicesAPI.cancelIrrigation).toHaveBeenLastCalledWith(mockDevice.deveui, { expectationId: null });
         });
@@ -215,25 +218,23 @@ describe('StregaValveCard', () => {
 
     // Review B1: the device list names a newer CLOSE owner (duration 0) that the gateway's cancel
     // refuses (409 actuation_not_active); the valve list's cancellable-only pass names the older
-    // queued open, and that is the run the card's cancel names.
-    it("names the valve list's cancellable open, not the device list's newer CLOSE owner", async () => {
+    // queued open. Review B2: the card reads that list fresh on the click, not from its cached row.
+    it("names the fresh valve list's cancellable open, not the device list's newer CLOSE owner or the cached row", async () => {
+        const run = (expectationId: string) => ({
+            expectationId,
+            reconciliationState: 'PENDING_OBSERVATION',
+            commandedAt: '2026-11-15T08:00:00Z',
+            expectedCloseAt: '2026-11-15T08:10:00Z',
+            durationSeconds: 600,
+            trigger: 'manual',
+        });
+        vi.mocked(valvesAPI.list).mockResolvedValueOnce([makeValveSummary({ activeActuation: run('vae-open-a') })]);
         renderCard(
             {
                 current_state: 'OPEN',
                 activeValveActuation: { expectationId: 'vae-close-b', reconciliationState: 'PENDING_OBSERVATION' },
             } as Partial<Device>,
-            {
-                valve: makeValveSummary({
-                    activeActuation: {
-                        expectationId: 'vae-open-a',
-                        reconciliationState: 'PENDING_OBSERVATION',
-                        commandedAt: '2026-11-15T08:00:00Z',
-                        expectedCloseAt: '2026-11-15T08:10:00Z',
-                        durationSeconds: 600,
-                        trigger: 'manual',
-                    },
-                }),
-            },
+            { valve: makeValveSummary({ activeActuation: run('vae-ended') }) },
         );
         fireEvent.click(await screen.findByRole('button', { name: /cancel queued open/i }));
         await waitFor(() => {
