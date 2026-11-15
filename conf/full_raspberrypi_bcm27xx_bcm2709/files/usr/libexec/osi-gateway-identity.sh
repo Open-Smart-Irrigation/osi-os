@@ -109,7 +109,7 @@ gateway_identity_read_persisted() {
     local stored stored_source stored_confidence stored_verified
     stored="$(normalize_gateway_eui "$(uci -q get osi-server.cloud.device_eui 2>/dev/null || true)" || true)"
     stored_source="$(uci -q get osi-server.cloud.device_eui_source 2>/dev/null || true)"
-    stored_confidence="$(printf '%s' "$(uci -q get osi-server.cloud.device_eui_confidence 2>/dev/null || true)" | tr '[:upper:]' '[:lower:]')"
+    stored_confidence="$(printf '%s' "$(uci -q get osi-server.cloud.device_eui_confidence 2>/dev/null || true)" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
     stored_verified="$(uci -q get osi-server.cloud.device_eui_last_verified_at 2>/dev/null || true)"
     [ -n "$stored" ] || return 1
     case "$stored_confidence" in

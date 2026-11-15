@@ -68,6 +68,35 @@ function missingFetches(deploySource, moduleName, fileList) {
   return fileList.filter((filename) => !fetchBlockPattern(moduleName, filename).test(deploySource));
 }
 
+// NEW-27: without stat(1), the one-filesystem precondition of the switch is
+// still checked, and a path whose filesystem cannot be read refuses.
+test('same_fs_or_die checks the filesystem without stat and refuses what it cannot read', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const start = indexOf('same_fs_or_die() {');
+  const fn = deploy.slice(start, deploy.indexOf('\n}\n', start) + 3);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-same-fs-'));
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const run = (a, b) => spawnSync('/bin/sh', ['-c', `${fn}\nsame_fs_or_die "$1" "$2"\necho same`, 'sh', a, b],
+    { encoding: 'utf8', env: { PATH: bin } });
+  try {
+    fs.mkdirSync(path.join(dir, 'payloads'));
+    const same = run(dir, path.join(dir, 'payloads'));
+    assert.equal(same.status, 0, same.stderr);
+    assert.match(same.stdout, /same/);
+    const missing = run(dir, path.join(dir, 'absent'));
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /could not read the filesystem/);
+    if (fs.existsSync('/proc/self') && fs.statSync('/proc/self').dev !== fs.statSync(dir).dev) {
+      const other = run(dir, '/proc/self');
+      assert.equal(other.status, 1);
+      assert.match(other.stderr, /different filesystem/);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 for (const mod of FENCED_MODULES) {
   mod.expectedFiles = listExpectedModuleFiles(mod.dir);
 }
@@ -79,8 +108,8 @@ test('deploy.sh fetches the tested payload-swap module and verifies same-filesys
   assert.match(deploy, /SWAP_JS="\$TMP_DIR\/deploy-payload-swap\.js"/);
   assert.match(deploy, /fetch "scripts\/deploy-payload-swap\.js" "\$SWAP_JS"/);
   assert.match(deploy, /same_fs_or_die\(\)/);
-  assert.match(deploy, /stat -c %d \/srv\/node-red/);
-  assert.match(deploy, /stat -c %d "\$PAYLOADS_ROOT"/);
+  assert.match(deploy, /^same_fs_or_die \/srv\/node-red "\$PAYLOADS_ROOT"$/m);
+  assert.doesNotMatch(deploy, /^[^#\n]*\bstat -c/m, 'the gateways have no stat(1) (NEW-27)');
   assert.match(deploy, /typeof out === "boolean"\) process\.exit\(out \? 0 : 1\)/,
     'boolean swap results must propagate false as a nonzero shell status');
 });
@@ -225,15 +254,15 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
 });
 
 test('schema-init completion is required before the bounded /gui health gate', () => {
-  const initBegin = indexOf('# init log check begin');
-  const healthCall = indexOf('if wait_for_node_red_health "$NODE_RED_HEALTH_TIMEOUT"; then');
-  const initResult = deploy.indexOf('sync-init: schema init complete', initBegin);
-  assert.ok(initBegin < initResult && initResult < healthCall,
+  const checkStart = indexOf('check_node_red_start() {');
+  const checkEnd = deploy.indexOf('\n}\n', checkStart);
+  const check = deploy.slice(checkStart, checkEnd);
+  assert.ok(check.indexOf('sync-init: schema init complete') < check.indexOf('wait_for_node_red_health'),
     'schema-init completion must be checked before /gui readiness');
-  const healthHelper = deploy.slice(deploy.indexOf('wait_for_node_red_health() {'), healthCall);
+  const healthHelper = deploy.slice(indexOf('wait_for_node_red_health() {'), indexOf('# node-red health wait end'));
   assert.ok(healthHelper.indexOf('node_red_state="$(node_red_service_state)"') < healthHelper.indexOf('127.0.0.1:1880/gui'),
     'the health helper proves named service state before /gui');
-  assert.match(deploy, /NODE_RED_HEALTH_TIMEOUT:-30/);
+  assert.ok(indexOf('# init log check begin') < deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}" "${NODE_RED_HEALTH_TIMEOUT:-30}"', indexOf('# init log check begin')));
   assert.match(deploy, /sleep 1/);
 });
 
@@ -433,4 +462,11 @@ test('the image seed leaves payload-linked helper modules alone and seeds the re
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('an unverified start is the last line the deploy prints, and the deploy exits 0', () => {
+  const tail = deploy.trimEnd().split('\n').slice(-4).join('\n');
+  assert.match(tail, /^if \[ "\$PROBE_OK" = "unverified" \]; then\n    echo "UNVERIFIED: payloads\/\$DEPLOY_STAMP runs/m);
+  const branch = deploy.indexOf('elif [ "$PROBE_OK" = "unverified" ]; then');
+  assert.doesNotMatch(deploy.slice(branch, deploy.indexOf('\nelse\n', branch)), /\bexit\b/);
 });

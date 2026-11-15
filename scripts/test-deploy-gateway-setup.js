@@ -347,11 +347,19 @@ function events(fx) {
 // deploy.sh's real activation, self-check and commit-or-rollback region. The
 // restart there names /etc/init.d/node-red literally; the copy run here points
 // it at the logging stub.
-function runActivationRegion({ logLine, prevStamp, version }) {
+function runActivationRegion({ logLine, prevStamp, version, migrated = false }) {
   const fx = uciFixture({ version });
   writeUciStub(fx.binDir);
   const stubs = writeEventStubs(fx);
-  writeExecutable(path.join(fx.binDir, 'logread'), ['#!/bin/sh', `echo ${JSON.stringify(`gw node-red[1]: ${logLine}`)}`]);
+  // logger writes the start's marker into the log; logread prints the log
+  // and then the boot node's line, as after a start.
+  const logFile = path.join(fx.binDir, 'syslog');
+  writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'shift 2', `echo "$*" >> ${JSON.stringify(logFile)}`]);
+  writeExecutable(path.join(fx.binDir, 'logread'), logLine === null
+    // A full ring: the marker and the start's lines are evicted.
+    ? ['#!/bin/sh', 'echo "gw kernel: later line"']
+    : ['#!/bin/sh', `cat ${JSON.stringify(logFile)} 2>/dev/null`, `echo ${JSON.stringify(`gw node-red[1]: ${logLine}`)}`]);
+  const startCheck = extractBetween('# node-red start check begin', '# node-red start check end');
   const region = extractBetween('# payload activation begin', '# self-check verdict end')
     .split('/etc/init.d/node-red restart').join('"$NODE_RED_INIT" restart');
   const script = `set -eu
@@ -360,8 +368,9 @@ ${extractFunction('cleanup_failed_first_payload')}
 ${stubs}
 wait_for_node_red_health() { probe_elapsed=1; return 0; }
 hold_node_red_stopped() { return 0; }
-verify_payload_db_compatibility() { return 0; }
-NODE_RED_LOG_MARK=0
+verify_payload_db_compatibility() { return ${migrated ? 1 : 0}; }
+${startCheck}
+NODE_RED_LOG_MARK=""
 GUI_ROOT=/nonexistent-gui
 PAYLOAD_KEEP_N=5
 PAYLOAD_FLIPPED=0
@@ -386,6 +395,19 @@ test('the new version is in UCI before the restart onto the new payload, and sta
   const { result, fx } = runActivationRegion({ logLine: 'sync-init: schema init complete', prevStamp: 'old-stamp', version: '0.6.5' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /REACHED_END/);
+  assert.deepEqual(events(fx), ['flipTo new-stamp fw=0.6.5', 'node-red restart fw=0.8.0']);
+  assert.equal(readState(fx), '0.8.0');
+});
+
+// Ledger item 1: an upgrade that migrated (no older payload fits the
+// database) and starts healthy, but whose start lines the ring evicted, is
+// never held: it keeps running, unverified.
+test('a healthy upgrade that migrated, with its start evicted from the log, keeps running unverified and is not held', () => {
+  const { result, fx } = runActivationRegion({ logLine: null, prevStamp: 'old-stamp', version: '0.6.5', migrated: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /REACHED_END/);
+  assert.match(result.stderr, /running but its start is unverified/);
+  assert.doesNotMatch(result.stderr, /ROLLED BACK|HELD|AUTO-ROLLING-BACK/);
   assert.deepEqual(events(fx), ['flipTo new-stamp fw=0.6.5', 'node-red restart fw=0.8.0']);
   assert.equal(readState(fx), '0.8.0');
 });
