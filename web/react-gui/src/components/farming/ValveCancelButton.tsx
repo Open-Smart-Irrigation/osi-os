@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { devicesAPI, valvesAPI } from '../../services/api';
-import { activeRunExpectationId } from '../../services/valveCancel';
+import { devicesAPI } from '../../services/api';
+import { freshCancellableRunId } from '../../services/valveCancelTarget';
 import type { Device } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
@@ -9,22 +9,6 @@ interface Props {
     device: Device;
     onUpdate?: () => void;
     onError?: (message: string) => void;
-}
-
-// The run a cancel names (V9): the activeActuation of this valve's row in a fresh read of
-// GET /api/valves, the gateway's cancellable-only pass (listValvesForUser). Never the device list's
-// newest active record, which that pass does not filter (a newer CLOSE owner can sit above a queued
-// open, review B1), and never the dashboard's cached row, which can name a run a card action has
-// already ended (review B2). No row, no run or a failed read names no run, as before V9.
-async function cancellableRunId(deveui: string): Promise<string | null> {
-    try {
-        const eui = deveui.toUpperCase();
-        const row = (await valvesAPI.list()).find((valve) => valve.deviceEui.toUpperCase() === eui);
-        return activeRunExpectationId(row?.activeActuation);
-    } catch (e: any) {
-        console.warn('ValveCancelButton: valve list unreadable, cancelling without naming a run: ' + (e && e.message ? e.message : e));
-        return null;
-    }
 }
 
 function getApiMessage(error: any): string {
@@ -44,7 +28,7 @@ export default function ValveCancelButton({ device, onUpdate, onError }: Props) 
         setError(null);
         try {
             // V9: with several opens queued an unnamed cancel is refused as ambiguous_actuation.
-            const expectationId = await cancellableRunId(device.deveui);
+            const expectationId = await freshCancellableRunId(device.deveui);
             await devicesAPI.cancelIrrigation(device.deveui, { expectationId });
             onUpdate?.();
         } catch (err: any) {
