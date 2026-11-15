@@ -216,3 +216,74 @@ test('a failed commit of the osi-server configuration refuses before settings.js
     assert.deepEqual(without(g.manifest()), before, 'the gateway-side tree is unchanged');
   } finally { g.cleanup(); }
 });
+
+// The migration runner's postflight foreign_key_check is global: one orphan
+// anywhere fails it after the first committed migration, and the deploy
+// restores the pre-migration copy and refuses, on every attempt. The
+// preflight now runs the same check read-only, before the first change.
+const sqlite = (db, sql) => require('node:child_process').spawnSync('sqlite3', [db, sql], { encoding: 'utf8' });
+
+test('foreign-key orphans: refused before any change, the tables and counts named, the tree byte-identical', () => {
+  const g = gateway({ layout: 'linked' });
+  try {
+    const r0 = sqlite(g.db, "PRAGMA foreign_keys=OFF; INSERT INTO device_data(deveui, recorded_at) VALUES ('A840410000000001', '2026-01-01 00:00:00'), ('A840410000000001', '2026-01-01 00:10:00'); INSERT INTO dendro_baselines(deveui) VALUES ('A840410000000001');");
+    assert.equal(r0.status, 0, r0.stderr);
+    const before = g.manifest();
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /CONFIGURATION_REACHED/);
+    assert.match(r.stderr, /ERROR: the farm database has foreign-key orphans in dendro_baselines \(1 row\), device_data \(2 rows\); the gateway is unchanged and keeps running its current release; do not retry; contact support with this line/);
+    assert.doesNotMatch(r.stderr, /A840410000000001/, 'no row values');
+    assert.deepEqual(g.manifest(), before, 'the gateway-side tree is byte-identical');
+  } finally { g.cleanup(); }
+});
+
+test('foreign keys: a clean database passes the check', () => {
+  const g = gateway({ layout: 'linked' });
+  try {
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /OK: no foreign-key orphans in the farm database/);
+    assert.match(r.stdout, /CONFIGURATION_REACHED/);
+  } finally { g.cleanup(); }
+});
+
+test('foreign keys: a database without the tables that carry them passes', () => {
+  const g = gateway({ layout: 'linked' });
+  try {
+    fs.rmSync(g.db);
+    assert.equal(sqlite(g.db, 'CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes(body) VALUES (1);').status, 0);
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /OK: no foreign-key orphans in the farm database/);
+  } finally { g.cleanup(); }
+});
+
+test('foreign keys: a lock held for about a second while the check reads: it waits and passes', () => {
+  const g = gateway({ layout: 'linked' });
+  try {
+    // A WAL reader is never made busy by a writer; with a rollback journal
+    // another process's BEGIN EXCLUSIVE is.
+    assert.equal(sqlite(g.db, 'PRAGMA journal_mode=DELETE;').stdout.trim(), 'delete');
+    const real = require('node:child_process').spawnSync('sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' }).stdout.trim();
+    const marker = path.join(g.root, 'fk.locked');
+    const done = path.join(g.root, 'fk.done');
+    fs.writeFileSync(path.join(g.bin, 'sqlite3'), `#!/bin/sh
+case "$*" in *foreign_key_check*)
+  if [ ! -e ${JSON.stringify(marker)} ]; then
+    ( { echo 'BEGIN EXCLUSIVE;'; echo ".shell touch '${marker}'"; sleep 1; echo 'COMMIT;'; } | ${JSON.stringify(real)} ${JSON.stringify(g.db)}; touch ${JSON.stringify(done)} ) >/dev/null 2>&1 &
+    while [ ! -e ${JSON.stringify(marker)} ]; do sleep 0.05; done
+    date +%s%N > ${JSON.stringify(path.join(g.root, 'fk.start'))}
+  fi ;;
+esac
+${JSON.stringify(real)} "$@"; rc=$?
+case "$*" in *foreign_key_check*) date +%s%N > ${JSON.stringify(path.join(g.root, 'fk.end'))} ;; esac
+exit $rc
+`, { mode: 0o755 });
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /OK: no foreign-key orphans in the farm database/);
+    const waitedMs = (Number(fs.readFileSync(path.join(g.root, 'fk.end'), 'utf8')) - Number(fs.readFileSync(path.join(g.root, 'fk.start'), 'utf8'))) / 1e6;
+    assert.ok(waitedMs >= 500, `the check waited for the lock (${waitedMs} ms)`);
+  } finally { g.cleanup(); }
+});
