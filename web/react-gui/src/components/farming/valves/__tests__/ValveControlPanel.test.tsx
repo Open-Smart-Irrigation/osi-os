@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ComponentProps } from 'react';
+import { SWRConfig } from 'swr';
 
 import { ValveControlPanel } from '../ValveControlPanel';
 import { devicesAPI, valvesAPI } from '../../../../services/api';
@@ -312,6 +313,148 @@ describe('ValveControlPanel', () => {
     expect(status).toHaveTextContent('The open may already have been sent to the valve, so it was not deleted.');
     expect(status).toHaveTextContent('Cancel deletes the pending command. It does not close a valve that is already open.');
     expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+  });
+
+  it('shows an uncertain cancel as that outcome instead of a generic failure', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+      response: { status: 503, data: { error: 'cancel_uncertain', outcome: 'uncertain', collateral: [], message: 'Queue state unknown' } },
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The gateway could not confirm that the pending open was deleted.');
+    expect(screen.queryByText('Queue state unknown')).not.toBeInTheDocument();
+    expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+  });
+
+  // V9 (v0.8.2): with several opens queued the gateway refuses an unnamed cancel as
+  // ambiguous_actuation, so the panel names the active run the gateway reports.
+  // V9 (v0.8.2): the cancel goes out unnamed at once, as on 14720cc8. Only a 409
+  // ambiguous_actuation (several opens active, nothing changed on the gateway) leads to one fresh
+  // GET /api/valves and one retry naming that read's run. A refusal shows the gateway's message.
+  describe('cancel retries once, named, after an ambiguous refusal (V9)', () => {
+    const run = (expectationId: string) => ({
+      expectationId,
+      reconciliationState: 'PENDING_OBSERVATION',
+      commandedAt: '2026-11-15T08:00:00Z',
+      expectedCloseAt: '2026-11-15T08:10:00Z',
+      durationSeconds: 600,
+      trigger: 'manual',
+    });
+    const ambiguousMessage = 'More than one actuation is active; name the one to cancel (expectation_id)';
+    const ambiguous = () => ({
+      response: { status: 409, data: { error: 'ambiguous_actuation', ambiguity: 'several_queued', message: ambiguousMessage } },
+    });
+    // A fresh SWR cache per test: the shared one would hand this test the previous test's valve list.
+    const renderPanel = () => render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <ValveControlPanel onUpdate={vi.fn()} canWrite />
+      </SWRConfig>,
+    );
+    // clearAllMocks keeps queued once-values; a reply a test did not use must not reach the next.
+    beforeEach(() => {
+      vi.mocked(devicesAPI.cancelIrrigation).mockReset();
+      vi.mocked(valvesAPI.list).mockReset();
+    });
+    // The cached row (the panel's first read) names vae-a; every later read names vae-b.
+    const cachedThenFresh = (fresh: ReturnType<typeof run> | null) => {
+      vi.mocked(valvesAPI.list)
+        .mockResolvedValue([makeValve({ activeActuation: fresh })])
+        .mockResolvedValueOnce([makeValve({ activeActuation: run('vae-a') })]);
+    };
+    const clickCancel = async () => {
+      const button = await screen.findByRole('button', { name: 'Cancel-0016C001F1000001' });
+      await waitFor(() => expect(valvesAPI.list).toHaveBeenCalledTimes(1));
+      fireEvent.click(button);
+    };
+
+    it('sends the unnamed cancel at once, before any valve-list read, even with a run in the cached row', async () => {
+      cachedThenFresh(run('vae-b'));
+      vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
+      renderPanel();
+      await clickCancel();
+      await waitFor(() => expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(devicesAPI.cancelIrrigation).mock.calls[0]).toEqual(['0016C001F1000001']);
+      const postOrder = vi.mocked(devicesAPI.cancelIrrigation).mock.invocationCallOrder[0];
+      expect(vi.mocked(valvesAPI.list).mock.invocationCallOrder.slice(1).every((order) => order > postOrder)).toBe(true);
+    });
+
+    it('after a 409 ambiguous_actuation reads the valve list fresh and retries once, naming its run', async () => {
+      cachedThenFresh(run('vae-b'));
+      vi.mocked(devicesAPI.cancelIrrigation)
+        .mockRejectedValueOnce(ambiguous())
+        .mockResolvedValueOnce({ outcome: 'cancelled', collateral: [] });
+      renderPanel();
+      await clickCancel();
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('The pending open was deleted.');
+      expect(vi.mocked(devicesAPI.cancelIrrigation).mock.calls).toEqual([
+        ['0016C001F1000001'],
+        ['0016C001F1000001', { expectationId: 'vae-b' }],
+      ]);
+      expect(screen.queryByText(ambiguousMessage)).not.toBeInTheDocument();
+    });
+
+    it("shows the gateway's message when the fresh read reports no run, without a retry", async () => {
+      cachedThenFresh(null);
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce(ambiguous());
+      renderPanel();
+      await clickCancel();
+      expect(await screen.findByText(ambiguousMessage)).toBeInTheDocument();
+      expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the gateway's message when the fresh read fails, without a retry", async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(valvesAPI.list)
+        .mockRejectedValue(new Error('timeout of 10000ms exceeded'))
+        .mockResolvedValueOnce([makeValve({ activeActuation: run('vae-a') })]);
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce(ambiguous());
+      renderPanel();
+      await clickCancel();
+      expect(await screen.findByText(ambiguousMessage)).toBeInTheDocument();
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
+
+    it("shows the retry's own 409 message and sends no third request", async () => {
+      cachedThenFresh(run('vae-b'));
+      vi.mocked(devicesAPI.cancelIrrigation)
+        .mockRejectedValueOnce(ambiguous())
+        .mockRejectedValueOnce({ response: { status: 409, data: { error: 'actuation_not_active', message: 'That actuation is no longer active' } } });
+      renderPanel();
+      await clickCancel();
+      expect(await screen.findByText('That actuation is no longer active')).toBeInTheDocument();
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry a 409 that is not ambiguous_actuation, and keeps the generic failure without a message', async () => {
+      cachedThenFresh(run('vae-b'));
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'actuation_not_active' } },
+      });
+      renderPanel();
+      await clickCancel();
+      expect(await screen.findByText('The action could not be completed.')).toBeInTheDocument();
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1);
+    });
+
+    it('still shows a handed-off 409 as that outcome, not as its message, without a retry', async () => {
+      cachedThenFresh(run('vae-b'));
+      vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'actuation_handed_off', outcome: 'handed_off', collateral: [], message: 'Open already handed off' } },
+      });
+      renderPanel();
+      await clickCancel();
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('The open may already have been sent to the valve, so it was not deleted.');
+      expect(screen.queryByText('Open already handed off')).not.toBeInTheDocument();
+      expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
+      expect(devicesAPI.cancelIrrigation).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {

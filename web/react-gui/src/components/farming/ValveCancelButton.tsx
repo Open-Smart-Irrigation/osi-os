@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { devicesAPI } from '../../services/api';
+import { cancelIrrigationWithAmbiguityRetry } from '../../services/valveCancelRetry';
 import type { Device } from '../../types/farming';
 import { ValveControlHelp } from './shared/ValveControlHelp';
 
@@ -26,7 +26,7 @@ export default function ValveCancelButton({ device, onUpdate, onError }: Props) 
         setBusy(true);
         setError(null);
         try {
-            await devicesAPI.cancelIrrigation(device.deveui);
+            await cancelIrrigationWithAmbiguityRetry(device.deveui);
             onUpdate?.();
         } catch (err: any) {
             const message = getApiMessage(err);

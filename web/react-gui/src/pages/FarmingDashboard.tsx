@@ -89,7 +89,7 @@ export const FarmingDashboard: React.FC = () => {
     () => (devices ?? []).some((d) => d.type_id === 'STREGA_VALVE'),
     [devices],
   );
-  const { data: valves } = useSWR<ValveSummary[]>(
+  const { data: valves, mutate: mutateValves } = useSWR<ValveSummary[]>(
     hasStregaValve ? '/api/valves' : null,
     valvesFetcher,
     {
@@ -115,10 +115,13 @@ export const FarmingDashboard: React.FC = () => {
   // canWrite still gates mutation affordances below.
   const allZones = useMemo(() => zones ?? [], [zones]);
 
+  // Card actions (open, cancel, settings) refresh the valve list too: the cards' valve rows
+  // otherwise wait up to 10 s for the next poll (review B2 on #661).
   const handleUpdate = () => {
     mutateDevices();
     mutateZones();
     mutateIrrigationActuations();
+    mutateValves();
   };
 
   const handleDeviceAdded = () => {
