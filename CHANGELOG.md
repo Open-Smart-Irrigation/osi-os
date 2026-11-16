@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.3] — 2026-11-16
+
+### Upgrade notes
+- A gateway with foreign-key orphans in its database refuses the upgrade
+  cleanly and stays on its version; contact support.
+- In this release, a valve opened locally on the gateway shows as "cloud
+  command" in the irrigation history.
+
 ### Added
 - Edge keeps every complete SDI-12 transmission, with the original LoRaWAN
   application events, in a local archive table before normalization
