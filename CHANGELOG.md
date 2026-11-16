@@ -98,6 +98,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   sysupgrade with a v0.8.1 or older image on a gateway deployed with helper
   modules in the payload, because those images copy their helpers over the
   module links. Both checks run before any live file is replaced (#466).
+- Factory images now carry the current dashboard: the committed feed copy of
+  the GUI is rebuilt from `web/react-gui` (it was last refreshed for v0.8.2's
+  release commit, so images built since lacked later GUI fixes, including the
+  valve-cancel retry). Script upgrades were not affected.
 
 ---
 
