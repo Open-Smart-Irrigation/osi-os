@@ -87,8 +87,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - The cancel of an ordinary open works as in 0.8.1: the open is taken out
     of the queue, settings and a CLOSE are queued again. The whole-queue flush
     of 0.8.2 applies where conditional irrigation is involved. One addition:
-    a cancel that names no open while several are active (the control panel
-    never names one) reads the queue and takes the one active open whose
+    a cancel that names no open while several are active (the control panel's
+    first request names none) reads the queue and takes the one active open whose
     queue id is still listed unsent there. 0.8.1 refused it as ambiguous and
     the valve ran the open. With none or several still queued it is refused
     as before, and the answer says why (`ambiguity`).
