@@ -17,11 +17,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   until this release, because the script upgrade stopped at the payload
   switch and left the gateway stopped (#647). This release's `deploy.sh` converts the image's GUI
   directory and completes the switch (#636).
-- **The deploy checks the farm database before it changes anything.** It
-  runs `PRAGMA integrity_check` on a read-only connection while Node-RED is
-  still running. The check reads every page once; on a slow SD card it is
-  estimated at about a minute and a half for a 100 MB database (not yet
-  measured on a gateway). A damaged database is refused and left byte for
+- **The deploy checks the farm database before replacing settings or
+  switching payloads.** It runs `PRAGMA integrity_check` on a read-only
+  connection while Node-RED is still running. The check reads every page
+  once. In a workstation test limited to 300 reads per second, the check took
+  about a minute and a half for a 113 MiB database; it has not yet been timed
+  on a gateway. A damaged database is refused and left byte for
   byte as it was. Copy it with its side files first, then follow
   [docs/operations/damaged-farm-database.md](docs/operations/damaged-farm-database.md)
   on the owner's word; there is no automatic repair (#651, #659).
@@ -126,7 +127,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - After a valve command times out, the gateway GUI says that no answer has
   arrived yet and that the command may have reached the valve. It no longer
   says "Could not send" or "Failed to open valve" and invites a second press.
-  Valve commands now wait 30 s. After a timed-out command that opens, every
+  Open, close and the five STREGA control requests now wait 30 s; Cancel
+  still waits 10 s. After a timed-out command that opens, every
   opening command for that valve (open, timed or partial open, flushing, and
   a one-time schedule that would start inside the hold) is held until the
   next valve reading or 60 s, whichever comes first. CLOSE is never held. The
@@ -142,7 +144,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   close. A manual open never set it. A timed open's OPEN turns CLOSED when
   the valve reports closed, after a cancel that proves the open never left
   the gateway, or 30 minutes after the open's window when no report comes.
-  Each change reaches the cloud as a device event (#617).
+  When the timed-open target is resolved to CLOSED, that resolution reaches
+  the cloud as a device event (#617).
 - Assigning a device to a zone or removing it, deleting a device or a zone,
   and the conditional-irrigation lifecycle steps no longer fail in the
   gateway's Node-RED on an undeclared `crypto`: the nine function nodes
@@ -240,10 +243,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   "Journal media configuration" (`uci: Entry not found`) with the new
   `settings.js` and init script in place and no working API, because nothing
   created `/etc/config/osi-server`. The deploy now creates it from the image's
-  own defaults. The checks that can refuse because of the gateway's state
-  now run before the first change, so a refusal leaves the gateway as it
-  found it; the ChirpStack credential-file check is the one that still runs
-  after it. On images, the first-boot Tailscale join no longer fails for a
+  own defaults. Gateway-state checks now run before the settings and init
+  scripts are replaced. Installing a missing SQLite command or repairing its
+  native module can happen earlier; the ChirpStack credential-file check still
+  runs after those files are replaced. On images, the first-boot Tailscale join no longer fails for a
   key that contains the letters s, p, a, c or e, which the base's `tr`
   deleted from the key (#659).
 - Dendrometer analytics fetches provider rain and VPD again; the fetch had
