@@ -160,8 +160,44 @@ test('one shared deadline includes reservation, claim, and enqueue time', async 
   assert.equal(h.enqueueCalls, 1);
   assert.equal(h.sleeps.length, 1);
   assert.ok(h.elapsed < 9000);
-  assert.equal(h.warnings.length, 1, 'no full bookkeeping wait fits the remaining budget');
+  assert.deepEqual(h.warnings, [], 'the first bookkeeping attempt always runs');
+  assert.equal((await h.state()).phase, 'ACCEPTED');
+  assert.equal((await h.state()).queue_id, 'busy-queue');
+});
+
+test('a slow enqueue with no busy error still records ACCEPTED and the queue id', async (t) => {
+  // A command that waited behind other helper work reaches the bookkeeping
+  // late; with no lock contention its first attempt must still be written.
+  const h = await harness(t, { failures: 0, enqueueMs: 8500 });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.deepEqual({ accepted: result.accepted, phase: result.phase, queue_id: result.queue_id },
+    { accepted: true, phase: 'ACCEPTED', queue_id: 'busy-queue' });
+  assert.equal(h.enqueueCalls, 1);
+  assert.deepEqual(h.warnings, []);
+  assert.deepEqual(h.sleeps, []);
+  const state = await h.state();
+  assert.equal(state.phase, 'ACCEPTED');
+  assert.equal(state.queue_id, 'busy-queue');
+});
+
+test('past the deadline a busy bookkeeping attempt runs once, is not retried, and names the command', async (t) => {
+  const h = await harness(t, { failures: Infinity, enqueueMs: 8500 });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.equal(result.accepted, true);
+  assert.equal(result.queue_id, 'busy-queue');
+  assert.equal(h.enqueueCalls, 1);
+  assert.equal(h.injections, 1, 'one first attempt, no retry past the deadline');
+  assert.deepEqual(h.sleeps, []);
+  assert.equal(h.warnings.length, 1);
+  assert.match(h.warnings[0], new RegExp('device ' + FIXTURE_EUI + ' owner expectation:'));
+  assert.match(h.warnings[0], /queue busy-queue/);
   assert.equal((await h.state()).phase, 'ATTEMPTED');
+});
+
+test('enqueueValveCommand keeps its async contract for invalid arguments', async () => {
+  const pending = dispatch.enqueueValveCommand(null);
+  assert.ok(pending instanceof Promise);
+  await assert.rejects(pending, TypeError);
 });
 
 test('post-enqueue busy waits consume the deadline and stop further retries', async (t) => {

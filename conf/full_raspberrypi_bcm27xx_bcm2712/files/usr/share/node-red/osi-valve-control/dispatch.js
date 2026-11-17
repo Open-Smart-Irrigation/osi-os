@@ -711,15 +711,14 @@ function busyRetryContext({ retryClock = () => performance.now(), sleep = (ms) =
   return { clock: retryClock, sleep, deadline: retryClock() + 9000 };
 }
 
-async function transaction(db, callback, retry, bookkeeping = false) {
+async function transaction(db, callback, retry) {
   if (!retry) return db.transaction(callback);
   let lastBusy;
   for (let attempt = 0; ; attempt += 1) {
     // The shared helper can wait 5 s in BEGIN IMMEDIATE. Never change its
-    // busy_timeout: it belongs to every helper user in the process.
-    if ((bookkeeping || attempt > 0) && retry.clock() + 5000 >= retry.deadline) {
-      throw lastBusy || errorWithCode('bookkeeping_deadline', 'no time remains for accepted enqueue bookkeeping');
-    }
+    // busy_timeout: it belongs to every helper user in the process. The first
+    // attempt always runs; only retries must fit the dispatch deadline.
+    if (attempt > 0 && retry.clock() + 5000 >= retry.deadline) throw lastBusy;
     try { return await db.transaction(callback); }
     catch (error) {
       const backoff = 100 * (attempt + 1);
@@ -855,7 +854,7 @@ function classifyEnqueueError(error) {
 }
 
 async function persistAttempt(db, owner, phase, patch, retry) {
-  return transaction(db, (tx) => updateOwnerTransportTx(tx, owner, { phase, ...patch }), retry, true);
+  return transaction(db, (tx) => updateOwnerTransportTx(tx, owner, { phase, ...patch }), retry);
 }
 
 async function ownerStateTx(tx, owner, deviceEui) {
@@ -1043,16 +1042,16 @@ async function occurrenceForOwner(db, owner, retry) {
     const expectation = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [owner.id]);
     if (!expectation || !expectation.command_id) return null;
     return tx.get('SELECT * FROM irrigation_occurrences WHERE command_id=?', [expectation.command_id]);
-  }, retry, true);
+  }, retry);
 }
 
 async function markOccurrenceSent(db, owner, queueId, now, retry) {
   const occurrence = await occurrenceForOwner(db, owner, retry);
   if (!occurrence || occurrence.state !== 'ATTEMPTED') return;
-  await transaction(db, (tx) => policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'SENT', queue_id: queueId, sent_at: nowIso(now) }, { now: nowIso(now) }), retry, true);
+  await transaction(db, (tx) => policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'SENT', queue_id: queueId, sent_at: nowIso(now) }, { now: nowIso(now) }), retry);
 }
 
-function enqueueValveCommand(options = {}) {
+async function enqueueValveCommand(options = {}) {
   return enqueueValveCommandWithRetry(options, busyRetryContext(options));
 }
 
@@ -1119,7 +1118,8 @@ async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transp
       await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(claimContext.now) }, retry);
       await markOccurrenceSent(db, owner, queueId, claimContext.now, retry);
     } catch (error) {
-      const message = '[valve-control] accepted enqueue bookkeeping failed; recovery required: ' + String(error && error.message || error);
+      const message = '[valve-control] accepted enqueue bookkeeping failed; recovery required for device ' + device
+        + ' owner ' + owner.type + ':' + owner.id + ' queue ' + queueId + ': ' + String(error && error.message || error);
       try { warn(message); }
       catch (warningError) { console.warn(message, warningError); }
     }
