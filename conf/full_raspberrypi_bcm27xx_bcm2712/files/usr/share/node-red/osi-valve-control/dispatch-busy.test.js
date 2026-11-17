@@ -189,7 +189,9 @@ test('past the deadline a busy bookkeeping attempt runs once, is not retried, an
   assert.equal(h.injections, 1, 'one first attempt, no retry past the deadline');
   assert.deepEqual(h.sleeps, []);
   assert.equal(h.warnings.length, 1);
-  assert.match(h.warnings[0], new RegExp('device ' + FIXTURE_EUI + ' owner expectation:'));
+  const expectation = await h.fixture.db.get('SELECT expectation_id FROM valve_actuation_expectations WHERE command_id=?', ['busy-command']);
+  assert.ok(expectation && expectation.expectation_id);
+  assert.ok(h.warnings[0].includes('device ' + FIXTURE_EUI + ' owner expectation:' + expectation.expectation_id + ' '));
   assert.match(h.warnings[0], /queue busy-queue/);
   assert.equal((await h.state()).phase, 'ATTEMPTED');
 });
