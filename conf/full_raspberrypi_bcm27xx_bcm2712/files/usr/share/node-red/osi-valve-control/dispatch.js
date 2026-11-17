@@ -7,6 +7,7 @@
 
 const crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
+const { performance } = require('node:perf_hooks');
 const policyStore = require('../osi-irrigation-policy/store');
 const { parseInstant } = require('../osi-irrigation-policy/timestamps');
 const { runtimeClockStatus, readRuntimeClock } = require('../osi-irrigation-policy/clock');
@@ -702,8 +703,31 @@ function withValveWriter(deviceEui, fn) {
   return withValveWriters([key], fn);
 }
 
-async function transaction(db, callback) {
-  return db.transaction(callback);
+function isSqliteBusy(error) {
+  return Boolean(error && (error.code === 'SQLITE_BUSY' || /database is locked/i.test(String(error.message || error))));
+}
+
+function busyRetryContext({ retryClock = () => performance.now(), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  return { clock: retryClock, sleep, deadline: retryClock() + 9000 };
+}
+
+async function transaction(db, callback, retry, bookkeeping = false) {
+  if (!retry) return db.transaction(callback);
+  let lastBusy;
+  for (let attempt = 0; ; attempt += 1) {
+    // The shared helper can wait 5 s in BEGIN IMMEDIATE. Never change its
+    // busy_timeout: it belongs to every helper user in the process.
+    if ((bookkeeping || attempt > 0) && retry.clock() + 5000 >= retry.deadline) {
+      throw lastBusy || errorWithCode('bookkeeping_deadline', 'no time remains for accepted enqueue bookkeeping');
+    }
+    try { return await db.transaction(callback); }
+    catch (error) {
+      const backoff = 100 * (attempt + 1);
+      if (!isSqliteBusy(error) || attempt >= 2 || retry.clock() + 5000 + backoff >= retry.deadline) throw error;
+      lastBusy = error;
+      await retry.sleep(backoff);
+    }
+  }
 }
 
 async function updateOwnerTransportTx(tx, owner, patch) {
@@ -830,8 +854,8 @@ function classifyEnqueueError(error) {
   return 'UNKNOWN';
 }
 
-async function persistAttempt(db, owner, phase, patch) {
-  return transaction(db, (tx) => updateOwnerTransportTx(tx, owner, { phase, ...patch }));
+async function persistAttempt(db, owner, phase, patch, retry) {
+  return transaction(db, (tx) => updateOwnerTransportTx(tx, owner, { phase, ...patch }), retry, true);
 }
 
 async function ownerStateTx(tx, owner, deviceEui) {
@@ -1009,26 +1033,30 @@ async function ensureOpaqueOwnerTx(tx, owner, deviceEui, item) {
   }
 }
 
-async function claimOwnerAttempt(db, owner, deviceEui, now, item, effectContext) {
-  return transaction(db, (tx) => claimOwnerAttemptTx(tx, owner, deviceEui, now, item, effectContext));
+async function claimOwnerAttempt(db, owner, deviceEui, now, item, effectContext, retry) {
+  return transaction(db, (tx) => claimOwnerAttemptTx(tx, owner, deviceEui, now, item, effectContext), retry);
 }
 
-async function occurrenceForOwner(db, owner) {
+async function occurrenceForOwner(db, owner, retry) {
   if (!owner || owner.type !== 'expectation') return null;
-  return db.transaction(async (tx) => {
+  return transaction(db, async (tx) => {
     const expectation = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [owner.id]);
     if (!expectation || !expectation.command_id) return null;
     return tx.get('SELECT * FROM irrigation_occurrences WHERE command_id=?', [expectation.command_id]);
-  });
+  }, retry, true);
 }
 
-async function markOccurrenceSent(db, owner, queueId, now) {
-  const occurrence = await occurrenceForOwner(db, owner);
+async function markOccurrenceSent(db, owner, queueId, now, retry) {
+  const occurrence = await occurrenceForOwner(db, owner, retry);
   if (!occurrence || occurrence.state !== 'ATTEMPTED') return;
-  await transaction(db, (tx) => policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'SENT', queue_id: queueId, sent_at: nowIso(now) }, { now: nowIso(now) }));
+  await transaction(db, (tx) => policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'SENT', queue_id: queueId, sent_at: nowIso(now) }, { now: nowIso(now) }), retry, true);
 }
 
-async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now, trustedContext } = {}) {
+function enqueueValveCommand(options = {}) {
+  return enqueueValveCommandWithRetry(options, busyRetryContext(options));
+}
+
+async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transport, now, trustedContext, warn = console.warn } = {}, retry) {
   const device = normalizeDevice(deviceEui || (item && item.devEui));
   if (!db || !owner || !item || !transport) throw new TypeError('enqueueValveCommand requires db, owner, item and transport');
   if (item.effect_snapshot) throw errorWithCode('effect_snapshot_forbidden', 'capture the immutable effect snapshot before enqueue');
@@ -1038,7 +1066,7 @@ async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now,
     const beforeClaim = await transaction(db, async (tx) => {
       await ensureOpaqueOwnerTx(tx, owner, device, item);
       return ownerStateTx(tx, owner, device);
-    });
+    }, retry);
     if (!beforeClaim.transport.phase && beforeClaim.occurrence && beforeClaim.occurrence.state === 'RESERVED') {
       const expiresAt = beforeClaim.occurrence.expires_at;
       if (!Number.isFinite(instantMs(expiresAt))) throw errorWithCode('conditional_expiry_missing', 'linked conditional occurrence has no valid expiry');
@@ -1046,7 +1074,7 @@ async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now,
     }
     const stateContext = beforeClaim.transport && beforeClaim.transport.effect_snapshot
       ? { ...(trustedContext || {}), clock: claimContext.clock, receipt: claimContext.receipt } : {};
-    const attempt = await claimOwnerAttempt(db, owner, device, startedAt, item, stateContext);
+    const attempt = await claimOwnerAttempt(db, owner, device, startedAt, item, stateContext, retry);
     if (!attempt.send) {
       return {
         accepted: attempt.transport.phase === 'ACCEPTED',
@@ -1068,15 +1096,13 @@ async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now,
       // an expiry the caller put on the command itself is passed on.
       expiresAt = beforeClaim.transport.effect_snapshot.explicit_expiry_at || undefined;
     }
+    let queueId;
     try {
       const enqueue = transport.enqueueDownlink || transport.enqueue;
       if (typeof enqueue !== 'function') throw errorWithCode('transport_method_missing', 'transport enqueue method is required');
       const result = await enqueue.call(transport, { ...item, devEui: device, expiresAt });
-      const queueId = result && (result.id || result.queue_id || result.queueId);
+      queueId = result && (result.id || result.queue_id || result.queueId);
       if (typeof queueId !== 'string' || !queueId.trim()) throw errorWithCode('enqueue_unknown', 'enqueue returned no queue id');
-      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(claimContext.now) });
-      await markOccurrenceSent(db, owner, queueId, claimContext.now);
-      return { accepted: true, phase: 'ACCEPTED', queue_id: queueId };
     } catch (error) {
       const classification = classifyEnqueueError(error);
       if (classification === 'enqueue_failed_before_acceptance' || classification === 'enqueue_rejected') {
@@ -1087,6 +1113,17 @@ async function enqueueValveCommand({ db, deviceEui, owner, item, transport, now,
       await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso() });
       return { accepted: false, phase: 'UNKNOWN', queue_id: null, error };
     }
+    // A queue ID proves acceptance. Local bookkeeping can never turn that
+    // physical handoff into an enqueue failure or authorize another frame.
+    try {
+      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(claimContext.now) }, retry);
+      await markOccurrenceSent(db, owner, queueId, claimContext.now, retry);
+    } catch (error) {
+      const message = '[valve-control] accepted enqueue bookkeeping failed; recovery required: ' + String(error && error.message || error);
+      try { warn(message); }
+      catch (warningError) { console.warn(message, warningError); }
+    }
+    return { accepted: true, phase: 'ACCEPTED', queue_id: queueId };
   });
 }
 
@@ -1118,7 +1155,8 @@ function compositionCommand(command, device, effectClass) {
 // and one enqueue share one reentrant per-device writer owner.
 async function executeValveAttempt({ db, deviceEui, command, frame, transport, now, trustedContext, policy, delivery_settings,
   interval_source, interval_minutes, minimum_gap_minutes, qualificationProvider, qualificationContext, current_state, current_state_at,
-  onceScheduleUuid } = {}) {
+  onceScheduleUuid, retryClock, sleep, warn } = {}) {
+  const retry = busyRetryContext({ retryClock, sleep });
   const device = normalizeDevice(deviceEui || (command && (command.device_eui || command.deviceEui)));
   if (!db || !transport || !frame) throw new TypeError('executeValveAttempt requires db, frame and transport');
   const classified = effects.classifyEffect(frame);
@@ -1201,7 +1239,7 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
       }
       const stored = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [owner.id]);
       return { owner, expectation: stored, transport: parsePersistedJson(stored.transport_json, 'transport_state_malformed', {}), replayed: false, send: true, once: onceScheduleUuid || null };
-    });
+    }, retry);
     if (prepared.replayed) {
       return { accepted: prepared.transport.phase === 'ACCEPTED', phase: prepared.transport.phase || 'UNKNOWN',
         queue_id: prepared.transport.queue_id || null, replayed: true, owner: prepared.owner,
@@ -1217,12 +1255,12 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
         device_eui: device, qualification_context: snapshot.qualification_context,
       });
     }
-    const result = await enqueueValveCommand({
+    const result = await enqueueValveCommandWithRetry({
       db, deviceEui: device, owner: prepared.owner,
       item: { fPort: normalizedFrame.fPort, data: normalizedFrame.data, confirmed: false, encrypted: false, provenance: normalizedFrame.provenance },
-      transport, now: finalContext.now,
+      transport, now: finalContext.now, warn,
       trustedContext: { ...(trustedContext || {}), currentQualification },
-    });
+    }, retry);
     return { ...result, owner: prepared.owner, snapshot, once: prepared.once };
   });
 }
