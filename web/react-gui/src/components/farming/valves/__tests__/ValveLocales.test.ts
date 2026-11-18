@@ -36,6 +36,18 @@ describe('valves locale bundles', () => {
     }
   });
 
+  it('translates the confirmation outcomes in every locale and preserves the deadline placeholder', () => {
+    for (const locale of LOCALES) {
+      for (const key of ['awaitingConfirmation', 'notConfirmed', 'onceFired']) {
+        const path = `scheduleDialog.${key}`;
+        const value = atPath(readLocale(locale), path);
+        expect(typeof value).toBe('string');
+        if (locale !== 'en') expect(value, `${locale} ${path}`).not.toBe(atPath(readLocale('en'), path));
+      }
+      expect(atPath(readLocale(locale), 'scheduleDialog.awaitingConfirmation')).toContain('{{time}}');
+    }
+  });
+
   it('keeps SWT thresholds and Recommended in Moist help only', () => {
     const english = readLocale('en');
     const preference = atPath(english, 'irrigationPreference') as Record<string, any>;

@@ -1688,6 +1688,7 @@ module.exports = {
   getDailyAccounting,
   getDailyAccountingTx,
   updateOwnerTransportTx,
+  cancelledUnsent, invalidatedByEarlierFlush,
   captureEffectSnapshot,
   captureEffectSnapshotTx,
   effects,

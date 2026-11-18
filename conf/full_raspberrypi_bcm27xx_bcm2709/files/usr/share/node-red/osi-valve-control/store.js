@@ -73,8 +73,42 @@ async function listValvesForUser(db, userId) {
   return rows;
 }
 
-async function listSchedules(db, deviceEui) {
-  return db.all('SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at', [deviceEui]);
+async function recentUplinkTimes(db, deviceEui, nowDate) {
+  const since = new Date(nowDate.getTime() - 48 * 3600000).toISOString();
+  const rows = await db.all('SELECT recorded_at FROM device_data WHERE deveui=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at DESC LIMIT 10', [deviceEui, since, nowDate.toISOString()]);
+  return rows.map((row) => row.recorded_at);
+}
+
+async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
+  const rows = await db.all(`SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at,
+    vae.transport_json AS dispatch_transport_json,
+    CASE WHEN vs.kind='ONCE' AND vs.once_state='SKIPPED' THEN (SELECT e.reason FROM irrigation_events e WHERE e.action='SKIP' AND e.reason IN ('one_time_uncertain','one_time_missed')
+      AND json_extract(e.payload_json,'$.schedule_uuid')=vs.schedule_uuid AND json_extract(e.payload_json,'$.fire_at')=vs.fire_at ORDER BY e.id DESC LIMIT 1) END AS skip_reason
+    FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid
+    LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id
+    WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at`, [deviceEui]);
+  let uplinkTimes;
+  for (const row of rows) {
+    row.awaiting_confirmation_until = null;
+    row.once_outcome = row.once_state === 'SKIPPED' ? (row.skip_reason === 'one_time_uncertain' ? 'uncertain' : row.skip_reason === 'one_time_missed' ? 'missed' : null) : null;
+    if (row.kind === 'ONCE' && row.once_state === 'PENDING' && ['UNKNOWN', 'ATTEMPTED'].includes(row.dispatch_state)) {
+      let transport;
+      try { transport = row.dispatch_transport_json ? JSON.parse(row.dispatch_transport_json) : {}; }
+      catch (_) { transport = {}; }
+      const attemptedAt = row.dispatch_attempted_at || transport.attempted_at;
+      if (attemptedAt || ['UNKNOWN', 'ATTEMPTED'].includes(transport.phase)) {
+        if (!uplinkTimes) uplinkTimes = await recentUplinkTimes(db, row.device_eui, now);
+        // Lazy import: workers uses this store; resolve the shared formula only
+        // when listing schedules, after both modules have finished loading.
+        const { confirmationDeadline } = require('./workers');
+        const deadline = confirmationDeadline({ attemptedAt, fireAt: row.fire_at, uplinkTimes, now });
+        if (parseAckInstant(deadline.confirmBy) >= now.getTime()) row.awaiting_confirmation_until = deadline.confirmBy;
+      }
+    }
+    delete row.dispatch_transport_json;
+    delete row.skip_reason;
+  }
+  return rows;
 }
 
 async function listPoliciesForSchedules(db, schedules) {
@@ -940,5 +974,5 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
+module.exports = { recentUplinkTimes, markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
   supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX };

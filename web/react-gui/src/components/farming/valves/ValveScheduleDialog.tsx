@@ -29,6 +29,7 @@ function deletionContent(schedule: ValveSchedule): string {
     schedule.weekdaysMask, schedule.startTime, schedule.fireAt, schedule.durationMinutes,
     schedule.timezone, schedule.enabled, schedule.onceState, schedule.dispatchState,
     schedule.dispatchCommandId, schedule.dispatchCreatedAt, schedule.dispatchAttemptedAt,
+    schedule.awaitingConfirmationUntil, schedule.onceOutcome,
     schedule.syncVersion, schedule.conditionPolicyUuid, schedule.effectiveFrom, schedule.execution,
   ]);
 }
@@ -605,9 +606,17 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                             {scheduleSummary(schedule, valve.timezone, td, i18n?.language)}
                           </p>
                           {schedule.kind === 'ONCE' && schedule.dispatchState && (
-                            <p className={`truncate text-xs ${schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
-                              {td('scheduleDialog.dispatchStatus', { state: dispatchStateLabel(schedule.dispatchState, td), defaultValue: 'Dispatch: {{state}}' })}
-                              {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
+                            <p className={`text-xs ${schedule.onceOutcome === 'uncertain' || schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
+                              {schedule.onceState === 'FIRED' && schedule.dispatchState === 'SKIPPED'
+                                ? td('scheduleDialog.onceFired')
+                                : schedule.awaitingConfirmationUntil
+                                  ? td('scheduleDialog.awaitingConfirmation', { time: formatClock(schedule.awaitingConfirmationUntil, valve.timezone, i18n?.language) })
+                                  : schedule.onceOutcome === 'uncertain'
+                                    ? td('scheduleDialog.notConfirmed')
+                                    : <>
+                                      {td('scheduleDialog.dispatchStatus', { state: dispatchStateLabel(schedule.dispatchState, td), defaultValue: 'Dispatch: {{state}}' })}
+                                      {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
+                                    </>}
                             </p>
                           )}
                         </div>

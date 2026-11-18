@@ -24,6 +24,9 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.preview': '{{days}} {{start}}–{{end}} · {{minutes}} min',
     'scheduleDialog.previewLiters': '≈ {{liters}} L',
     'scheduleDialog.onceNote': 'One-time opens are sent by the gateway at that minute; the gateway must be online.',
+    'scheduleDialog.awaitingConfirmation': "Sent, waiting for the valve's confirmation (until {{time}})",
+    'scheduleDialog.notConfirmed': 'Not confirmed — check the valve',
+    'scheduleDialog.onceFired': 'Fired',
     'scheduleDialog.dispatchStatus': 'Dispatch: {{state}}',
     'scheduleDialog.dispatchStates.SENT': 'Sent to the radio network',
     'scheduleDialog.dispatchStates.PENDING': 'PENDING',
@@ -295,6 +298,21 @@ describe('ValveScheduleDialog', () => {
     });
     renderDialog(makeValve());
     expect(await screen.findByText(/Dispatch: Sent to the radio network/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { onceState: 'PENDING' as const, dispatchState: 'UNKNOWN' as const, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null, text: "Sent, waiting for the valve's confirmation (until 12:38 PM)" },
+    { onceState: 'SKIPPED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: 'uncertain' as const, text: 'Not confirmed — check the valve' },
+    { onceState: 'FIRED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: null, text: 'Fired' },
+  ])('shows the one-time outcome: $text', async ({ text, ...status }) => {
+    schedulesMock.mockResolvedValue({
+      ...emptyResponse(),
+      schedules: [{ scheduleUuid: 'once-status', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Once status', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, ...status }],
+    });
+    renderDialog(makeValve());
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.queryByText(/Dispatch: UNKNOWN/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dispatch: SKIPPED/)).not.toBeInTheDocument();
   });
 
   it('badges each weekday with the first push row as the API returns it, even when queuedAt disagrees (clock stepped back)', async () => {

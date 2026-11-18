@@ -245,3 +245,21 @@ describe('valvesAPI setSchedulerStatus refusal', () => {
     await expect(valvesAPI.setSchedulerStatus(EUI, 'DEACTIVATED')).rejects.toBe(other);
   });
 });
+
+
+describe('one-time confirmation fields', () => {
+  it('maps snake_case and camelCase deadlines and outcomes, with null on older gateways', async () => {
+    axiosMocks.get.mockResolvedValue({ data: { schedules: [
+      { schedule_uuid: 'waiting', device_eui: 'a840410000000001', kind: 'ONCE', awaiting_confirmation_until: '2026-08-19T10:38:00Z', once_outcome: null },
+      { scheduleUuid: 'uncertain', deviceEui: 'A840410000000001', kind: 'ONCE', awaitingConfirmationUntil: null, onceOutcome: 'uncertain' },
+      { schedule_uuid: 'old', device_eui: 'A840410000000001', kind: 'ONCE' },
+    ] } });
+    const { valvesAPI } = await import('../../../../services/api');
+    const { schedules } = await valvesAPI.schedules('A840410000000001');
+    expect(schedules[0].awaitingConfirmationUntil).toBe('2026-08-19T10:38:00Z');
+    expect(schedules[0].deviceEui).toBe('A840410000000001');
+    expect(schedules[1].onceOutcome).toBe('uncertain');
+    expect(schedules[2].awaitingConfirmationUntil).toBeNull();
+    expect(schedules[2].onceOutcome).toBeNull();
+  });
+});

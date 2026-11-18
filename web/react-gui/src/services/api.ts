@@ -1935,6 +1935,8 @@ function normaliseValveSchedule(row: any): ValveSchedule {
     dispatchCommandId: row?.dispatch_command_id ?? row?.dispatchCommandId ?? null,
     dispatchCreatedAt: row?.dispatch_created_at ?? row?.dispatchCreatedAt ?? null,
     dispatchAttemptedAt: row?.dispatch_attempted_at ?? row?.dispatchAttemptedAt ?? null,
+    awaitingConfirmationUntil: row?.awaiting_confirmation_until ?? row?.awaitingConfirmationUntil ?? null,
+    onceOutcome: row?.once_outcome ?? row?.onceOutcome ?? null,
     syncVersion: row?.sync_version == null ? null : Number(row.sync_version),
     conditionPolicyUuid: row?.condition_policy_uuid ?? row?.conditionPolicyUuid ?? null,
     effectiveFrom: row?.effective_from ?? row?.effectiveFrom ?? null,
