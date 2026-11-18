@@ -816,7 +816,6 @@ async function settleOnceUncertain(db, row, nowDate, readQueue, warn) {
   return db.transaction(async (tx) => {
     // A successful read remains evidence even if this schedule was disabled
     // while the RPC was in flight. Eligibility is checked separately below.
-    await dispatch.recordQueueAbsenceTx(tx, row.device_eui, snapshot.readable ? queue : null, snapshot.readAt);
     // A concurrent tick or an operator may have settled/cancelled the schedule
     // while the queue lookup was in flight. Re-read both eligibility and proof.
     const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.expectation_id, vae.commanded_duration_seconds, vae.transport_json, vae.observed_open_at, vae.reconciliation_state FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.command_id=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [row.schedule_uuid, row.command_id]);
@@ -875,7 +874,8 @@ async function correctLateOnceOpens(db, nowDate, warn) {
     WHERE vae.commanded_at >= ? AND julianday(vae.commanded_at)>=julianday(?)
       AND i.state='SKIPPED' AND vs.kind='ONCE' AND vs.once_state='SKIPPED' AND vs.deleted_at IS NULL AND d.deleted_at IS NULL
       AND json_extract(CASE WHEN json_valid(vae.transport_json) THEN vae.transport_json ELSE '{}' END,'$.once_settlement')='uncertain'
-      AND julianday(json_extract(CASE WHEN json_valid(vae.transport_json) THEN vae.transport_json ELSE '{}' END,'$.once_confirm_by')) + vae.commanded_duration_seconds/86400.0 >= julianday(?)`, [recent.slice(0, 10), recent, nowIso]);
+      AND COALESCE(julianday(json_extract(CASE WHEN json_valid(vae.transport_json) THEN vae.transport_json ELSE '{}' END,'$.once_confirm_by')),
+        julianday(COALESCE(i.attempted_at,json_extract(CASE WHEN json_valid(vae.transport_json) THEN vae.transport_json ELSE '{}' END,'$.attempted_at'),vs.fire_at)) + 3.0/24.0) + vae.commanded_duration_seconds/86400.0 >= julianday(?)`, [recent.slice(0, 10), recent, nowIso]);
   for (const candidate of candidates) {
     try {
       await db.transaction(async (tx) => {
@@ -892,7 +892,19 @@ async function correctLateOnceOpens(db, nowDate, warn) {
         if (transport.once_settlement !== 'uncertain') return;
         const attemptedAt = row.attempted_at || transport.attempted_at || row.fire_at;
         const start = observationInstant(attemptedAt);
-        const deadline = await store.onceConfirmationDeadline(tx, { ...row, expectation_id: own.expectation_id }, transport, nowDate);
+        let legacySkip = null;
+        if (observationInstant(transport.once_confirm_by) == null) {
+          // Only legacy candidates read audit history, through the timestamp
+          // index and this tick's bounded lookback; unzoned rows use the default.
+          const event = await tx.get(`SELECT payload_json FROM irrigation_events INDEXED BY idx_irrig_events_created_at
+            WHERE created_at >= ? AND created_at < ? AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)
+              AND action='SKIP' AND reason='one_time_uncertain' AND valve_deveui=?
+              AND json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END,'$.schedule_uuid')=?
+              AND json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END,'$.fire_at')=?
+            ORDER BY created_at DESC LIMIT 1`, [recent.slice(0, 10), new Date(nowDate.getTime() + 86400000).toISOString().slice(0, 10), recent, nowIso, row.device_eui, row.schedule_uuid, row.fire_at]);
+          if (event) legacySkip = JSON.parse(event.payload_json);
+        }
+        const deadline = await store.onceConfirmationDeadline(tx, { ...row, expectation_id: own.expectation_id }, transport, nowDate, legacySkip);
         const confirmBy = deadline.confirmBy;
         const frame = attemptedOnceFrame(own, transport);
         if (frame) row.duration_minutes = frame.durationMinutes;
@@ -935,22 +947,27 @@ function withOnceClaimWriter(db, fn) {
   return scheduled;
 }
 
-async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, transport, onError, trustedContext, queueReadNow = Date.now }) {
+async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, transport, onError, trustedContext, queueReadNow = Date.now, enqueueNow = Date.now }) {
   const nowDate = now || new Date();
   const nowMs = nowDate.getTime();
   const queueReads = new Map();
   const readQueue = (deviceEui) => {
-    if (!queueReads.has(deviceEui)) queueReads.set(deviceEui, (async () => {
+    if (!queueReads.has(deviceEui)) queueReads.set(deviceEui, dispatch.withValveWriter(deviceEui, async () => {
+      // No SQLite transaction is held during the bounded RPC. Independent local
+      // enqueues wait on this writer; the quiet-time rule still covers late server work.
+      const read_started_at = new Date(queueReadNow()).toISOString();
       try {
         if (!transport || typeof transport.getDeviceQueue !== 'function') return { readable: false, items: [] };
         const items = await transport.getDeviceQueue(deviceEui);
+        const read_completed_at = new Date(queueReadNow()).toISOString();
         if (!dispatch.readableQueue(items)) throw new Error('malformed queue response');
-        return { readable: true, items, readAt: new Date(queueReadNow()).toISOString() };
+        await db.transaction((tx) => dispatch.recordQueueAbsenceTx(tx, deviceEui, items, { read_started_at, read_completed_at }));
+        return { readable: true, items, read_started_at, read_completed_at };
       } catch (error) {
         warn && warn('[valve-control] one-time uncertain queue lookup failed: ' + error.message);
-        return { readable: false, items: [] };
+        return { readable: false, items: [], read_started_at, read_completed_at: new Date(queueReadNow()).toISOString() };
       }
-    })());
+    }));
     return queueReads.get(deviceEui);
   };
   const correctionWarn = typeof warn === 'function' ? warn : typeof onError === 'function' ? onError : null;
@@ -1033,7 +1050,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
           command.transportResult = await dispatch.executeValveAttempt({
             db, deviceEui: row.device_eui,
             command: { device_eui: row.device_eui, command_id: row.command_id, action: 'OPEN_FOR_DURATION', duration_minutes: Number(row.duration_minutes), zone_id: row.irrigation_zone_id, trigger: 'one_time', commanded_at: row.fire_at },
-            frame, transport, now: nowDate, trustedContext, onceScheduleUuid: row.schedule_uuid,
+            frame, transport, now: nowDate, trustedContext, enqueueNow, onceScheduleUuid: row.schedule_uuid,
           });
         } catch (error) {
           command.transportResult = { accepted: false, phase: error && error.code === 'clock_untrusted' ? 'UNKNOWN' : (error && error.code || 'UNKNOWN'), error };

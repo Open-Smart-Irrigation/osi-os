@@ -1002,7 +1002,7 @@ async function claimOwnerAttemptTx(tx, owner, deviceEui, now, item, effectContex
     if (occurrence.state !== 'RESERVED') throw errorWithCode('occurrence_not_reserved', `occurrence state ${occurrence.state} cannot be attempted`);
     await policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'ATTEMPTED', attempted_at: now }, { now });
   }
-  const attemptPatch = { phase: 'ATTEMPTED', attempted_at: now };
+  const attemptPatch = { phase: 'ATTEMPTED', attempted_at: now, enqueue_timeout_ms: require('../osi-chirpstack-helper').grpcDeadlineMs() };
   if (snapshot && effectContext.receipt) attemptPatch.attempt_receipt = {
     boot_id: effectContext.receipt.boot_id,
     uptime_ms: effectContext.receipt.uptime_ms,
@@ -1055,7 +1055,7 @@ async function enqueueValveCommand(options = {}) {
   return enqueueValveCommandWithRetry(options, busyRetryContext(options));
 }
 
-async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transport, now, trustedContext, warn = console.warn } = {}, retry) {
+async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transport, now, trustedContext, warn = console.warn, enqueueNow = Date.now } = {}, retry) {
   const device = normalizeDevice(deviceEui || (item && item.devEui));
   if (!db || !owner || !item || !transport) throw new TypeError('enqueueValveCommand requires db, owner, item and transport');
   if (item.effect_snapshot) throw errorWithCode('effect_snapshot_forbidden', 'capture the immutable effect snapshot before enqueue');
@@ -1105,17 +1105,17 @@ async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transp
     } catch (error) {
       const classification = classifyEnqueueError(error);
       if (classification === 'enqueue_failed_before_acceptance' || classification === 'enqueue_rejected') {
-        await persistAttempt(db, owner, classification, { failure_code: classification, failed_at: nowIso() });
+        await persistAttempt(db, owner, classification, { failure_code: classification, failed_at: nowIso(enqueueNow()) });
         await markOccurrencePreAcceptanceExpired(db, owner, classification, now);
         return { accepted: false, phase: classification, queue_id: null, error };
       }
-      await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso() });
+      await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso(enqueueNow()) });
       return { accepted: false, phase: 'UNKNOWN', queue_id: null, error };
     }
     // A queue ID proves acceptance. Local bookkeeping can never turn that
     // physical handoff into an enqueue failure or authorize another frame.
     try {
-      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(claimContext.now) }, retry);
+      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(enqueueNow()) }, retry);
       await markOccurrenceSent(db, owner, queueId, claimContext.now, retry);
     } catch (error) {
       const message = '[valve-control] accepted enqueue bookkeeping failed; recovery required for device ' + device
@@ -1155,7 +1155,7 @@ function compositionCommand(command, device, effectClass) {
 // and one enqueue share one reentrant per-device writer owner.
 async function executeValveAttempt({ db, deviceEui, command, frame, transport, now, trustedContext, policy, delivery_settings,
   interval_source, interval_minutes, minimum_gap_minutes, qualificationProvider, qualificationContext, current_state, current_state_at,
-  onceScheduleUuid, retryClock, sleep, warn } = {}) {
+  onceScheduleUuid, retryClock, sleep, warn, enqueueNow } = {}) {
   const retry = busyRetryContext({ retryClock, sleep });
   const device = normalizeDevice(deviceEui || (command && (command.device_eui || command.deviceEui)));
   if (!db || !transport || !frame) throw new TypeError('executeValveAttempt requires db, frame and transport');
@@ -1258,7 +1258,7 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
     const result = await enqueueValveCommandWithRetry({
       db, deviceEui: device, owner: prepared.owner,
       item: { fPort: normalizedFrame.fPort, data: normalizedFrame.data, confirmed: false, encrypted: false, provenance: normalizedFrame.provenance },
-      transport, now: finalContext.now, warn,
+      transport, now: finalContext.now, warn, enqueueNow,
       trustedContext: { ...(trustedContext || {}), currentQualification },
     }, retry);
     return { ...result, owner: prepared.owner, snapshot, once: prepared.once };
@@ -1571,45 +1571,59 @@ function readableQueue(items) {
   return Array.isArray(items) && items.every((item) => queueFrame(item));
 }
 
-// Shared by queue proof and OPEN attribution. A later absence cannot explain
-// which command caused an earlier OPEN, so attribution supplies its attempt cutoff.
-function resolvedByQueueRemoval(transport, notAfter = null) {
-  const absent = instantMs(transport && transport.queue_absent_at);
-  const attempt = instantMs(transport && (transport.attempt_trusted_at || transport.attempted_at || transport.accepted_at));
-  return absent != null && attempt != null && absent > attempt
-    && (notAfter == null || absent <= instantMs(notAfter));
+// The RPC helper uses 20 s by default, capped at 120 s. Persist its actual
+// budget at claim and retain at least 60 s of quiet time for late server work.
+function queueAbsenceWindowEligible(transport, read) {
+  if (!transport || !read) return false;
+  const started = instantMs(read.read_started_at);
+  const completed = instantMs(read.read_completed_at);
+  const ends = [transport.accepted_at, transport.unknown_at, transport.failed_at].map(instantMs).filter((at) => at != null);
+  const ended = ends.length ? Math.max(...ends)
+    : instantMs(transport.attempt_trusted_at || transport.attempted_at || transport.intent_at);
+  const savedTimeout = Number(transport.enqueue_timeout_ms);
+  const grace = Math.max(60000, require('../osi-chirpstack-helper').grpcDeadlineMs(), Number.isFinite(savedTimeout) ? savedTimeout : 0);
+  return started != null && completed != null && completed >= started && ended != null && started - ended >= grace;
 }
 
-async function recordQueueAbsenceTx(tx, deviceEui, items, readAt) {
-  if (!readableQueue(items) || instantMs(readAt) == null) return;
+// Shared by queue proof and OPEN attribution. Completion is the conservative
+// attribution cutoff. Legacy completion-only stamps cannot establish read order.
+function resolvedByQueueRemoval(transport, notAfter = null) {
+  const read = transport && { read_started_at: transport.queue_absent_read_started_at,
+    read_completed_at: transport.queue_absent_read_completed_at };
+  return queueAbsenceWindowEligible(transport, read)
+    && (notAfter == null || instantMs(read.read_completed_at) <= instantMs(notAfter));
+}
+
+async function recordQueueAbsenceTx(tx, deviceEui, items, read) {
+  if (!readableQueue(items)) return;
   const frames = items.map(queueFrame);
   const absent = (state) => {
-    if (!state || state.queue_id || resolvedByQueueRemoval(state)) return false;
-    const attempt = instantMs(state.attempt_trusted_at || state.attempted_at || state.accepted_at);
-    if (attempt == null || attempt >= instantMs(readAt)) return false;
+    if (!state || state.queue_id || resolvedByQueueRemoval(state) || !queueAbsenceWindowEligible(state, read)) return false;
     const frame = queueFrame(state.effect_snapshot || state.attempt || state);
     return frame && !frames.some((queued) => queued.port === frame.port && queued.hex === frame.hex);
   };
+  const evidence = read && { queue_absent_at: read.read_completed_at,
+    queue_absent_read_started_at: read.read_started_at, queue_absent_read_completed_at: read.read_completed_at };
   const rows = await tx.all('SELECT expectation_id,transport_json FROM valve_actuation_expectations WHERE device_eui=?', [deviceEui]);
   for (const row of rows) {
     let state;
     try { state = row.transport_json && JSON.parse(row.transport_json); }
     catch (_) { continue; } // Malformed owners remain unresolved.
-    if (absent(state)) await updateOwnerTransportTx(tx, { type: 'expectation', id: row.expectation_id }, { queue_absent_at: readAt });
+    if (absent(state)) await updateOwnerTransportTx(tx, { type: 'expectation', id: row.expectation_id }, evidence);
   }
   const control = await store.conditionalControl(tx, deviceEui);
   let changed = false;
   const opaque = (control.opaque || []).map((state) => {
     if (!absent(state)) return state;
     changed = true;
-    return { ...state, queue_absent_at: readAt };
+    return { ...state, ...evidence };
   });
   if (changed) await store.writeConditionalControl(tx, deviceEui, { ...control, opaque });
 }
 
-async function captureRemoteQueueOwners(db, deviceEui, owners, snapshot, intent, capturedAt) {
+async function captureRemoteQueueOwners(db, deviceEui, owners, snapshot, intent, read) {
   // This is an existing pre-flush read, not an additional network poll.
-  await transaction(db, (tx) => recordQueueAbsenceTx(tx, deviceEui, snapshot, capturedAt || nowIso()));
+  await transaction(db, (tx) => recordQueueAbsenceTx(tx, deviceEui, snapshot, read));
   const known = new Set(owners.map((entry) => entry.transport && entry.transport.queue_id).filter(Boolean));
   const remote = [];
   const capturedSnapshot = Array.isArray(snapshot) ? snapshot : [];
@@ -1634,7 +1648,8 @@ async function captureRemoteQueueOwners(db, deviceEui, owners, snapshot, intent,
       flush_id: intent.flush_id,
       owners: captured,
       captured_snapshot: capturedSnapshot,
-      captured_at: capturedAt || nowIso(),
+      captured_at: read.read_completed_at,
+      read_started_at: read.read_started_at, read_completed_at: read.read_completed_at,
       capture_status: 'COMPLETE',
     });
   });
@@ -1731,8 +1746,10 @@ async function flushValveQueue({ db, deviceEui, reason, transport, now, queueRea
     const getQueue = transportMethod(transport, ['getDeviceQueue', 'getQueue']);
     let snapshot;
     try {
+      const read_started_at = nowIso(queueReadNow());
       snapshot = await getQueue(device);
-      await captureRemoteQueueOwners(db, device, owners, snapshot, intent, nowIso(queueReadNow()));
+      const read_completed_at = nowIso(queueReadNow());
+      await captureRemoteQueueOwners(db, device, owners, snapshot, intent, { read_started_at, read_completed_at });
       return executeFlushIntent({ db, device, transport, flushId: intent.flush_id, snapshot, now });
     } catch (error) {
       await transaction(db, (tx) => setFlushIntentTx(tx, device, {
@@ -1758,8 +1775,10 @@ async function recoverValveFlush({ db, deviceEui, flushId, transport, now, queue
       const owners = await ownerRecords(db, device);
       const getQueue = transportMethod(transport, ['getDeviceQueue', 'getQueue']);
       try {
+        const read_started_at = nowIso(queueReadNow());
         const snapshot = await getQueue(device);
-        await captureRemoteQueueOwners(db, device, owners, snapshot, intent, nowIso(queueReadNow()));
+        const read_completed_at = nowIso(queueReadNow());
+        await captureRemoteQueueOwners(db, device, owners, snapshot, intent, { read_started_at, read_completed_at });
       } catch (error) {
         await transaction(db, (tx) => setFlushIntentTx(tx, device, {
           flush_id: flushId, status: 'UNKNOWN', capture_status: 'UNKNOWN', result_status: 'UNKNOWN',
