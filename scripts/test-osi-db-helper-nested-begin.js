@@ -56,6 +56,12 @@ test('a transaction retries after a queued manual COMMIT without deadlock', { ti
   const other = new helper.Database(filename);
   await db.exec('CREATE TABLE sample(value TEXT)');
   await db.run('BEGIN IMMEDIATE');
+  // The retry waits until the manual COMMIT has settled, so exactly one retry
+  // happens on any runner speed (a fixed real delay made this timing-dependent).
+  let commitSettled;
+  const committed = new Promise((resolve) => { commitSettled = resolve; });
+  const delays = [];
+  helper._setTransactionRetryDelayForTests(async (ms) => { delays.push(ms); await committed; });
   let executions = 0;
   const pending = other.transaction(async (tx) => {
     executions += 1;
@@ -63,8 +69,9 @@ test('a transaction retries after a queued manual COMMIT without deadlock', { ti
     return 'result';
   });
   const manualWrite = db.run("INSERT INTO sample VALUES ('manual')");
-  const manualCommit = db.run('COMMIT');
+  const manualCommit = db.run('COMMIT').finally(() => commitSettled());
   const [result] = await Promise.all([pending, manualWrite, manualCommit]);
+  assert.deepEqual(delays, [100]);
   assert.equal(result, 'result');
   assert.equal(executions, 1);
   assert.equal(events.filter((event) => event === 'BEGIN IMMEDIATE').length, 2);

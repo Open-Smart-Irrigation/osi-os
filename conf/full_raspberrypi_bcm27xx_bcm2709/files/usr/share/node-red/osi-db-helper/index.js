@@ -252,7 +252,9 @@ class DatabaseFacade {
       }).catch(async (error) => {
         if (!nestedBeginFailed || attempt >= 10) throw error;
         // Wait outside the queue so the manual transaction can finish, then
-        // join its tail again. Nine delays total 4.5 seconds.
+        // join its tail again. Nine delays total 4.5 seconds. The retry goes to
+        // the back of the queue, so work submitted meanwhile runs first; that
+        // ordering change ends once manual transactions use db.transaction.
         await transactionRetryDelay(attempt * 100);
         return attemptTransaction(attempt + 1);
       });
