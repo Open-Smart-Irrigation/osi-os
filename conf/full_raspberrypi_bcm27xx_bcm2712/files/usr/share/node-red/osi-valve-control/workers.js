@@ -592,9 +592,9 @@ function onceDispatchMarker(scheduleUuid, fireAt) {
   return 'one_time_open:' + scheduleUuid + ':' + fireAt;
 }
 
-async function finalizeOnceAccepted(db, row, nowDate) {
+async function finalizeOnceAccepted(db, row, nowDate, transaction = null) {
   const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
-  return db.transaction(async (tx) => {
+  const finalize = async (tx) => {
     const schedule = await tx.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL', [row.schedule_uuid, row.device_eui]);
     const existingLog = await tx.get('SELECT id FROM actuator_log WHERE reason=? LIMIT 1', [marker]);
     let existingEvent = null;
@@ -623,6 +623,51 @@ async function finalizeOnceAccepted(db, row, nowDate) {
       }
     }
     return { newlyFinalized: !complete };
+  };
+  return transaction ? finalize(transaction) : db.transaction(finalize);
+}
+
+async function settleOnceUncertain(db, row, nowDate, transport, warn) {
+  let queued = false;
+  if (transport && typeof transport.getDeviceQueue === 'function') {
+    try {
+      // Read the network outside the transaction; this path never sends again.
+      const queue = await transport.getDeviceQueue(row.device_eui);
+      const data = Buffer.from([0x41, Number(row.duration_minutes)]).toString('base64');
+      queued = Array.isArray(queue) && queue.some((item) => item && Number(item.fPort) === 2 && item.data === data);
+    } catch (error) {
+      warn && warn('[valve-control] one-time uncertain queue lookup failed: ' + (error && error.message ? error.message : error));
+    }
+  }
+  return db.transaction(async (tx) => {
+    // A concurrent tick or an operator may have settled/cancelled the schedule
+    // while the queue lookup was in flight. Re-read both eligibility and proof.
+    const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.transport_json, vae.observed_open_at, vae.reconciliation_state FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.command_id=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [row.schedule_uuid, row.command_id]);
+    if (!current) return null;
+    const state = persistedTransport(current);
+    if (!state) throw Object.assign(new Error('one-time transport state is malformed'), { code: 'transport_state_malformed' });
+    const attemptedAt = current.attempted_at || state.attempted_at || null;
+    const attemptedMs = observationInstant(attemptedAt);
+    const openMs = observationInstant(current.observed_open_at);
+    const reportMs = observationInstant(state.observation && state.observation.observed_at);
+    const observed = attemptedMs != null && ((openMs != null && openMs >= attemptedMs)
+      || (current.reconciliation_state === 'OBSERVED_RUNNING' && reportMs != null && reportMs >= attemptedMs));
+    const proof = state.phase === 'ACCEPTED' && state.queue_id ? 'accepted transport receipt'
+      : (observed ? 'OPEN observation' : (queued ? 'matching device queue item' : null));
+    if (proof) {
+      const result = await finalizeOnceAccepted(db, current, nowDate, tx);
+      warn && warn('[valve-control] one-time uncertain open confirmed by ' + proof + ' for ' + current.schedule_uuid);
+      return { kind: 'accepted', ...result };
+    }
+    if (nowDate.getTime() - Date.parse(current.fire_at) <= ONCE_GRACE_MS) return null;
+    await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT')", [current.schedule_uuid]);
+    const afterSkip = await tx.get('SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [current.schedule_uuid]);
+    if (!afterSkip || afterSkip.state !== 'SKIPPED') return null;
+    await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'SKIPPED' }, current.device_eui);
+    if (current.user_id != null && current.irrigation_zone_id != null) {
+      await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'SKIP', 'one_time_uncertain', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, fire_at: current.fire_at, attempted_at: attemptedAt, phase: state.phase || current.state, note: 'Enqueue was attempted but not confirmed.' })]);
+    }
+    return { kind: 'skipped' };
   });
 }
 
@@ -649,7 +694,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
   for (const r of rows) {
     await db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES (?,?,?,'PENDING') ON CONFLICT(schedule_uuid) DO NOTHING", [r.schedule_uuid, r.device_eui, crypto.randomUUID()]);
   }
-  const intents = await db.all("SELECT schedule_uuid FROM valve_once_dispatch_intents WHERE state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') ORDER BY created_at, schedule_uuid");
+  const intents = await db.all("SELECT i.schedule_uuid FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui WHERE i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL ORDER BY i.created_at, i.schedule_uuid");
   for (const i of intents) {
     try {
       if (typeof beforeAttempt === 'function') await beforeAttempt(i);
@@ -695,8 +740,15 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
       }));
       if (!outcome) continue;
       if (outcome.kind === 'skipped') { skipped.push({ schedule_uuid: outcome.row.schedule_uuid, device_eui: outcome.row.device_eui }); continue; }
-      if (outcome.kind === 'uncertain') continue;
       const row = outcome.row;
+      if (outcome.kind === 'uncertain') {
+        const settlement = await settleOnceUncertain(db, row, nowDate, transport, warn);
+        if (settlement && settlement.kind === 'skipped') skipped.push({ schedule_uuid: row.schedule_uuid, device_eui: row.device_eui });
+        if (settlement && settlement.kind === 'accepted' && settlement.newlyFinalized) {
+          fired.push({ schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') });
+        }
+        continue;
+      }
       if (row.user_id == null || row.irrigation_zone_id == null) warn && warn('[valve-control] one_time_open not logged for ' + row.device_eui + ' (no zone/user)');
       const command = { schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') };
       let reportFired = true;
