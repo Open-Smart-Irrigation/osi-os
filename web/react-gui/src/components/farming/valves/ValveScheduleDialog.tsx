@@ -29,6 +29,7 @@ function deletionContent(schedule: ValveSchedule): string {
     schedule.weekdaysMask, schedule.startTime, schedule.fireAt, schedule.durationMinutes,
     schedule.timezone, schedule.enabled, schedule.onceState, schedule.dispatchState,
     schedule.dispatchCommandId, schedule.dispatchCreatedAt, schedule.dispatchAttemptedAt,
+    schedule.awaitingConfirmationUntil, schedule.onceOutcome, schedule.onceProof,
     schedule.syncVersion, schedule.conditionPolicyUuid, schedule.effectiveFrom, schedule.execution,
   ]);
 }
@@ -58,6 +59,13 @@ function formatDateTime(iso: string, timeZone: string, language: string | undefi
 
 function dispatchStateLabel(state: NonNullable<ValveSchedule['dispatchState']>, translate: Translate): string {
   return translate(`scheduleDialog.dispatchStates.${state}`, { defaultValue: state });
+}
+
+function awaitingOnceConfirmation(schedule: ValveSchedule): boolean {
+  // Keep polling until settlement, including transport-only legacy attempts
+  // whose deadline or resolved attempt time is absent from a cached response.
+  return schedule.kind === 'ONCE' && schedule.onceState === 'PENDING'
+    && (schedule.dispatchState === 'UNKNOWN' || schedule.dispatchState === 'ATTEMPTED');
 }
 
 /** Offset (in minutes) of `timeZone` from UTC at the given instant: local = UTC + offset. */
@@ -186,7 +194,25 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   // dynamically-built key (weekday index, push-badge lookups) goes through this permissive alias.
   const td = t as Translate;
   const key = open ? `/api/valves/${valve.deviceEui}/schedules` : null;
-  const { data, error, mutate } = useSWR(key, () => valvesAPI.schedules(valve.deviceEui));
+  const { data, error, mutate } = useSWR(key, () => valvesAPI.schedules(valve.deviceEui), {
+    refreshInterval: (latest) => open && latest?.schedules.some(awaitingOnceConfirmation) ? 30_000 : 0,
+  });
+  const earliestConfirmation = Math.min(...(data?.schedules ?? [])
+    .flatMap((schedule) => schedule.kind === 'ONCE' && schedule.awaitingConfirmationUntil
+      ? [Date.parse(schedule.awaitingConfirmationUntil)] : [])
+    .filter(Number.isFinite));
+  const revalidatedDeadline = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !Number.isFinite(earliestConfirmation)) return;
+    const deadlineKey = `${key}:${earliestConfirmation}`;
+    if (revalidatedDeadline.current === deadlineKey) return;
+    const timer = setTimeout(() => {
+      revalidatedDeadline.current = deadlineKey;
+      // SWR retains the fetch error for the existing error surface.
+      void mutate().catch(() => undefined);
+    }, Math.max(0, earliestConfirmation - Date.now() + 100));
+    return () => clearTimeout(timer);
+  }, [open, key, earliestConfirmation, mutate]);
 
   const [weekly, setWeekly] = useState<WeeklyFormState>(EMPTY_WEEKLY);
   const [once, setOnce] = useState<OnceFormState>(EMPTY_ONCE);
@@ -604,10 +630,18 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           <p className="truncate text-xs text-[var(--text-tertiary)]">
                             {scheduleSummary(schedule, valve.timezone, td, i18n?.language)}
                           </p>
-                          {schedule.kind === 'ONCE' && schedule.dispatchState && (
-                            <p className={`truncate text-xs ${schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
-                              {td('scheduleDialog.dispatchStatus', { state: dispatchStateLabel(schedule.dispatchState, td), defaultValue: 'Dispatch: {{state}}' })}
-                              {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
+                          {schedule.kind === 'ONCE' && (schedule.dispatchState || schedule.onceState === 'FIRED') && (
+                            <p className={`text-xs ${schedule.onceState !== 'FIRED' && (schedule.onceOutcome === 'uncertain' || schedule.dispatchState === 'UNKNOWN') ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
+                              {schedule.onceState === 'FIRED'
+                                ? td(schedule.onceProof === 'observed_open' ? 'scheduleDialog.onceReportedOpen' : 'scheduleDialog.onceFired')
+                                : schedule.awaitingConfirmationUntil
+                                  ? td('scheduleDialog.awaitingConfirmation', { time: formatClock(schedule.awaitingConfirmationUntil, valve.timezone, i18n?.language) })
+                                  : schedule.onceOutcome === 'uncertain'
+                                    ? td('scheduleDialog.notConfirmed')
+                                    : schedule.dispatchState && <>
+                                      {td('scheduleDialog.dispatchStatus', { state: dispatchStateLabel(schedule.dispatchState, td), defaultValue: 'Dispatch: {{state}}' })}
+                                      {schedule.dispatchAttemptedAt ? ` · ${formatDateTime(schedule.dispatchAttemptedAt, valve.timezone, i18n?.language)}` : ''}
+                                    </>}
                             </p>
                           )}
                         </div>
