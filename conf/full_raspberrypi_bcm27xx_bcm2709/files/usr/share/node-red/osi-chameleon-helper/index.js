@@ -141,8 +141,9 @@ function buildReadingRow(d) {
 // The diagnostic and its link are one queued transaction on the shared
 // connection: no other statement or rollback can fall between them, so the
 // returned id is never reused for another reading before it is linked. If
-// another node holds a manual transaction, BEGIN fails and nothing is
-// written; the canonical row stays unlinked and the scheduler ignores it.
+// another node holds a manual transaction, the helper retries the whole
+// transaction for a few seconds; only if that fails is nothing written, and
+// the canonical row then stays unlinked and the scheduler ignores it.
 async function insertReadingWithLink(db, row) {
   return db.transaction(async (t) => {
     const inserted = await t.get(READING_INSERT_SQL, row.params);
