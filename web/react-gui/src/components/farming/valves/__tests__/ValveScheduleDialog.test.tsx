@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 
@@ -32,6 +33,7 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.dispatchStates.SKIPPED': 'SKIPPED',
     'scheduleDialog.save': 'Save',
     'scheduleDialog.saving': 'Saving…',
+    'scheduleDialog.saveSucceeded': 'Schedule saved.',
     'scheduleDialog.delete': 'Delete',
     'scheduleDialog.enabled': 'Enabled',
     'scheduleDialog.conflictTooMany': '{{weekday}} would have more than 4 windows.',
@@ -252,10 +254,96 @@ describe('ValveScheduleDialog', () => {
     vi.clearAllMocks();
   });
 
+  it('owns focus while open and returns focus to its opener when closed', async () => {
+    const user = userEvent.setup();
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    const onClose = vi.fn();
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    const view = render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+        <ValveScheduleDialog valve={makeValve()} open onClose={onClose} onChanged={vi.fn()} />
+      </SWRConfig>,
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledOnce();
+    view.rerender(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+        <ValveScheduleDialog valve={makeValve()} open={false} onClose={onClose} onChanged={vi.fn()} />
+      </SWRConfig>,
+    );
+    view.unmount();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it('wraps Tab at both ends and pulls outside focus back into the schedule dialog', async () => {
+    const user = userEvent.setup();
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    const dialog = await screen.findByRole('dialog');
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex]:not([tabindex="-1"])'))
+      .filter((control) => !control.closest('details:not([open])') || control === control.closest('details:not([open])')?.querySelector('summary'));
+    const weekSummary = dialog.querySelector('details > summary');
+    expect(controls.length).toBeGreaterThan(1);
+    expect(weekSummary).not.toBeNull();
+    await user.tab();
+    expect(controls[0]).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(weekSummary).toHaveFocus();
+    await user.tab();
+    expect(controls[0]).toHaveFocus();
+    outside.focus();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    outside.remove();
+  });
+
   it('renders schedules returned by the API', async () => {
     schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
     renderDialog(makeValve());
     expect(await screen.findByText('Morning soak')).toBeInTheDocument();
+  });
+
+  it('shows the saved schedule and moves focus to its row after creation', async () => {
+    const user = userEvent.setup();
+    schedulesMock.mockResolvedValueOnce(emptyResponse()).mockResolvedValueOnce(responseWithTuesdayWindows());
+    createScheduleMock.mockResolvedValueOnce({
+      schedule: { scheduleUuid: 'sched-1' },
+      pushesQueued: 1,
+    });
+    renderDialog(makeValve());
+    await screen.findByText('Schedules');
+    fireEvent.click(screen.getByRole('button', {name: 'Mon'}));
+    await user.click(screen.getAllByRole('button', { name: 'Save' })[0]);
+    expect(await screen.findByRole('status')).toHaveTextContent('Schedule saved.');
+    const row = await screen.findByText('Morning soak');
+    await waitFor(() => expect(row.closest('li')).toHaveFocus());
+    expect(createScheduleMock.mock.calls[0][1]).toMatchObject({
+      kind: 'WEEKLY',
+      weekdaysMask: expect.any(Number),
+      startTime: '06:00',
+      durationMinutes: 30,
+    });
+  });
+
+  it('puts creation forms before a collapsed compiled week when the valve has no schedules', async () => {
+    schedulesMock.mockResolvedValueOnce(emptyResponse());
+    renderDialog(makeValve());
+    const weekly = await screen.findByText('+ Weekly');
+    const once = screen.getByText('+ One-time');
+    const summary = screen.getByText('Compiled week (what the valve will run)');
+    const details = summary.closest('details');
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute('open');
+    expect(weekly.compareDocumentPosition(once) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(once.compareDocumentPosition(details!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('delegates conditional weekly rows to the policy editor instead of exposing ordinary CRUD', async () => {
@@ -348,7 +436,7 @@ describe('ValveScheduleDialog', () => {
     renderDialog(makeValve());
     await screen.findByText('Schedules');
 
-    const dayGroups = screen.getAllByRole('group');
+    const dayGroups = screen.getAllByRole('group').filter(group => group.hasAttribute('aria-label'));
     expect(dayGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
     ]);
@@ -384,7 +472,7 @@ describe('ValveScheduleDialog', () => {
     renderDialog(makeValve());
     await screen.findByText('Schedules');
 
-    const weekGrid = screen.getAllByRole('group')[0].parentElement;
+    const weekGrid = screen.getAllByRole('group').find(group => group.hasAttribute('aria-label'))?.parentElement;
     expect(weekGrid).toHaveClass('grid-cols-1');
     expect(weekGrid).toHaveClass('sm:grid-cols-7');
   });

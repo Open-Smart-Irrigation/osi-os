@@ -1,1 +1,1 @@
-{"extends":"../tsconfig.json","compilerOptions":{"allowJs":true,"types":["vite/client"]},"include":["./*.ts","./*.tsx","../src"],"exclude":["../src/**/__tests__","./tests","./playwright.config.ts","./reveal-example.ts"]}
+{"extends":"../tsconfig.json","compilerOptions":{"allowJs":true,"types":["vite/client"]},"include":["./*.ts","./*.tsx","./public/**/*.ts","./public/**/*.tsx","../src"],"exclude":["../src/**/__tests__","./tests","./playwright.config.ts","./playwright.public.config.ts","./reveal-example.ts"]}

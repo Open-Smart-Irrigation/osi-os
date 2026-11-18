@@ -1,0 +1,203 @@
+# Simulator source provenance
+
+The public simulator source was imported from `26fe14d594257f81a602f29178405e32a1f08324`, fetched from the local transfer bundle into `refs/osi-local/public-simulator-v1`. The source commit is not on a remote. No branch history or private review folders were imported.
+
+The import covered the demo runtime, public host, model, tests and locale files, plus these explicit integration paths:
+
+- `web/react-gui/demo`
+- `web/react-gui/vite.demo.config.ts`
+- `web/react-gui/scripts/generate-sdi12-profiles.mjs`
+- `web/react-gui/src/utils/publicSimulatorDeviceDefaults.ts`
+- `web/react-gui/src/utils/publicSimulatorInvalidation.ts`
+- `docs/website/osi-os-demo-plugin.php`
+- `docs/website/osi-os-demo-page.md`
+- `docs/website/osi-os-demo-embed.html`
+- `docs/operations/public-simulator-release.md`
+
+Main-only demo files were retained. The Luganda valve locale and its English-fallback test were restored from the base commit. Dependencies and the lockfile remain from main; only the seven demo scripts were added or updated.
+
+## Source tree entries
+
+Blob SHA and path from the source tree:
+
+- 9220186964d3c8f6f26e8c9b05dfc2ea2f21ed1e docs/operations/public-simulator-release.md
+- e4b209b5e30e9f1e514dd687f87f2f6063e71cc5 docs/website/osi-os-demo-embed.html
+- 619a137409f609dccacd36fa28af48c080dfee5d docs/website/osi-os-demo-page.md
+- fc986d93c91347f6f26584fde0a218dbeceea7dc docs/website/osi-os-demo-plugin.php
+- 7f7c6a332d80c72211c7f9747154306ab2823df2 web/react-gui/demo/README.md
+- 3c0d2fb32b01724b58f31d8439af71ab5dcd4ad0 web/react-gui/demo/action-inventory.md
+- 560f3d510998b8826042741e3af10e2654c86ef3 web/react-gui/demo/adapter.ts
+- 1f43962d30783d465143c6b0f6ccc2469a859dd1 web/react-gui/demo/agronomy.md
+- 781a123e807e137a457ca7ce77ae9b8153e9b4e6 web/react-gui/demo/app.css
+- a09a1f9bd40962a8518cb4aa606b1724bd7881a2 web/react-gui/demo/app.html
+- dc3cb9cc2779b1adbd1d7ab933701933cfc5e298 web/react-gui/demo/check-build-isolation.mjs
+- c20f5e2396ca91ed415228cb23c8571fa0d54a3d web/react-gui/demo/controller-semantics.md
+- d5ba108a11f00513c94908c79347098e5698b085 web/react-gui/demo/datetime.ts
+- 50abaee501ce9fd09ea2d3b63c9f7af075729d45 web/react-gui/demo/env.d.ts
+- 0add691e08a5ec160609f1ff2206daf8671e016a web/react-gui/demo/errors.ts
+- 2ee39d9f9f002d1e56c5809fe168a7ea651a7746 web/react-gui/demo/fixtures.ts
+- b9e21278a2dd1bd01c7b0fe82f1d91ed56b6c645 web/react-gui/demo/history.ts
+- 142a195dbf017d8eae5743d19ac8d5306db71b1f web/react-gui/demo/host.css
+- 3996f56e9aa7c35282579ad41c49a9cf95da4c76 web/react-gui/demo/host.ts
+- fd8652318a0391120d69e7ce7a373c69743c205a web/react-gui/demo/i18n.ts
+- db04a91647b6bfa48308ab1f9d8693a04f92379d web/react-gui/demo/index.html
+- fb52d9c93e072fcdcf5d94c1ae879b0a88d34e31 web/react-gui/demo/journal-catalog-provenance.json
+- bc271fab264dae6012713e674a9cd284ea829b74 web/react-gui/demo/journal-catalog.json
+- bb450fa3294d8a99a5c83acb9751fb5eea7b777b web/react-gui/demo/journal-catalog.json.sha256
+- abd8a6d2d55081345fbe2a3b8df7ee5fa94db2d0 web/react-gui/demo/locales/lg-valves.json
+- 314e43891a4c8e5151d5ea2b80ef8f160b806b69 web/react-gui/demo/locales/public-advisory/de-CH.json
+- 0fc35123bedc5fc976e00c7489b4265ba28302ac web/react-gui/demo/locales/public-advisory/en.json
+- fe85d4af0a583ad600aaa056b24ef24f56be75dc web/react-gui/demo/locales/public-advisory/es.json
+- a211d655b2e337ba35fa8ebdda2d1446a63d30ce web/react-gui/demo/locales/public-advisory/fr.json
+- efb58d28e9f245b9b3b28bd309172cb44741cdf6 web/react-gui/demo/locales/public-advisory/it.json
+- bc91e161ce20bce8d38510dd19626c06f7e244be web/react-gui/demo/locales/public-advisory/lg.json
+- cad08d4aa666291a0fce91f0a65ff4318be5ef80 web/react-gui/demo/locales/public-advisory/pt.json
+- b6adbacc612f9a259db9644230bf4c69c595a6a7 web/react-gui/demo/model.ts
+- f527b80c011664f23fe0e8c4d409310cefe8293b web/react-gui/demo/model/aggregation.ts
+- 1558cda7bd6cb96562e88c15700250f7885ff131 web/react-gui/demo/model/analysis.ts
+- 4beab55d9eb2d0a9acf55990cbcfad8f3c0db56e web/react-gui/demo/model/clock.ts
+- 5c92d011c5208b99303057b58218c8b039f38527 web/react-gui/demo/model/device-sources.ts
+- abf511000be6a5d5e6a6f7014190ebba03290ccc web/react-gui/demo/model/devices.ts
+- efa5e451e9bfc0b8e66e09bcb0715f8367785d5e web/react-gui/demo/model/environment.ts
+- 136dda00e9a441178b8ab8fd83674bf214b97d96 web/react-gui/demo/model/farm.ts
+- e381e64c897b456dbdd7e172fe7489748fb69aa2 web/react-gui/demo/model/histories.ts
+- 7494d949bedfa39e5ca6e106416bca63f0e874dd web/react-gui/demo/model/history.ts
+- 0ee1762b1dc7dc068328686e441220602bed77ae web/react-gui/demo/model/irrigation.ts
+- f06100bbc4e24cadf21d5939cace36dc2464b17a web/react-gui/demo/model/journal.ts
+- e287e158edb65f5e0010399a8be16e6937412f5f web/react-gui/demo/model/network.ts
+- 26fae3fa0386926b469eb8d6e25664ce4d0f4f94 web/react-gui/demo/model/plans.ts
+- 3a1f88d86c3880560100fe582682e38d3f624718 web/react-gui/demo/model/preferences.ts
+- b558aae7351c8cb722f93bf07370655b2d3de75b web/react-gui/demo/model/readings.ts
+- 540d918594474fa32262937f3e81f603c203cfb4 web/react-gui/demo/model/sdi12-profiles.ts
+- 0d02da0940964ec1a2b419a3aa38a5c73bdd083b web/react-gui/demo/model/sessions.ts
+- 31015229ea2ed7a61437f1207f7488d007aff14f web/react-gui/demo/model/sha256.ts
+- c628e57d993a46ae618a8dabf29081ccef29095d web/react-gui/demo/model/state.ts
+- 260bc3edef8217a0d4c2bac2bf965b79068feb4e web/react-gui/demo/model/support.ts
+- 80f9f17815aa1397ba0c267ab1ff60d832c05826 web/react-gui/demo/model/system.ts
+- 5b8c7912e023f3c01bfdd16c8d2c2411c961a771 web/react-gui/demo/model/triggers.ts
+- 5967ce4c9c90a6f5cd64eb17e25d2566e591cd54 web/react-gui/demo/model/water-action.ts
+- 951c9519d1e6afa58b6011ca67616e58bbbbc981 web/react-gui/demo/model/watermark.ts
+- 295c14c666b47ac0c545ae60ec81eb9eca2c0747 web/react-gui/demo/mount.tsx
+- 49b2912b00941d798a6d8b72ff84b8b27c85e24a web/react-gui/demo/playwright.config.ts
+- 967ce83895e02d4439bf0b7ce71d54897b878bed web/react-gui/demo/playwright.public.config.ts
+- 7f7c77444bbf455bcc39878ecfec4c803cfb89e1 web/react-gui/demo/protocol.ts
+- 1c9115e8c8f75bb6f61719a2f8a58c984c2c5766 web/react-gui/demo/public-boundary.ts
+- f8bc459407c72fcd77469c52b33b2fc1e75c174f web/react-gui/demo/public-copy.ts
+- 8b814e5b155ef7c75432a998fb3c7916c524d3f0 web/react-gui/demo/public-navigation.ts
+- c8a8486bf5d7c96c5c88f5102135894641682a45 web/react-gui/demo/public/apache-subdomain.conf
+- 1ccfed98dec6b1b1d56713c3fc10d12b53c1c100 web/react-gui/demo/public/apache.conf
+- 94ab45b95ade77d7cbe051be5dd19dadc4d94060 web/react-gui/demo/public/app.html
+- a5c49b2b9f874307c89d23be57781cd7d4f69c15 web/react-gui/demo/public/datetime.ts
+- beaf675431d80e5e6470e81fc084fa6c733d0080 web/react-gui/demo/public/device-location.ts
+- ac34d0d3fbedde8b54df81e50bb20b8abd0a0ba4 web/react-gui/demo/public/host.css
+- 3abe07c537dd62a20757b9d133897515047b1371 web/react-gui/demo/public/host.ts
+- e0ea2dede9e71496c2878a869b1f23c22d2c2736 web/react-gui/demo/public/index.html
+- 2ba21e7963dd077c726dd8d25d795da8be7aa392 web/react-gui/demo/public/locales/de-CH.json
+- 2b1036885a88476e5ad7dc1b67b6ef2485420aaf web/react-gui/demo/public/locales/en.json
+- 6e1c5f97701a7fdb1b84ea73472cf34c1d78ccc6 web/react-gui/demo/public/locales/es.json
+- 5141dcd206fa558df9923a1a3b3d0ebeddd03c19 web/react-gui/demo/public/locales/fr.json
+- 06d1b8056e2a6e062ecbcca3b83b46ec5baf6826 web/react-gui/demo/public/locales/it.json
+- 6458d8424f4c3e3b41dcf60d28101a2f9feb9757 web/react-gui/demo/public/locales/lg.json
+- 87e3411a4001b258a158eb8eb5f4b5ff83fe9f6c web/react-gui/demo/public/locales/pt.json
+- f9dce35fe1142a7c7d153581cf05449505585eef web/react-gui/demo/public/messages.ts
+- c437d459a7bc4f937a10e25b8fb4a663008c3a46 web/react-gui/demo/public/offline-map.svg
+- 5f2b559ec022064216ec95dfc6026543442b061d web/react-gui/demo/public/offline-map.tsx
+- ed71abdd8c99ce949e10335a784593ab0d7eba51 web/react-gui/demo/public/serve.mjs
+- da1933ee8a127b3aa2609c904a368775d7a6bc5e web/react-gui/demo/revalidation.ts
+- 3cc486d98bf5811e21e03d5ea883f1e02a0df23d web/react-gui/demo/reveal-bridge.js
+- 4f2cbc2352ab962e2d40311d123ac3acf8489e4c web/react-gui/demo/reveal-example.css
+- c1c57029ec4ea8fd7867732e00089c7988b4dbb9 web/react-gui/demo/reveal-example.ts
+- 0e8e50339db31143ab856e9552515d0d83a978c5 web/react-gui/demo/reveal.html
+- f954c2b0bc22e3ce146c7268303c3861337d53ae web/react-gui/demo/runtime.ts
+- 8293eda2cb834bac57f496d1ddd113d867454740 web/react-gui/demo/screenshots/enlarged-720p.png
+- 22ed8980b1f67adc3d8b7621ae6c6f8a7ef19c1b web/react-gui/demo/screenshots/french-valve-actions.png
+- 8c424daf7e2618d42bed3866aedc1a74e6a4c12d web/react-gui/demo/screenshots/french.png
+- 09b956ff5b609d5a739eb6a1211ba083c3f8e870 web/react-gui/demo/screenshots/layout-1280.png
+- 4178eaa79e2f33bc4ee72cc853a6d6f3eab74684 web/react-gui/demo/screenshots/layout-1920.png
+- cc4fde65741791d5d4b6c9d286613b394ad33e84 web/react-gui/demo/screenshots/luganda-wrapping.png
+- 091c1f5c93be56dfa1734ebcc4b7b3595ddc5fce web/react-gui/demo/screenshots/open-valve.png
+- f95c0daef45955f201d759c5e510c3db0e03a01e web/react-gui/demo/screenshots/overview.png
+- 2bb5cfdaae6973aefb1d8936c911acd65409c30d web/react-gui/demo/screenshots/populated-zone.png
+- 689532f465150835a210c627249029875e910992 web/react-gui/demo/screenshots/settings.png
+- 7202afa496485b2061fce5a1d75e33c3606e1c59 web/react-gui/demo/screenshots/soil-history-30-days-20cm.png
+- bf4f7c639aa9925a75203d1d518b3cccd9272ca3 web/react-gui/demo/screenshots/soil-history-30-days-40cm.png
+- db937a8e81bd04dec0c9f4748daed58f8149bcc7 web/react-gui/demo/screenshots/soil-history-7-days.png
+- 30aa983cbad77a3c39736ae1bec7658f6dd98483 web/react-gui/demo/screenshots/soil-history-90-days-20cm.png
+- eed36cbdfb281e4c98adf0570ebc26c0d44830f2 web/react-gui/demo/screenshots/soil-history-90-days-40cm.png
+- 815d9eefc5f00b624c8ec609bdeb7b4f0f5a0a7c web/react-gui/demo/scripts/build-journal-catalog.mjs
+- 89b77ca2f679c6b54d56f3e27a9c7b9c45b946c7 web/react-gui/demo/serve.mjs
+- aaaf9a3b86187693410f91b05b9b7fe4b89fb5b7 web/react-gui/demo/tests/adapter.test.ts
+- 3d72ee77a37fa88d659c9339b66d77ee2bdf9839 web/react-gui/demo/tests/analysis.test.ts
+- 8916d2ef24429211c954ed0f662d3abc0f252bbb web/react-gui/demo/tests/browser.spec.ts
+- c494bef221f3b7ff053e8109ed06da0d7d0b20b6 web/react-gui/demo/tests/build-isolation.test.ts
+- 23898490b32663a956de04eb68dba2534fa3ba2b web/react-gui/demo/tests/clock.test.ts
+- 3feec9bd4c0ed3c56ee1df42bba4808ef56b8c4a web/react-gui/demo/tests/contracts.test.ts
+- 736d4d62a6d78bd0d6e6d9be3662ac0d7fa35edb web/react-gui/demo/tests/datetime.test.ts
+- 4ad747804740c18e5237dc049141df0868b8245a web/react-gui/demo/tests/devices.test.ts
+- 92f99719d4b450578145ab5702d6cf0e37dcddb6 web/react-gui/demo/tests/display-preferences.test.ts
+- e07655d485f15736b4014edf85586857564cc0f9 web/react-gui/demo/tests/environment.test.ts
+- 8b7a116e867d28cf8d3e2ad9676c3f3908e370cc web/react-gui/demo/tests/farm.test.ts
+- 786e5b9bc7dcf0d32bdbd1073691ffc65fece516 web/react-gui/demo/tests/history-api.test.ts
+- 58333e449ee1c8a9a2fb2a7a248fa23e756ba39f web/react-gui/demo/tests/history.test.ts
+- c73156c4da6d25b01cb26d9fb46263b102dfec12 web/react-gui/demo/tests/irrigation.test.ts
+- 61b3c0eeb743e8e76dde833319d2823613f7a333 web/react-gui/demo/tests/journal-catalog-parity.test.ts
+- 55e11e2e9eb73ee0b70baa17750a7e78e059cb55 web/react-gui/demo/tests/journal-review.test.ts
+- 764de3619b14c7924784903fc812a7b1bc2ab9d1 web/react-gui/demo/tests/journal.test.ts
+- 00ea4c7ac65d9745d7ee80f647758c53b7b8705c web/react-gui/demo/tests/live-readings.test.ts
+- 7f3e389f15f338faf9e855d7e5abd245ff539a68 web/react-gui/demo/tests/model.test.ts
+- d48414346a512bd464da19310dd24d917f820c0f web/react-gui/demo/tests/network.test.ts
+- b21d2c8c1e76e86c58326b88f7019f291eced052 web/react-gui/demo/tests/plans.test.ts
+- 59ffbdc4566053d400f0e6115fd25b4468c757ab web/react-gui/demo/tests/polish.spec.ts
+- b9c48615f45b6dde43a319a36998d9be6ab9b1f7 web/react-gui/demo/tests/preferences-system.test.ts
+- 18db8861217ae934025790e1bfc9dd9a1bd198ef web/react-gui/demo/tests/presentation-mode.spec.ts
+- 6715271a6ff6c1f964eb1a7f24473b356b830e57 web/react-gui/demo/tests/protocol.test.ts
+- 02a473c3c5f16778f9a44550fa7efe78c8d6642b web/react-gui/demo/tests/public-boundary.test.ts
+- 4b509e4d4d8182b83c6235b17be93fc48a5571c3 web/react-gui/demo/tests/public-datetime.test.ts
+- 53eba65eedbce190b2ae6042f69c085e09319137 web/react-gui/demo/tests/public-hosting.test.ts
+- 49288c2065c47475fa410c503a7ddd06a5002ccb web/react-gui/demo/tests/public-i18n.test.ts
+- d7e7457c5b15b488f0d1517b143d4a1b4726d170 web/react-gui/demo/tests/public-location.test.ts
+- 22572d8c01a191a4f1fb0835dd63ba039a6aeef9 web/react-gui/demo/tests/public-navigation.test.ts
+- 64212fa95b3b653f105cf4b11ae60e7f71ac2849 web/react-gui/demo/tests/public-sessions-copy.test.ts
+- bd7224cfdcf924124446f080b1ef04e8fbad6230 web/react-gui/demo/tests/public/actions.spec.ts
+- 51795949d2446a21fee0688ce461efc8c16d7949 web/react-gui/demo/tests/public/ancestor.spec.ts
+- bf5f2f783155e480ef46d4b532570a5126fb4888 web/react-gui/demo/tests/public/host-copy.test.ts
+- dc33d878cc0d69a2e8b157feae950c768dd08975 web/react-gui/demo/tests/public/host-protocol.test.ts
+- 1032731e4f773bb131404c937e1e0cf29ee80aa5 web/react-gui/demo/tests/public/hosting.spec.ts
+- 73afe668fce248b38e2c1ee19a9c18f421111b10 web/react-gui/demo/tests/public/invitation.spec.ts
+- 06a4de88311a2bcc569864f0140cb12418ff8ce7 web/react-gui/demo/tests/public/layout.spec.ts
+- 0d29b3671b414b029b6c8104a46a22fa9b1f1091 web/react-gui/demo/tests/public/plans.spec.ts
+- 2e3f8fd5b33219e90db1078d1a805dca4e384216 web/react-gui/demo/tests/public/registration.spec.ts
+- aee450799c20ffccbcfae284b5baa4da8f57bd7d web/react-gui/demo/tests/public/release.spec.ts
+- ef7ecf445f77dbf2d6b9814338deaf53d552e9d0 web/react-gui/demo/tests/public/stable-modules.spec.ts
+- 39cb76da540b73dacdb33ce962da045d9a42a421 web/react-gui/demo/tests/public/triggers.spec.ts
+- a030c645d3b2f735e966b915a2ee6a45c2c97cd6 web/react-gui/demo/tests/rain-history.test.ts
+- 6942c41aaa0258894adf9a0a57a213f029622d9e web/react-gui/demo/tests/sessions.test.ts
+- 36d70f73dcda39f375a9d09f58655e1486fc6760 web/react-gui/demo/tests/shared-meter-readings.test.ts
+- 811533da97759d27a4a2934739d16893bc8275af web/react-gui/demo/tests/support.test.ts
+- 84ba659f2413b42b085c29735c5dabb96cc85503 web/react-gui/demo/tests/triggers.test.ts
+- d028538153bf02b4cf36f005613c1236c01e0345 web/react-gui/demo/tests/v1-native-contracts.test.ts
+- 437689fc1ce21f33b46ff36ef8febdf169e85656 web/react-gui/demo/tests/valve-locale.test.ts
+- 7b5e6ee3b121a02fd30964803543af52c547fcbf web/react-gui/demo/tests/water-fixture.test.ts
+- e5eeac83b27fae74ddd341a8c5905a27193bf137 web/react-gui/demo/tests/website-packager.test.ts
+- 8a725b4c3728e83e9be84fbf219d66bacee15c42 web/react-gui/demo/timezone-store.ts
+- 8efd10edb2b1c2caefe6333aebad0a139aa15e40 web/react-gui/demo/tsconfig.json
+- 6b72ca6a13696bd307c6490679546f9ab7b35732 web/react-gui/demo/verification.md
+- 31d0a051687439be77b22f8abe14bf6899541579 web/react-gui/demo/water-copy.ts
+- 3362dc586fead747f9919efdd567a7bdc4d4d2ed web/react-gui/demo/website/embed.html
+- 16d4a92ea153a83c7c7667b24eac578056579c8c web/react-gui/demo/website/invitation.css
+- c6a3dd26dadc9d81679d879cc2d220be977be8f2 web/react-gui/demo/website/invitation.html
+- 928a1d930add238928e1daa1652e92b6b90c0de5 web/react-gui/demo/website/invitation.js
+- 917441983b299c1706ebf507ed008161e1766225 web/react-gui/demo/website/osi-os-preview.png
+- 1b35fbaa86c86ec661d01a242c975383992e1b92 web/react-gui/demo/website/package.mjs
+- e9cf53fe698150c81be323b6a0f4064ac1132c07 web/react-gui/demo/website/preview.html
+- fa552346c6aad48b41bcc604ca3d07523f0537bf web/react-gui/scripts/generate-sdi12-profiles.mjs
+- 5d6fbedfaf5d50bf223d56796b0adffc3ee3d27c web/react-gui/src/utils/publicSimulatorDeviceDefaults.ts
+- c177511c02befcf8c47ce8d0911008d77c2d0698 web/react-gui/src/utils/publicSimulatorInvalidation.ts
+- b5d320619c5c211e9ca0ab9a62bc546182cc70eb web/react-gui/vite.demo.config.ts
+
+## Port follow-up
+
+The imported `demo/locales/public-advisory/*.json` files remain listed above as
+source provenance, but are not shipped. The public host has no rendered surface
+that consumes that advisory overlay; its unused loader and fixtures were
+removed during the reviewed UX pass.

@@ -6,6 +6,7 @@ import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
 import { assertScheduleStartNotHeld, isValveOpenHeldError, scheduleUpdateWhileHeld } from '../../../services/valveCommandHold';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
 import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
+import { useModalFocus } from '../../../hooks/useModalFocus';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
 
 export interface ValveScheduleDialogProps {
@@ -192,6 +193,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const [once, setOnce] = useState<OnceFormState>(EMPTY_ONCE);
   const [weeklyError, setWeeklyError] = useState<string | null>(null);
   const [onceError, setOnceError] = useState<string | null>(null);
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [savingWeekly, setSavingWeekly] = useState(false);
   const [savingOnce, setSavingOnce] = useState(false);
   const [rowBusyUuid, setRowBusyUuid] = useState<string | null>(null);
@@ -209,12 +211,17 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
   const scheduleCloseRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
+  const scheduleDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedRow = open && deleteSelection?.valveEui === valve.deviceEui
     ? data?.schedules.find((schedule) => schedule.scheduleUuid === deleteSelection.scheduleUuid)
     : undefined;
   const pendingDelete = selectedRow && !isConditionalSchedule(selectedRow)
     && deletionContent(selectedRow) === deleteSelection?.content ? selectedRow : null;
   const confirmationOpen = pendingDelete !== null;
+
+  // The delete confirmation is a separate nested surface with its own focus owner.
+  // Pause the outer trap while it is open so its focusin guard cannot steal focus.
+  useModalFocus(scheduleDialogRef, open, onClose, 'self', confirmationOpen);
 
   useEffect(() => {
     if (deleteSelection && !confirmationOpen) setDeleteSelection(null);
@@ -226,6 +233,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setOnce(EMPTY_ONCE);
       setWeeklyError(null);
       setOnceError(null);
+      setSaveSucceeded(false);
       setRowError(null);
       setEditingWeeklyUuid(null);
       setEditingOnceUuid(null);
@@ -292,6 +300,9 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     await mutate();
     onChanged();
   };
+  const focusSavedSchedule = (scheduleUuid: string) => {
+    window.requestAnimationFrame(() => document.getElementById(`valve-schedule-row-${scheduleUuid}`)?.focus());
+  };
 
   const toggleWeekday = (day: number) => {
     setWeekly((prev) => ({
@@ -316,6 +327,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     if (!isWeeklyValid || savingWeekly) return;
     setSavingWeekly(true);
     setWeeklyError(null);
+    setSaveSucceeded(false);
     try {
       const weeklyFields = {
         label: weekly.label.trim() || null,
@@ -329,12 +341,19 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         // same way a create would be — `enabled` is deliberately not sent, so the row keeps
         // whatever the enable toggle last set.
         await valvesAPI.updateSchedule(valve.deviceEui, editingWeeklyUuid, weeklyFields);
+        const savedUuid = editingWeeklyUuid;
+        setWeekly(EMPTY_WEEKLY);
+        setEditingWeeklyUuid(null);
+        await afterMutation();
+        setSaveSucceeded(true);
+        focusSavedSchedule(savedUuid);
       } else {
-        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'WEEKLY', ...weeklyFields, enabled: true });
+        const created = await valvesAPI.createSchedule(valve.deviceEui, { kind: 'WEEKLY', ...weeklyFields, enabled: true });
+        setWeekly(EMPTY_WEEKLY);
+        await afterMutation();
+        setSaveSucceeded(true);
+        focusSavedSchedule(created.schedule.scheduleUuid);
       }
-      setWeekly(EMPTY_WEEKLY);
-      setEditingWeeklyUuid(null);
-      await afterMutation();
     } catch (err) {
       setWeeklyError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.saveFailed'));
     } finally {
@@ -349,6 +368,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     if (!fireAt) return;
     setSavingOnce(true);
     setOnceError(null);
+    setSaveSucceeded(false);
     try {
       const onceFields: Pick<ValveScheduleInput, 'label' | 'fireAt' | 'durationMinutes' | 'enabled'> = {
         label: once.label.trim() || null,
@@ -365,13 +385,20 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
         const body = scheduleUpdateWhileHeld(valve.deviceEui, onceFields, current);
         if (current) await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body, current);
         else await valvesAPI.updateSchedule(valve.deviceEui, editingOnceUuid, body);
+        const savedUuid = editingOnceUuid;
+        setOnce(EMPTY_ONCE);
+        setEditingOnceUuid(null);
+        await afterMutation();
+        setSaveSucceeded(true);
+        focusSavedSchedule(savedUuid);
       } else {
         assertScheduleStartNotHeld(valve.deviceEui, { kind: 'ONCE', fireAt, enabled: true });
-        await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
+        const created = await valvesAPI.createSchedule(valve.deviceEui, { kind: 'ONCE', ...onceFields, enabled: true });
+        setOnce(EMPTY_ONCE);
+        await afterMutation();
+        setSaveSucceeded(true);
+        focusSavedSchedule(created.schedule.scheduleUuid);
       }
-      setOnce(EMPTY_ONCE);
-      setEditingOnceUuid(null);
-      await afterMutation();
     } catch (err) {
       setOnceError(isValveOpenHeldError(err)
         ? t('commandNoAnswer.open')
@@ -498,50 +525,9 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       })
     : null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
-          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('scheduleDialog.title', { name: valve.name })}</h2>
-          <button
-            type="button"
-            ref={scheduleCloseRef}
-            onClick={onClose}
-            aria-label={tc('close')}
-            className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)]"
-          >
-            &times;
-          </button>
-        </div>
-
-        <div className="overflow-y-auto px-5 py-4">
-          {!data && !error && (
-            <p className="text-sm text-[var(--text-tertiary)]">{tc('loading')}</p>
-          )}
-
-          {error && (
-            <div className="flex items-center gap-3 text-sm text-[var(--warn-text)]">
-              <span>{t('scheduleDialog.loadFailed')}</span>
-              <button
-                type="button"
-                onClick={() => mutate()}
-                className="flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] sm:min-h-0"
-              >
-                {tc('retry')}
-              </button>
-            </div>
-          )}
-
-          {data && (
-            <>
+  const compiledWeekSection = data ? (
               <section>
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.week')}</p>
+                {data.schedules.length > 0 && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.week')}</p>}
                 <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-7">
                   {WEEKDAYS.map((d) => {
                     const windows = data.compiled.days[d] ?? [];
@@ -585,18 +571,66 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                   return overall ? <p className="mt-2 text-xs text-[var(--text-tertiary)]">{overall}</p> : null;
                 })()}
               </section>
+  ) : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        ref={scheduleDialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="flex max-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+          <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('scheduleDialog.title', { name: valve.name })}</h2>
+          <button
+            type="button"
+            ref={scheduleCloseRef}
+            onClick={onClose}
+            aria-label={tc('close')}
+            className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)]"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4">
+          {!data && !error && (
+            <p className="text-sm text-[var(--text-tertiary)]">{tc('loading')}</p>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-3 text-sm text-[var(--warn-text)]">
+              <span>{t('scheduleDialog.loadFailed')}</span>
+              <button
+                type="button"
+                onClick={() => mutate()}
+                className="flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] sm:min-h-0"
+              >
+                {tc('retry')}
+              </button>
+            </div>
+          )}
+
+          {data && (
+            <>
+              {data.schedules.length > 0 && compiledWeekSection}
 
               <p className="mt-3 text-xs text-[var(--text-tertiary)]">{t('bluetoothNote')}</p>
 
               <section className="mt-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.list')}</p>
+                {saveSucceeded && <p role="status" aria-live="polite" className="mt-2 rounded-md border border-[var(--success-border)] bg-[var(--success-bg)] px-3 py-2 text-sm text-[var(--success-text)]">{t('scheduleDialog.saveSucceeded')}</p>}
                 {rowError && <p className="mt-1 whitespace-pre-line text-xs text-[var(--warn-text)]">{rowError}</p>}
                 {data.schedules.length === 0 ? (
                   <p className="mt-2 text-sm text-[var(--text-tertiary)]">{t('noSchedule')}</p>
                 ) : (
-                  <ul className="mt-2 flex flex-col gap-1.5">
+                  <ul aria-live="polite" className="mt-2 flex flex-col gap-1.5">
                     {data.schedules.map((schedule) => (
-                      <li key={schedule.scheduleUuid} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
+                      <li id={`valve-schedule-row-${schedule.scheduleUuid}`} key={schedule.scheduleUuid} tabIndex={-1} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2 focus-visible:outline-2 focus-visible:outline-[var(--focus)]">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-[var(--text)]">
                             {schedule.label ?? (schedule.kind === 'WEEKLY' ? t('scheduleDialog.addWeekly') : t('scheduleDialog.addOnce'))}
@@ -837,6 +871,12 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                   </div>
                 </section>
               </div>
+              {data.schedules.length === 0 && (
+                <details className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.week')}</summary>
+                  {compiledWeekSection}
+                </details>
+              )}
             </>
           )}
         </div>

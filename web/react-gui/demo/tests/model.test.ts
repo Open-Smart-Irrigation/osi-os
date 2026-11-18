@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Simulator, DEMO_EPOCH, VALVE_EUI, SPARE_EUI } from '../model';
+import { Simulator, DEMO_EPOCH, PUBLIC_EPOCH, VALVE_EUI, SPARE_EUI } from '../model';
 import { classifySwtWaterStatus } from '../../src/utils/swt';
 
 test('seed contains two populated zones and wet/moist/dry kPa, reproducible history', () => {
@@ -26,25 +26,40 @@ test('zone validation, assignments and deletion preserve devices and initial zon
 });
 
 test('one clock governs acknowledgement, pause, acceleration, cancellation and expiry', () => {
-  const sim = new Simulator();
+  const sim = new Simulator({mode: 'public'});
   sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
   assert.equal(sim.actuation?.reconciliation_state, 'PENDING_OBSERVATION');
-  assert.throws(() => sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60}));
+  assert.deepEqual(sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60}), {status: 'queued'});
   sim.advance(2000);
   assert.equal(sim.actuation?.reconciliation_state, 'OBSERVED_RUNNING');
   sim.active = false;
   sim.advance(120000);
-  assert.equal(sim.now, DEMO_EPOCH + 2000);
+  assert.equal(sim.now, PUBLIC_EPOCH + 2000);
   sim.active = true;
   sim.speed = 10;
   sim.advance(6000);
   assert.equal(sim.actuation, null);
   assert.equal(sim.devices.find(d => d.deveui === VALVE_EUI)?.current_state, 'CLOSED');
   sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
-  sim.request('POST', `/api/valve/${VALVE_EUI}/cancel`);
+  const pendingExpectationId = sim.actuation?.expectation_id;
+  assert.deepEqual(sim.request('POST', `/api/valve/${VALVE_EUI}/cancel`), {
+    status: 'cancelled', outcome: 'cancelled', confirmation: 'queue_flushed', deveui: VALVE_EUI, cancelled: 1,
+    expectation_id: pendingExpectationId,
+    previous_state: 'PENDING_OBSERVATION', reason: 'operator_cancel', queue_scope: 'full_flush',
+    chirpstack_queue_status: null, dropped_opens: {count: 0, expectationIds: []}, collateral: [],
+    transport_uncertain: false, timestamp: new Date(sim.now).toISOString(),
+  });
   sim.advance(6000);
   assert.equal(sim.actuation, null);
   assert.equal(sim.outcomes[0].status, 'CANCELLED');
+});
+
+test('presentation mode retains the original sixty-second timed valve closure', () => {
+  const sim = new Simulator();
+  sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
+  sim.advanceTo(DEMO_EPOCH + 60000);
+  assert.equal(sim.actuation, null);
+  assert.equal(sim.outcomes[0].observedCloseAt, new Date(DEMO_EPOCH + 60000).toISOString());
 });
 
 test('reset removes active countdown and restores exact seed', () => {
@@ -79,7 +94,8 @@ test('trigger configuration and synthetic device registration remain local and v
   const sim = new Simulator();
   sim.request('POST','/api/devices',{deveui:'00000000000000B0',name:'Practice',type_id:'KIWI_SENSOR'});
   assert.equal(sim.devices.length,7);
-  assert.throws(()=>sim.request('POST','/api/devices',{deveui:'1234567890123456',name:'Not a fixture',type_id:'KIWI_SENSOR'}));
+  assert.equal((sim.request('POST','/api/devices',{deveui:'1234567890123456',name:'Full hex EUI',type_id:'KIWI_SENSOR'}) as {deveui:string}).deveui,
+    '1234567890123456');
   const schedule=sim.request('PUT','/api/irrigation-zones/1/schedule',{trigger_metric:'SWT_1',threshold_kpa:70,enabled:true,duration_minutes:5});
   assert.deepEqual(sim.zones[0].schedule,schedule);
   assert.throws(()=>sim.request('PUT','/api/irrigation-zones/1/schedule',{trigger_metric:'SWT_1',threshold_kpa:0,enabled:true,duration_minutes:5}));

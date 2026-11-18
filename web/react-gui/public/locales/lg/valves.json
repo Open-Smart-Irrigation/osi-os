@@ -41,7 +41,7 @@
   "openDialog": { "title": "Open {{name}}", "duration": "Duration (min)", "durationHint": "Enter 1–255 minutes.", "custom": "Custom", "summary": "closes ≈ {{time}}", "liters": "≈ {{liters}} L", "confirm": "Open for {{minutes}} min", "error": "Could not send the open command." },
   "scheduleDialog": { "edit": "Kyusa", "update": "Kyusa enteekateeka", "discardEdit": "Lekawo", "editWeekly": "Kyusa enteekateeka ya buli wiiki", "editOnce": "Kyusa okuggulawo kw’omulundi gumu",
     "title": "Schedules for {{name}}", "loadFailed": "Could not load schedules.", "week": "Compiled week (what the valve will run)", "windows": "{{count}} of 4 windows", "noWindows": "—",
-    "list": "Schedules", "addWeekly": "+ Weekly", "addOnce": "+ One-time",
+    "list": "Schedules", "addWeekly": "+ Weekly", "addOnce": "+ One-time", "saveSucceeded": "Schedule saved.",
     "label": "Label (optional)", "weekdays": "Days", "startTime": "Start", "duration": "Duration (min)", "date": "Date", "time": "Time",
     "preview": "{{days}} {{start}}–{{end}} · {{minutes}} min", "previewLiters": "≈ {{liters}} L",
     "onceNote": "One-time opens are sent by the gateway at that minute; the gateway must be online.", "dispatchStatus": "Dispatch: {{state}}", "dispatchStates": { "PENDING": "Pending", "ATTEMPTED": "Attempted", "SENT": "Sent to the radio network", "UNKNOWN": "Unknown", "SKIPPED": "Skipped" },

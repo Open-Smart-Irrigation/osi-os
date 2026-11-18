@@ -55,6 +55,7 @@ test('zone creation, assignment, removal and language preserve existing farm', a
 
 test('water card, real sensor charts and three status categories', async ({page}) => {
   await page.goto('/'); const app=page.frameLocator('#app');
+  await expect(page.locator('#host-notice')).toBeEmpty();
   await app.getByRole('button', {name:/Tomato plot.*devices/}).click();
   await expect(app.getByTestId('water-rain-tile')).toContainText('6.0 mm');
   await expect(app.getByTestId('water-flow-meter-tile')).toContainText('120 L');
@@ -78,15 +79,15 @@ test('water card, real sensor charts and three status categories', async ({page}
   await expect(app.getByText('673 readings · last 168 h')).toBeVisible();
   await page.waitForTimeout(1700); // Let the real chart's series transition finish before capture.
   await page.screenshot({path:'demo/screenshots/soil-history-7-days.png'});
-  await app.getByRole('button',{name:'×',exact:true}).click();
+  await app.getByRole('button',{name:'Close',exact:true}).click();
   await app.getByRole('button',{name:/Demonstration bed.*device/}).click();
   await app.getByRole('button',{name:/Devices in this zone/}).last().click();
   await expect(app.getByTestId('water-rain-tile').last()).toContainText('6.0 mm');
   await expect(app.getByRole('button',{name:'12.0 kPa',exact:true})).toBeVisible();
-  for (const [status,color] of [['wet','rgb(59, 130, 246)'],['moist','rgb(21, 128, 61)'],['dry','rgb(239, 68, 68)']]) {
+  for (const [status,fill] of [['wet','full'],['moist','half'],['dry','empty']]) {
     const indicator=app.locator(`[data-swt-status="${status}"]`).filter({visible:true}).first();
     await expect(indicator).toBeVisible();
-    await expect(indicator.locator(':scope > span').first()).toHaveCSS('background-color',color);
+    await expect(indicator.locator('[data-swt-fill]')).toHaveAttribute('data-swt-fill',fill);
   }
   await expect(page.locator('#host-notice')).toBeEmpty();
 });
@@ -104,7 +105,7 @@ test('30 and 90 day soil charts show the complete simulated history at both dept
       await page.waitForTimeout(1700); // Capture after the chart's series transition.
       await page.screenshot({path:`demo/screenshots/soil-history-${days}-days-${depth}cm.png`});
     }
-    await app.getByRole('button',{name:'×',exact:true}).click();
+    await app.getByRole('button',{name:'Close',exact:true}).click();
   }
 });
 
@@ -206,14 +207,16 @@ test('existing device registration and SWT trigger configuration', async ({page}
   await expect(app.getByText('Practice probe',{exact:true})).toBeVisible();
   await app.getByRole('button',{name:/Tomato plot.*devices/}).click();
   await app.getByRole('button',{name:/Trigger-based irrigation/i}).click();
-  await app.getByLabel('Threshold (kPa)').fill('70');
+  await app.getByRole('radio', {name: 'Custom'}).check();
+  const customThreshold = app.locator('input[id^="swt-custom-threshold-"]');
+  await customThreshold.fill('70');
   await app.getByRole('button',{name:'English'}).click();await app.getByRole('menuitem',{name:'Français',exact:true}).click();
-  await expect(app.locator('#swt-threshold-1')).toHaveValue('70');
+  await expect(customThreshold).toHaveValue('70');
   await app.getByRole('button',{name:'Français'}).click();await app.getByRole('menuitem',{name:'English',exact:true}).click();
   await app.getByRole('button',{name:'Save schedule',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('Automatic trigger execution is not simulated');
   await page.getByRole('button',{name:'Dismiss notice'}).click();
-  await app.getByRole('button',{name:'Reload',exact:true}).click();await expect(app.getByLabel('Threshold (kPa)')).toHaveValue('70');
+  await app.getByRole('button',{name:'Reload',exact:true}).click();await expect(customThreshold).toHaveValue('70');
 });
 
 
@@ -256,6 +259,9 @@ test('native language button fills the dashboard slot below Add beside Account',
 test('valve text and compact tooltip work in every language, with unclipped identity', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
   const labels=['English','Deutsch','Français','Italiano','Español','Português','Luganda'];
+  const helpLabels=['About weekly schedules','Über Wochenpläne','À propos des programmes hebdomadaires',
+    'Informazioni sui programmi settimanali','Acerca de los programas semanales','Sobre os programas semanais',
+    'Ebikwata ku nteekateeka za buli wiiki'];
   const titles=['Valve control','Ventilsteuerung','Commande des vannes','Controllo valvole','Control de válvulas','Controlo de válvulas','Okufuga amabbomba'];
   let current='English';
   for(let index=0;index<labels.length;index++) {
@@ -266,18 +272,17 @@ test('valve text and compact tooltip work in every language, with unclipped iden
     const panel=heading.locator('xpath=../..');
     await expect(panel.locator('> div').first().locator('p')).toHaveCount(0);
     const info=heading.locator('..').getByRole('button');
-    await info.click();await expect(app.getByRole('tooltip')).toBeVisible();
-    await expect(app.getByRole('tooltip')).not.toContainText('All valves, all zones.');
-    await info.click();await expect(app.getByRole('tooltip')).toHaveCount(0);
-    await info.focus();await info.press('Escape');await expect(app.getByRole('tooltip')).toHaveCount(0);
-    const seen=panel.getByTestId('valve-last-seen');
+    const help=app.getByRole('region',{name:helpLabels[index]});
+    await info.click();await expect(help).toBeVisible();
+    await expect(help).not.toContainText('All valves, all zones.');
+    await info.click();await expect(help).toHaveCount(0);
+    await info.focus();await info.press('Escape');await expect(help).toHaveCount(0);
+    const seen=panel.getByTestId('device-card-last-seen');
     const name=panel.getByRole('heading',{name:'Tomato valve',exact:true});
     await expect(seen).toBeVisible();await expect(name).toBeVisible();
-    const seenBox=await seen.boundingBox(),nameBox=await name.boundingBox();
-    expect(seenBox!.y+seenBox!.height).toBeLessThanOrEqual(nameBox!.y);
     expect(await name.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
     // The first button in the tile is the rename pencil, so use its primary-action grid.
-    const open=panel.locator('[data-testid="valve-actions"] > button').first();
+    const open=panel.locator('[data-testid="valve-actions"] > div > button').first();
     await open.click();
     await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
     if(index>0)await expect(app.getByRole('dialog')).not.toContainText('Duration (min)');
@@ -334,12 +339,12 @@ test('long translations wrap across all languages, including Luganda settings', 
     const toggle=app.getByRole('button',{name:/^Tomato plot/});
     if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
     await expectTextToFit();
-    const valve=app.getByTestId('valve-last-seen').locator('..');
-    await valve.locator('[data-testid="valve-actions"] > button').click();
+    const valve=app.getByTestId('valve-actions').first();
+    await valve.getByRole('button').first().click();
     await expect(app.getByRole('dialog').getByRole('spinbutton')).toBeVisible();
     await expectTextToFit();
     await app.getByRole('dialog').getByRole('button').first().click();
-    await valve.locator('[data-testid="valve-actions"] > div > button').click();
+    await valve.getByRole('button').nth(1).click();
     await expect(app.getByRole('dialog')).toBeVisible();
     await expectTextToFit();
     await app.getByRole('dialog').getByRole('button').first().click();
@@ -350,7 +355,6 @@ test('long translations wrap across all languages, including Luganda settings', 
       await expect(app.getByRole('dialog')).toBeVisible();
       await expectTextToFit();
       await app.getByRole('dialog').getByRole('button').first().click();
-      await app.getByText(/Bwagulibwa omulundi gw'omuliko/).last().scrollIntoViewIfNeeded();
       await page.screenshot({path:'demo/screenshots/luganda-wrapping.png'});
     }
     current=label;

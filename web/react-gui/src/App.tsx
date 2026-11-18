@@ -17,12 +17,14 @@ import { GrantsPage } from './pages/admin/GrantsPage';
 import { ScopeStatusBanner } from './components/ScopeStatusBanner';
 import { NetworkPage } from './pages/NetworkPage';
 import { AnalysisRoute } from './pages/AnalysisRoute';
+import { isPublicSimulatorBuild } from './utils/publicSimulatorDeviceDefaults';
 
 const MobileTensionHistoryRoute = import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'
   ? lazy(() => import('./pages/MobileTensionHistoryRoute').then((module) => ({ default: module.MobileTensionHistoryRoute })))
   : null;
 
 function App() {
+  const publicSimulatorBuild = isPublicSimulatorBuild();
   return (
     <AppProviders>
         <ScopeStatusBanner />
@@ -84,7 +86,7 @@ function App() {
           <Route
             path="/analysis"
             element={
-              <PrivateRoute>
+              publicSimulatorBuild ? <Navigate to="/dashboard" replace /> : <PrivateRoute>
                 <AnalysisRoute />
               </PrivateRoute>
             }
@@ -103,7 +105,7 @@ function App() {
             }
           />
 
-          <Route path="/network" element={<PrivateRoute><NetworkPage /></PrivateRoute>} />
+          <Route path="/network" element={publicSimulatorBuild ? <Navigate to="/dashboard" replace /> : <PrivateRoute><NetworkPage /></PrivateRoute>} />
 
           <Route
             path="/history/zones/:zoneId"
@@ -126,7 +128,7 @@ function App() {
           <Route
             path="/history/gateways/:gatewayEui/cards/:cardId"
             element={
-              <PrivateRoute>
+              publicSimulatorBuild ? <Navigate to="/dashboard" replace /> : <PrivateRoute>
                 <HistoryCardDetailPage />
               </PrivateRoute>
             }
@@ -137,7 +139,7 @@ function App() {
           <Route
             path="/journal"
             element={
-              <PrivateRoute>
+              publicSimulatorBuild ? <Navigate to="/dashboard" replace /> : <PrivateRoute>
                 <JournalPage />
               </PrivateRoute>
             }

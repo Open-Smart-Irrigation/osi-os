@@ -9,6 +9,7 @@ declare global {
     readonly VITE_MOBILE_HISTORY_INTERNAL?: string;
     readonly VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS?: string;
     readonly VITE_BASE_PATH?: string;
+    readonly VITE_PUBLIC_SIMULATOR?: string;
   }
 
   interface ImportMeta {
