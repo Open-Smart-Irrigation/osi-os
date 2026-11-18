@@ -35,6 +35,15 @@ configuration() {
 	cat >> /var/etc/$PACKAGE_NAME/$PACKAGE_NAME.toml <<- EOF
 		[sqlite]
 		path="/srv/chirpstack/chirpstack.sqlite"
+		# WAL lets the API's queue writes and uplink handling proceed side by
+		# side; the default rollback journal with a 1 s busy wait refused
+		# downlink enqueues (gRPC INTERNAL) under load. A custom list replaces
+		# ChirpStack's defaults, so foreign_keys stays on here.
+		pragmas=[
+			"journal_mode = WAL",
+			"busy_timeout = 5000",
+			"foreign_keys = ON",
+		]
 
 		[gateway]
 		allow_unknown_gateways=true
