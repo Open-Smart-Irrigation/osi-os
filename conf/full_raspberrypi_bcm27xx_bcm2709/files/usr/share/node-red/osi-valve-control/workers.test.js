@@ -296,7 +296,7 @@ async function uncertainOnceFixture(t) {
     async enqueueDownlink() { calls.enqueue += 1; throw new Error('gateway handoff uncertain'); },
     async getDeviceQueue(devEui) { assert.equal(devEui, deviceEui); calls.queue += 1; return queue; },
   };
-  const tick = (at, extra = {}) => W.runOnceTick({ db, now: new Date(at), transport, warn: (message) => warnings.push(message), ...extra });
+  const tick = (at, extra = {}) => W.runOnceTick({ db, now: new Date(at), queueReadNow: () => Date.parse(at), transport, warn: (message) => warnings.push(message), ...extra });
   const first = await tick('2026-08-19T10:03:00Z', {
     trustedContext: controlledRuntime([Date.parse('2026-08-19T10:03:00Z'), Date.parse('2026-08-19T10:03:00Z')]),
   });
@@ -389,10 +389,10 @@ for (const racing of [false, true]) {
     } else await f.tick('2026-08-19T10:39:01Z');
     await f.tick('2026-08-19T10:39:02Z');
     await f.tick('2026-08-19T10:39:03Z');
-    const events = await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'");
+    const events = await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_reported_late'");
     assert.equal(events.length, 1);
     assert.equal(events[0].action, 'IRRIGATE');
-    assert.deepEqual(JSON.parse(events[0].payload_json), { expectation_id: (await f.db.get('SELECT expectation_id FROM valve_actuation_expectations WHERE command_id IS NULL AND device_eui=?', [f.deviceEui])).expectation_id, schedule_uuid: f.scheduleUuid, fire_at: '2026-08-19T10:00:00.000Z', observed_open_at: '2026-08-19T10:39:00.000Z', attempted_at: f.intent.attempted_at });
+    assert.deepEqual(JSON.parse(events[0].payload_json), { proof: 'observed_open', message: 'Valve reported open', expectation_id: (await f.db.get('SELECT expectation_id FROM valve_actuation_expectations WHERE command_id IS NULL AND device_eui=?', [f.deviceEui])).expectation_id, schedule_uuid: f.scheduleUuid, fire_at: '2026-08-19T10:00:00.000Z', observed_open_at: '2026-08-19T10:39:00.000Z', attempted_at: f.intent.attempted_at });
     const schedule = await f.db.get('SELECT once_state,once_fired_at FROM valve_schedules');
     assert.deepEqual({ ...schedule }, { once_state: 'FIRED', once_fired_at: '2026-08-19T10:00:00.000Z' });
     assert.equal((await f.db.get('SELECT state FROM valve_once_dispatch_intents')).state, 'SKIPPED');
@@ -421,7 +421,7 @@ for (const scenario of ['other attempt', 'OPEN after window', 'OPEN before attem
     }
     await f.tick(scenario === 'expired correction window' ? '2026-08-19T10:40:00.001Z' : '2026-08-19T10:39:01Z');
     assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'SKIPPED');
-    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, 0);
+    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_reported_late'")).length, 0);
     assert.equal((await f.db.all('SELECT * FROM actuator_log')).length, 0);
     assert.equal(f.calls.enqueue, 1);
   });
@@ -463,7 +463,7 @@ test('runOnceTick skips an uncertain open after its confirmation deadline exactl
   assert.equal(payload.phase, JSON.parse(expectation.transport_json).phase);
   assert.match(payload.note, /attempted.*not confirmed/);
   const afterSkip = await db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [intent.command_id]);
-  assert.deepEqual(JSON.parse(afterSkip.transport_json), { ...JSON.parse(expectation.transport_json), once_settlement: 'uncertain', once_confirm_by: payload.confirm_by, once_interval_minutes: payload.interval }, 'settling preserves transport proof and adds its fixed deadline and outcome');
+  assert.deepEqual(JSON.parse(afterSkip.transport_json), { ...JSON.parse(expectation.transport_json), once_settlement: 'uncertain', once_confirm_by: payload.confirm_by, once_interval_minutes: payload.interval, queue_absent_at: '2026-08-19T10:28:00.001Z' }, 'settling preserves transport proof and adds its fixed deadline and outcome');
   await tick('2026-08-19T10:29:00Z');
   await tick('2026-08-19T10:30:00Z');
   assert.equal((await db.all('SELECT * FROM irrigation_events')).length, 1);
@@ -474,7 +474,7 @@ test('runOnceTick skips an uncertain open after its confirmation deadline exactl
 test('runOnceTick leaves an uncertain open pending through the exact confirmation boundary without resending', async (t) => {
   const { db, tick, calls, setQueue } = await uncertainOnceFixture(t);
   // Neither a different port nor a different duration proves this open was queued.
-  setQueue([{ fPort: 3, data: 'QQI=' }, { fPort: 2, data: 'QQM=' }]);
+  setQueue([{ id: 'wrong-port', fPort: 3, data: 'QQI=' }, { id: 'wrong-duration', fPort: 2, data: 'QQM=' }]);
   for (const at of ['2026-08-19T10:04:00Z', '2026-08-19T10:05:00Z', '2026-08-19T10:28:00Z']) {
     assert.deepEqual(await tick(at), { fired: [], skipped: [], transportFailures: [] });
   }
@@ -601,20 +601,23 @@ test('runOnceTick settles uncertainty without a queue API and omits the SKIP eve
   assert.equal(calls.enqueue, 1);
 });
 
-test('runOnceTick leaves an uncertain schedule disabled during the queue lookup untouched', async (t) => {
-  const { db, tick, calls, transport, scheduleUuid } = await uncertainOnceFixture(t);
-  transport.getDeviceQueue = async () => {
-    await db.run('UPDATE valve_schedules SET enabled=0 WHERE schedule_uuid=?', [scheduleUuid]);
-    return [{ fPort: 2, data: 'QQI=' }];
-  };
-  assert.deepEqual(await tick('2026-08-19T10:11:00Z'), { fired: [], skipped: [], transportFailures: [] });
-  assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, 'PENDING');
-  assert.equal((await db.all('SELECT * FROM irrigation_events')).length, 0);
-  assert.equal(calls.enqueue, 1);
-});
+for (const disabled of [false, true]) {
+  test(disabled ? 'runOnceTick leaves an uncertain schedule disabled during the queue lookup untouched' : 'enabled queue-lookup control accepts the qualifying id', async (t) => {
+    const { db, tick, calls, transport, scheduleUuid } = await uncertainOnceFixture(t);
+    transport.getDeviceQueue = async () => {
+      if (disabled) await db.run('UPDATE valve_schedules SET enabled=0 WHERE schedule_uuid=?', [scheduleUuid]);
+      return [{ id: 'qualifying-frame', fPort: 2, data: 'QQI=' }];
+    };
+    const result = await tick('2026-08-19T10:11:00Z');
+    assert.equal(result.fired.length, disabled ? 0 : 1);
+    assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, disabled ? 'PENDING' : 'FIRED');
+    assert.equal((await db.all('SELECT * FROM irrigation_events')).length, disabled ? 0 : 1);
+    assert.equal(calls.enqueue, 1);
+  });
+}
 
 for (const [label, transport, patch] of [
-  ['old UNKNOWN without a live queue item', { phase: 'UNKNOWN', attempted_at: '2026-08-18T10:02:59Z' }, null],
+  ['earlier queue removal evidence', { phase: 'UNKNOWN', attempted_at: '2026-08-18T10:02:59Z', queue_absent_at: '2026-08-19T10:00:00Z' }, null],
   ['explicit expiry', { phase: 'UNKNOWN', explicit_expiry_at: '2026-08-19T10:03:59Z' }, null],
   ['applied snapshot explicit expiry', { phase: 'UNKNOWN', effect_snapshot: { explicit_expiry_at: '2026-08-19T10:03:59Z' } }, null],
   ['accepted item already delivered', { phase: 'ACCEPTED', queue_id: 'gone-queue-id' }, null],
@@ -831,7 +834,7 @@ for (const late of [false, true]) {
 
 for (const [label, options] of [
   ['own OPEN observed before the one-time attempt', { resolved: true }],
-  ['older than the 24-hour lookback', { manualAt: '2026-08-18T09:00:00Z' }],
+
 ]) {
   test(`R2 S2: an earlier command ${label} does not block`, async (t) => {
     const f = await delayedOwnerFixture(t, options);
@@ -850,7 +853,7 @@ for (const [expiry, corrected] of [['2026-08-19T10:28:59Z', true], ['2026-08-19T
     await recordOnceOpen(f, '2026-08-19T10:29:00Z');
     await f.tick('2026-08-19T10:29:01Z');
     assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, corrected ? 'FIRED' : 'SKIPPED');
-    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, corrected ? 1 : 0);
+    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_reported_late'")).length, corrected ? 1 : 0);
     assert.equal(f.calls.enqueue, 1);
   });
 }
@@ -1088,7 +1091,7 @@ for (const source of ['actuator log', 'local physical run']) {
     else await f.db.run("UPDATE valve_actuation_expectations SET trigger='service_action' WHERE command_id IS NULL AND device_eui=?", [f.deviceEui]);
     await f.tick('2026-08-19T10:39:01Z');
     assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'SKIPPED');
-    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, 0);
+    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_reported_late'")).length, 0);
     assert.equal(f.calls.enqueue, 1);
   });
 }
@@ -1098,7 +1101,7 @@ for (const evidence of ['observed_open_at', 'OBSERVED_RUNNING']) {
     const f = await uncertainOnceFixture(t);
     await addUplinkHistory(f);
     await f.tick('2026-08-19T10:38:00.001Z');
-    const state = JSON.parse(f.expectation.transport_json);
+    const state = JSON.parse((await f.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [f.intent.command_id])).transport_json);
     if (evidence === 'observed_open_at') await f.db.run('UPDATE valve_actuation_expectations SET observed_open_at=? WHERE command_id=?', ['2026-08-19T10:40:00Z', f.intent.command_id]);
     else {
       state.observation = { observed_at: '2026-08-19T10:40:00Z' };
@@ -1106,7 +1109,7 @@ for (const evidence of ['observed_open_at', 'OBSERVED_RUNNING']) {
     }
     await f.tick('2026-08-19T10:40:00Z');
     assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'FIRED');
-    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, 1);
+    assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_reported_late'")).length, 1);
     assert.equal(f.calls.enqueue, 1);
   });
 }
@@ -1725,13 +1728,13 @@ for (const proof of ['queue', 'observation', 'opaque observation']) {
   });
 }
 
-test('CR-isolate: corrupt correction payload warns and still dispatches a due schedule', async (t) => {
+test('CR-isolate: corrupt correction transport warns and still dispatches a due schedule', async (t) => {
   const f = await uncertainOnceFixture(t);
   await f.tick('2026-08-19T10:28:00.001Z');
   await store.insertSchedule(f.db, { schedule_uuid: 'due-after-corruption', device_eui: f.deviceEui, kind: 'ONCE', fire_at: '2026-08-19T10:29:00.000Z', duration_minutes: 2, timezone: 'UTC', enabled: 1 });
   const db = { ...f.db, transaction: (fn) => f.db.transaction((tx) => fn({ ...tx, get: async (sql, args) => {
     const row = await tx.get(sql, args);
-    return row && sql.includes('e.payload_json, d.user_id') ? { ...row, payload_json: '{' } : row;
+    return row && sql === 'SELECT * FROM valve_actuation_expectations WHERE expectation_id=?' && args[0] === f.expectation.expectation_id ? { ...row, transport_json: '{' } : row;
   } })) };
   const warnings = [];
   const result = await f.tick('2026-08-19T10:29:00Z', { db, warn: (s) => warnings.push(s), transport: { async enqueueDownlink() { return { id: 'due-queue' }; } }, trustedContext: controlledRuntime([Date.parse('2026-08-19T10:29:00Z')]) });
@@ -1777,7 +1780,7 @@ for (const closeFirst of [false, true]) {
     await f.tick('2026-08-19T10:39:33Z');
     const events = await f.db.all("SELECT * FROM irrigation_events WHERE action='IRRIGATE'");
     assert.equal(events.length, 1);
-    assert.equal(events[0].reason, 'one_time_open_confirmed_late');
+    assert.equal(events[0].reason, 'one_time_open_reported_late');
     assert.equal(JSON.parse(events[0].payload_json).expectation_id, physical.expectation_id);
     assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE action='SKIP'")).length, 1);
   });
@@ -1813,15 +1816,190 @@ test('CR-isolate: one failed correction transaction does not suppress another ca
   await addUplinkHistory(f);
   await f.tick('2026-08-19T10:38:00.001Z');
   await recordOnceOpen(f, '2026-08-19T10:39:00Z');
-  await f.db.run("INSERT INTO irrigation_events(user_id,irrigation_zone_id,action,reason,duration_minutes,valve_deveui,payload_json,created_at) SELECT user_id,irrigation_zone_id,action,reason,duration_minutes,valve_deveui,payload_json,created_at FROM irrigation_events WHERE reason='one_time_uncertain'");
+
   let failed = false;
   const warnings = [];
-  const db = { ...f.db, transaction: (fn) => f.db.transaction((tx) => fn({ ...tx, get: async (sql, args) => {
-    if (!failed && sql.includes('e.payload_json, d.user_id')) { failed = true; throw new Error('injected correction failure'); }
+  const db = { ...f.db, all: async (sql, args) => {
+    const rows = await f.db.all(sql, args);
+    return sql.includes('SELECT vae.expectation_id FROM devices d') ? [...rows, ...rows] : rows;
+  }, transaction: (fn) => f.db.transaction((tx) => fn({ ...tx, get: async (sql, args) => {
+    if (!failed && sql.includes('SELECT vs.*, i.command_id')) { failed = true; throw new Error('injected correction failure'); }
     return tx.get(sql, args);
   } })) };
   await f.tick('2026-08-19T10:39:01Z', { db, warn: (s) => warnings.push(s) });
   assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'FIRED');
-  assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, 1);
+  assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE reason='one_time_open_reported_late'")).length, 1);
   assert.ok(warnings.some((s) => s.includes('injected correction failure')));
+});
+
+for (const proof of ['queue', 'OPEN']) {
+  test(`removal evidence: an offline owner older than 24 hours still blocks ${proof}`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    await insertOtherExpectation(f.db, f.deviceEui, 'offline-old', { phase: 'UNKNOWN', attempted_at: '2026-08-17T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102', encoded_duration_seconds: 120 } });
+    f.setQueue([{ id: 'old-frame', fPort: 2, data: 'QQI=' }, { id: 'config', fPort: 9, data: 'AA==' }]);
+    if (proof === 'OPEN') { f.setQueue([]); await recordOnceOpen(f, '2026-08-19T10:05:00Z'); }
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+    if (proof === 'queue') assert.equal(JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='offline-old'")).transport_json).queue_absent_at, undefined);
+  });
+}
+
+test('removal evidence: an earlier absence releases queue proof, including when a new identical frame appears', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await insertOtherExpectation(f.db, f.deviceEui, 'drained-old', { phase: 'UNKNOWN', attempted_at: '2026-08-19T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102', encoded_duration_seconds: 120 } });
+  await f.tick('2026-08-19T10:04:00Z');
+  const state = JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='drained-old'")).transport_json);
+  assert.equal(state.queue_absent_at, '2026-08-19T10:04:00.000Z');
+  f.setQueue([{ id: 'new-frame', fPort: 2, data: 'QQI=' }]);
+  assert.equal((await f.tick('2026-08-19T10:05:00Z')).fired.length, 1);
+});
+
+for (const at of ['2026-08-19T10:02:00Z', '2026-08-19T10:04:00Z']) {
+  test(`removal evidence: OPEN attribution checks absence time ${at} against the new attempt`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    await insertOtherExpectation(f.db, f.deviceEui, 'earlier-owner', { phase: 'UNKNOWN', attempted_at: '2026-08-17T09:00:00Z', queue_absent_at: at });
+    await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, at.includes('10:02') ? 1 : 0);
+  });
+}
+
+for (const malformed of ['error', 'object', 'bad item', 'contradictory bytes']) {
+  test(`removal evidence: unreadable queue (${malformed}) records nothing and releases nothing`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    await insertOtherExpectation(f.db, f.deviceEui, 'offline-old', { phase: 'UNKNOWN', attempted_at: '2026-08-17T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102', encoded_duration_seconds: 120 } });
+    await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+    const transport = { ...f.transport, async getDeviceQueue() { if (malformed === 'error') throw new Error('unreadable'); return malformed === 'object' ? {} : malformed === 'contradictory bytes' ? [{ id: 'bad', fPort: 2, bytes_hex: '4103', data: 'QQI=' }] : [{ id: 'bad' }]; } };
+    assert.equal((await f.tick('2026-08-19T10:05:01Z', { transport })).fired.length, 0);
+    const state = JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='offline-old'")).transport_json);
+    assert.equal(state.queue_absent_at, undefined);
+  });
+}
+
+test('CR-unlinked-open: a 30-minute valve reports OPEN at +37 minutes and records observed_open proof', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f, 30);
+  await f.tick('2026-08-19T10:04:00Z');
+  assert.equal((await recordOnceOpen(f, '2026-08-19T10:40:00Z')).kind, 'synthetic');
+  assert.equal((await f.tick('2026-08-19T10:40:01Z')).fired.length, 1);
+  const event = await f.db.get("SELECT * FROM irrigation_events WHERE action='IRRIGATE'");
+  assert.equal(JSON.parse(event.payload_json).proof, 'observed_open');
+  assert.equal(JSON.parse(event.payload_json).message, 'Valve reported open');
+  const [row] = await store.listSchedules(f.db, f.deviceEui);
+  assert.equal(row.once_proof, 'observed_open');
+});
+
+test('CR-unzoned-correction: persisted uncertainty and window allow an unzoned late OPEN', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f);
+  await f.db.run('UPDATE devices SET irrigation_zone_id=NULL WHERE deveui=?', [f.deviceEui]);
+  await f.tick('2026-08-19T10:38:00.001Z');
+  assert.equal((await f.db.all('SELECT id FROM irrigation_events')).length, 0);
+  await recordOnceOpen(f, '2026-08-19T10:39:00Z');
+  await f.tick('2026-08-19T10:39:01Z');
+  const [row] = await store.listSchedules(f.db, f.deviceEui);
+  assert.equal(row.once_state, 'FIRED');
+  assert.equal(row.once_proof, 'observed_open');
+  assert.equal((await f.db.all('SELECT id FROM irrigation_events')).length, 0);
+});
+
+test('CR-unclaimed-listing: an intent timestamp and snapshot reservation alone show no waiting deadline', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await f.db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE command_id=?', [JSON.stringify({ phase: 'INTENT', effect_snapshot: JSON.parse(f.expectation.transport_json).effect_snapshot }), f.intent.command_id]);
+  const [row] = await store.listSchedules(f.db, f.deviceEui, { now: new Date('2026-08-19T10:04:00Z') });
+  assert.equal(row.awaiting_confirmation_until, null);
+});
+
+test('CR-unlinked-open: a competing attempt still excludes the 30-minute valve OPEN', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f, 30);
+  await f.tick('2026-08-19T10:04:00Z');
+  await insertOtherExpectation(f.db, f.deviceEui, 'in-window-open', { phase: 'UNKNOWN', attempted_at: '2026-08-19T10:20:00Z' });
+  await recordOnceOpen(f, '2026-08-19T10:40:00Z');
+  assert.equal((await f.tick('2026-08-19T10:40:01Z')).fired.length, 0);
+  assert.equal((await f.tick('2026-08-19T11:08:00.001Z')).skipped.length, 1);
+  const [row] = await store.listSchedules(f.db, f.deviceEui);
+  assert.equal(row.once_proof, null);
+});
+
+for (const path of ['expectation', 'opaque']) {
+  test(`removal evidence: an existing flush capture records absence on the ${path} before the new attempt`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    const old = { phase: 'UNKNOWN', attempted_at: '2026-08-17T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102', encoded_duration_seconds: 120 } };
+    if (path === 'expectation') await insertOtherExpectation(f.db, f.deviceEui, 'old', old);
+    else await f.db.run('INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES (?,?)', [f.deviceEui, JSON.stringify({ opaque: [{ ...old, owner_id: 'old' }] })]);
+    const dispatch = require('./dispatch');
+    const result = await dispatch.flushValveQueue({ db: f.db, deviceEui: f.deviceEui, now: new Date('2026-08-19T10:02:00Z'), queueReadNow: () => Date.parse('2026-08-19T10:02:00Z'), transport: { async getDeviceQueue() { return []; }, async flushDeviceQueue() {} } });
+    assert.equal(result.ok, true);
+    const state = path === 'expectation' ? JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='old'")).transport_json) : (await store.conditionalControl(f.db, f.deviceEui)).opaque.find((r) => r.owner_id === 'old');
+    assert.equal(state.queue_absent_at, '2026-08-19T10:02:00.000Z');
+    await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 1);
+  });
+}
+
+for (const proof of ['receipt', 'queue']) {
+  test(`proof: ${proof} is recorded on the event, expectation and listing`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    if (proof === 'queue') f.setQueue([{ id: 'own-frame', fPort: 2, data: 'QQI=' }]);
+    else await f.db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ ...JSON.parse(f.expectation.transport_json), phase: 'ACCEPTED', queue_id: 'own-frame' }), f.expectation.expectation_id]);
+    await f.tick('2026-08-19T10:04:00Z');
+    assert.equal(JSON.parse((await f.db.get("SELECT payload_json FROM irrigation_events WHERE action='IRRIGATE'")).payload_json).proof, proof);
+    assert.equal(JSON.parse((await f.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [f.intent.command_id])).transport_json).proof, proof);
+    assert.equal((await store.listSchedules(f.db, f.deviceEui))[0].once_proof, proof);
+  });
+}
+
+test('CR-unlinked-open: CLOSED before settlement still credits the reported run only once', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f, 30);
+  await f.tick('2026-08-19T10:04:00Z');
+  await recordOnceOpen(f, '2026-08-19T10:40:00Z');
+  await W.recordValveObservation({ db: f.db, deviceEui: f.deviceEui, observedState: 'CLOSED', observedAt: '2026-08-19T10:42:00Z', runtimeContext: controlledRuntime([Date.parse('2026-08-19T10:42:01Z')]) });
+  await f.tick('2026-08-19T10:42:02Z');
+  assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE action='IRRIGATE'")).length, 1);
+});
+
+test('CR-unzoned-correction: candidate lookup uses the valve index and never scans irrigation events', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f);
+  await f.tick('2026-08-19T10:38:00.001Z');
+  const plans = [];
+  const db = { ...f.db, all: (sql, args) => {
+    if (sql.includes('SELECT vae.expectation_id FROM devices d')) plans.push(...f.raw.prepare('EXPLAIN QUERY PLAN ' + sql).all(...args));
+    return f.db.all(sql, args);
+  } };
+  await f.tick('2026-08-19T10:39:00Z', { db });
+  assert.ok(plans.some((p) => /SEARCH vae USING INDEX idx_valve_act_exp_device_eui/.test(p.detail)), JSON.stringify(plans));
+  assert.ok(plans.every((p) => !/irrigation_events|SCAN vae\b/.test(p.detail)), JSON.stringify(plans));
+});
+
+test('removal evidence: the read must be after the attempt, and several identical frames prevent absence', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  const dispatch = require('./dispatch');
+  await insertOtherExpectation(f.db, f.deviceEui, 'old-no-id', { phase: 'UNKNOWN', attempted_at: '2026-08-17T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102' } });
+  await f.db.transaction((tx) => dispatch.recordQueueAbsenceTx(tx, f.deviceEui, [], '2026-08-17T09:00:00Z'));
+  f.setQueue([{ id: 'unrelated', fPort: 9, data: 'AA==' }, { id: 'owned-elsewhere', fPort: 2, data: 'QQI=' }, { id: 'another-identical', fPort: 2, data: 'QQI=' }]);
+  assert.equal((await f.tick('2026-08-19T10:04:00Z')).fired.length, 0);
+  const state = JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='old-no-id'")).transport_json);
+  assert.equal(state.queue_absent_at, undefined);
+});
+
+test('removal evidence: absence is stamped at queue-read completion rather than tick start', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await insertOtherExpectation(f.db, f.deviceEui, 'read-race', { phase: 'UNKNOWN', attempted_at: '2026-08-19T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102' } });
+  await f.tick('2026-08-19T10:02:00Z', { queueReadNow: () => Date.parse('2026-08-19T10:04:00Z') });
+  const state = JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='read-race'")).transport_json);
+  assert.equal(state.queue_absent_at, '2026-08-19T10:04:00.000Z');
+  await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+  assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+});
+
+test('removal evidence: uncertain intents on one valve share one live-queue read per tick', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await store.insertSchedule(f.db, { schedule_uuid: 'second-uncertain', device_eui: f.deviceEui, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 2, timezone: 'UTC', enabled: 1 });
+  await f.db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at) VALUES ('second-uncertain',?,'second-command','UNKNOWN','2026-08-19T10:03:00Z')", [f.deviceEui]);
+  await insertOtherExpectation(f.db, f.deviceEui, 'second-command', { phase: 'UNKNOWN', attempted_at: '2026-08-19T10:03:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4102', encoded_duration_seconds: 120 } });
+  const before = f.calls.queue;
+  await f.tick('2026-08-19T10:04:00Z');
+  assert.equal(f.calls.queue - before, 1);
+  assert.equal(f.calls.enqueue, 1);
 });

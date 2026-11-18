@@ -1936,6 +1936,7 @@ function normaliseValveSchedule(row: any): ValveSchedule {
     dispatchCreatedAt: row?.dispatch_created_at ?? row?.dispatchCreatedAt ?? null,
     dispatchAttemptedAt: row?.dispatch_attempted_at ?? row?.dispatchAttemptedAt ?? null,
     awaitingConfirmationUntil: row?.awaiting_confirmation_until ?? row?.awaitingConfirmationUntil ?? null,
+    onceProof: row?.once_proof ?? row?.onceProof ?? null,
     onceOutcome: row?.once_outcome ?? row?.onceOutcome ?? null,
     syncVersion: row?.sync_version == null ? null : Number(row.sync_version),
     conditionPolicyUuid: row?.condition_policy_uuid ?? row?.conditionPolicyUuid ?? null,

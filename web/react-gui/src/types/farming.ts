@@ -1188,6 +1188,7 @@ export interface ValveSchedule {
   dispatchCreatedAt?: string | null;
   dispatchAttemptedAt?: string | null;
   awaitingConfirmationUntil?: string | null;
+  onceProof?: 'receipt' | 'queue' | 'observed_open' | null;
   onceOutcome?: 'uncertain' | 'missed' | null;
   syncVersion?: number | null;
   conditionPolicyUuid?: string | null;

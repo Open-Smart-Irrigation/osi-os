@@ -129,6 +129,7 @@ async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
     // Persisted settlement is authoritative, including preclaim expiry. Legacy
     // intent timestamps alone do not prove that dispatch reached enqueue.
     const attempted = hasTransportAttemptEvidence(transport);
+    row.once_proof = ['receipt','queue','observed_open'].includes(transport.proof) ? transport.proof : null;
     const settlement = ['uncertain', 'missed'].includes(transport.once_settlement)
       ? transport.once_settlement : attempted ? 'uncertain' : 'missed';
     row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED' ? settlement : null;

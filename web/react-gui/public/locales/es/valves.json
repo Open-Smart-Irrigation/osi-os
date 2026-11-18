@@ -47,6 +47,7 @@
     "awaitingConfirmation": "Enviado, esperando la confirmación de la válvula (hasta las {{time}})",
     "notConfirmed": "Sin confirmar — compruebe la válvula",
     "onceFired": "Ejecutado",
+    "onceReportedOpen": "La válvula indicó que estaba abierta",
     "onceNote": "El gateway envía las aperturas únicas a la hora prevista; debe estar conectado.", "dispatchStatus": "Envío: {{state}}", "dispatchStates": { "PENDING": "Pendiente", "ATTEMPTED": "Intentado", "SENT": "Enviado a la red de radio", "UNKNOWN": "Desconocido", "SKIPPED": "Omitido" },
     "save": "Guardar", "saving": "Guardando…", "delete": "Eliminar", "enabled": "Activado",
     "conflictTooMany": "{{weekday}} tendría más de 4 franjas.", "conflictOverlap": "Se solapa con otra franja del {{weekday}}.", "conflictGeneric": "El programa entra en conflicto con el plan.", "conflictInvalidStart": "Un programa tiene una hora de inicio no válida.", "invalidStartTime": "La hora de inicio no es válida.", "saveFailed": "No se pudo guardar el programa.", "updateFailed": "No se pudo actualizar el programa.", "deleteFailed": "No se pudo eliminar el programa.", "deleteConfirmTitle": "¿Eliminar este programa?", "deleteConfirmBody": "{{schedule}} en {{valve}} se eliminará. Esto no deshace el riego ya realizado.", "deleteConfirmButton": "Sí, eliminar",

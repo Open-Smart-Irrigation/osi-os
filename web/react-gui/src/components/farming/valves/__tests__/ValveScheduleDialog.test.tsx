@@ -27,6 +27,7 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.awaitingConfirmation': "Sent, waiting for the valve's confirmation (until {{time}})",
     'scheduleDialog.notConfirmed': 'Not confirmed — check the valve',
     'scheduleDialog.onceFired': 'Fired',
+    'scheduleDialog.onceReportedOpen': 'Valve reported open',
     'scheduleDialog.dispatchStatus': 'Dispatch: {{state}}',
     'scheduleDialog.dispatchStates.SENT': 'Sent to the radio network',
     'scheduleDialog.dispatchStates.PENDING': 'PENDING',
@@ -305,6 +306,7 @@ describe('ValveScheduleDialog', () => {
     { onceState: 'PENDING' as const, dispatchState: 'UNKNOWN' as const, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null, text: "Sent, waiting for the valve's confirmation (until 12:38 PM)" },
     { onceState: 'SKIPPED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: 'uncertain' as const, text: 'Not confirmed — check the valve' },
     { onceState: 'FIRED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: null, text: 'Fired' },
+    { onceState: 'FIRED' as const, dispatchState: 'SKIPPED' as const, onceProof: 'observed_open' as const, awaitingConfirmationUntil: null, onceOutcome: null, text: 'Valve reported open' },
   ])('shows the one-time outcome: $text', async ({ text, ...status }) => {
     schedulesMock.mockResolvedValue({
       ...emptyResponse(),
