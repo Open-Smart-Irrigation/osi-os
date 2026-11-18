@@ -814,11 +814,13 @@ async function settleOnceUncertain(db, row, nowDate, readQueue, warn) {
   const queue = snapshot.items;
   const liveQueueIds = new Set(queue.filter((item) => item && item.id).map((item) => String(item.id)));
   return db.transaction(async (tx) => {
+    // A successful read remains evidence even if this schedule was disabled
+    // while the RPC was in flight. Eligibility is checked separately below.
+    await dispatch.recordQueueAbsenceTx(tx, row.device_eui, snapshot.readable ? queue : null, snapshot.readAt);
     // A concurrent tick or an operator may have settled/cancelled the schedule
     // while the queue lookup was in flight. Re-read both eligibility and proof.
     const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.expectation_id, vae.commanded_duration_seconds, vae.transport_json, vae.observed_open_at, vae.reconciliation_state FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.command_id=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [row.schedule_uuid, row.command_id]);
     if (!current) return null;
-    await dispatch.recordQueueAbsenceTx(tx, current.device_eui, snapshot.readable ? queue : null, snapshot.readAt);
     // Absence recording can have updated this expectation too.
     if (current.expectation_id) current.transport_json = (await tx.get('SELECT transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [current.expectation_id]))?.transport_json || current.transport_json;
     const state = persistedTransport(current);

@@ -2003,3 +2003,15 @@ test('removal evidence: uncertain intents on one valve share one live-queue read
   assert.equal(f.calls.queue - before, 1);
   assert.equal(f.calls.enqueue, 1);
 });
+
+test('removal evidence: disabling the schedule during lookup still records the successful read for other owners', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await insertOtherExpectation(f.db, f.deviceEui, 'other-drained', { phase: 'UNKNOWN', attempted_at: '2026-08-19T09:00:00Z', effect_snapshot: { fPort: 2, bytes_hex: '4103' } });
+  const transport = { ...f.transport, async getDeviceQueue() {
+    await store.updateSchedule(f.db, f.scheduleUuid, { enabled: 0 }, f.deviceEui);
+    return [];
+  } };
+  assert.equal((await f.tick('2026-08-19T10:04:00Z', { transport })).fired.length, 0);
+  const state = JSON.parse((await f.db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id='other-drained'")).transport_json);
+  assert.equal(state.queue_absent_at, '2026-08-19T10:04:00.000Z');
+});
