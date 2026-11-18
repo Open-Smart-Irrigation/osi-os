@@ -375,10 +375,11 @@ regardless of payload. To inspect or change ChirpStack config on a live Pi:
 ### ChirpStack journal after a package upgrade
 
 Run `sh scripts/pi/chirpstack-sqlite-wal.sh --check` (read-only) to see the
-gateway's journal state and configured pragmas. An `opkg` upgrade of the
-`chirpstack` package rewrites `/etc/init.d/chirpstack` and silently drops the
-5 s busy wait; the database stays WAL. After an upgrade, re-run `--check`,
-then `--apply` if it reports missing pragmas.
+gateway's journal state and configured pragmas. An `opkg` upgrade to a
+`chirpstack` package whose init lacks the locally added pragmas replaces
+`/etc/init.d/chirpstack` and silently drops the 5 s busy wait; the database
+stays WAL. The current OSI feed init already carries these pragmas. After
+an upgrade, re-run `--check`, then `--apply` if it reports missing pragmas.
 
 ### Flows fail to load / all routes 404
 

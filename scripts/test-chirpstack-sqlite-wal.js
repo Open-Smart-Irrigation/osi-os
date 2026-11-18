@@ -51,7 +51,9 @@ exec '${process.execPath}' --require "$OSI_CS_ROOT/faults.cjs" "$@"`);
   exe('sync', ':');
   exe('sleep', '[ "$1" != 10 ] || [ "${TEST_LATE_DEATH:-0}" != 1 ] || rm -f "$OSI_CS_ROOT/running" "$OSI_CS_ROOT/proc/1/exe"');
   fs.appendFileSync(p('bin/sleep'), '[ "$1" != 10 ] || [ "${TEST_RESPAWN:-0}" != 1 ] || echo "1 (chirpstack) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 124" > "$OSI_CS_ROOT/proc/1/stat"\n');
-  exe('date', 'if [ "$1" = +%s ]; then n=$(cat "$OSI_CS_ROOT/clock" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$OSI_CS_ROOT/clock"; echo "$n"; else exec /usr/bin/date "$@"; fi');
+  // Ten virtual seconds per deadline check keep failed health checks bounded
+  // to six polls, including on hosts where spawning each helper is slow.
+  exe('date', 'if [ "$1" = +%s ]; then n=$(cat "$OSI_CS_ROOT/clock" 2>/dev/null || echo 0); n=$((n + 10)); echo "$n" > "$OSI_CS_ROOT/clock"; echo "$n"; else exec /usr/bin/date "$@"; fi');
   exe('df', 'echo "Filesystem 1024-blocks Used Available Capacity Mounted on"; echo "test 100000 0 ${TEST_FREE_KB:-100000} 0% /srv"');
   fs.writeFileSync(p('service'), `#!/bin/sh
 set -eu
@@ -97,6 +99,12 @@ module.exports = s;
   fs.writeFileSync(p('faults.cjs'), `
 const fs = require('node:fs');
 const op = process.argv[3];
+if (process.env.TEST_SLOW_POLL === '1' && ['running', 'port'].includes(op)) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+}
+if (op === 'port' && process.env.TEST_BAD_PORT === '1' && process.env.OSI_CS_API_PORT === '0') {
+  fs.appendFileSync(process.env.OSI_CS_ROOT + '/bad-port-polls', 'poll\\n');
+}
 const originalRename = fs.renameSync;
 fs.renameSync = function(from, to) {
   if (op === 'install' && process.env.TEST_SECOND_HELPER_FAIL === '1' && to.endsWith('/restore.sh')) throw Error('injected second helper install failure');
@@ -125,7 +133,7 @@ if (op === 'install' && process.env.TEST_KILL_BEFORE_INSTALL === '1') { process.
   const backup = () => p(`srv/backup/${fs.readdirSync(p('srv/backup'))[0]}`);
   return { root, p, run, state, journal, backup, env };
 }
-function ok(r, status = 0) { assert.equal(r.status, status, `${r.error || ''}\n${r.stdout}\n${r.stderr}`); }
+function ok(r, status = 0) { assert.ifError(r.error); assert.equal(r.status, status, `${r.error || ''}\n${r.stdout}\n${r.stderr}`); }
 function restored(g) {
   assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), original);
   assert.equal(fs.readFileSync(g.p('opt/chirpstack/backup.sh'), 'utf8'), '#!/bin/sh\necho old-backup\n');
@@ -231,6 +239,7 @@ for (const [name, extra] of [
   ['start fails', { TEST_START_FAIL: '1' }],
   ['header never switches', { TEST_NO_WAL: '1' }],
   ['API port unavailable', { TEST_BAD_PORT: '1' }],
+  ['API port unavailable with slow helper launches', { TEST_BAD_PORT: '1', TEST_SLOW_POLL: '1' }],
   ['generated config lacks pragmas', { TEST_BAD_CONFIG: '1' }],
   ['fsync fails before init publication', { TEST_FSYNC_FAIL: '1' }],
   ['daemon respawns during the ten-second wait', { TEST_RESPAWN: '1' }],
@@ -238,6 +247,10 @@ for (const [name, extra] of [
 ]) test(`automatic rollback: ${name}`, async (t) => {
   const g = await gateway(t); const r = g.run(['--apply'], extra);
   ok(r, 1); assert.match(r.stderr, /ROLLED BACK:/); restored(g);
+  if (extra.TEST_BAD_PORT) {
+    const polls = fs.readFileSync(g.p('bad-port-polls'), 'utf8').trim().split('\n').length;
+    assert.ok(polls > 1 && polls <= 6, 'virtual 60-second health deadline takes at most six polls');
+  }
   if (extra.TEST_BAD_CONFIG || extra.TEST_LATE_DEATH || extra.TEST_NO_WAL) {
     const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
     assert.equal(d.prepare('SELECT count(*) AS n FROM uplinks').get().n, 2, 'keep uplinks written after conversion'); d.close();
