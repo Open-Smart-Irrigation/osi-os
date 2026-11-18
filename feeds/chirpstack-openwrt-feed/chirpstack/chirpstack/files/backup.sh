@@ -22,6 +22,9 @@ RECOVERY_INCOMPLETE=0
 RESTORING=0
 PUBLISHING=0
 PUBLISHED=0
+PUBLISH_STAGE=
+PUBLISH_MANIFEST_HASH=
+PUBLISH_PROVEN_ABSENT=1
 LEGACY_ARCHIVE=
 ARCHIVED=
 ERROR='unexpected exit'
@@ -325,16 +328,41 @@ report_error() {
     if [ -n "$PROBE" ] && process_running chirpstack; then state=running; fi
     log "ERROR: $ERROR; ChirpStack $state" >&2
 }
+publication_from_filesystem() {
+    # Flags alone cannot distinguish a failed mv from a completed rename whose
+    # caller was interrupted (or whose command reported failure after rename).
+    PUBLISH_PROVEN_ABSENT=0
+    if [ ! -e "$PUBLISH_STAGE" ] && [ ! -L "$PUBLISH_STAGE" ] &&
+       [ -d "$SET" ] && [ ! -L "$SET" ] &&
+       [ -f "$SET/MANIFEST.sha256" ] && [ ! -L "$SET/MANIFEST.sha256" ] &&
+       hash_file "$SET/MANIFEST.sha256" && [ "$HASH" = "$PUBLISH_MANIFEST_HASH" ]; then
+        PUBLISHED=1
+        return 0
+    fi
+    # The original staging directory still being intact proves its rename did
+    # not commit. An absent destination also proves the new set is not in place.
+    if { [ -d "$PUBLISH_STAGE" ] && [ ! -L "$PUBLISH_STAGE" ] &&
+         hash_file "$PUBLISH_STAGE/MANIFEST.sha256" && [ "$HASH" = "$PUBLISH_MANIFEST_HASH" ]; } ||
+       { [ ! -e "$SET" ] && [ ! -L "$SET" ]; }; then
+        PUBLISHED=0
+        PUBLISH_PROVEN_ABSENT=1
+        return 0
+    fi
+    return 1
+}
 finish() {
     result=$?
     trap - 0
     trap '' HUP INT TERM
     # A refused contender owns no service state and must not disturb the owner.
     if [ "$LOCKED" != 1 ]; then report_error; exit "$result"; fi
+    if [ -n "$PUBLISH_STAGE" ]; then
+        publication_from_filesystem || { ERROR="$ERROR; cannot prove publication outcome; legacy files remain archived at $LEGACY_ARCHIVE"; result=1; }
+    fi
     if [ "$PUBLISHING" = 1 ] && [ ! -e "$SET" ] && [ -d "$PREV" ]; then
         mv "$PREV" "$SET" || { ERROR="$ERROR; previous set remains at $PREV"; result=1; }
     fi
-    if [ "$PUBLISHED" = 0 ] && [ -n "$LEGACY_ARCHIVE" ]; then
+    if [ "$PUBLISHED" = 0 ] && [ "$PUBLISH_PROVEN_ABSENT" = 1 ] && [ -n "$LEGACY_ARCHIVE" ]; then
         for legacy_name in $ARCHIVED; do
             mv "$LEGACY_ARCHIVE/$legacy_name" "$BASE/$legacy_name" || { ERROR="$ERROR; legacy copy retained at $LEGACY_ARCHIVE/$legacy_name"; result=1; }
         done
@@ -402,6 +430,9 @@ done
 integrity "$TMP" || fail 'integrity: copied SQLite database is not ok'
 write_manifest || fail 'manifest: cannot write checksums'
 validate_set "$TMP" || fail 'manifest: temporary set failed validation'
+hash_file "$TMP/MANIFEST.sha256" || fail 'publish: cannot record staged manifest'
+PUBLISH_MANIFEST_HASH=$HASH
+PUBLISH_STAGE=$TMP
 archive_legacy || fail 'archive: cannot retain legacy flat backups'
 # Rename complete directories on the same filesystem. Keep the old set until
 # publication succeeds; the EXIT trap restores it if the final rename fails.
@@ -411,9 +442,17 @@ if [ -e "$SET" ] || [ -L "$SET" ]; then
     PUBLISHING=1
     mv "$SET" "$PREV" || fail 'publish: cannot retain previous set'
 fi
-mv "$TMP" "$SET" || fail 'publish: cannot rename complete temporary set'
-TMP=
-PUBLISHING=0
-PUBLISHED=1
+# Do not let a catchable signal split the final rename from its bookkeeping.
+trap '' INT TERM HUP
+if mv "$TMP" "$SET"; then
+    PUBLISHED=1
+    TMP=
+    PUBLISHING=0
+    publish_status=0
+else
+    publish_status=$?
+fi
+trap 'fail "signal: interrupted"' HUP INT TERM
+[ "$publish_status" -eq 0 ] || fail 'publish: cannot rename complete temporary set'
 SUCCESS="OK: backup $SET"
 exit 0

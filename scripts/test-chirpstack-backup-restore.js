@@ -80,6 +80,18 @@ if [ -n "\${FAIL_ROLLBACK_MOVE:-}" ]; then
   case "$1" in *"/$FAIL_ROLLBACK_MOVE.pre-restore-"*) echo injected-rollback-rename >&2; exit 1;; esac
 fi
 [ -z "\${FAIL_MOVE:-}" ] || case "$*" in *"$FAIL_MOVE"*) exit 1;; esac
+case "$1:$2" in
+  "$OSI_CS_ROOT/srv/backup/.chirpstack-stage."*":$OSI_CS_ROOT/srv/backup/chirpstack-set")
+    if [ -n "\${PUBLISH_ACTION:-}" ]; then
+      [ "$PUBLISH_ACTION" != fail ] || exit 1
+      '${find('mv')}' "$@" || exit 1
+      case "$PUBLISH_ACTION" in
+        TERM|HUP|INT) kill -"$PUBLISH_ACTION" "$PPID" ;;
+        renamed-but-error) exit 1 ;;
+      esac
+      exit 0
+    fi ;;
+esac
 exec '${find('mv')}' "$@"`);
     fs.unlinkSync(p('bin/rm'));
     exe('rm', `[ -z "\${FAIL_REMOVE:-}" ] || case "$*" in *"/$FAIL_REMOVE") echo injected-rollback-removal >&2; exit 1;; esac
@@ -366,6 +378,41 @@ d.close();
     assert.equal(fs.readdirSync(g.p('srv/backup')).some(n => n.startsWith('chirpstack-legacy-')), false);
     g.running();
   });
+  for (const action of ['TERM', 'HUP', 'INT', 'renamed-but-error', 'fail']) {
+    test(`${label}: publication boundary ${action} preserves the set/archive invariant`, t => {
+      const g = gateway(t); const oldSet = g.backup(); g.backup(true);
+      const oldManifest = fs.readFileSync(path.join(oldSet, 'MANIFEST.sha256'));
+      for (const n of ['chirpstack.sqlite', 'chirpstack.sqlite-wal', 'chirpstack.sqlite-shm']) {
+        fs.rmSync(g.live(n), { force: true }); fs.rmSync(g.p('srv/backup/' + n), { force: true });
+      }
+      for (const [file, rows] of [[g.live('chirpstack.sqlite'), '(1),(2)'], [g.p('srv/backup/chirpstack.sqlite'), '(1)']]) {
+        const db = new DatabaseSync(file); db.exec(`CREATE TABLE uplinks (id INTEGER); INSERT INTO uplinks VALUES ${rows}`); db.close();
+      }
+      for (const n of ['chirpstack.sqlite-wal', 'chirpstack.sqlite-shm']) fs.writeFileSync(g.p('srv/backup/' + n), 'stale-' + n);
+      const before = Object.fromEntries(['chirpstack.sqlite', 'chirpstack.redis'].map(n => [n, fs.readFileSync(g.live(n))]));
+      const r = g.run('backup', { PUBLISH_ACTION: action }); assert.ifError(r.error); g.running();
+      if (action === 'fail') {
+        bad(r);
+        assert.deepEqual(fs.readFileSync(path.join(oldSet, 'MANIFEST.sha256')), oldManifest);
+        for (const n of names) assert.ok(fs.existsSync(g.p('srv/backup/' + n)), 'failed rename returns flat files');
+        assert.equal(fs.readdirSync(g.p('srv/backup')).some(n => n.startsWith('chirpstack-legacy-')), false);
+        return;
+      }
+      const returnedFlats = names.filter(n => fs.existsSync(g.p('srv/backup/' + n)));
+      const stock = fs.readFileSync(path.join(__dirname, 'fixtures/chirpstack-backup-restore/released-restore.sh'), 'utf8').replaceAll('/srv/', g.p('srv/'));
+      const downgrade = g.commands(stock); assert.ifError(downgrade.error);
+      const live = new DatabaseSync(g.live('chirpstack.sqlite'));
+      const liveRows = live.prepare('SELECT count(*) AS n FROM uplinks').get().n; live.close();
+      const set = new DatabaseSync(path.join(oldSet, 'chirpstack.sqlite'));
+      const setRows = set.prepare('SELECT count(*) AS n FROM uplinks').get().n; set.close();
+      t.diagnostic(JSON.stringify({ action, backupExit: r.status, returnedFlats, liveRows, setRows }));
+      assert.deepEqual(returnedFlats, [], 'a completed publish never returns stale flat files');
+      assert.equal(liveRows, 2); assert.equal(setRows, 2);
+      for (const n of Object.keys(before)) assert.deepEqual(fs.readFileSync(g.live(n)), before[n], 'released downgrade leaves live bytes unchanged');
+      if (action === 'renamed-but-error') bad(r);
+      else ok(r); // Signals sent during the rename/bookkeeping fence are ignored.
+    });
+  }
   for (const version of ['released', 'unreleased']) test(`${label}: archival prevents stale copies by ${version} stock helper`, t => {
     const g = gateway(t); g.backup(true);
     fs.writeFileSync(g.live('chirpstack.sqlite-journal'), 'live-journal');
