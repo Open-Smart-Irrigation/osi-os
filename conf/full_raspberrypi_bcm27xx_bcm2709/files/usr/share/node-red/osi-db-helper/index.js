@@ -23,6 +23,8 @@ let sharedDatabase = null;
 let initPromise = null;
 let operationQueue = Promise.resolve();
 let activeDbPath = DB_PATH;
+const defaultTransactionRetryDelay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let transactionRetryDelay = defaultTransactionRetryDelay;
 const health = {
   dbPath: DB_PATH,
   initializedAt: null,
@@ -223,24 +225,39 @@ class DatabaseFacade {
     if (typeof executor !== 'function') {
       throw new TypeError('Database.transaction requires an executor function');
     }
-    return enqueueOperation(async (database) => {
-      await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
-      const transaction = createTransactionScope(database);
-      try {
-        const result = await executor(transaction);
-        await runRaw(database, 'exec', 'COMMIT;');
-        return result;
-      } catch (error) {
+    const attemptTransaction = (attempt) => {
+      let nestedBeginFailed = false;
+      return enqueueOperation(async (database) => {
         try {
-          await runRaw(database, 'exec', 'ROLLBACK;');
-        } catch (rollbackError) {
-          if (error && typeof error === 'object') {
-            error.rollbackError = rollbackError;
-          }
+          await runRaw(database, 'exec', 'BEGIN IMMEDIATE;');
+        } catch (error) {
+          nestedBeginFailed = /cannot start a transaction within a transaction/i.test(error && error.message);
+          throw error;
         }
-        throw error;
-      }
-    });
+        const transaction = createTransactionScope(database);
+        try {
+          const result = await executor(transaction);
+          await runRaw(database, 'exec', 'COMMIT;');
+          return result;
+        } catch (error) {
+          try {
+            await runRaw(database, 'exec', 'ROLLBACK;');
+          } catch (rollbackError) {
+            if (error && typeof error === 'object') {
+              error.rollbackError = rollbackError;
+            }
+          }
+          throw error;
+        }
+      }).catch(async (error) => {
+        if (!nestedBeginFailed || attempt >= 10) throw error;
+        // Wait outside the queue so the manual transaction can finish, then
+        // join its tail again. Nine delays total 4.5 seconds.
+        await transactionRetryDelay(attempt * 100);
+        return attemptTransaction(attempt + 1);
+      });
+    };
+    return attemptTransaction(1);
   }
 
   async readSnapshot(executor) {
@@ -440,6 +457,9 @@ async function isolatedFarmingTransaction(executor) {
 }
 
 module.exports = {
+  _setTransactionRetryDelayForTests(delay) {
+    transactionRetryDelay = delay || defaultTransactionRetryDelay;
+  },
   isolatedFarmingTransaction,
   Database: DatabaseFacade,
   open: (filename, options) => new IndependentDatabaseFacade(filename, options),
