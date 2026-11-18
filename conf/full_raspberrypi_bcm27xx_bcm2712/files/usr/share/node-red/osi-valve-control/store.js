@@ -84,20 +84,22 @@ async function recentUplinkTimes(db, deviceEui, nowDate) {
 
 async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
   const rows = await db.all(`SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at,
-    vae.transport_json AS dispatch_transport_json,
-    CASE WHEN vs.kind='ONCE' AND vs.once_state='SKIPPED' THEN (SELECT e.reason FROM irrigation_events e WHERE e.action='SKIP' AND e.reason IN ('one_time_uncertain','one_time_missed')
-      AND json_extract(e.payload_json,'$.schedule_uuid')=vs.schedule_uuid AND json_extract(e.payload_json,'$.fire_at')=vs.fire_at ORDER BY e.id DESC LIMIT 1) END AS skip_reason
+    vae.transport_json AS dispatch_transport_json
     FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid
     LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id
     WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at`, [deviceEui]);
   let uplinkTimes;
   for (const row of rows) {
     row.awaiting_confirmation_until = null;
-    row.once_outcome = row.once_state === 'SKIPPED' ? (row.skip_reason === 'one_time_uncertain' ? 'uncertain' : row.skip_reason === 'one_time_missed' ? 'missed' : null) : null;
+    let transport;
+    try { transport = row.dispatch_transport_json ? JSON.parse(row.dispatch_transport_json) : {}; }
+    catch (_) { transport = {}; }
+    // Intent and attempt evidence survive even when zone/user constraints prevent
+    // an audit event. Listing outcomes never read irrigation history.
+    const attempted = row.dispatch_attempted_at || transport.attempted_at || transport.attempt_receipt;
+    row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED'
+      ? (attempted ? 'uncertain' : 'missed') : null;
     if (row.kind === 'ONCE' && row.once_state === 'PENDING' && ['UNKNOWN', 'ATTEMPTED'].includes(row.dispatch_state)) {
-      let transport;
-      try { transport = row.dispatch_transport_json ? JSON.parse(row.dispatch_transport_json) : {}; }
-      catch (_) { transport = {}; }
       const attemptedAt = row.dispatch_attempted_at || transport.attempted_at;
       if (attemptedAt || ['UNKNOWN', 'ATTEMPTED'].includes(transport.phase)) {
         if (!uplinkTimes) uplinkTimes = await recentUplinkTimes(db, row.device_eui, now);
@@ -109,7 +111,6 @@ async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
       }
     }
     delete row.dispatch_transport_json;
-    delete row.skip_reason;
   }
   return rows;
 }

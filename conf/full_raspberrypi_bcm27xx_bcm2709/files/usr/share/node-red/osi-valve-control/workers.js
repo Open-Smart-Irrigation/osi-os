@@ -653,18 +653,65 @@ async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemp
     const transport = persistedTransport(other);
     if (!transport) { otherUncertain = true; continue; }
     const liveItem = transport.queue_id && liveQueueIds.has(String(transport.queue_id));
-    const expiry = observationInstant(transport.effect_snapshot && transport.effect_snapshot.queue_expires_at);
-    const explicitExpiry = observationInstant(transport.explicit_expiry_at);
+    // An item still listed by ChirpStack belongs to this owner, regardless of
+    // local horizons, age or phase. Ordinary calculated horizons are not sent.
+    if (liveItem) { queueIds.add(String(transport.queue_id)); continue; }
     const otherAttempt = observationInstant(transport.attempted_at) ?? observationInstant(other.commanded_at);
     if (dispatch.cancelledUnsent(other, transport) || dispatch.invalidatedByEarlierFlush(transport)
-        || ['enqueue_rejected', 'enqueue_failed_before_acceptance'].includes(transport.phase)
-        || (transport.phase === 'ACCEPTED' && !liveItem)
-        || (expiry != null && expiry <= nowDate.getTime()) || (explicitExpiry != null && explicitExpiry <= nowDate.getTime())
-        || (otherAttempt != null && otherAttempt < observationInstant(attemptedAt) - 24 * 3600000 && !liveItem)) continue;
-    if (liveItem) queueIds.add(String(transport.queue_id));
-    else if (!transport.queue_id && (transport.phase === 'ATTEMPTED' || transport.phase === 'UNKNOWN')) otherUncertain = true;
+        || ['enqueue_rejected', 'enqueue_failed_before_acceptance', 'ACCEPTED'].includes(transport.phase)
+        || (otherAttempt != null && otherAttempt < observationInstant(attemptedAt) - 24 * 3600000)) continue;
+    if (!transport.queue_id && (transport.phase === 'ATTEMPTED' || transport.phase === 'UNKNOWN')) {
+      const occurrence = other.command_id && await tx.get('SELECT expires_at FROM irrigation_occurrences WHERE command_id=?', [other.command_id]);
+      // Dispatch sends the linked occurrence expiry, or an explicitly requested
+      // ordinary expiry. It never sends the calculated queue_expires_at.
+      const appliedExpiry = observationInstant(occurrence ? occurrence.expires_at
+        : transport.effect_snapshot ? transport.effect_snapshot.explicit_expiry_at : transport.explicit_expiry_at);
+      if (appliedExpiry == null || appliedExpiry > nowDate.getTime()) otherUncertain = true;
+    }
   }
   return { queueIds, otherUncertain };
+}
+
+// Both immediate observation proof and late correction use the same competing
+// command, actuator-log and physical-run exclusions for their attribution window.
+async function onceOpenObservationTx(tx, row, start, end) {
+  const inWindow = (at) => { const ms = observationInstant(at); return ms != null && ms >= start && ms <= end; };
+  const expectations = await tx.all('SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?)', [row.device_eui]);
+  // Any other attempted open, including a completed/cancelled command, makes
+  // this position report ambiguous. Reservation time alone is not an attempt.
+  for (const other of expectations) {
+    if (other.command_id === row.command_id || !(Number(other.commanded_duration_seconds) > 0)) continue;
+    const state = persistedTransport(other);
+    if (!state) return null;
+    if (inWindow(state.attempted_at) || inWindow(state.attempt_trusted_at)) return null;
+    const intent = other.command_id && await tx.get('SELECT attempted_at FROM valve_once_dispatch_intents WHERE command_id=?', [other.command_id]);
+    if (intent && inWindow(intent.attempted_at)) return null;
+  }
+  const logs = await tx.all("SELECT reason, created_at FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND UPPER(action) IN ('OPEN','OPEN_FOR_MINUTES','TIMED_OPEN','OPEN_FOR_DURATION','OPEN_FOR_DURATION_CONDITIONAL','SET_PARTIAL_OPENING','SET_FLUSHING') AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)", [row.device_eui, new Date(start).toISOString(), new Date(end).toISOString()]);
+  const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
+  if (logs.some((log) => log.reason !== marker)) return null;
+  const observations = [];
+  for (const expectation of expectations) {
+    const state = persistedTransport(expectation);
+    const opens = [expectation.observed_open_at];
+    if (!state) { if (opens.some(inWindow)) return null; continue; }
+    if (expectation.reconciliation_state === 'OBSERVED_RUNNING') opens.push(state.observation && state.observation.observed_at);
+    const at = opens.find(inWindow);
+    if (!at) continue;
+    if (expectation.command_id === row.command_id) observations.push(at);
+    else {
+      const physical = dispatch.parsePhysicalRun(expectation);
+      // Only reconciliation's trusted unexplained report can be the missing
+      // delivery. A run credited to a schedule, service or other command is
+      // evidence of another open, even if its attempt time is unavailable.
+      if (expectation.command_id || expectation.trigger !== 'unexplained' || !physical.report_only
+          || physical.malformed || !physical.marker || !state.observation || state.observation.untrusted
+          || !state.observation.proof || state.observation.unattributed === 'ambiguous_owner') return null;
+      observations.push(at);
+    }
+  }
+  if (observations.length !== 1) return null;
+  return observations[0];
 }
 
 async function settleOnceUncertain(db, row, nowDate, transport, warn) {
@@ -694,8 +741,11 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
     const attemptedMs = observationInstant(attemptedAt);
     const openMs = observationInstant(current.observed_open_at);
     const reportMs = observationInstant(state.observation && state.observation.observed_at);
-    const observed = attemptedMs != null && ((openMs != null && openMs >= attemptedMs)
-      || (current.reconciliation_state === 'OBSERVED_RUNNING' && reportMs != null && reportMs >= attemptedMs));
+    const candidateOpenMs = [openMs, current.reconciliation_state === 'OBSERVED_RUNNING' ? reportMs : null]
+      .find((ms) => attemptedMs != null && ms != null && ms >= attemptedMs);
+    const acceptedReceipt = state.phase === 'ACCEPTED' && state.queue_id;
+    const observed = !acceptedReceipt && candidateOpenMs != null
+      && Boolean(await onceOpenObservationTx(tx, current, attemptedMs, candidateOpenMs));
     let matchedQueueId = null;
     if (queuedIds.length && !(state.phase === 'ACCEPTED' && state.queue_id) && !observed) {
       const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id, liveQueueIds, attemptedAt, nowDate);
@@ -757,47 +807,14 @@ async function correctLateOnceOpens(db, nowDate) {
         uplinkTimes: await store.recentUplinkTimes(tx, row.device_eui, nowDate) }).confirmBy;
       const end = observationInstant(confirmBy) + Number(row.duration_minutes) * 60000;
       if (start == null || !Number.isFinite(end) || nowDate.getTime() > end) return;
-      const inWindow = (at) => { const ms = observationInstant(at); return ms != null && ms >= start && ms <= end; };
-      const expectations = await tx.all('SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?)', [row.device_eui]);
-      // Any other attempted open, including a completed/cancelled command, makes
-      // this position report ambiguous. Reservation time alone is not an attempt.
-      for (const other of expectations) {
-        if (other.command_id === row.command_id || !(Number(other.commanded_duration_seconds) > 0)) continue;
-        const state = persistedTransport(other);
-        if (!state) return;
-        if (inWindow(state.attempted_at) || inWindow(state.attempt_trusted_at)) return;
-        const intent = other.command_id && await tx.get('SELECT attempted_at FROM valve_once_dispatch_intents WHERE command_id=?', [other.command_id]);
-        if (intent && inWindow(intent.attempted_at)) return;
-      }
-      const logs = await tx.all("SELECT reason, created_at FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND UPPER(action) IN ('OPEN','OPEN_FOR_MINUTES','TIMED_OPEN','OPEN_FOR_DURATION','OPEN_FOR_DURATION_CONDITIONAL','SET_PARTIAL_OPENING','SET_FLUSHING') AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)", [row.device_eui, new Date(start).toISOString(), new Date(end).toISOString()]);
+      const observedOpenAt = await onceOpenObservationTx(tx, row, start, end);
+      if (!observedOpenAt) return;
       const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
-      if (logs.some((log) => log.reason !== marker)) return;
-      const observations = [];
-      for (const expectation of expectations) {
-        const state = persistedTransport(expectation);
-        if (!state) continue;
-        const opens = [expectation.observed_open_at];
-        if (expectation.reconciliation_state === 'OBSERVED_RUNNING') opens.push(state.observation && state.observation.observed_at);
-        const at = opens.find(inWindow);
-        if (!at) continue;
-        if (expectation.command_id === row.command_id) observations.push(at);
-        else {
-          const physical = dispatch.parsePhysicalRun(expectation);
-          // Only reconciliation's trusted unexplained report can be the missing
-          // delivery. A run credited to a schedule, service or other command is
-          // evidence of another open, even if its attempt time is unavailable.
-          if (expectation.command_id || expectation.trigger !== 'unexplained' || !physical.report_only
-              || physical.malformed || !physical.marker || !state.observation || state.observation.untrusted
-              || !state.observation.proof || state.observation.unattributed === 'ambiguous_owner') return;
-          observations.push(at);
-        }
-      }
-      if (observations.length !== 1) return;
       const existing = await tx.get("SELECT id FROM irrigation_events WHERE reason='one_time_open_confirmed_late' AND action='IRRIGATE' AND json_extract(payload_json,'$.schedule_uuid')=? AND json_extract(payload_json,'$.fire_at')=? LIMIT 1", [row.schedule_uuid, row.fire_at]);
       if (existing) return;
       if (row.user_id != null && row.irrigation_zone_id != null) {
         await tx.run('INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)', [row.user_id, row.irrigation_zone_id, 'IRRIGATE', 'one_time_open_confirmed_late', row.duration_minutes, row.device_eui,
-          JSON.stringify({ schedule_uuid: row.schedule_uuid, fire_at: row.fire_at, observed_open_at: new Date(observationInstant(observations[0])).toISOString(), attempted_at: attemptedAt })]);
+          JSON.stringify({ schedule_uuid: row.schedule_uuid, fire_at: row.fire_at, observed_open_at: new Date(observationInstant(observedOpenAt)).toISOString(), attempted_at: attemptedAt })]);
       }
       await store.updateSchedule(tx, row.schedule_uuid, { once_state: 'FIRED', once_fired_at: row.fire_at }, row.device_eui);
       const logged = await tx.get('SELECT id FROM actuator_log WHERE reason=? LIMIT 1', [marker]);

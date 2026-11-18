@@ -263,3 +263,19 @@ describe('one-time confirmation fields', () => {
     expect(schedules[2].onceOutcome).toBeNull();
   });
 });
+
+
+describe('unzoned one-time uncertainty', () => {
+  it('S4: maps a skipped attempt without an irrigation event to the GUI warning outcome', async () => {
+    axiosMocks.get.mockResolvedValue({ data: { schedules: [{
+      schedule_uuid: 'uncertain-without-zone', device_eui: 'A840410000000001', kind: 'ONCE',
+      once_state: 'SKIPPED', dispatch_state: 'SKIPPED', dispatch_attempted_at: '2026-08-19T10:03:00Z',
+      awaiting_confirmation_until: null, once_outcome: 'uncertain',
+    }] } });
+    const { valvesAPI } = await import('../../../../services/api');
+    const { schedules: [row] } = await valvesAPI.schedules('A840410000000001');
+    expect(row.onceState).toBe('SKIPPED');
+    expect(row.onceOutcome).toBe('uncertain');
+    expect(row.awaitingConfirmationUntil).toBeNull();
+  });
+});
