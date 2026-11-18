@@ -1105,11 +1105,11 @@ async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transp
     } catch (error) {
       const classification = classifyEnqueueError(error);
       if (classification === 'enqueue_failed_before_acceptance' || classification === 'enqueue_rejected') {
-        await persistAttempt(db, owner, classification, { failure_code: classification, failed_at: nowIso() });
+        await persistAttempt(db, owner, classification, { failure_code: classification, failed_at: nowIso() }, retry);
         await markOccurrencePreAcceptanceExpired(db, owner, classification, now);
         return { accepted: false, phase: classification, queue_id: null, error };
       }
-      await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso() });
+      await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso() }, retry);
       return { accepted: false, phase: 'UNKNOWN', queue_id: null, error };
     }
     // A queue ID proves acceptance. Local bookkeeping can never turn that

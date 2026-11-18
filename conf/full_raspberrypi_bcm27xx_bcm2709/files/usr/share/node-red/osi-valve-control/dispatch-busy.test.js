@@ -12,7 +12,7 @@ const busy = () => Object.assign(new Error('database is locked'), { code: 'SQLIT
 
 // Inject after the transaction body so the real fixture must roll back every
 // partial write, including reservation/snapshot and INTENT/ATTEMPTED changes.
-async function harness(t, { transaction = 4, failures = 2, error = busy(), busyMs = 0, enqueueMs = 0 } = {}) {
+async function harness(t, { transaction = 4, failures = 2, error = busy(), busyMs = 0, enqueueMs = 0, enqueueError } = {}) {
   const fixture = await tempDb();
   t.after(fixture.cleanup);
   let elapsed = 0;
@@ -45,7 +45,12 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
     retryClock: () => elapsed,
     sleep: async (ms) => { sleeps.push(ms); elapsed += ms; },
     warn: (message) => warnings.push(message),
-    transport: { async enqueueDownlink() { enqueueCalls += 1; elapsed += enqueueMs; return { id: 'busy-queue' }; } },
+    transport: { async enqueueDownlink() {
+      enqueueCalls += 1;
+      elapsed += enqueueMs;
+      if (enqueueError) throw enqueueError;
+      return { id: 'busy-queue' };
+    } },
   };
   return { fixture, args, sleeps, warnings, phases, error,
     get elapsed() { return elapsed; }, get injections() { return injections; }, get enqueueCalls() { return enqueueCalls; },
@@ -95,6 +100,62 @@ test('post-enqueue busy retries ACCEPTED bookkeeping without another enqueue', a
   assert.equal((await h.state()).phase, 'ACCEPTED');
   assert.ok(!h.phases.includes('UNKNOWN'));
 });
+
+for (const [phase, enqueueError] of [
+  ['enqueue_rejected', Object.assign(new Error('enqueue rejected'), {
+    provenance: 'chirpstack_enqueue_preacceptance', grpcCode: 3, step: 'enqueueDownlink',
+  })],
+  ['enqueue_failed_before_acceptance', Object.assign(new Error('local preflight failed'), {
+    code: 'enqueue_failed_before_acceptance', provenance: 'local_preflight', step: 'enqueueDownlink',
+  })],
+  ['UNKNOWN', new Error('transport unavailable')],
+]) {
+  test(`${phase} bookkeeping retries a busy write and preserves the enqueue failure`, async (t) => {
+    const h = await harness(t, { failures: 1, enqueueError });
+    const result = await dispatch.executeValveAttempt(h.args);
+    assert.equal(result.accepted, false);
+    assert.equal(result.phase, phase);
+    assert.equal(result.queue_id, null);
+    assert.equal(result.error, enqueueError);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2);
+    assert.deepEqual(h.sleeps, [100]);
+    assert.deepEqual(h.warnings, []);
+    const state = await h.state();
+    assert.equal(state.phase, phase);
+    if (phase === 'UNKNOWN') {
+      assert.equal(state.error, enqueueError.message);
+      assert.ok(state.unknown_at);
+      assert.equal(state.failure_code, undefined);
+    } else {
+      assert.equal(state.failure_code, phase);
+      assert.ok(state.failed_at);
+      assert.equal(state.error, undefined);
+    }
+    assert.equal(state.queue_id, undefined);
+  });
+
+  test(`${phase} persistent busy surfaces the original database error after three attempts`, async (t) => {
+    const h = await harness(t, { failures: Infinity, enqueueError });
+    await assert.rejects(dispatch.executeValveAttempt(h.args), (error) => error === h.error);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 3);
+    assert.deepEqual(h.sleeps, [100, 200]);
+    assert.ok(h.elapsed < 9000);
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  });
+
+  test(`${phase} busy waits stop retries within the shared deadline`, async (t) => {
+    const h = await harness(t, { failures: Infinity, enqueueError, busyMs: 1800, enqueueMs: 1000 });
+    await assert.rejects(dispatch.executeValveAttempt(h.args), (error) => error === h.error);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2, 'no room for another 5 s database wait');
+    assert.deepEqual(h.sleeps, [100]);
+    assert.equal(h.elapsed, 4700);
+    assert.ok(h.elapsed < 9000);
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  });
+}
 
 test('post-enqueue persistent busy warns, stays claimed for recovery, and still answers ACCEPTED', async (t) => {
   const h = await harness(t, { failures: Infinity });
