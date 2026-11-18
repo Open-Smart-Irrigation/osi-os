@@ -175,6 +175,29 @@ warn_root_password() {
 }
 warn_root_password
 
+# Advisory only: the operator schedules ChirpStack's separate WAL one-shot.
+# Read the header without opening SQLite or creating shared-memory sidecars.
+note_chirpstack_wal() {
+    if node -e '
+        const fs = require("fs");
+        const fd = fs.openSync(process.argv[1], "r");
+        try {
+            const b = Buffer.alloc(20);
+            const n = fs.readSync(fd, b, 0, 20, 0);
+            process.exitCode = n === 20 && b[18] === 1 && b[19] === 1 ? 3 : 0;
+        } finally { fs.closeSync(fd); }
+    ' "${OSI_CS_DB:-/srv/chirpstack/chirpstack.sqlite}" 2>/dev/null; then
+        :
+    else
+        cs_wal_status=$?
+        if [ "$cs_wal_status" = 3 ]; then
+            echo "NOTE: ChirpStack SQLite is not on WAL; after operator review run: sh scripts/pi/chirpstack-sqlite-wal.sh --apply"
+        fi
+    fi
+    return 0
+}
+note_chirpstack_wal
+
 # deploy lock begin
 take_deploy_lock || exit 1
 # deploy lock end
