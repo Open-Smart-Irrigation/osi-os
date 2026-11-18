@@ -15,7 +15,14 @@ const fixtures = path.join(__dirname, 'fixtures/chirpstack-sqlite-wal');
 const original = fs.readFileSync(path.join(fixtures, 'chirpstack.init.orig'), 'utf8');
 const pragma = '\t\tpragmas = ["busy_timeout = 5000", "journal_mode = WAL", "foreign_keys = ON"]';
 const converted = original.replace('\t\tpath="/srv/chirpstack/chirpstack.sqlite"\n', `$&${pragma}\n`);
-const shell = process.env.OSI_CS_TEST_SHELL || (spawnSync('busybox', ['sh', '-c', 'exit 0']).status === 0 ? 'busybox' : 'dash');
+const shellCommand = process.env.OSI_CS_TEST_SHELL || (spawnSync('busybox', ['sh', '-c', 'exit 0']).status === 0 ? 'busybox' : 'dash');
+// Keep the test shell available when a refusal case intentionally empties PATH.
+// If neither shell exists, retain the command so spawn fails loudly with ENOENT.
+const shell = shellCommand.includes('/') ? path.resolve(shellCommand) :
+  (process.env.PATH || '').split(path.delimiter).map((dir) => path.resolve(dir, shellCommand)).find((file) => {
+    try { fs.accessSync(file, fs.constants.X_OK); return fs.statSync(file).isFile(); }
+    catch (error) { if (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'ENOTDIR') return false; throw error; }
+  }) || shellCommand;
 const shellArgs = shell.endsWith('busybox') ? ['sh'] : [];
 const hash = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 
