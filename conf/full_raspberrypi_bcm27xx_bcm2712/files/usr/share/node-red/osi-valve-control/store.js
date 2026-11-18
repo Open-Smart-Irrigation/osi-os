@@ -88,13 +88,39 @@ function hasTransportAttemptEvidence(transport) {
     || (transport.attempted_at && transport.phase && !['INTENT', 'SNAPSHOT'].includes(transport.phase))));
 }
 
+// Persist only these JSON fields atomically: a listing must not overwrite a
+// concurrent enqueue receipt or observation. Every reader then uses the winner.
+async function onceConfirmationDeadline(db, row, transport, now, legacySkip = null) {
+  const read = (state) => parseAckInstant(state.once_confirm_by) != null
+    && Number.isFinite(state.once_interval_minutes)
+    ? { confirmBy: state.once_confirm_by, interval: state.once_interval_minutes } : null;
+  const existing = read(transport);
+  if (existing) return existing;
+  const attemptedAt = row.attempted_at || row.dispatch_attempted_at || transport.attempted_at || row.fire_at;
+  // Anchor the history window to the attempt, excluding later uplinks.
+  const at = new Date(parseAckInstant(attemptedAt) ?? now.getTime());
+  const { confirmationDeadline } = require('./workers');
+  const deadline = confirmationDeadline({ attemptedAt, fireAt: row.fire_at, now: at,
+    uplinkTimes: await recentUplinkTimes(db, row.device_eui, at) });
+  // Older SKIPs already recorded a fixed window; retain that audit boundary.
+  if (legacySkip && parseAckInstant(legacySkip.confirm_by) != null) {
+    deadline.confirmBy = legacySkip.confirm_by;
+    if (Number.isFinite(legacySkip.interval)) deadline.interval = legacySkip.interval;
+  }
+  if (!row.expectation_id) return deadline;
+  await db.run(`UPDATE valve_actuation_expectations SET transport_json=json_set(transport_json,
+    '$.once_confirm_by',?,'$.once_interval_minutes',?) WHERE expectation_id=? AND json_valid(transport_json)
+    AND json_extract(transport_json,'$.once_confirm_by') IS NULL`, [deadline.confirmBy, deadline.interval, row.expectation_id]);
+  const saved = await db.get('SELECT transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [row.expectation_id]);
+  return saved ? read(JSON.parse(saved.transport_json)) || deadline : deadline;
+}
+
 async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
   const rows = await db.all(`SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at,
-    vae.transport_json AS dispatch_transport_json
+    vae.expectation_id, vae.transport_json AS dispatch_transport_json
     FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid
     LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id
     WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at`, [deviceEui]);
-  let uplinkTimes;
   for (const row of rows) {
     row.awaiting_confirmation_until = null;
     let transport;
@@ -108,17 +134,13 @@ async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
     row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED' ? settlement : null;
     row.dispatch_attempted_at = row.dispatch_attempted_at || transport.attempted_at || null;
     if (row.kind === 'ONCE' && row.once_state === 'PENDING' && ['UNKNOWN', 'ATTEMPTED'].includes(row.dispatch_state)) {
-      const attemptedAt = row.dispatch_attempted_at || transport.attempted_at;
       if (attempted) {
-        if (!uplinkTimes) uplinkTimes = await recentUplinkTimes(db, row.device_eui, now);
-        // Lazy import: workers uses this store; resolve the shared formula only
-        // when listing schedules, after both modules have finished loading.
-        const { confirmationDeadline } = require('./workers');
-        const deadline = confirmationDeadline({ attemptedAt, fireAt: row.fire_at, uplinkTimes, now });
+        const deadline = await onceConfirmationDeadline(db, row, transport, now);
         if (parseAckInstant(deadline.confirmBy) >= now.getTime()) row.awaiting_confirmation_until = deadline.confirmBy;
       }
     }
     delete row.dispatch_transport_json;
+    delete row.expectation_id;
   }
   return rows;
 }
@@ -986,5 +1008,5 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { hasTransportAttemptEvidence, recentUplinkTimes, markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
+module.exports = { onceConfirmationDeadline, hasTransportAttemptEvidence, recentUplinkTimes, markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
   supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX };

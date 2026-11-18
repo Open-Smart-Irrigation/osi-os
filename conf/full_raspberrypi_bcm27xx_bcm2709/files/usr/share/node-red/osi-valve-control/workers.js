@@ -247,8 +247,7 @@ async function ensurePhysicalRunEventTx(tx, row, observedCloseAt, warn) {
     if (typeof warn === 'function') warn('[valve-control] observed run not logged for ' + row.device_eui + ' (no zone/user), expectation ' + row.expectation_id);
     return false;
   }
-  const marker = '%' + String(row.expectation_id).replace(/[%_]/g, (value) => '\\' + value) + '%';
-  const existing = await tx.get("SELECT id FROM irrigation_events WHERE action='IRRIGATE' AND payload_json LIKE ? ESCAPE '\\' LIMIT 1", [marker]);
+  const existing = await tx.get("SELECT id FROM irrigation_events WHERE action='IRRIGATE' AND valve_deveui=? AND json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END,'$.expectation_id')=? LIMIT 1", [row.device_eui, row.expectation_id]);
   if (existing) return false;
   const reason = row.trigger === 'on_valve_schedule' ? 'on_valve_schedule_run' : 'unexplained_on_valve_run';
   await tx.run(
@@ -609,6 +608,9 @@ function onceDispatchMarker(scheduleUuid, fireAt) {
 async function finalizeOnceAccepted(db, row, nowDate, transaction = null) {
   const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
   const finalize = async (tx) => {
+    const expectation = await tx.get('SELECT * FROM valve_actuation_expectations WHERE command_id=?', [row.command_id]);
+    const frame = expectation && attemptedOnceFrame(expectation, persistedTransport(expectation) || {});
+    if (frame) row = { ...row, duration_minutes: frame.durationMinutes };
     const schedule = await tx.get('SELECT once_state FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL', [row.schedule_uuid, row.device_eui]);
     const existingLog = await tx.get('SELECT id FROM actuator_log WHERE reason=? LIMIT 1', [marker]);
     let existingEvent = null;
@@ -636,7 +638,7 @@ async function finalizeOnceAccepted(db, row, nowDate, transaction = null) {
         await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [row.user_id, row.irrigation_zone_id, 'IRRIGATE', 'one_time_open', row.duration_minutes, row.device_eui, JSON.stringify({ schedule_uuid: row.schedule_uuid, command_id: row.command_id, fire_at: row.fire_at })]);
       }
     }
-    return { newlyFinalized: !complete };
+    return { newlyFinalized: !complete, duration_minutes: row.duration_minutes };
   };
   return transaction ? finalize(transaction) : db.transaction(finalize);
 }
@@ -646,12 +648,14 @@ async function opaqueOwnersTx(tx, deviceEui) {
   return Array.isArray(control.opaque) ? control.opaque : [];
 }
 
+// A completed flush can capture a frame already transmitted. Its marker alone
+// cannot release attribution or queue ownership; the snapshot must prove unsent.
 function openOwnerResolved(row, transport, start, opaque = false) {
   const opens = [row.observed_open_at, transport.observation && transport.observation.observed_at].map(observationInstant);
   return opens.some((ms) => ms != null && ms < start)
     || dispatch.cancelledUnsent(row, transport)
     || (opaque && Boolean(transport.cancelled_unsent_at || transport.cancelled_before_send_at))
-    || dispatch.invalidatedByEarlierFlush(transport)
+    || (dispatch.invalidatedByEarlierFlush(transport) && transport.unsent_in_snapshot === true)
     || ['enqueue_rejected', 'enqueue_failed_before_acceptance'].includes(transport.phase);
 }
 
@@ -678,7 +682,7 @@ async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemp
     // local horizons, age or phase. Ordinary calculated horizons are not sent.
     if (liveItem) { queueIds.add(String(transport.queue_id)); continue; }
     const otherAttempt = observationInstant(transport.attempted_at) ?? observationInstant(other.commanded_at);
-    if (dispatch.cancelledUnsent(other, transport) || dispatch.invalidatedByEarlierFlush(transport)
+    if (dispatch.cancelledUnsent(other, transport) || (dispatch.invalidatedByEarlierFlush(transport) && transport.unsent_in_snapshot === true)
         || ['enqueue_rejected', 'enqueue_failed_before_acceptance', 'ACCEPTED'].includes(transport.phase)
         || (otherAttempt != null && otherAttempt < observationInstant(attemptedAt) - 24 * 3600000)) continue;
     if (!transport.queue_id && (transport.phase === 'ATTEMPTED' || transport.phase === 'UNKNOWN')) {
@@ -731,7 +735,7 @@ async function onceOpenObservationTx(tx, row, start, end) {
     if (expectation.reconciliation_state === 'OBSERVED_RUNNING') opens.push(state.observation && state.observation.observed_at);
     const at = opens.find(inWindow);
     if (!at) continue;
-    if (expectation.command_id === row.command_id) observations.push(at);
+    if (expectation.command_id === row.command_id) observations.push({ at, expectationId: expectation.expectation_id });
     else {
       const physical = dispatch.parsePhysicalRun(expectation);
       // Only reconciliation's trusted unexplained report can be the missing
@@ -740,11 +744,11 @@ async function onceOpenObservationTx(tx, row, start, end) {
       if (expectation.command_id || expectation.trigger !== 'unexplained' || !physical.report_only
           || physical.malformed || !physical.marker || !state.observation || state.observation.untrusted
           || !state.observation.proof || state.observation.unattributed === 'ambiguous_owner') return null;
-      observations.push(at);
+      observations.push({ at, expectationId: expectation.expectation_id });
     }
   }
   if (observations.length !== 1) return null;
-  const observationMs = observationInstant(observations[0]);
+  const observationMs = observationInstant(observations[0].at);
   // A class-A frame from before this attempt may still arrive now. Calculated
   // effect horizons and queue absence do not prove that it cannot explain OPEN.
   for (const other of expectations) {
@@ -781,18 +785,30 @@ async function onceOpenObservationTx(tx, row, start, end) {
   return observations[0];
 }
 
+function attemptedOnceFrame(row, state) {
+  const snapshot = state.effect_snapshot || state.attempt;
+  if (snapshot) {
+    const seconds = Number(snapshot.encoded_duration_seconds);
+    const hex = snapshot.bytes_hex;
+    const data = typeof hex === 'string' && /^(?:[0-9a-f]{2})+$/i.test(hex)
+      ? Buffer.from(hex, 'hex').toString('base64') : snapshot.data;
+    if (!(seconds > 0) || !Number.isFinite(seconds) || !data || !Number.isFinite(Number(snapshot.fPort))) return null;
+    return { fPort: Number(snapshot.fPort), data, durationMinutes: seconds / 60 };
+  }
+  const seconds = Number(row.commanded_duration_seconds);
+  if (!(seconds > 0) || !Number.isInteger(seconds / 60) || seconds / 60 > 255) return null;
+  return { fPort: 2, data: Buffer.from([0x41, seconds / 60]).toString('base64'), durationMinutes: seconds / 60 };
+}
+
 async function settleOnceUncertain(db, row, nowDate, transport, warn) {
-  let queuedIds = [];
+  let queue = [];
   const liveQueueIds = new Set();
   if (transport && typeof transport.getDeviceQueue === 'function') {
     try {
       // Read the network outside the transaction; this path never sends again.
-      const queue = await transport.getDeviceQueue(row.device_eui);
-      for (const item of Array.isArray(queue) ? queue : []) if (item && item.id) liveQueueIds.add(String(item.id));
-      const data = Buffer.from([0x41, Number(row.duration_minutes)]).toString('base64');
-      queuedIds = Array.isArray(queue)
-        ? queue.filter((item) => item && Number(item.fPort) === 2 && item.data === data).map((item) => String(item.id || ''))
-        : [];
+      const result = await transport.getDeviceQueue(row.device_eui);
+      queue = Array.isArray(result) ? result : [];
+      for (const item of queue) if (item && item.id) liveQueueIds.add(String(item.id));
     } catch (error) {
       warn && warn('[valve-control] one-time uncertain queue lookup failed: ' + (error && error.message ? error.message : error));
     }
@@ -800,11 +816,15 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
   return db.transaction(async (tx) => {
     // A concurrent tick or an operator may have settled/cancelled the schedule
     // while the queue lookup was in flight. Re-read both eligibility and proof.
-    const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.expectation_id, vae.transport_json, vae.observed_open_at, vae.reconciliation_state FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.command_id=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [row.schedule_uuid, row.command_id]);
+    const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.expectation_id, vae.commanded_duration_seconds, vae.transport_json, vae.observed_open_at, vae.reconciliation_state FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.command_id=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL", [row.schedule_uuid, row.command_id]);
     if (!current) return null;
     const state = persistedTransport(current);
     if (!state) throw Object.assign(new Error('one-time transport state is malformed'), { code: 'transport_state_malformed' });
     const attemptedAt = current.attempted_at || state.attempted_at || current.fire_at;
+    const deadline = await store.onceConfirmationDeadline(tx, current, state, nowDate);
+    const frame = attemptedOnceFrame(current, state);
+    if (frame) current.duration_minutes = frame.durationMinutes;
+    const queuedIds = frame ? queue.filter((item) => item && Number(item.fPort) === frame.fPort && item.data === frame.data).map((item) => String(item.id || '')) : [];
     const attemptedMs = observationInstant(attemptedAt);
     const openMs = observationInstant(current.observed_open_at);
     const reportMs = observationInstant(state.observation && state.observation.observed_at);
@@ -815,7 +835,7 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
       && Boolean(await onceOpenObservationTx(tx, current, attemptedMs, candidateOpenMs));
     let matchedQueueId = null;
     if (queuedIds.length && !(state.phase === 'ACCEPTED' && state.queue_id) && !observed) {
-      const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id, liveQueueIds, attemptedAt, nowDate, Buffer.from([0x41, Number(current.duration_minutes)]).toString('base64'));
+      const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id, liveQueueIds, attemptedAt, nowDate, frame.data);
       if (!owners.otherUncertain) matchedQueueId = queuedIds.find((id) => id && (!state.queue_id || String(state.queue_id) === id) && !owners.queueIds.has(id)) || null;
     }
     const proof = state.phase === 'ACCEPTED' && state.queue_id ? 'accepted transport receipt'
@@ -826,8 +846,6 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
       warn && warn('[valve-control] one-time uncertain open confirmed by ' + proof + ' for ' + current.schedule_uuid);
       return { kind: 'accepted', ...result };
     }
-    const deadline = confirmationDeadline({ attemptedAt, fireAt: current.fire_at, now: nowDate,
-      uplinkTimes: await store.recentUplinkTimes(tx, current.device_eui, nowDate) });
     if (nowDate.getTime() <= Date.parse(deadline.confirmBy)) return null;
     await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT')", [current.schedule_uuid]);
     const afterSkip = await tx.get('SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [current.schedule_uuid]);
@@ -845,49 +863,66 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
 // runs. The position report has no cause field: a magnet or local open inside the
 // window can be mistaken for the delivered one-time open. Recorded competing
 // commands, actuator opens and other physical runs disqualify the correction.
-async function correctLateOnceOpens(db, nowDate) {
+async function correctLateOnceOpens(db, nowDate, warn) {
   const nowIso = nowDate.toISOString();
   const recent = new Date(nowDate.getTime() - 24 * 3600000).toISOString();
   const candidates = await db.all(`SELECT e.id FROM irrigation_events e
-    JOIN valve_schedules vs ON vs.schedule_uuid=json_extract(e.payload_json,'$.schedule_uuid') AND vs.fire_at=json_extract(e.payload_json,'$.fire_at')
+    JOIN valve_schedules vs ON vs.schedule_uuid=json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.schedule_uuid') AND vs.fire_at=json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.fire_at')
     JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid
     WHERE e.created_at >= ? AND julianday(e.created_at) >= julianday(?)
       AND e.action='SKIP' AND e.reason='one_time_uncertain' AND i.state='SKIPPED'
       AND vs.kind='ONCE' AND vs.once_state='SKIPPED' AND vs.deleted_at IS NULL
-      AND julianday(COALESCE(json_extract(e.payload_json,'$.attempted_at'),i.attempted_at,vs.fire_at)) >= julianday(?)
-      AND julianday(COALESCE(json_extract(e.payload_json,'$.confirm_by'),datetime(COALESCE(i.attempted_at,vs.fire_at),'+3 hours')))
+      AND julianday(COALESCE(json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.attempted_at'),i.attempted_at,vs.fire_at)) >= julianday(?)
+      AND julianday(COALESCE(json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.confirm_by'),datetime(COALESCE(i.attempted_at,vs.fire_at),'+3 hours')))
         + vs.duration_minutes/1440.0 >= julianday(?)`, [recent.slice(0, 10), recent, recent, nowIso]);
   for (const candidate of candidates) {
-    await db.transaction(async (tx) => {
-      // Re-read under the writer: two ticks can both select the same SKIP.
-      const row = await tx.get(`SELECT vs.*, i.command_id, i.attempted_at, e.payload_json, d.user_id, d.irrigation_zone_id
-        FROM irrigation_events e JOIN valve_schedules vs ON vs.schedule_uuid=json_extract(e.payload_json,'$.schedule_uuid') AND vs.fire_at=json_extract(e.payload_json,'$.fire_at')
-        JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui
-        WHERE e.id=? AND i.state='SKIPPED' AND vs.once_state='SKIPPED' AND vs.deleted_at IS NULL AND d.deleted_at IS NULL`, [candidate.id]);
-      if (!row) return;
-      const skip = JSON.parse(row.payload_json);
-      const own = await tx.get('SELECT * FROM valve_actuation_expectations WHERE command_id=?', [row.command_id]);
-      const transport = persistedTransport(own);
-      if (!transport) return;
-      const attemptedAt = skip.attempted_at || row.attempted_at || transport.attempted_at || row.fire_at;
-      const start = observationInstant(attemptedAt);
-      const confirmBy = skip.confirm_by || confirmationDeadline({ attemptedAt, fireAt: row.fire_at, now: nowDate,
-        uplinkTimes: await store.recentUplinkTimes(tx, row.device_eui, nowDate) }).confirmBy;
-      const end = observationInstant(confirmBy) + Number(row.duration_minutes) * 60000;
-      if (start == null || !Number.isFinite(end) || nowDate.getTime() > end) return;
-      const observedOpenAt = await onceOpenObservationTx(tx, row, start, end);
-      if (!observedOpenAt) return;
-      const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
-      const existing = await tx.get("SELECT id FROM irrigation_events WHERE reason='one_time_open_confirmed_late' AND action='IRRIGATE' AND json_extract(payload_json,'$.schedule_uuid')=? AND json_extract(payload_json,'$.fire_at')=? LIMIT 1", [row.schedule_uuid, row.fire_at]);
-      if (existing) return;
-      if (row.user_id != null && row.irrigation_zone_id != null) {
-        await tx.run('INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)', [row.user_id, row.irrigation_zone_id, 'IRRIGATE', 'one_time_open_confirmed_late', row.duration_minutes, row.device_eui,
-          JSON.stringify({ schedule_uuid: row.schedule_uuid, fire_at: row.fire_at, observed_open_at: new Date(observationInstant(observedOpenAt)).toISOString(), attempted_at: attemptedAt })]);
-      }
-      await store.updateSchedule(tx, row.schedule_uuid, { once_state: 'FIRED', once_fired_at: row.fire_at }, row.device_eui);
-      const logged = await tx.get('SELECT id FROM actuator_log WHERE reason=? LIMIT 1', [marker]);
-      if (!logged) await tx.run('INSERT INTO actuator_log(deveui, irrigation_zone_id, action, duration_minutes, reason, created_at) VALUES (?,?,?,?,?,?)', [row.device_eui, row.irrigation_zone_id, 'OPEN_FOR_DURATION', row.duration_minutes, marker, nowIso]);
-    });
+    try {
+      await db.transaction(async (tx) => {
+        // Re-read under the writer: two ticks can both select the same SKIP.
+        const row = await tx.get(`SELECT vs.*, i.command_id, i.attempted_at, e.payload_json, d.user_id, d.irrigation_zone_id
+          FROM irrigation_events e JOIN valve_schedules vs ON vs.schedule_uuid=json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.schedule_uuid') AND vs.fire_at=json_extract(CASE WHEN json_valid(e.payload_json) THEN e.payload_json ELSE '{}' END,'$.fire_at')
+          JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui
+          WHERE e.id=? AND i.state='SKIPPED' AND vs.once_state='SKIPPED' AND vs.deleted_at IS NULL AND d.deleted_at IS NULL`, [candidate.id]);
+        if (!row) return;
+        let skip;
+        try { skip = JSON.parse(row.payload_json); }
+        catch (error) { throw new Error('correction payload malformed: ' + error.message); }
+        if (!skip || typeof skip !== 'object' || Array.isArray(skip)) throw new Error('correction payload malformed');
+        const own = await tx.get('SELECT * FROM valve_actuation_expectations WHERE command_id=?', [row.command_id]);
+        const transport = persistedTransport(own);
+        if (!transport) return;
+        const attemptedAt = skip.attempted_at || row.attempted_at || transport.attempted_at || row.fire_at;
+        const start = observationInstant(attemptedAt);
+        const deadline = await store.onceConfirmationDeadline(tx, { ...row, expectation_id: own.expectation_id }, transport, nowDate, skip);
+        const confirmBy = deadline.confirmBy;
+        const frame = attemptedOnceFrame(own, transport);
+        if (frame) row.duration_minutes = frame.durationMinutes;
+        const end = observationInstant(confirmBy) + Number(row.duration_minutes) * 60000;
+        if (start == null || !Number.isFinite(end) || nowDate.getTime() > end) return;
+        const observedOpenAt = await onceOpenObservationTx(tx, row, start, end);
+        if (!observedOpenAt) return;
+        const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
+        const existing = await tx.get("SELECT id FROM irrigation_events WHERE reason='one_time_open_confirmed_late' AND action='IRRIGATE' AND json_extract(payload_json,'$.schedule_uuid')=? AND json_extract(payload_json,'$.fire_at')=? LIMIT 1", [row.schedule_uuid, row.fire_at]);
+        if (existing) return;
+        if (row.user_id != null && row.irrigation_zone_id != null) {
+          const payload = { schedule_uuid: row.schedule_uuid, fire_at: row.fire_at,
+            expectation_id: observedOpenAt.expectationId,
+            observed_open_at: new Date(observationInstant(observedOpenAt.at)).toISOString(), attempted_at: attemptedAt };
+          const physicalEvent = await tx.get("SELECT id, payload_json FROM irrigation_events WHERE action='IRRIGATE' AND valve_deveui=? AND json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END,'$.expectation_id')=? LIMIT 1", [row.device_eui, observedOpenAt.expectationId]);
+          if (physicalEvent) {
+            await tx.run('UPDATE irrigation_events SET reason=?, duration_minutes=?, payload_json=? WHERE id=?',
+              ['one_time_open_confirmed_late', row.duration_minutes, JSON.stringify({ ...JSON.parse(physicalEvent.payload_json), ...payload }), physicalEvent.id]);
+          } else {
+            await tx.run('INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)', [row.user_id, row.irrigation_zone_id, 'IRRIGATE', 'one_time_open_confirmed_late', row.duration_minutes, row.device_eui, JSON.stringify(payload)]);
+          }
+        }
+        await store.updateSchedule(tx, row.schedule_uuid, { once_state: 'FIRED', once_fired_at: row.fire_at }, row.device_eui);
+        const logged = await tx.get('SELECT id FROM actuator_log WHERE reason=? LIMIT 1', [marker]);
+        if (!logged) await tx.run('INSERT INTO actuator_log(deveui, irrigation_zone_id, action, duration_minutes, reason, created_at) VALUES (?,?,?,?,?,?)', [row.device_eui, row.irrigation_zone_id, 'OPEN_FOR_DURATION', row.duration_minutes, marker, nowIso]);
+      });
+    } catch (error) {
+      warn && warn('[valve-control] late one-time correction failed for event ' + candidate.id + ': ' + error.message);
+    }
   }
 }
 
@@ -903,7 +938,9 @@ function withOnceClaimWriter(db, fn) {
 async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, transport, onError, trustedContext }) {
   const nowDate = now || new Date();
   const nowMs = nowDate.getTime();
-  await correctLateOnceOpens(db, nowDate);
+  const correctionWarn = typeof warn === 'function' ? warn : typeof onError === 'function' ? onError : null;
+  try { await correctLateOnceOpens(db, nowDate, correctionWarn); }
+  catch (error) { correctionWarn && correctionWarn('[valve-control] late one-time correction failed: ' + error.message); }
   // An ATTEMPTED marker means the process reached the QoS0 handoff boundary. A successful emit
   // advances it to SENT; a later tick marks only an interrupted ATTEMPTED handoff UNKNOWN.
   await db.run("UPDATE valve_once_dispatch_intents SET state='UNKNOWN', updated_at=datetime('now') WHERE state='ATTEMPTED' AND attempted_at IS NOT NULL AND julianday(attempted_at) < julianday('now','-1 second')");
@@ -967,7 +1004,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
         const settlement = await settleOnceUncertain(db, row, nowDate, transport, warn);
         if (settlement && settlement.kind === 'skipped') skipped.push({ schedule_uuid: row.schedule_uuid, device_eui: row.device_eui });
         if (settlement && settlement.kind === 'accepted' && settlement.newlyFinalized) {
-          fired.push({ schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: row.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, row.duration_minutes, row.command_id, 'one_time_open') });
+          fired.push({ schedule_uuid: row.schedule_uuid, device_eui: row.device_eui, duration_minutes: settlement.duration_minutes, command_id: row.command_id, actuator_command: actuatorCommand(row.device_eui, row.irrigation_zone_id, settlement.duration_minutes, row.command_id, 'one_time_open') });
         }
         continue;
       }
@@ -989,6 +1026,8 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
         if (command.transportResult.accepted) {
           const finalization = await finalizeOnceAccepted(db, row, nowDate);
           reportFired = finalization.newlyFinalized;
+          command.duration_minutes = finalization.duration_minutes;
+          command.actuator_command.data.duration_minutes = finalization.duration_minutes;
         } else {
           await db.run("UPDATE valve_once_dispatch_intents SET state='UNKNOWN', updated_at=datetime('now') WHERE schedule_uuid=? AND state IN ('PENDING','ATTEMPTED','UNKNOWN')", [row.schedule_uuid]);
         }

@@ -392,7 +392,7 @@ for (const racing of [false, true]) {
     const events = await f.db.all("SELECT * FROM irrigation_events WHERE reason='one_time_open_confirmed_late'");
     assert.equal(events.length, 1);
     assert.equal(events[0].action, 'IRRIGATE');
-    assert.deepEqual(JSON.parse(events[0].payload_json), { schedule_uuid: f.scheduleUuid, fire_at: '2026-08-19T10:00:00.000Z', observed_open_at: '2026-08-19T10:39:00.000Z', attempted_at: f.intent.attempted_at });
+    assert.deepEqual(JSON.parse(events[0].payload_json), { expectation_id: (await f.db.get('SELECT expectation_id FROM valve_actuation_expectations WHERE command_id IS NULL AND device_eui=?', [f.deviceEui])).expectation_id, schedule_uuid: f.scheduleUuid, fire_at: '2026-08-19T10:00:00.000Z', observed_open_at: '2026-08-19T10:39:00.000Z', attempted_at: f.intent.attempted_at });
     const schedule = await f.db.get('SELECT once_state,once_fired_at FROM valve_schedules');
     assert.deepEqual({ ...schedule }, { once_state: 'FIRED', once_fired_at: '2026-08-19T10:00:00.000Z' });
     assert.equal((await f.db.get('SELECT state FROM valve_once_dispatch_intents')).state, 'SKIPPED');
@@ -463,7 +463,7 @@ test('runOnceTick skips an uncertain open after its confirmation deadline exactl
   assert.equal(payload.phase, JSON.parse(expectation.transport_json).phase);
   assert.match(payload.note, /attempted.*not confirmed/);
   const afterSkip = await db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [intent.command_id]);
-  assert.deepEqual(JSON.parse(afterSkip.transport_json), { ...JSON.parse(expectation.transport_json), once_settlement: 'uncertain' }, 'settling adds only its outcome marker to the transport state');
+  assert.deepEqual(JSON.parse(afterSkip.transport_json), { ...JSON.parse(expectation.transport_json), once_settlement: 'uncertain', once_confirm_by: payload.confirm_by, once_interval_minutes: payload.interval }, 'settling preserves transport proof and adds its fixed deadline and outcome');
   await tick('2026-08-19T10:29:00Z');
   await tick('2026-08-19T10:30:00Z');
   assert.equal((await db.all('SELECT * FROM irrigation_events')).length, 1);
@@ -620,7 +620,7 @@ for (const [label, transport, patch] of [
   ['accepted item already delivered', { phase: 'ACCEPTED', queue_id: 'gone-queue-id' }, null],
   ['rejected enqueue', { phase: 'enqueue_rejected' }, null],
   ['cancelled unsent', { phase: 'UNKNOWN', cancelled_unsent_at: '2026-08-19T10:03:00Z' }, 'CANCELLED'],
-  ['invalidated by a completed flush', { phase: 'UNKNOWN', invalidated_by_flush: 'flush-1', first_invalidated_by_flush: 'flush-1' }, null],
+  ['positively unsent in a completed flush', { phase: 'UNKNOWN', invalidated_by_flush: 'flush-1', first_invalidated_by_flush: 'flush-1', unsent_in_snapshot: true }, null],
 ]) {
   test(`runOnceTick queue proof ignores ${label}`, async (t) => {
     const f = await uncertainOnceFixture(t);
@@ -1011,7 +1011,7 @@ for (const resolution of ['flush-invalidated', 'cancelled-unsent']) {
     await f.enqueueService('2026-08-19T09:00:00Z', 27, 'MSg=');
     await f.log('2026-08-19T09:00:00Z', 'SET_PARTIAL_OPENING', 40);
     const patch = resolution === 'flush-invalidated'
-      ? { phase: 'UNKNOWN', invalidated_by_flush: 'service-flush', first_invalidated_by_flush: 'service-flush' }
+      ? { phase: 'UNKNOWN', invalidated_by_flush: 'service-flush', first_invalidated_by_flush: 'service-flush', unsent_in_snapshot: true }
       : { cancelled_unsent_at: '2026-08-19T09:01:00Z' };
     await require('./dispatch').updateOwnerTransportTx(f.db, { type: 'opaque', id: 'service-open', device_eui: f.deviceEui }, patch);
     f.queue.length = 0;
@@ -1710,4 +1710,118 @@ test('F1: runOnceTickLazy builds the ChirpStack client only when a ONCE dispatch
   await store.insertSchedule(second.db, { schedule_uuid: 'f1-fail', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: iso(-1), duration_minutes: 5, timezone: 'UTC', enabled: 1 });
   await W.runOnceTickLazy({ db: second.db, now: new Date(iso(0)), warn: () => {}, transportFactory: factory('fail'), trustedContext: controlledRuntime([Date.parse(iso(0)), Date.parse(iso(0))]) }).catch(() => null);
   assert.deepEqual({ created: stats.created, closed: stats.closed }, { created: 2, closed: 2 }, 'closed after a failure too');
+});
+
+for (const proof of ['queue', 'observation', 'opaque observation']) {
+  test(`CR-flush: a flush marker without unsent proof blocks ${proof}`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    const owner = { phase: 'UNKNOWN', attempted_at: '2026-08-19T09:00:00Z', invalidated_by_flush: 'flush', first_invalidated_by_flush: 'flush', unsent_in_snapshot: false };
+    if (proof === 'opaque observation') await f.db.run('INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES (?,?)', [f.deviceEui, JSON.stringify({ opaque: [{ ...owner, owner_id: 'service', fPort: 27, data: 'MSg=' }] })]);
+    else await insertOtherExpectation(f.db, f.deviceEui, 'flushed-owner', owner);
+    if (proof === 'queue') f.setQueue([{ id: 'possibly-old', fPort: 2, data: 'QQI=' }]);
+    else await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+    assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'PENDING');
+  });
+}
+
+test('CR-isolate: corrupt correction payload warns and still dispatches a due schedule', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await f.tick('2026-08-19T10:28:00.001Z');
+  await store.insertSchedule(f.db, { schedule_uuid: 'due-after-corruption', device_eui: f.deviceEui, kind: 'ONCE', fire_at: '2026-08-19T10:29:00.000Z', duration_minutes: 2, timezone: 'UTC', enabled: 1 });
+  const db = { ...f.db, transaction: (fn) => f.db.transaction((tx) => fn({ ...tx, get: async (sql, args) => {
+    const row = await tx.get(sql, args);
+    return row && sql.includes('e.payload_json, d.user_id') ? { ...row, payload_json: '{' } : row;
+  } })) };
+  const warnings = [];
+  const result = await f.tick('2026-08-19T10:29:00Z', { db, warn: (s) => warnings.push(s), transport: { async enqueueDownlink() { return { id: 'due-queue' }; } }, trustedContext: controlledRuntime([Date.parse('2026-08-19T10:29:00Z')]) });
+  assert.deepEqual(result.fired.map((r) => r.schedule_uuid), ['due-after-corruption']);
+  assert.ok(warnings.some((s) => /correction.*fail|correction.*malformed/i.test(s)), warnings.join('\n'));
+});
+
+for (const editDuringLookup of [false, true]) {
+  test(`CR-duration: attempted bytes and sent duration survive an edit ${editDuringLookup ? 'during' : 'before'} lookup`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    if (!editDuringLookup) await store.updateSchedule(f.db, f.scheduleUuid, { duration_minutes: 9 }, f.deviceEui);
+    const transport = { ...f.transport, async getDeviceQueue() {
+      if (editDuringLookup) await store.updateSchedule(f.db, f.scheduleUuid, { duration_minutes: 9 }, f.deviceEui);
+      return [{ id: 'sent-two-minutes', fPort: 2, data: 'QQI=' }];
+    } };
+    const result = await f.tick('2026-08-19T10:04:00Z', { transport });
+    assert.equal(result.fired.length, 1);
+    assert.equal(result.fired[0].duration_minutes, 2);
+    assert.equal((await f.db.get("SELECT duration_minutes FROM irrigation_events WHERE action='IRRIGATE'")).duration_minutes, 2);
+    assert.equal((await f.db.get('SELECT duration_minutes FROM actuator_log')).duration_minutes, 2);
+    assert.equal(f.calls.enqueue, 1);
+  });
+}
+
+test('CR-duration: a queue item for the edited duration cannot prove the attempted frame', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await store.updateSchedule(f.db, f.scheduleUuid, { duration_minutes: 9 }, f.deviceEui);
+  f.setQueue([{ id: 'different-nine-minute-frame', fPort: 2, data: 'QQk=' }]);
+  assert.equal((await f.tick('2026-08-19T10:04:00Z')).fired.length, 0);
+});
+
+for (const closeFirst of [false, true]) {
+  test(`CR-one-record: ${closeFirst ? 'CLOSED then correction' : 'correction then CLOSED'} credits one physical run`, async (t) => {
+    const f = await uncertainOnceFixture(t);
+    await addUplinkHistory(f);
+    await f.tick('2026-08-19T10:38:00.001Z');
+    await recordOnceOpen(f, '2026-08-19T10:39:00Z');
+    const physical = await f.db.get('SELECT expectation_id FROM valve_actuation_expectations WHERE command_id IS NULL AND device_eui=?', [f.deviceEui]);
+    const close = () => W.recordValveObservation({ db: f.db, deviceEui: f.deviceEui, observedState: 'CLOSED', observedAt: '2026-08-19T10:39:30Z', runtimeContext: controlledRuntime([Date.parse('2026-08-19T10:39:31Z')]) });
+    if (closeFirst) await close();
+    await f.tick('2026-08-19T10:39:32Z');
+    if (!closeFirst) await close();
+    await f.tick('2026-08-19T10:39:33Z');
+    const events = await f.db.all("SELECT * FROM irrigation_events WHERE action='IRRIGATE'");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, 'one_time_open_confirmed_late');
+    assert.equal(JSON.parse(events[0].payload_json).expectation_id, physical.expectation_id);
+    assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE action='SKIP'")).length, 1);
+  });
+}
+
+test('CR-fixed-deadline: listing and settlement retain the attempt-time window as old uplinks age out', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  for (const at of ['2026-08-17T10:10:00Z', '2026-08-17T10:40:00Z', '2026-08-17T11:10:00Z']) await f.db.run('INSERT INTO device_data(deveui,recorded_at) VALUES (?,?)', [f.deviceEui, at]);
+  const [before] = await store.listSchedules(f.db, f.deviceEui, { now: new Date('2026-08-19T10:04:00Z') });
+  assert.equal(before.awaiting_confirmation_until, '2026-08-19T11:08:00.000Z');
+  assert.equal((await f.tick('2026-08-19T10:29:00Z')).skipped.length, 0);
+  const [after] = await store.listSchedules(f.db, f.deviceEui, { now: new Date('2026-08-19T10:29:00Z') });
+  assert.equal(after.awaiting_confirmation_until, before.awaiting_confirmation_until);
+  const state = JSON.parse((await f.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [f.intent.command_id])).transport_json);
+  assert.equal(state.once_confirm_by, before.awaiting_confirmation_until);
+  assert.equal(state.once_interval_minutes, 30);
+});
+
+test('CR-fixed-deadline: new uplinks and backfilled history do not extend a persisted default', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  const [first] = await store.listSchedules(f.db, f.deviceEui, { now: new Date('2026-08-19T10:04:00Z') });
+  assert.equal(first.awaiting_confirmation_until, '2026-08-19T10:28:00.000Z');
+  await addUplinkHistory(f, 30);
+  for (const at of ['2026-08-19T10:04:00Z', '2026-08-19T10:20:00Z']) await f.db.run('INSERT INTO device_data(deveui,recorded_at) VALUES (?,?)', [f.deviceEui, at]);
+  assert.equal((await f.tick('2026-08-19T10:28:00.001Z')).skipped.length, 1);
+  const payload = JSON.parse((await f.db.get("SELECT payload_json FROM irrigation_events WHERE reason='one_time_uncertain'")).payload_json);
+  assert.equal(payload.confirm_by, first.awaiting_confirmation_until);
+  assert.equal(payload.interval, 10);
+});
+
+test('CR-isolate: one failed correction transaction does not suppress another candidate', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await addUplinkHistory(f);
+  await f.tick('2026-08-19T10:38:00.001Z');
+  await recordOnceOpen(f, '2026-08-19T10:39:00Z');
+  await f.db.run("INSERT INTO irrigation_events(user_id,irrigation_zone_id,action,reason,duration_minutes,valve_deveui,payload_json,created_at) SELECT user_id,irrigation_zone_id,action,reason,duration_minutes,valve_deveui,payload_json,created_at FROM irrigation_events WHERE reason='one_time_uncertain'");
+  let failed = false;
+  const warnings = [];
+  const db = { ...f.db, transaction: (fn) => f.db.transaction((tx) => fn({ ...tx, get: async (sql, args) => {
+    if (!failed && sql.includes('e.payload_json, d.user_id')) { failed = true; throw new Error('injected correction failure'); }
+    return tx.get(sql, args);
+  } })) };
+  await f.tick('2026-08-19T10:39:01Z', { db, warn: (s) => warnings.push(s) });
+  assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'FIRED');
+  assert.equal((await f.db.all("SELECT id FROM irrigation_events WHERE reason='one_time_open_confirmed_late'")).length, 1);
+  assert.ok(warnings.some((s) => s.includes('injected correction failure')));
 });
