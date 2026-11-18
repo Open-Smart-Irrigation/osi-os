@@ -11,6 +11,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const repo = path.resolve(__dirname, '..');
 const script = path.join(repo, 'scripts/pi/chirpstack-sqlite-wal.sh');
+const feed = path.join(repo, 'feeds/chirpstack-openwrt-feed/chirpstack/chirpstack/files');
 const fixtures = path.join(__dirname, 'fixtures/chirpstack-sqlite-wal');
 const original = fs.readFileSync(path.join(fixtures, 'chirpstack.init.orig'), 'utf8');
 const pragma = '\t\tpragmas = ["busy_timeout = 5000", "journal_mode = WAL", "foreign_keys = ON"]';
@@ -98,6 +99,7 @@ const fs = require('node:fs');
 const op = process.argv[3];
 const originalRename = fs.renameSync;
 fs.renameSync = function(from, to) {
+  if (op === 'install' && process.env.TEST_SECOND_HELPER_FAIL === '1' && to.endsWith('/restore.sh')) throw Error('injected second helper install failure');
   if (op === 'restore-config' && process.env.TEST_RESTORE_FAIL === '1' && to.endsWith('/backup.sh')) throw Error('injected backup.sh restore failure');
   return originalRename.apply(this, arguments);
 };
@@ -134,7 +136,7 @@ function restored(g) {
   assert.ok(fs.existsSync(g.p('running')));
 }
 
-test(`field init converts with ${shell}, backup manifest and embedded #670 scripts`, async (t) => {
+test(`field init converts with ${shell}, backup manifest and byte-identical current feed scripts`, async (t) => {
   const g = await gateway(t);
   const before = g.state();
   const check = g.run(); ok(check, 3); assert.match(check.stdout, /needs conversion/);
@@ -149,7 +151,7 @@ test(`field init converts with ${shell}, backup manifest and embedded #670 scrip
   assert.equal(fs.statSync(g.backup()).mode & 0o777, 0o700);
   const manifest = fs.readFileSync(path.join(g.backup(), 'MANIFEST.txt'), 'utf8');
   for (const file of ['chirpstack.sqlite', 'chirpstack.init', 'backup.sh', 'restore.sh']) assert.ok(manifest.includes(`${hash(path.join(g.backup(), file))}  ${file}\n`));
-  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(fixtures, 'feed-670', file)));
+  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
   ok(g.run(['--check']));
   const once = g.state(); const backupNames = fs.readdirSync(g.p('srv/backup'));
   const twice = g.run(['--apply']); ok(twice); assert.match(twice.stdout, /OK: already WAL/);
@@ -167,7 +169,7 @@ test('captured WAL fixture remains byte-identical on an idempotent apply', async
   const g = await gateway(t, wal);
   const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close();
   // A fully converted gateway already carries the WAL-aware helpers.
-  for (const file of ['backup.sh', 'restore.sh']) fs.copyFileSync(path.join(fixtures, 'feed-670', file), g.p(`opt/chirpstack/${file}`));
+  for (const file of ['backup.sh', 'restore.sh']) fs.copyFileSync(path.join(feed, file), g.p(`opt/chirpstack/${file}`));
   const before = g.state(); ok(g.run(['--apply'])); assert.deepEqual(g.state(), before);
 });
 
@@ -280,7 +282,7 @@ for (const init of [converted, fs.readFileSync(path.join(fixtures, 'feed-670/chi
     ok(g.run(['--apply'])); assert.deepEqual(g.journal(), [2, 2]);
     assert.deepEqual(g.state()['etc/init.d/chirpstack'], before['etc/init.d/chirpstack']);
     // The restart path also installs the WAL-aware helpers (a stock restore.sh would replay a stale WAL).
-    for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(fixtures, 'feed-670', file)));
+    for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
     fs.unlinkSync(g.p('running')); fs.unlinkSync(g.p('proc/1/exe')); fs.rmSync(g.p('opt/chirpstack'), { recursive: true });
     const checked = g.run(); ok(checked); assert.match(checked.stdout, /running: no; backup\/restore WAL-aware: no/);
     const once = hash(g.p('etc/init.d/chirpstack')); ok(g.run(['--apply']));
@@ -401,7 +403,7 @@ test('a kill between the init edit and the helper install is repaired by the nex
   sleepSync(1100); // backup directories are named by the second
   ok(g.run(['--apply']));
   assert.deepEqual(g.journal(), [2, 2]);
-  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(fixtures, 'feed-670', file)));
+  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
   ok(g.run(['--check']));
 });
 
@@ -415,7 +417,7 @@ test('already WAL with stale helpers installs them without touching ChirpStack o
   assert.match(applied.stdout, /OK: already WAL; WAL-aware backup\/restore scripts installed; previous helpers in /);
   assert.equal(fs.existsSync(g.p('service-calls')), false, 'ChirpStack was neither stopped nor started');
   assert.equal(hash(g.p('srv/chirpstack/chirpstack.sqlite')), dbBefore);
-  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(fixtures, 'feed-670', file)));
+  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
   const saved = fs.readdirSync(g.backup()).sort();
   assert.deepEqual(saved, ['ABSENT.txt', 'MANIFEST.txt', 'backup.sh', 'restore.sh'], 'only the previous helpers are kept; the live database is never copied');
   assert.equal(fs.readFileSync(path.join(g.backup(), 'restore.sh'), 'utf8'), '#!/bin/sh\necho old-restore\n');
@@ -457,4 +459,27 @@ test('Node unavailable refuses with its own message before downtime', async (t) 
   const g = await gateway(t); const before = g.state(); const empty = g.p('empty-bin'); fs.mkdirSync(empty);
   const r = g.run(['--apply'], { PATH: empty }); ok(r, 1); assert.match(r.stderr, /Node unavailable/);
   assert.deepEqual(g.state(), before); assert.equal(fs.existsSync(g.p('service-calls')), false);
+});
+
+for (const absent of [false, true]) test(`helper-only second-file failure restores originals, initially absent=${absent}`, async (t) => {
+  const g = await gateway(t, converted);
+  const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close();
+  if (absent) fs.unlinkSync(g.p('opt/chirpstack/backup.sh'));
+  const dbBefore = hash(g.p('srv/chirpstack/chirpstack.sqlite'));
+  const initBefore = fs.readFileSync(g.p('etc/init.d/chirpstack'));
+  const r = g.run(['--apply'], { TEST_SECOND_HELPER_FAIL: '1' }); ok(r, 1);
+  assert.match(r.stderr, /injected second helper install failure/);
+  assert.match(r.stderr, /ROLLED BACK: previous backup\/restore helpers/);
+  if (absent) assert.equal(fs.existsSync(g.p('opt/chirpstack/backup.sh')), false);
+  else {
+    assert.equal(fs.readFileSync(g.p('opt/chirpstack/backup.sh'), 'utf8'), '#!/bin/sh\necho old-backup\n');
+    assert.equal(fs.statSync(g.p('opt/chirpstack/backup.sh')).mode & 0o777, 0o750);
+  }
+  assert.equal(fs.readFileSync(g.p('opt/chirpstack/restore.sh'), 'utf8'), '#!/bin/sh\necho old-restore\n');
+  assert.equal(fs.statSync(g.p('opt/chirpstack/restore.sh')).mode & 0o777, 0o700);
+  assert.deepEqual(fs.readFileSync(g.p('etc/init.d/chirpstack')), initBefore);
+  assert.equal(hash(g.p('srv/chirpstack/chirpstack.sqlite')), dbBefore);
+  assert.equal(fs.existsSync(g.p('service-calls')), false, 'helper-only rollback never stops or starts ChirpStack');
+  assert.ok(fs.existsSync(g.p('running')));
+  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
 });
