@@ -707,6 +707,17 @@ test('expired uncertain skips open no correction transactions, and never enqueue
   assert.equal(f.calls.enqueue, 1);
 });
 
+test('waiting deadlines use SQLite timestamp uplinks and exclude future rows before taking ten reports', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  for (const at of [...uplinkHistory(15), ...uplinkHistory(1, 10, '2026-08-19T11:09:00Z')]) {
+    await f.db.run('INSERT INTO device_data(deveui,recorded_at) VALUES (?,?)', [f.deviceEui, at.replace('T', ' ').replace('.000Z', '')]);
+  }
+  const [schedule] = await store.listSchedules(f.db, f.deviceEui, { now: new Date('2026-08-19T10:11:00Z') });
+  assert.equal(schedule.awaiting_confirmation_until, '2026-08-19T10:38:00.000Z');
+  assert.equal((await f.tick('2026-08-19T10:29:00Z')).skipped.length, 0);
+  assert.equal(f.calls.enqueue, 1);
+});
+
 test('schedule listing returns the shared waiting deadline, uncertain outcome, and fired state after correction', async (t) => {
   const f = await uncertainOnceFixture(t);
   await addUplinkHistory(f);

@@ -75,7 +75,10 @@ async function listValvesForUser(db, userId) {
 
 async function recentUplinkTimes(db, deviceEui, nowDate) {
   const since = new Date(nowDate.getTime() - 48 * 3600000).toISOString();
-  const rows = await db.all('SELECT recorded_at FROM device_data WHERE deveui=? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at DESC LIMIT 10', [deviceEui, since, nowDate.toISOString()]);
+  const nextDay = new Date(nowDate.getTime() + 86400000).toISOString().slice(0, 10);
+  // The date bounds use the per-valve timestamp index. Compare instants before
+  // LIMIT so SQLite's space-separated timestamps and ISO reports sort together.
+  const rows = await db.all('SELECT recorded_at FROM device_data WHERE deveui=? AND recorded_at >= ? AND recorded_at < ? AND julianday(recorded_at) BETWEEN julianday(?) AND julianday(?) ORDER BY julianday(recorded_at) DESC LIMIT 10', [deviceEui, since.slice(0, 10), nextDay, since, nowDate.toISOString()]);
   return rows.map((row) => row.recorded_at);
 }
 
