@@ -1688,7 +1688,7 @@ module.exports = {
   getDailyAccounting,
   getDailyAccountingTx,
   updateOwnerTransportTx,
-  cancelledUnsent, invalidatedByEarlierFlush,
+  cancelledUnsent, invalidatedByEarlierFlush, opaqueMovesWater,
   captureEffectSnapshot,
   captureEffectSnapshotTx,
   effects,

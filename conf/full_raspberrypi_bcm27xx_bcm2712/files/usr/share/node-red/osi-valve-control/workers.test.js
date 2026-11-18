@@ -897,6 +897,172 @@ for (const [label, metadata, outcome] of [
   });
 }
 
+let productionLogBuilder;
+function productionActuatorLog(context) {
+  if (!productionLogBuilder) {
+    const flows = JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../flows.json'), 'utf8'));
+    productionLogBuilder = new Function('msg', flows.find((node) => node.name === 'Build actuator_log INSERT').func);
+  }
+  return productionLogBuilder({ _log_ctx: context });
+}
+
+async function serviceOwnerFixture(t) {
+  const f = await tempDb();
+  t.after(f.cleanup);
+  const deviceEui = 'A840410000000001';
+  await f.db.run("INSERT INTO irrigation_zones(name,user_id,timezone) VALUES ('Service Zone',1,'UTC')");
+  await f.db.run("INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) SELECT ?,'Service valve','STREGA_VALVE',1,id,'2026-08-19T08:00:00Z','2026-08-19T08:00:00Z' FROM irrigation_zones", [deviceEui]);
+  const zoneId = (await f.db.get('SELECT irrigation_zone_id FROM devices WHERE deveui=?', [deviceEui])).irrigation_zone_id;
+  await store.insertSchedule(f.db, { schedule_uuid: 'service-once', device_eui: deviceEui, kind: 'ONCE', fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 2, timezone: 'UTC', enabled: 1 });
+  const boot = 'service-owner-' + (++runtimeFixtureId);
+  const start = Date.parse('2026-08-19T08:00:00Z');
+  const context = (at) => ({ runtimeNow: () => Date.parse(at), clockOptions: {
+    fs: { readFileSync(path) {
+      if (path === '/proc/sys/kernel/random/boot_id') return boot + '\n';
+      if (path === '/proc/uptime') return (Date.parse(at) - start) / 1000 + ' 0\n';
+      if (path === '/service-marker') return JSON.stringify({ boot_id: boot, epoch_ms: start, uptime_ms: 0, stratum: 1 });
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    } }, markerPath: '/service-marker', rejectionPath: '/service-rejection', fallbackPath: '/service-fallback',
+  } });
+  const queue = []; let onceCalls = 0;
+  const transport = { async enqueueDownlink() { onceCalls++; throw new Error('one-time never queued'); }, async getDeviceQueue() { return queue; } };
+  const tick = (at) => W.runOnceTick({ db: f.db, now: new Date(at), transport, trustedContext: context(at) });
+  const enqueueService = async (at, fPort, data, unknown = false, expiresAt) => {
+    const result = await require('./dispatch').enqueueValveCommand({ db: f.db, deviceEui,
+      owner: { type: 'opaque', id: 'service-open', device_eui: deviceEui },
+      item: { fPort, data, confirmed: false, encrypted: false, provenance: { source: 'local_encoder' }, expiresAt },
+      transport: { async enqueueDownlink(item) { queue.push({ ...item, id: 'service-queued' }); if (unknown) throw new Error('response lost'); return { id: 'service-queued' }; } },
+      now: new Date(at), trustedContext: context(at) });
+    assert.equal(result.accepted, !unknown);
+  };
+  const log = async (at, action, percentage = null, returnPosition = null) => {
+    const statement = productionActuatorLog({ devEui: deviceEui, zone_id: zoneId, action, reason: 'manual_service', percentage, returnPosition, created_at: at });
+    await f.db.run(statement.topic);
+  };
+  const observe = (at) => W.recordValveObservation({ db: f.db, deviceEui, observedState: 'OPEN', observedAt: at, runtimeContext: context(at) });
+  return { ...f, deviceEui, queue, tick, enqueueService, log, observe, calls: () => onceCalls };
+}
+
+for (const [action, port, returnPosition] of [['SET_PARTIAL_OPENING', 27, null], ['SET_FLUSHING', 28, 'OPEN']]) {
+  for (const late of [false, true]) for (const earlier of [false, true]) {
+    test(`R3 S2: production ${action} ${earlier ? 'earlier' : 'in-window'} blocks ${late ? 'late correction' : 'immediate confirmation'}`, async (t) => {
+      const f = await serviceOwnerFixture(t);
+      if (!earlier) await f.tick('2026-08-19T10:03:00Z');
+      if (late && !earlier) await f.tick('2026-08-19T10:28:00.001Z');
+      const at = earlier ? '2026-08-19T09:00:00Z' : late ? '2026-08-19T10:28:30Z' : '2026-08-19T10:04:00Z';
+      await f.enqueueService(at, port, 'MSg=');
+      await f.log(at, action, 40, returnPosition);
+      assert.equal((await f.db.get("SELECT action FROM actuator_log WHERE reason='manual_service'")).action,
+        action + ' 40%' + (returnPosition ? ' -> ' + returnPosition : ''));
+      if (earlier) {
+        await f.tick('2026-08-19T10:03:00Z');
+        if (late) await f.tick('2026-08-19T10:28:00.001Z');
+      }
+      assert.equal(f.queue.shift().id, 'service-queued', 'only the service frame was delivered');
+      await f.observe(late ? '2026-08-19T10:29:00Z' : '2026-08-19T10:05:00Z');
+      assert.equal((await f.tick(late ? '2026-08-19T10:29:01Z' : '2026-08-19T10:05:01Z')).fired.length, 0);
+      if (!late) await f.tick('2026-08-19T10:28:00.001Z');
+      await f.tick('2026-08-19T10:29:30Z');
+      assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'SKIPPED');
+      assert.equal((await f.db.all("SELECT * FROM irrigation_events WHERE action='IRRIGATE'")).length, 0);
+      assert.equal((await f.db.all("SELECT * FROM valve_actuation_expectations WHERE command_id='service-open'")).length, 0, 'service ownership is opaque, not a timed expectation');
+      assert.equal(f.calls(), 1);
+    });
+  }
+}
+
+for (const action of ['SET_PARTIAL_OPENING', 'SET_FLUSHING']) {
+  test(`R3 S2: a suffixed production ${action} log alone blocks OPEN attribution`, async (t) => {
+    const f = await serviceOwnerFixture(t);
+    await f.tick('2026-08-19T10:03:00Z');
+    await f.log('2026-08-19T10:04:00Z', action, 40, action === 'SET_FLUSHING' ? 'OPEN' : null);
+    await f.observe('2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+    assert.equal(f.calls(), 1);
+  });
+}
+
+for (const [port, data] of [[11, 'AAoAAg=='], [27, 'MCg=']]) {
+  test(`R3 S2: a non-water-moving opaque frame on port ${port} does not block an uncontested OPEN`, async (t) => {
+    const f = await serviceOwnerFixture(t);
+    await f.enqueueService('2026-08-19T09:00:00Z', port, data);
+    f.queue.length = 0;
+    await f.tick('2026-08-19T10:03:00Z');
+    await f.observe('2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 1);
+    assert.equal(f.calls(), 1);
+  });
+}
+
+test('R3 S2: a requested opaque expiry never sent to ChirpStack does not resolve a service open', async (t) => {
+  const f = await serviceOwnerFixture(t);
+  await f.enqueueService('2026-08-19T09:00:00Z', 27, 'MSg=', false, '2026-08-19T09:30:00Z');
+  assert.equal(f.queue[0].expiresAt, undefined);
+  f.queue.length = 0;
+  await f.tick('2026-08-19T10:03:00Z');
+  await f.observe('2026-08-19T10:05:00Z');
+  assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+  assert.equal(f.calls(), 1);
+});
+
+for (const resolution of ['flush-invalidated', 'cancelled-unsent']) {
+  test(`R3 S2: a ${resolution} earlier opaque owner does not block an uncontested OPEN`, async (t) => {
+    const f = await serviceOwnerFixture(t);
+    await f.enqueueService('2026-08-19T09:00:00Z', 27, 'MSg=');
+    await f.log('2026-08-19T09:00:00Z', 'SET_PARTIAL_OPENING', 40);
+    const patch = resolution === 'flush-invalidated'
+      ? { phase: 'UNKNOWN', invalidated_by_flush: 'service-flush', first_invalidated_by_flush: 'service-flush' }
+      : { cancelled_unsent_at: '2026-08-19T09:01:00Z' };
+    await require('./dispatch').updateOwnerTransportTx(f.db, { type: 'opaque', id: 'service-open', device_eui: f.deviceEui }, patch);
+    f.queue.length = 0;
+    await f.tick('2026-08-19T10:03:00Z');
+    await f.observe('2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 1);
+    assert.equal(f.calls(), 1);
+  });
+}
+
+test('R3 S2: an untimed water-moving opaque owner remains unresolved and blocks observation proof', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await f.db.run('INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES (?,?)', [f.deviceEui, JSON.stringify({ opaque: [{ owner_id: 'untimed-service', fPort: 27, data: 'MSg=' }] })]);
+  await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+  assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 0);
+  assert.equal(f.calls.enqueue, 1);
+});
+
+test('R3 S2: an expired ChirpStack-captured opaque owner is resolved even with a local-only snapshot', async (t) => {
+  const f = await uncertainOnceFixture(t);
+  await f.db.run('INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES (?,?)', [f.deviceEui, JSON.stringify({ opaque: [{
+    owner_id: 'captured-service', fPort: 27, data: 'MSg=', phase: 'UNKNOWN', attempted_at: '2026-08-19T09:00:00Z',
+    captured_by_flush: 'incomplete-capture', expiresAt: '2026-08-19T09:30:00Z', effect_snapshot: { explicit_expiry_at: null },
+  }] })]);
+  await recordOnceOpen(f, '2026-08-19T10:05:00Z');
+  assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 1);
+  assert.equal(f.calls.enqueue, 1);
+});
+
+for (const unknown of [false, true]) {
+  test(`R3 S2: an opaque timed-open ${unknown ? 'unknown id' : 'live id'} cannot be taken as one-time queue proof`, async (t) => {
+    const f = await serviceOwnerFixture(t);
+    await f.enqueueService('2026-08-19T09:00:00Z', 2, 'QQI=', unknown);
+    await f.tick('2026-08-19T10:03:00Z');
+    assert.equal((await f.tick('2026-08-19T10:04:00Z')).fired.length, 0);
+    assert.equal((await f.db.get('SELECT once_state FROM valve_schedules')).once_state, 'PENDING');
+    assert.equal(f.calls(), 1);
+  });
+}
+
+for (const action of ['CLOSE', 'CLOSE_FOR_DURATION', 'SET_INTERVAL', 'SET_MAGNET_MODE', 'OPEN_INTERVAL', 'SET_PARTIAL_OPENING_CONFIG']) {
+  test(`R3 S2: the production ${action} log is not matched as an open`, async (t) => {
+    const f = await serviceOwnerFixture(t);
+    await f.tick('2026-08-19T10:03:00Z');
+    await f.log('2026-08-19T10:04:00Z', action);
+    await f.observe('2026-08-19T10:05:00Z');
+    assert.equal((await f.tick('2026-08-19T10:05:01Z')).fired.length, 1);
+    assert.equal(f.calls(), 1);
+  });
+}
+
 test('a queue-confirmed UNKNOWN owns its id and does not block the next uncertain once open', async (t) => {
   const f = await uncertainOnceFixture(t);
   const firstTransport = JSON.parse(f.expectation.transport_json);

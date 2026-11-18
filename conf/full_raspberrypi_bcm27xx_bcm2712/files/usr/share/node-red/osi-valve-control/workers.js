@@ -641,11 +641,32 @@ async function finalizeOnceAccepted(db, row, nowDate, transaction = null) {
   return transaction ? finalize(transaction) : db.transaction(finalize);
 }
 
+async function opaqueOwnersTx(tx, deviceEui) {
+  const control = await store.conditionalControl(tx, deviceEui);
+  return Array.isArray(control.opaque) ? control.opaque : [];
+}
+
+function openOwnerResolved(row, transport, start, opaque = false) {
+  const opens = [row.observed_open_at, transport.observation && transport.observation.observed_at].map(observationInstant);
+  return opens.some((ms) => ms != null && ms < start)
+    || dispatch.cancelledUnsent(row, transport)
+    || (opaque && Boolean(transport.cancelled_unsent_at || transport.cancelled_before_send_at))
+    || dispatch.invalidatedByEarlierFlush(transport)
+    || ['enqueue_rejected', 'enqueue_failed_before_acceptance'].includes(transport.phase);
+}
+
+function opaqueAppliedExpiry(row) {
+  // enqueueValveCommand sends snapshot.explicit_expiry_at. expiresAt captured
+  // from ChirpStack is applied too; metadata from an unclaimed request is not.
+  return observationInstant(row.effect_snapshot && row.effect_snapshot.explicit_expiry_at)
+    ?? observationInstant(row.captured_by_flush ? row.expiresAt || row.expires_at : null);
+}
+
 // Queue item ids recorded by other commands on this valve, and whether another
 // open on it is itself unconfirmed. A manual open builds the same frame as a
 // one-time open, so an identical queued item proves this command only when no
 // other command can own it.
-async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemptedAt, nowDate) {
+async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemptedAt, nowDate, frameData) {
   const rows = await tx.all("SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND (command_id IS NULL OR command_id<>?)", [deviceEui, commandId]);
   const queueIds = new Set();
   let otherUncertain = false;
@@ -669,6 +690,23 @@ async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemp
       if (appliedExpiry == null || appliedExpiry > nowDate.getTime()) otherUncertain = true;
     }
   }
+  for (const other of await opaqueOwnersTx(tx, deviceEui)) {
+    if (!other || typeof other !== 'object') { otherUncertain = true; continue; }
+    // Services use FPorts 27/28, so their frames cannot match the one-time's
+    // FPort 2 payload. Captured opaque owners can also contain timed opens on
+    // FPort 2: every live id stays reserved, regardless of its metadata/age.
+    if (other.queue_id && liveQueueIds.has(String(other.queue_id))) { queueIds.add(String(other.queue_id)); continue; }
+    if (!dispatch.opaqueMovesWater(other) || !['UNKNOWN', 'ATTEMPTED'].includes(other.phase) || other.queue_id) continue;
+    const port = other.fPort == null ? other.fport : other.fPort;
+    const payload = other.data || other.payload;
+    if ((port != null && Number.isFinite(Number(port)) && Number(port) !== 2) || (payload != null && payload !== frameData)) continue;
+    const at = observationInstant(other.attempt_trusted_at) ?? observationInstant(other.attempted_at) ?? observationInstant(other.accepted_at);
+    const expiry = opaqueAppliedExpiry(other);
+    if (openOwnerResolved(other, other, observationInstant(attemptedAt), true)
+        || (at != null && at < observationInstant(attemptedAt) - 24 * 3600000)
+        || (expiry != null && expiry <= nowDate.getTime())) continue;
+    otherUncertain = true;
+  }
   return { queueIds, otherUncertain };
 }
 
@@ -677,7 +715,12 @@ async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemp
 async function onceOpenObservationTx(tx, row, start, end) {
   const inWindow = (at) => { const ms = observationInstant(at); return ms != null && ms >= start && ms <= end; };
   const expectations = await tx.all('SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?)', [row.device_eui]);
-  const logs = await tx.all("SELECT reason, created_at FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND UPPER(action) IN ('OPEN','OPEN_FOR_MINUTES','TIMED_OPEN','OPEN_FOR_DURATION','OPEN_FOR_DURATION_CONDITIONAL','SET_PARTIAL_OPENING','SET_FLUSHING') AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)", [row.device_eui, new Date(start).toISOString(), new Date(end).toISOString()]);
+  // Cloud/schedule/one-time opens log OPEN_FOR_DURATION (legacy aliases below).
+  // The shared builder appends percentage/return text to the two service names.
+  // Partial-opening log text omits direction, so its family match is conservative.
+  // TIMED_ACTION can close too: its opens are tracked by expectations/opaque
+  // owners, so the ambiguous log name is deliberately not added to this list.
+  const logs = await tx.all("SELECT reason, created_at FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND (UPPER(action) IN ('OPEN','OPEN_FOR_MINUTES','TIMED_OPEN','OPEN_FOR_DURATION','OPEN_FOR_DURATION_CONDITIONAL','SET_PARTIAL_OPENING','SET_FLUSHING') OR instr(UPPER(action),'SET_PARTIAL_OPENING ')=1 OR instr(UPPER(action),'SET_FLUSHING ')=1) AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)", [row.device_eui, new Date(start).toISOString(), new Date(end).toISOString()]);
   const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
   if (logs.some((log) => log.reason !== marker)) return null;
   const observations = [];
@@ -716,14 +759,23 @@ async function onceOpenObservationTx(tx, row, start, end) {
       ?? observationInstant(intent && intent.attempted_at) ?? observationInstant(other.commanded_at);
     if (attemptMs != null && attemptMs >= start && attemptMs <= end) return null;
     if (attemptMs == null || attemptMs < start - 24 * 3600000 || attemptMs >= start || attemptMs > observationMs) continue;
-    const ownOpens = [other.observed_open_at, state.observation && state.observation.observed_at].map(observationInstant);
-    if (ownOpens.some((ms) => ms != null && ms < start)
-        || dispatch.cancelledUnsent(other, state) || dispatch.invalidatedByEarlierFlush(state)
-        || ['enqueue_rejected', 'enqueue_failed_before_acceptance'].includes(state.phase)) continue;
+    if (openOwnerResolved(other, state, start)) continue;
     const occurrence = other.command_id && await tx.get('SELECT expires_at FROM irrigation_occurrences WHERE command_id=?', [other.command_id]);
     const appliedExpiry = observationInstant(occurrence ? occurrence.expires_at
       : state.effect_snapshot ? state.effect_snapshot.explicit_expiry_at : state.explicit_expiry_at);
     if (appliedExpiry != null && appliedExpiry <= observationMs) continue;
+    return null;
+  }
+  for (const other of await opaqueOwnersTx(tx, row.device_eui)) {
+    if (!dispatch.opaqueMovesWater(other)) continue;
+    if (!other || typeof other !== 'object') return null;
+    const expiry = opaqueAppliedExpiry(other);
+    if (openOwnerResolved(other, other, start, true) || (expiry != null && expiry <= observationMs)) continue;
+    const attemptMs = observationInstant(other.attempt_trusted_at) ?? observationInstant(other.attempted_at) ?? observationInstant(other.accepted_at);
+    // Opaque records can come from another writer/queue capture. Without a
+    // usable attempt or acceptance time they remain unresolved while retained.
+    if (attemptMs == null) return null;
+    if (attemptMs < start - 24 * 3600000 || attemptMs > end) continue;
     return null;
   }
   return observations[0];
@@ -763,7 +815,7 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
       && Boolean(await onceOpenObservationTx(tx, current, attemptedMs, candidateOpenMs));
     let matchedQueueId = null;
     if (queuedIds.length && !(state.phase === 'ACCEPTED' && state.queue_id) && !observed) {
-      const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id, liveQueueIds, attemptedAt, nowDate);
+      const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id, liveQueueIds, attemptedAt, nowDate, Buffer.from([0x41, Number(current.duration_minutes)]).toString('base64'));
       if (!owners.otherUncertain) matchedQueueId = queuedIds.find((id) => id && (!state.queue_id || String(state.queue_id) === id) && !owners.queueIds.has(id)) || null;
     }
     const proof = state.phase === 'ACCEPTED' && state.queue_id ? 'accepted transport receipt'
