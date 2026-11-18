@@ -1546,70 +1546,7 @@ function opaqueFromQueueEntry(entry, deviceEui, flushId) {
   };
 }
 
-// Queue reads are evidence only when every item's port and payload can be read.
-// Compare bytes, since equivalent base64 spellings need not have equal text.
-function queueFrame(value) {
-  if (!value || typeof value !== 'object') return null;
-  const port = Number(value.fPort == null ? value.fport : value.fPort);
-  const hex = value.bytes_hex;
-  let bytes;
-  if (hex != null) {
-    if (typeof hex !== 'string' || !/^(?:[a-f0-9]{2})+$/i.test(hex)) return null;
-    bytes = Buffer.from(hex, 'hex');
-    const data = value.data == null ? value.payload : value.data;
-    if (data != null && (typeof data !== 'string' || Buffer.from(data, 'base64').toString('hex') !== bytes.toString('hex'))) return null;
-  } else {
-    const data = value.data == null ? value.payload : value.data;
-    if (typeof data !== 'string' || !data.length || !/^[a-z0-9+/]*={0,2}$/i.test(data)) return null;
-    bytes = Buffer.from(data, 'base64');
-    if (!bytes.length || bytes.toString('base64').replace(/=+$/, '') !== data.replace(/=+$/, '')) return null;
-  }
-  return Number.isInteger(port) && port > 0 && port <= 255 ? { port, hex: bytes.toString('hex') } : null;
-}
-
-function readableQueue(items) {
-  return Array.isArray(items) && items.every((item) => queueFrame(item));
-}
-
-// Shared by queue proof and OPEN attribution. A later absence cannot explain
-// which command caused an earlier OPEN, so attribution supplies its attempt cutoff.
-function resolvedByQueueRemoval(transport, notAfter = null) {
-  const absent = instantMs(transport && transport.queue_absent_at);
-  const attempt = instantMs(transport && (transport.attempt_trusted_at || transport.attempted_at || transport.accepted_at));
-  return absent != null && attempt != null && absent > attempt
-    && (notAfter == null || absent <= instantMs(notAfter));
-}
-
-async function recordQueueAbsenceTx(tx, deviceEui, items, readAt) {
-  if (!readableQueue(items) || instantMs(readAt) == null) return;
-  const frames = items.map(queueFrame);
-  const absent = (state) => {
-    if (!state || state.queue_id || resolvedByQueueRemoval(state)) return false;
-    const attempt = instantMs(state.attempt_trusted_at || state.attempted_at || state.accepted_at);
-    if (attempt == null || attempt >= instantMs(readAt)) return false;
-    const frame = queueFrame(state.effect_snapshot || state.attempt || state);
-    return frame && !frames.some((queued) => queued.port === frame.port && queued.hex === frame.hex);
-  };
-  const rows = await tx.all('SELECT expectation_id,transport_json FROM valve_actuation_expectations WHERE device_eui=?', [deviceEui]);
-  for (const row of rows) {
-    let state;
-    try { state = row.transport_json && JSON.parse(row.transport_json); }
-    catch (_) { continue; } // Malformed owners remain unresolved.
-    if (absent(state)) await updateOwnerTransportTx(tx, { type: 'expectation', id: row.expectation_id }, { queue_absent_at: readAt });
-  }
-  const control = await store.conditionalControl(tx, deviceEui);
-  let changed = false;
-  const opaque = (control.opaque || []).map((state) => {
-    if (!absent(state)) return state;
-    changed = true;
-    return { ...state, queue_absent_at: readAt };
-  });
-  if (changed) await store.writeConditionalControl(tx, deviceEui, { ...control, opaque });
-}
-
 async function captureRemoteQueueOwners(db, deviceEui, owners, snapshot, intent, capturedAt) {
-  // This is an existing pre-flush read, not an additional network poll.
-  await transaction(db, (tx) => recordQueueAbsenceTx(tx, deviceEui, snapshot, capturedAt || nowIso()));
   const known = new Set(owners.map((entry) => entry.transport && entry.transport.queue_id).filter(Boolean));
   const remote = [];
   const capturedSnapshot = Array.isArray(snapshot) ? snapshot : [];
@@ -1716,7 +1653,7 @@ async function executeFlushIntent({ db, device, transport, flushId, snapshot, no
   return { ok: true, phase: 'UNKNOWN', flush_id: flushId, snapshot: intent.captured_snapshot || snapshot || null, invalidated_queue_ids: invalidated, replayed };
 }
 
-async function flushValveQueue({ db, deviceEui, reason, transport, now, queueReadNow = Date.now } = {}) {
+async function flushValveQueue({ db, deviceEui, reason, transport, now } = {}) {
   const device = normalizeDevice(deviceEui);
   if (!db || !transport) throw new TypeError('flushValveQueue requires db and transport');
   return withValveWriter(device, async () => {
@@ -1732,7 +1669,7 @@ async function flushValveQueue({ db, deviceEui, reason, transport, now, queueRea
     let snapshot;
     try {
       snapshot = await getQueue(device);
-      await captureRemoteQueueOwners(db, device, owners, snapshot, intent, nowIso(queueReadNow()));
+      await captureRemoteQueueOwners(db, device, owners, snapshot, intent, at);
       return executeFlushIntent({ db, device, transport, flushId: intent.flush_id, snapshot, now });
     } catch (error) {
       await transaction(db, (tx) => setFlushIntentTx(tx, device, {
@@ -1744,7 +1681,7 @@ async function flushValveQueue({ db, deviceEui, reason, transport, now, queueRea
   });
 }
 
-async function recoverValveFlush({ db, deviceEui, flushId, transport, now, queueReadNow = Date.now } = {}) {
+async function recoverValveFlush({ db, deviceEui, flushId, transport, now } = {}) {
   const device = normalizeDevice(deviceEui);
   if (!flushId) throw errorWithCode('flush_id_required', 'flushId is required for recovery');
   if (!db || !transport) throw new TypeError('recoverValveFlush requires db and transport');
@@ -1759,7 +1696,7 @@ async function recoverValveFlush({ db, deviceEui, flushId, transport, now, queue
       const getQueue = transportMethod(transport, ['getDeviceQueue', 'getQueue']);
       try {
         const snapshot = await getQueue(device);
-        await captureRemoteQueueOwners(db, device, owners, snapshot, intent, nowIso(queueReadNow()));
+        await captureRemoteQueueOwners(db, device, owners, snapshot, intent, nowIso(now));
       } catch (error) {
         await transaction(db, (tx) => setFlushIntentTx(tx, device, {
           flush_id: flushId, status: 'UNKNOWN', capture_status: 'UNKNOWN', result_status: 'UNKNOWN',
@@ -1789,8 +1726,6 @@ module.exports = {
   getDailyAccounting,
   getDailyAccountingTx,
   updateOwnerTransportTx,
-  queueFrame, readableQueue, resolvedByQueueRemoval, recordQueueAbsenceTx,
-  cancelledUnsent, invalidatedByEarlierFlush, opaqueMovesWater,
   captureEffectSnapshot,
   captureEffectSnapshotTx,
   effects,

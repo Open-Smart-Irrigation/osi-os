@@ -90,7 +90,7 @@ function hasTransportAttemptEvidence(transport) {
 
 // Persist only these JSON fields atomically: a listing must not overwrite a
 // concurrent enqueue receipt or observation. Every reader then uses the winner.
-async function onceConfirmationDeadline(db, row, transport, now, legacySkip = null) {
+async function onceConfirmationDeadline(db, row, transport, now) {
   const read = (state) => parseAckInstant(state.once_confirm_by) != null
     && Number.isFinite(state.once_interval_minutes)
     ? { confirmBy: state.once_confirm_by, interval: state.once_interval_minutes } : null;
@@ -102,11 +102,6 @@ async function onceConfirmationDeadline(db, row, transport, now, legacySkip = nu
   const { confirmationDeadline } = require('./workers');
   const deadline = confirmationDeadline({ attemptedAt, fireAt: row.fire_at, now: at,
     uplinkTimes: await recentUplinkTimes(db, row.device_eui, at) });
-  // Older SKIPs already recorded a fixed window; retain that audit boundary.
-  if (legacySkip && parseAckInstant(legacySkip.confirm_by) != null) {
-    deadline.confirmBy = legacySkip.confirm_by;
-    if (Number.isFinite(legacySkip.interval)) deadline.interval = legacySkip.interval;
-  }
   if (!row.expectation_id) return deadline;
   await db.run(`UPDATE valve_actuation_expectations SET transport_json=json_set(transport_json,
     '$.once_confirm_by',?,'$.once_interval_minutes',?) WHERE expectation_id=? AND json_valid(transport_json)
@@ -129,7 +124,7 @@ async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
     // Persisted settlement is authoritative, including preclaim expiry. Legacy
     // intent timestamps alone do not prove that dispatch reached enqueue.
     const attempted = hasTransportAttemptEvidence(transport);
-    row.once_proof = ['receipt','queue','observed_open'].includes(transport.proof) ? transport.proof : null;
+    row.once_proof = ['receipt','queue'].includes(transport.proof) ? transport.proof : null;
     const settlement = ['uncertain', 'missed'].includes(transport.once_settlement)
       ? transport.once_settlement : attempted ? 'uncertain' : 'missed';
     row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED' ? settlement : null;

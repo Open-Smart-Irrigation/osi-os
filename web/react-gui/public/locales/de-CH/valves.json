@@ -47,7 +47,6 @@
     "awaitingConfirmation": "Gesendet, warte auf die Bestätigung des Ventils (bis {{time}})",
     "notConfirmed": "Nicht bestätigt — Ventil prüfen",
     "onceFired": "Ausgeführt",
-    "onceReportedOpen": "Ventil meldet offen",
     "onceNote": "Einmalige Öffnungen werden vom Gateway zu diesem Zeitpunkt gesendet; das Gateway muss online sein.", "dispatchStatus": "Versand: {{state}}", "dispatchStates": { "PENDING": "Ausstehend", "ATTEMPTED": "Versucht", "SENT": "An das Funknetz gesendet", "UNKNOWN": "Unbekannt", "SKIPPED": "Übersprungen" },
     "save": "Speichern", "saving": "Speichert…", "delete": "Löschen", "enabled": "Aktiviert",
     "conflictTooMany": "{{weekday}} hätte mehr als 4 Fenster.", "conflictOverlap": "Überschneidet sich mit einem anderen Fenster am {{weekday}}.", "conflictGeneric": "Der Zeitplan steht im Konflikt mit dem Plan.", "conflictInvalidStart": "Ein Zeitplan hat eine ungültige Startzeit.", "invalidStartTime": "Diese Startzeit ist ungültig.", "saveFailed": "Zeitplan konnte nicht gespeichert werden.", "updateFailed": "Zeitplan konnte nicht aktualisiert werden.", "deleteFailed": "Zeitplan konnte nicht gelöscht werden.", "deleteConfirmTitle": "Diesen Zeitplan löschen?", "deleteConfirmBody": "{{schedule}} auf {{valve}} wird gelöscht. Bereits gelaufene Bewässerung wird dadurch nicht rückgängig gemacht.", "deleteConfirmButton": "Ja, löschen",

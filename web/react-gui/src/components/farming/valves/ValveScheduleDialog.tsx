@@ -633,7 +633,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           {schedule.kind === 'ONCE' && (schedule.dispatchState || schedule.onceState === 'FIRED') && (
                             <p className={`text-xs ${schedule.onceState !== 'FIRED' && (schedule.onceOutcome === 'uncertain' || schedule.dispatchState === 'UNKNOWN') ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
                               {schedule.onceState === 'FIRED'
-                                ? td(schedule.onceProof === 'observed_open' ? 'scheduleDialog.onceReportedOpen' : 'scheduleDialog.onceFired')
+                                ? td('scheduleDialog.onceFired')
                                 : schedule.awaitingConfirmationUntil
                                   ? td('scheduleDialog.awaitingConfirmation', { time: formatClock(schedule.awaitingConfirmationUntil, valve.timezone, i18n?.language) })
                                   : schedule.onceOutcome === 'uncertain'
