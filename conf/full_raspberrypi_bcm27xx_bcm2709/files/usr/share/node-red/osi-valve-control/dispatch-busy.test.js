@@ -61,6 +61,17 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
   };
 }
 
+async function reserveConditionalOwner(h) {
+  const occurrence = { schedule_uuid: 'busy-schedule', local_date: '2026-10-18', local_time: '10:00' };
+  await h.fixture.db.run('INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, expires_at, requested_duration_minutes, reservation_start_at, reservation_end_at, reserved_minutes) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+    occurrence.schedule_uuid, occurrence.local_date, occurrence.local_time, FIXTURE_EUI, AT, 'PENDING', '2026-10-18T10:10:00.000Z', 2, AT, '2026-10-18T10:12:00.000Z', 2,
+  ]);
+  const reserved = await dispatch.reserveValveCommand({ db: h.fixture.db, command: {
+    ...h.args.command, conditional: true, occurrence,
+  }, now: AT });
+  return { type: 'expectation', id: reserved.expectation.expectation_id };
+}
+
 for (const [stage, transaction] of [['reservation', 1], ['before claim', 2], ['claim', 3]]) {
   test(`${stage} retries a whole rolled-back busy transaction, then enqueues once`, async (t) => {
     const h = await harness(t, { transaction, failures: 1 });
@@ -155,6 +166,54 @@ for (const [phase, enqueueError] of [
     assert.ok(h.elapsed < 9000);
     assert.equal((await h.state()).phase, 'ATTEMPTED');
   });
+
+  if (phase === 'UNKNOWN') continue;
+
+  test(`${phase} conditional expiry retries after rejection persistence and releases the reservation`, async (t) => {
+    // Direct enqueue commits beforeClaim, claim, rejection, then expiry.
+    const h = await harness(t, { transaction: 4, failures: 1, enqueueError });
+    const owner = await reserveConditionalOwner(h);
+    const result = await dispatch.enqueueValveCommand({ ...h.args, owner, item: FRAME });
+    assert.equal(result.accepted, false);
+    assert.equal(result.phase, phase);
+    assert.equal(result.error, enqueueError);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2);
+    assert.deepEqual(h.sleeps, [100]);
+    assert.equal((await h.state()).failure_code, phase);
+    assert.equal(h.phases.filter((value) => value === phase).length, 1, 'rejection persistence committed without retry');
+    const occurrence = await h.fixture.db.get('SELECT state, queue_id, sent_at FROM irrigation_occurrences WHERE command_id=?', ['busy-command']);
+    assert.equal(occurrence.state, 'EXPIRED');
+    assert.equal(occurrence.queue_id, null);
+    assert.equal(occurrence.sent_at, null);
+    const accounting = await dispatch.getDailyAccounting({ db: h.fixture.db, deviceEui: FIXTURE_EUI, timezone: 'UTC' });
+    assert.equal(accounting.days['2026-10-18'] || 0, 0);
+    const next = await dispatch.reserveValveCommand({ db: h.fixture.db,
+      command: { ...h.args.command, command_id: 'next-command' }, now: AT, effectContext: { ordinary_candidate: true } });
+    assert.ok(next.expectation);
+    assert.equal(next.replayed, false);
+    assert.equal(h.enqueueCalls, 1, 'reserving the next command sends no frame');
+  });
+
+  for (const [bound, busyMs, enqueueMs, attempts, sleeps, elapsed] of [
+    ['attempt', 0, 0, 3, [100, 200], 300],
+    ['deadline', 1800, 1000, 2, [100], 4700],
+  ]) {
+    test(`${phase} conditional expiry ${bound} exhaustion surfaces the database error`, async (t) => {
+      const h = await harness(t, { transaction: 4, failures: Infinity, enqueueError, busyMs, enqueueMs });
+      const owner = await reserveConditionalOwner(h);
+      await assert.rejects(dispatch.enqueueValveCommand({ ...h.args, owner, item: FRAME }), (error) => error === h.error);
+      assert.equal(h.enqueueCalls, 1);
+      assert.equal(h.injections, attempts);
+      assert.deepEqual(h.sleeps, sleeps);
+      assert.equal(h.elapsed, elapsed);
+      assert.ok(h.elapsed < 9000);
+      assert.equal((await h.state()).phase, phase);
+      assert.equal((await h.state()).failure_code, phase);
+      assert.equal(h.phases.filter((value) => value === phase).length, 1);
+      assert.equal((await h.fixture.db.get('SELECT state FROM irrigation_occurrences WHERE command_id=?', ['busy-command'])).state, 'ATTEMPTED');
+    });
+  }
 }
 
 test('post-enqueue persistent busy warns, stays claimed for recovery, and still answers ACCEPTED', async (t) => {

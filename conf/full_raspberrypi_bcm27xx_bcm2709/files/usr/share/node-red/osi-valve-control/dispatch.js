@@ -1106,7 +1106,7 @@ async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transp
       const classification = classifyEnqueueError(error);
       if (classification === 'enqueue_failed_before_acceptance' || classification === 'enqueue_rejected') {
         await persistAttempt(db, owner, classification, { failure_code: classification, failed_at: nowIso() }, retry);
-        await markOccurrencePreAcceptanceExpired(db, owner, classification, now);
+        await markOccurrencePreAcceptanceExpired(db, owner, classification, now, retry);
         return { accepted: false, phase: classification, queue_id: null, error };
       }
       await persistAttempt(db, owner, 'UNKNOWN', { error: String(error && error.message || error), unknown_at: nowIso() }, retry);
@@ -1356,7 +1356,7 @@ async function markOccurrenceUnknown(db, owner, now) {
   });
 }
 
-async function markOccurrencePreAcceptanceExpired(db, owner, failureCode, now) {
+async function markOccurrencePreAcceptanceExpired(db, owner, failureCode, now, retry) {
   if (!owner || owner.type !== 'expectation') return;
   await transaction(db, async (tx) => {
     const expectation = await tx.get('SELECT command_id FROM valve_actuation_expectations WHERE expectation_id=?', [owner.id]);
@@ -1368,7 +1368,7 @@ async function markOccurrencePreAcceptanceExpired(db, owner, failureCode, now) {
       authorization: policyStore.PRE_ACCEPTANCE_FAILURE_AUTHORIZATION,
       preAcceptanceFailure: { command_id: occurrence.command_id, phase: 'pre_acceptance', failure_code: failureCode, accepted: false, queue_id: null },
     });
-  });
+  }, retry);
 }
 
 function accountingForOccurrence(occurrence, expectation, timezone) {
