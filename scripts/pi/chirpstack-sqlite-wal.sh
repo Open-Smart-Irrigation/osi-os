@@ -19,6 +19,7 @@ BACKUP=
 STOPPED=0
 MODIFIED=0
 RESTART_ONLY=0
+SCRIPTS_ONLY=0
 LOCKED=0
 LOCK="$ROOT/var/run/chirpstack-sqlite-wal.lock"
 
@@ -199,11 +200,28 @@ async function main() {
       identities.sort();
       console.log(op === 'identity' ? identities.join(',') : identities.length ? 'yes' : 'no'); break;
     }
-    case 'recovery-backup': {
-      const parent = at('/srv/backup');
-      const dirs = fs.readdirSync(parent).filter((name) => /^chirpstack-wal-/.test(name) && fs.statSync(path.join(parent, name)).isDirectory()).sort();
-      if (!dirs.length) throw Error('no backup directory found');
-      console.log(path.join(parent, dirs[dirs.length - 1])); break;
+    case 'scripts-needed': {
+      // Only gateways with /opt/chirpstack carry these helpers.
+      const needed = fs.existsSync(at('/opt/chirpstack')) && !Object.entries(feedScripts).every(([name, text]) => fs.existsSync(files[name]) && fs.readFileSync(files[name], 'utf8') === text);
+      console.log(needed ? 'yes' : 'no'); break;
+    }
+    case 'backup-scripts': {
+      const absent = [];
+      for (const name of ['backup.sh', 'restore.sh']) {
+        if (fs.existsSync(files[name])) copy(files[name], path.join(arg, name));
+        else absent.push(name);
+      }
+      fs.writeFileSync(path.join(arg, 'ABSENT.txt'), absent.join('\n') + '\n', { flag: 'wx', mode: 0o600 });
+      break;
+    }
+    case 'rollback-match': {
+      // The current init must be the backup's init, or that init with exactly
+      // the one-shot's pragma line inserted. Anything else was changed since.
+      const before = fs.readFileSync(path.join(arg, 'chirpstack.init'), 'utf8');
+      const current = fs.readFileSync(init, 'utf8');
+      const converted = before.replace(anchor + '\n', anchor + '\n' + pragma + '\n');
+      if (current !== before && current !== converted) throw Error('backup init does not match the current init; not modified');
+      break;
     }
     case 'header': console.log(header()); break;
     case 'init-state': console.log(shape(fs.readFileSync(init, 'utf8'), true) ? 'yes' : 'no'); break;
@@ -233,6 +251,13 @@ async function main() {
       const names = fs.readdirSync(arg).sort();
       fs.writeFileSync(path.join(arg, 'MANIFEST.txt'), names.map((name) => `${hash(path.join(arg, name))}  ${name}\n`).join(''), { flag: 'wx', mode: 0o600 });
       saved(arg);
+      break;
+    }
+    case 'manifest-scripts': {
+      // Helper-only backup (already-converted gateway): not a --rollback directory.
+      const names = fs.readdirSync(arg).sort();
+      if (!names.every((name) => ['ABSENT.txt', 'backup.sh', 'restore.sh'].includes(name))) throw Error('unexpected file in helper backup');
+      fs.writeFileSync(path.join(arg, 'MANIFEST.txt'), names.map((name) => `${hash(path.join(arg, name))}  ${name}\n`).join(''), { flag: 'wx', mode: 0o600 });
       break;
     }
     case 'validate-backup': saved(arg); break;
@@ -386,8 +411,11 @@ finish() {
     exit "$result"
 }
 refuse_lock() {
-    recovery_backup=$(cat "$LOCK/backup" 2>/dev/null) || recovery_backup=$(cs_node recovery-backup 2>/dev/null) || recovery_backup="$ROOT/srv/backup/chirpstack-wal-<UTC> (no backup recorded)"
-    die "another WAL one-shot is running or its lock remains: $LOCK; backup $recovery_backup; after confirming no one-shot is running, remove $LOCK/backup and $LOCK, then run sh /tmp/chirpstack-sqlite-wal.sh --rollback $recovery_backup"
+    if recovery_backup=$(cat "$LOCK/backup" 2>/dev/null) && [ -n "$recovery_backup" ]; then
+        die "another WAL one-shot is running or its lock remains: $LOCK; backup $recovery_backup; after confirming no one-shot is running, remove $LOCK/backup and $LOCK, then run sh /tmp/chirpstack-sqlite-wal.sh --rollback $recovery_backup"
+    fi
+    # Never guess a backup: the newest directory may belong to an earlier run.
+    die "another WAL one-shot is running or its lock remains: $LOCK; no backup directory was recorded; inspect $ROOT/srv/backup and the ChirpStack state by hand before removing $LOCK; not modified"
 }
 
 MODE=${1:---check}
@@ -405,7 +433,9 @@ if [ "$MODE" = --check ]; then
     scripts_state=$(cs_node scripts-state) || exit 1
     process_state=$(cs_node running) || exit 1
     log "init pragmas: $init_state; journal: $journal; running: $process_state; backup/restore WAL-aware: $scripts_state"
-    if [ "$init_state:$journal" = yes:WAL ]; then log 'OK: already WAL'; exit 0; fi
+    scripts_needed=$(cs_node scripts-needed) || exit 1
+    if [ "$init_state:$journal:$scripts_needed" = yes:WAL:no ]; then log 'OK: already WAL'; exit 0; fi
+    if [ "$init_state:$journal" = yes:WAL ]; then log 'needs WAL-aware backup/restore scripts'; exit 3; fi
     log 'needs conversion'
     exit 3
 fi
@@ -414,13 +444,19 @@ fi
 [ ! -d "$LOCK" ] || refuse_lock
 if [ "$MODE" = --apply ]; then
     required=$(cs_node preflight) || exit 1
-    if [ "$required" = already ]; then log 'OK: already WAL'; exit 0; fi
+    if [ "$required" = already ]; then
+        [ "$(cs_node scripts-needed)" = yes ] || { log 'OK: already WAL'; exit 0; }
+        SCRIPTS_ONLY=1
+    fi
     case "$required" in restart:*) RESTART_ONLY=1; required=${required#restart:} ;; esac
-    free=$("$DF" -Pk "$ROOT/srv" | awk 'NR == 2 { print $4 }') || die 'could not read free space'
-    case "$free" in ''|*[!0-9]*) die 'could not read free space' ;; esac
-    [ "$free" -ge "$required" ] || die 'not enough free space on /srv (need twice the database and sidecars); not modified'
+    if [ "$SCRIPTS_ONLY" = 0 ]; then
+        free=$("$DF" -Pk "$ROOT/srv" | awk 'NR == 2 { print $4 }') || die 'could not read free space'
+        case "$free" in ''|*[!0-9]*) die 'could not read free space' ;; esac
+        [ "$free" -ge "$required" ] || die 'not enough free space on /srv (need twice the database and sidecars); not modified'
+    fi
 else
     cs_node validate-backup "$BACKUP" || exit 1
+    cs_node rollback-match "$BACKUP" || exit 1
     cs_node header >/dev/null || exit 1
     node -e 'require(process.env.OSI_CS_SQLITE_MODULE || process.argv[1])' "$ROOT/srv/node-red/node_modules/sqlite3" || die 'sqlite3 module unavailable'
 fi
@@ -438,6 +474,14 @@ if [ "$MODE" = --apply ]; then
     log "OK: backup directory $BACKUP"
 fi
 printf '%s\n' "$BACKUP" > "$LOCK/backup" || die 'cannot record recovery backup'
+if [ "$SCRIPTS_ONLY" = 1 ]; then
+    # ChirpStack and its database are already converted; only the helpers are
+    # stale, so ChirpStack keeps running and the database is not copied.
+    cs_node backup-scripts "$BACKUP" && "$SYNC" && cs_node manifest-scripts "$BACKUP" && "$SYNC" || die 'helper script backup failed'
+    cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed; previous helpers in '"$BACKUP"
+    log "OK: already WAL; WAL-aware backup/restore scripts installed; previous helpers in $BACKUP"
+    exit 0
+fi
 # Set before stop: even a failed stop must try to restart the service.
 STOPPED=1
 stop_cs || die 'ChirpStack did not stop within 30 seconds; restarting unchanged'
@@ -462,6 +506,8 @@ if [ "$RESTART_ONLY" = 0 ]; then
     log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
 else
     log 'OK: existing WAL pragmas retained; restarting ChirpStack to switch the header'
+    cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed'
+    log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
 fi
 start_cs || die 'ChirpStack failed to start or API port 8080 unavailable'
 log 'OK: ChirpStack running and API port reachable'
