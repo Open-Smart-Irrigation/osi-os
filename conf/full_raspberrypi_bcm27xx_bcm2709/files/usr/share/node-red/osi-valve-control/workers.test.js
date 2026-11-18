@@ -322,6 +322,8 @@ test('runOnceTick skips an uncertain open after grace exactly once without resen
   assert.equal(payload.attempted_at, intent.attempted_at);
   assert.equal(payload.phase, JSON.parse(expectation.transport_json).phase);
   assert.match(payload.note, /attempted.*not confirmed/);
+  const afterSkip = await db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [intent.command_id]);
+  assert.equal(afterSkip.transport_json, expectation.transport_json, 'settling never rewrites the transport state');
   await tick('2026-08-19T10:11:00Z');
   await tick('2026-08-19T10:12:00Z');
   assert.equal((await db.all('SELECT * FROM irrigation_events')).length, 1);
@@ -340,6 +342,43 @@ test('runOnceTick leaves an uncertain open pending through the exact grace bound
   assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, 'PENDING');
   assert.equal((await db.all('SELECT * FROM irrigation_events')).length, 0);
   assert.equal(calls.queue, 3);
+  assert.equal(calls.enqueue, 1);
+});
+
+// Another command's expectation on the same valve, with its own transport state.
+async function insertOtherExpectation(db, deviceEui, commandId, transport) {
+  await db.run("INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,effect_key,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,observed_open_at,reconciliation_state,created_at,trigger,transport_json) SELECT ?,UPPER(d.deveui),d.irrigation_zone_id,?,NULL,?,120,?,'unknown',NULL,'PENDING_OBSERVATION',?,'manual',? FROM devices d WHERE UPPER(d.deveui)=UPPER(?)",
+    ['other-' + commandId, commandId, '2026-08-19T10:02:00.000Z', '2026-08-19T10:04:00.000Z', '2026-08-19T10:02:00.000Z', JSON.stringify(transport), deviceEui]);
+}
+
+for (const [label, other, queueId] of [
+  ['owned by another command', { phase: 'ACCEPTED', queue_id: 'manual-queued' }, 'manual-queued'],
+  ['unowned while another open on the valve is unconfirmed', { phase: 'UNKNOWN' }, 'unowned-queued'],
+]) {
+  test(`runOnceTick does not take an identical queued item ${label} as proof`, async (t) => {
+    const { db, tick, calls, setQueue, deviceEui } = await uncertainOnceFixture(t);
+    await insertOtherExpectation(db, deviceEui, 'manual-open', other);
+    // A manual open builds the same frame as the one-time open.
+    setQueue([{ id: queueId, fPort: 2, data: Buffer.from([0x41, 2]).toString('base64') }]);
+    assert.deepEqual(await tick('2026-08-19T10:04:00Z'), { fired: [], skipped: [], transportFailures: [] });
+    assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, 'PENDING');
+    assert.equal((await db.all('SELECT * FROM actuator_log')).length, 0);
+    const late = await tick('2026-08-19T10:10:00.001Z');
+    assert.equal(late.skipped.length, 1);
+    assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, 'SKIPPED');
+    assert.equal((await db.get('SELECT reason FROM irrigation_events')).reason, 'one_time_uncertain');
+    assert.equal(calls.enqueue, 1);
+  });
+}
+
+test('runOnceTick still accepts a queued match whose id no other command owns', async (t) => {
+  const { db, tick, calls, setQueue, deviceEui } = await uncertainOnceFixture(t);
+  await insertOtherExpectation(db, deviceEui, 'manual-open', { phase: 'ACCEPTED', queue_id: 'manual-queued' });
+  const data = Buffer.from([0x41, 2]).toString('base64');
+  setQueue([{ id: 'manual-queued', fPort: 2, data }, { id: 'once-queued', fPort: 2, data }]);
+  const out = await tick('2026-08-19T10:04:00Z');
+  assert.equal(out.fired.length, 1);
+  assert.equal((await db.get('SELECT once_state FROM valve_schedules')).once_state, 'FIRED');
   assert.equal(calls.enqueue, 1);
 });
 

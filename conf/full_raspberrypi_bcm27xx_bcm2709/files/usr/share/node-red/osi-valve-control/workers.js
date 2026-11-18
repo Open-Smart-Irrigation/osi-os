@@ -627,14 +627,34 @@ async function finalizeOnceAccepted(db, row, nowDate, transaction = null) {
   return transaction ? finalize(transaction) : db.transaction(finalize);
 }
 
+// Queue item ids recorded by other commands on this valve, and whether another
+// open on it is itself unconfirmed. A manual open builds the same frame as a
+// one-time open, so an identical queued item proves this command only when no
+// other command can own it.
+async function otherQueueOwnersTx(tx, deviceEui, commandId) {
+  const rows = await tx.all("SELECT command_id, transport_json FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND (command_id IS NULL OR command_id<>?)", [deviceEui, commandId]);
+  const queueIds = new Set();
+  let otherUncertain = false;
+  for (const other of rows) {
+    let transport = null;
+    try { transport = other.transport_json ? JSON.parse(other.transport_json) : null; } catch (_) { otherUncertain = true; continue; }
+    if (!transport) continue;
+    if (transport.queue_id) queueIds.add(String(transport.queue_id));
+    else if (transport.phase === 'ATTEMPTED' || transport.phase === 'UNKNOWN') otherUncertain = true;
+  }
+  return { queueIds, otherUncertain };
+}
+
 async function settleOnceUncertain(db, row, nowDate, transport, warn) {
-  let queued = false;
+  let queuedIds = [];
   if (transport && typeof transport.getDeviceQueue === 'function') {
     try {
       // Read the network outside the transaction; this path never sends again.
       const queue = await transport.getDeviceQueue(row.device_eui);
       const data = Buffer.from([0x41, Number(row.duration_minutes)]).toString('base64');
-      queued = Array.isArray(queue) && queue.some((item) => item && Number(item.fPort) === 2 && item.data === data);
+      queuedIds = Array.isArray(queue)
+        ? queue.filter((item) => item && Number(item.fPort) === 2 && item.data === data).map((item) => String(item.id || ''))
+        : [];
     } catch (error) {
       warn && warn('[valve-control] one-time uncertain queue lookup failed: ' + (error && error.message ? error.message : error));
     }
@@ -652,6 +672,11 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
     const reportMs = observationInstant(state.observation && state.observation.observed_at);
     const observed = attemptedMs != null && ((openMs != null && openMs >= attemptedMs)
       || (current.reconciliation_state === 'OBSERVED_RUNNING' && reportMs != null && reportMs >= attemptedMs));
+    let queued = false;
+    if (queuedIds.length && !(state.phase === 'ACCEPTED' && state.queue_id) && !observed) {
+      const owners = await otherQueueOwnersTx(tx, current.device_eui, current.command_id);
+      queued = !owners.otherUncertain && queuedIds.some((id) => id && !owners.queueIds.has(id));
+    }
     const proof = state.phase === 'ACCEPTED' && state.queue_id ? 'accepted transport receipt'
       : (observed ? 'OPEN observation' : (queued ? 'matching device queue item' : null));
     if (proof) {
