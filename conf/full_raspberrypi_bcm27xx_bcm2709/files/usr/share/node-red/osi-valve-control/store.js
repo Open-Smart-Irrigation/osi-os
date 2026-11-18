@@ -82,6 +82,12 @@ async function recentUplinkTimes(db, deviceEui, nowDate) {
   return rows.map((row) => row.recorded_at);
 }
 
+function hasTransportAttemptEvidence(transport) {
+  return Boolean(transport && (['ATTEMPTED', 'UNKNOWN'].includes(transport.phase)
+    || transport.attempt_receipt
+    || (transport.attempted_at && transport.phase && !['INTENT', 'SNAPSHOT'].includes(transport.phase))));
+}
+
 async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
   const rows = await db.all(`SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at,
     vae.transport_json AS dispatch_transport_json
@@ -92,16 +98,18 @@ async function listSchedules(db, deviceEui, { now = new Date() } = {}) {
   for (const row of rows) {
     row.awaiting_confirmation_until = null;
     let transport;
-    try { transport = row.dispatch_transport_json ? JSON.parse(row.dispatch_transport_json) : {}; }
+    try { transport = row.dispatch_transport_json ? JSON.parse(row.dispatch_transport_json) || {} : {}; }
     catch (_) { transport = {}; }
-    // Intent and attempt evidence survive even when zone/user constraints prevent
-    // an audit event. Listing outcomes never read irrigation history.
-    const attempted = row.dispatch_attempted_at || transport.attempted_at || transport.attempt_receipt;
-    row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED'
-      ? (attempted ? 'uncertain' : 'missed') : null;
+    // Persisted settlement is authoritative, including preclaim expiry. Legacy
+    // intent timestamps alone do not prove that dispatch reached enqueue.
+    const attempted = hasTransportAttemptEvidence(transport);
+    const settlement = ['uncertain', 'missed'].includes(transport.once_settlement)
+      ? transport.once_settlement : attempted ? 'uncertain' : 'missed';
+    row.once_outcome = row.once_state === 'SKIPPED' && row.dispatch_state === 'SKIPPED' ? settlement : null;
+    row.dispatch_attempted_at = row.dispatch_attempted_at || transport.attempted_at || null;
     if (row.kind === 'ONCE' && row.once_state === 'PENDING' && ['UNKNOWN', 'ATTEMPTED'].includes(row.dispatch_state)) {
       const attemptedAt = row.dispatch_attempted_at || transport.attempted_at;
-      if (attemptedAt || ['UNKNOWN', 'ATTEMPTED'].includes(transport.phase)) {
+      if (attempted) {
         if (!uplinkTimes) uplinkTimes = await recentUplinkTimes(db, row.device_eui, now);
         // Lazy import: workers uses this store; resolve the shared formula only
         // when listing schedules, after both modules have finished loading.
@@ -978,5 +986,5 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { recentUplinkTimes, markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
+module.exports = { hasTransportAttemptEvidence, recentUplinkTimes, markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, resolveTimedOpenTargetTx, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
   supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX };

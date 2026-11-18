@@ -62,11 +62,10 @@ function dispatchStateLabel(state: NonNullable<ValveSchedule['dispatchState']>, 
 }
 
 function awaitingOnceConfirmation(schedule: ValveSchedule): boolean {
-  // The listing can clear the deadline before the next worker tick settles the
-  // attempt. Keep refreshing that pending attempt until its outcome arrives.
-  return schedule.kind === 'ONCE' && Boolean(schedule.awaitingConfirmationUntil
-    || (schedule.onceState === 'PENDING' && schedule.dispatchAttemptedAt
-      && (schedule.dispatchState === 'UNKNOWN' || schedule.dispatchState === 'ATTEMPTED')));
+  // Keep polling until settlement, including transport-only legacy attempts
+  // whose deadline or resolved attempt time is absent from a cached response.
+  return schedule.kind === 'ONCE' && schedule.onceState === 'PENDING'
+    && (schedule.dispatchState === 'UNKNOWN' || schedule.dispatchState === 'ATTEMPTED');
 }
 
 /** Offset (in minutes) of `timeZone` from UTC at the given instant: local = UTC + offset. */

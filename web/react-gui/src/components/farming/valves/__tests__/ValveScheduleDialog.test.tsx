@@ -373,10 +373,61 @@ describe('ValveScheduleDialog', () => {
     }
   });
 
-  it.each(['empty', 'planned'])('S3: adds no polling for %s schedules without an attempt', async (kind) => {
+  it('R2_TRANSPORT_ONLY_LAG: polls past a cleared deadline until a transport-only row settles', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-19T10:37:55Z'));
+    const row = { scheduleUuid: 'transport-only', deviceEui: 'A840410000000001', kind: 'ONCE' as const,
+      label: 'Transport only', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z',
+      durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING' as const,
+      dispatchState: 'UNKNOWN' as const, dispatchAttemptedAt: null,
+      awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null };
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [row] });
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText(/Sent, waiting for the valve/);
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...row, awaitingConfirmationUntil: null }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5150); });
+      const calls = schedulesMock.mock.calls.length;
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...row,
+        awaitingConfirmationUntil: null, onceState: 'SKIPPED', dispatchState: 'SKIPPED', onceOutcome: 'uncertain' }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBeGreaterThan(calls);
+      expect(screen.getByText('Not confirmed — check the valve')).toBeInTheDocument();
+      const settledCalls = schedulesMock.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(settledCalls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('R2 S3: unmount cancels transport-only polling and deadline revalidation', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-19T10:37:55Z'));
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{
+      scheduleUuid: 'unmount-pending', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Pending',
+      weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 2,
+      timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: 'UNKNOWN',
+      dispatchAttemptedAt: null, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null,
+    }] });
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText(/Sent, waiting for the valve/);
+      const calls = schedulesMock.mock.calls.length;
+      view.unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(calls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['empty', 'planned', 'planned without intent'])('S3: adds no polling for %s schedules without an attempt', async (kind) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const response = emptyResponse();
-    if (kind === 'planned') response.schedules.push({ scheduleUuid: 'planned-once', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Planned', weekdaysMask: null, startTime: null, fireAt: '2026-08-20T10:00:00Z', durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: 'PENDING' });
+    if (kind !== 'empty') response.schedules.push({ scheduleUuid: 'planned-once', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Planned', weekdaysMask: null, startTime: null, fireAt: '2026-08-20T10:00:00Z', durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: kind === 'planned without intent' ? null : 'PENDING' });
     schedulesMock.mockResolvedValue(response);
     const view = renderDialog(makeValve());
     try {

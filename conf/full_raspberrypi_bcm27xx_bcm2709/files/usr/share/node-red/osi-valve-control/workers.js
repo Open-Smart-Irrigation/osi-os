@@ -677,16 +677,6 @@ async function otherQueueOwnersTx(tx, deviceEui, commandId, liveQueueIds, attemp
 async function onceOpenObservationTx(tx, row, start, end) {
   const inWindow = (at) => { const ms = observationInstant(at); return ms != null && ms >= start && ms <= end; };
   const expectations = await tx.all('SELECT * FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?)', [row.device_eui]);
-  // Any other attempted open, including a completed/cancelled command, makes
-  // this position report ambiguous. Reservation time alone is not an attempt.
-  for (const other of expectations) {
-    if (other.command_id === row.command_id || !(Number(other.commanded_duration_seconds) > 0)) continue;
-    const state = persistedTransport(other);
-    if (!state) return null;
-    if (inWindow(state.attempted_at) || inWindow(state.attempt_trusted_at)) return null;
-    const intent = other.command_id && await tx.get('SELECT attempted_at FROM valve_once_dispatch_intents WHERE command_id=?', [other.command_id]);
-    if (intent && inWindow(intent.attempted_at)) return null;
-  }
   const logs = await tx.all("SELECT reason, created_at FROM actuator_log WHERE UPPER(deveui)=UPPER(?) AND UPPER(action) IN ('OPEN','OPEN_FOR_MINUTES','TIMED_OPEN','OPEN_FOR_DURATION','OPEN_FOR_DURATION_CONDITIONAL','SET_PARTIAL_OPENING','SET_FLUSHING') AND julianday(created_at) BETWEEN julianday(?) AND julianday(?)", [row.device_eui, new Date(start).toISOString(), new Date(end).toISOString()]);
   const marker = onceDispatchMarker(row.schedule_uuid, row.fire_at);
   if (logs.some((log) => log.reason !== marker)) return null;
@@ -711,6 +701,31 @@ async function onceOpenObservationTx(tx, row, start, end) {
     }
   }
   if (observations.length !== 1) return null;
+  const observationMs = observationInstant(observations[0]);
+  // A class-A frame from before this attempt may still arrive now. Calculated
+  // effect horizons and queue absence do not prove that it cannot explain OPEN.
+  for (const other of expectations) {
+    if (other.command_id === row.command_id || !(Number(other.commanded_duration_seconds) > 0)) continue;
+    const state = persistedTransport(other);
+    if (!state) return null;
+    if (!store.hasTransportAttemptEvidence(state) && !(state.phase === 'ACCEPTED' && state.queue_id)) continue;
+    const intent = other.command_id && await tx.get('SELECT attempted_at FROM valve_once_dispatch_intents WHERE command_id=?', [other.command_id]);
+    const attempts = [state.attempted_at, state.attempt_trusted_at, intent && intent.attempted_at].map(observationInstant).filter((ms) => ms != null);
+    if (attempts.some((ms) => ms >= start && ms <= end)) return null;
+    const attemptMs = observationInstant(state.attempt_trusted_at) ?? observationInstant(state.attempted_at)
+      ?? observationInstant(intent && intent.attempted_at) ?? observationInstant(other.commanded_at);
+    if (attemptMs != null && attemptMs >= start && attemptMs <= end) return null;
+    if (attemptMs == null || attemptMs < start - 24 * 3600000 || attemptMs >= start || attemptMs > observationMs) continue;
+    const ownOpens = [other.observed_open_at, state.observation && state.observation.observed_at].map(observationInstant);
+    if (ownOpens.some((ms) => ms != null && ms < start)
+        || dispatch.cancelledUnsent(other, state) || dispatch.invalidatedByEarlierFlush(state)
+        || ['enqueue_rejected', 'enqueue_failed_before_acceptance'].includes(state.phase)) continue;
+    const occurrence = other.command_id && await tx.get('SELECT expires_at FROM irrigation_occurrences WHERE command_id=?', [other.command_id]);
+    const appliedExpiry = observationInstant(occurrence ? occurrence.expires_at
+      : state.effect_snapshot ? state.effect_snapshot.explicit_expiry_at : state.explicit_expiry_at);
+    if (appliedExpiry != null && appliedExpiry <= observationMs) continue;
+    return null;
+  }
   return observations[0];
 }
 
@@ -765,6 +780,7 @@ async function settleOnceUncertain(db, row, nowDate, transport, warn) {
     await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT')", [current.schedule_uuid]);
     const afterSkip = await tx.get('SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?', [current.schedule_uuid]);
     if (!afterSkip || afterSkip.state !== 'SKIPPED') return null;
+    if (current.expectation_id) await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: current.expectation_id }, { once_settlement: 'uncertain' });
     await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'SKIPPED' }, current.device_eui);
     if (current.user_id != null && current.irrigation_zone_id != null) {
       await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'SKIP', 'one_time_uncertain', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, fire_at: current.fire_at, attempted_at: attemptedAt, confirm_by: deadline.confirmBy, interval: deadline.interval, phase: state.phase || current.state, note: 'Enqueue was attempted but not confirmed.' }), nowDate.toISOString()]);
@@ -854,7 +870,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
       const outcome = await withOnceClaimWriter(db, () => db.transaction(async (tx) => {
         const claimNowMs = now ? new Date(now).getTime() : Date.now();
         const claimNowIso = new Date(claimNowMs).toISOString();
-        const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.transport_json FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ?", [i.schedule_uuid, claimNowIso]);
+        const current = await tx.get("SELECT i.state, i.command_id, i.attempted_at, vs.schedule_uuid, vs.device_eui, vs.duration_minutes, vs.fire_at, d.irrigation_zone_id, d.user_id, vae.expectation_id, vae.transport_json FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid JOIN devices d ON d.deveui=vs.device_eui LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid=? AND i.state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT') AND vs.kind='ONCE' AND vs.once_state='PENDING' AND vs.enabled=1 AND vs.deleted_at IS NULL AND d.deleted_at IS NULL AND vs.fire_at <= ?", [i.schedule_uuid, claimNowIso]);
         if (!current) return null;
         const historical = await tx.get("SELECT created_at FROM actuator_log WHERE action='OPEN_FOR_DURATION' AND reason=? ORDER BY id LIMIT 1", [onceDispatchMarker(current.schedule_uuid, current.fire_at)]);
         if (historical) {
@@ -882,6 +898,7 @@ async function runOnceTick({ db, now, warn, beforeAttempt, afterAttempt, emit, t
           await tx.run("UPDATE valve_once_dispatch_intents SET state='SKIPPED', updated_at=datetime('now') WHERE schedule_uuid=? AND state IN ('PENDING','UNKNOWN','ATTEMPTED','SENT')", [current.schedule_uuid]);
           const afterSkip = await tx.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid=?", [current.schedule_uuid]);
           if (!afterSkip || afterSkip.state !== 'SKIPPED') return null;
+          if (current.expectation_id) await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: current.expectation_id }, { once_settlement: 'missed' });
           await store.updateSchedule(tx, current.schedule_uuid, { once_state: 'SKIPPED' }, current.device_eui);
           if (current.user_id != null && current.irrigation_zone_id != null) await tx.run("INSERT INTO irrigation_events(user_id, irrigation_zone_id, action, reason, duration_minutes, valve_deveui, payload_json) VALUES (?,?,?,?,?,?,?)", [current.user_id, current.irrigation_zone_id, 'SKIP', 'one_time_missed', current.duration_minutes, current.device_eui, JSON.stringify({ schedule_uuid: current.schedule_uuid, fire_at: current.fire_at })]);
           return { kind: 'skipped', row: current };
