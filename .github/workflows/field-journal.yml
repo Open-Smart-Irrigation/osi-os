@@ -54,7 +54,7 @@ jobs:
       - name: Bootstrap tests
         run: node scripts/test-journal-bootstrap.js
       - name: Read-snapshot tests
-        run: node scripts/test-osi-db-helper-read-snapshot.js
+        run: node --test scripts/test-osi-db-helper-read-snapshot.js scripts/test-osi-db-helper-nested-begin.js
       - name: Catalog generator tests
         run: node scripts/test-journal-catalog-generator.js
       - name: Catalog generated-file check

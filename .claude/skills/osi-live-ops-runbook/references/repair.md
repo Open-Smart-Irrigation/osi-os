@@ -80,6 +80,12 @@ GUI_LINKS=$(find "$BK/gui" -type l) || die "cannot scan the GUI backup"
 if [ -e /srv/chirpstack/chirpstack.sqlite ]; then
   cp -aL /srv/chirpstack/chirpstack.sqlite "$BK/chirpstack.sqlite.raw" \
     || die "chirpstack.sqlite.raw copy failed"
+  # With a WAL journal, committed data can sit in the -wal file: keep it too.
+  for ext in -wal -shm; do
+    [ -e "/srv/chirpstack/chirpstack.sqlite$ext" ] || continue
+    cp -aL "/srv/chirpstack/chirpstack.sqlite$ext" "$BK/chirpstack.sqlite.raw$ext" \
+      || die "chirpstack.sqlite$ext copy failed"
+  done
   echo "NOTE: chirpstack.sqlite.raw is a raw copy, not a rollback copy"
 else
   echo "NOTE: no chirpstack.sqlite on this gateway; not copied"
