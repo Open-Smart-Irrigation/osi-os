@@ -22,7 +22,10 @@ RESTART_ONLY=0
 SCRIPTS_ONLY=0
 HELPERS_CHANGED=0
 LOCKED=0
-LOCK="$ROOT/var/run/chirpstack-sqlite-wal.lock"
+LOCK="$ROOT/srv/backup/.chirpstack-maintenance.lock"
+BACKUP_TYPE=unknown
+PHASE=locked
+KEEP_LOCK=0
 
 log() { printf '%s\n' "$*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
@@ -46,6 +49,8 @@ const pragma = '\t\tpragmas = ["busy_timeout = 5000", "journal_mode = WAL", "for
 const feedScripts = {
   "backup.sh": `#!/bin/sh
 # Standalone LuCI helper. Keep the shared safety functions identical in both scripts.
+# Restore reports and keeps the newest pre-restore generation after verified
+# success; older generations are pruned then. Incomplete recovery never prunes.
 # OSI_CS_ROOT prefixes filesystem paths for the isolated failure-injection tests.
 set -u
 umask 077
@@ -53,9 +58,9 @@ ROOT=\${OSI_CS_ROOT:-}
 BASE="$ROOT/srv/backup"
 SET="$BASE/chirpstack-set"
 PREV="$BASE/chirpstack-set.prev"
-LOCK="$BASE/.chirpstack-backup-restore.lock"
+LOCK="$BASE/.chirpstack-maintenance.lock"
 REDIS="$ROOT/srv/redis/dump.rdb"
-FILES='chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.redis'
+FILES='chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.sqlite-journal chirpstack.redis'
 TMP=
 CHECK=
 LOCKED=0
@@ -65,6 +70,9 @@ ORIGINAL_MANIFEST=
 RECOVERY_INCOMPLETE=0
 RESTORING=0
 PUBLISHING=0
+PUBLISHED=0
+LEGACY_ARCHIVE=
+ARCHIVED=
 ERROR='unexpected exit'
 SUCCESS=
 PROBE=
@@ -130,7 +138,7 @@ integrity() {
     # set or the restore staging bytes: validate a second, disposable copy.
     CHECK=$(mktemp -d "$BASE/.chirpstack-check.XXXXXX") || return 1
     chmod 700 "$CHECK" || return 1
-    for check_name in chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm; do
+    for check_name in chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.sqlite-journal; do
         if [ -f "$1/$check_name" ]; then
             copy_checked "$1/$check_name" "$CHECK/$check_name" || return 1
         fi
@@ -155,7 +163,7 @@ validate_set() {
     while IFS= read -r line || [ -n "$line" ]; do
         expected=\${line%%  *}
         name=\${line#*  }
-        case "$name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.redis) ;; *) return 1 ;; esac
+        case "$name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.sqlite-journal|chirpstack.redis) ;; *) return 1 ;; esac
         [ "$line" = "$expected  $name" ] || return 1
         case "$seen" in *" $name "*) return 1 ;; esac
         seen="$seen$name "
@@ -190,7 +198,7 @@ record_originals() {
 verify_live() {
     live_seen=' '
     while read -r expected live_name; do
-        case "$live_name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.redis) ;; *) return 1 ;; esac
+        case "$live_name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.sqlite-journal|chirpstack.redis) ;; *) return 1 ;; esac
         live_path "$live_name"
         [ -f "$LIVE" ] && [ ! -L "$LIVE" ] || return 1
         hash_file "$LIVE" || return 1
@@ -249,6 +257,7 @@ quote_path() {
     done
 }
 report_recovery() {
+    printf '%s\\n' "$STAMP" > "$LOCK/recovery" || log 'ERROR: cannot record recovery ownership' >&2
     log "ERROR: ROLLBACK INCOMPLETE: services will not be started; recovery lock retained at $LOCK" >&2
     for recovery_name in $FILES; do
         live_path "$recovery_name"
@@ -258,41 +267,107 @@ report_recovery() {
         recovery_state=absent
         if [ -e "$recovery" ]; then recovery_state=present; fi
         log "RECOVERY: $recovery_name: live $LIVE ($live_state); original $recovery ($recovery_state)" >&2
-        if [ -e "$recovery.pending" ]; then log "RECOVERY: pending copy $recovery.pending" >&2; fi
     done
     log "RECOVERY: validated replacement snapshot and original hashes retained at $TMP" >&2
     log 'BEGIN RECOVERY COMMANDS' >&2
-    log 'service chirpstack stop &&' >&2
-    log 'service redis stop &&' >&2
+    log '(' >&2
+    quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
+    quote_path "$STAMP"; log "recovery_token=$QUOTED" >&2
+    cat >&2 <<'RECOVERY_START'
+if mkdir "$recovery_lock" 2>/dev/null; then
+    printf '%s\\n' "$recovery_token" > "$recovery_lock/recovery" || exit 1
+else
+    [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || { echo 'ERROR: another maintenance owner holds the lock'; exit 1; }
+fi
+recovery_fail() { echo "ERROR: recovery $*; lock retained" >&2; exit 1; }
+trap 'recovery_result=$?; trap - 0; if [ "$recovery_result" -ne 0 ]; then printf "%s\\n" "$recovery_token" > "$recovery_lock/recovery"; service chirpstack stop; service redis stop; fi; exit "$recovery_result"' 0
+service chirpstack stop || recovery_fail 'stop ChirpStack'
+service redis stop || recovery_fail 'stop Redis'
+RECOVERY_START
     if [ "$PROBE" = pidof ]; then
-        log 'if pidof chirpstack redis-server >/dev/null 2>&1; then echo "Processes still running"; false; else test "$?" -eq 1; fi &&' >&2
+        log 'recovery_running() { pidof "$1" >/dev/null 2>&1; }' >&2
     else
-        log 'if pgrep -x "chirpstack|redis-server" >/dev/null 2>&1; then echo "Processes still running"; false; else test "$?" -eq 1; fi &&' >&2
+        log 'recovery_running() { pgrep -x "$1" >/dev/null 2>&1; }' >&2
     fi
-    for recovery_name in $MOVED; do
+    cat >&2 <<'RECOVERY_STOP'
+for recovery_process in chirpstack redis-server; do
+    recovery_running "$recovery_process"
+    [ "$?" -eq 1 ] || recovery_fail 'processes still running or probe failed'
+done
+RECOVERY_STOP
+    while read -r expected recovery_name; do
+        case " $MOVED " in *" $recovery_name "*) ;; *) continue ;; esac
         live_path "$recovery_name"
         quote_path "$LIVE.pre-restore-$STAMP"; recovery_from=$QUOTED
-        quote_path "$LIVE"
-        log "mv -f $recovery_from $QUOTED &&" >&2
-    done
+        quote_path "$LIVE.pre-restore-$STAMP.pending"; recovery_pending=$QUOTED
+        quote_path "$LIVE"; recovery_to=$QUOTED
+        log "[ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
+        log "cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
+        log "printf '%s  %s\\n' '$expected' $recovery_pending | sha256sum -c - || recovery_fail 'hash $recovery_name'" >&2
+        log "mv -f $recovery_pending $recovery_to || recovery_fail 'rename $recovery_name'" >&2
+    done < "$ORIGINAL_MANIFEST"
     for recovery_name in $FILES; do
         case " $ORIGINAL_FILES " in *" $recovery_name "*) continue ;; esac
         live_path "$recovery_name"; quote_path "$LIVE"
-        log "rm -f $QUOTED &&" >&2
+        log "rm -f $QUOTED || recovery_fail 'remove originally absent $recovery_name'" >&2
     done
     while read -r expected recovery_name; do
         live_path "$recovery_name"; quote_path "$LIVE"
-        log "printf '%s  %s\\n' '$expected' $QUOTED | sha256sum -c - &&" >&2
+        log "printf '%s  %s\\n' '$expected' $QUOTED | sha256sum -c - || recovery_fail 'verify original $recovery_name'" >&2
     done < "$ORIGINAL_MANIFEST"
-    quote_path "$ROOT/srv/chirpstack/chirpstack.sqlite"
-    log "test -s $QUOTED &&" >&2
-    quote_path "$REDIS"
-    log "test -s $QUOTED &&" >&2
-    quote_path "$LOCK"
-    log "rmdir $QUOTED &&" >&2
-    log 'service redis start &&' >&2
-    log 'service chirpstack start' >&2
+    quote_path "$ROOT/srv/chirpstack/chirpstack.sqlite"; log "test -s $QUOTED || recovery_fail 'missing SQLite main file'" >&2
+    quote_path "$REDIS"; log "test -s $QUOTED || recovery_fail 'missing Redis dump'" >&2
+    cat >&2 <<'RECOVERY_END'
+service redis start || recovery_fail 'restart Redis'
+service chirpstack start || recovery_fail 'restart ChirpStack'
+for recovery_process in redis-server chirpstack; do
+    recovery_wait=0
+    until recovery_running "$recovery_process"; do
+        [ "$recovery_wait" -lt 30 ] || recovery_fail "restart $recovery_process not running"
+        sleep 1 || recovery_fail 'restart wait'
+        recovery_wait=$((recovery_wait + 1))
+    done
+done
+RECOVERY_END
+    quote_path "$TMP"; log "rm -rf $QUOTED || recovery_fail 'cleanup verified recovery snapshot'" >&2
+    cat >&2 <<'RECOVERY_UNLOCK'
+rm -f "$recovery_lock/recovery" || recovery_fail 'clear recovery ownership'
+rmdir "$recovery_lock" || recovery_fail 'release lock after restart'
+)
+RECOVERY_UNLOCK
     log 'END RECOVERY COMMANDS' >&2
+}
+retain_originals() {
+    for retained_name in $FILES; do
+        live_path "$retained_name"
+        for retained_path in "$LIVE.pre-restore-"*; do
+            [ -e "$retained_path" ] || continue
+            if [ "$retained_path" = "$LIVE.pre-restore-$STAMP" ]; then
+                log "RETAINED: $retained_path"
+                continue
+            fi
+            retained_generation=\${retained_path#"$LIVE.pre-restore-"}
+            case "$retained_generation" in
+                20??????T??????Z-*) retained_pid=\${retained_generation#*-}; case "$retained_pid" in ''|*[!0-9]*) continue ;; esac ;;
+                *) continue ;;
+            esac
+            [ -f "$retained_path" ] && [ ! -L "$retained_path" ] || return 1
+            rm -f "$retained_path" || return 1
+        done
+    done
+}
+archive_legacy() {
+    for legacy_name in $FILES; do
+        if [ -e "$BASE/$legacy_name" ] || [ -L "$BASE/$legacy_name" ]; then
+            [ -f "$BASE/$legacy_name" ] && [ ! -L "$BASE/$legacy_name" ] || return 1
+            if [ -z "$LEGACY_ARCHIVE" ]; then
+                LEGACY_ARCHIVE=$(mktemp -d "$BASE/chirpstack-legacy-XXXXXX") || return 1
+                chmod 700 "$LEGACY_ARCHIVE" || return 1
+            fi
+            mv "$BASE/$legacy_name" "$LEGACY_ARCHIVE/$legacy_name" || return 1
+            ARCHIVED="$ARCHIVED $legacy_name"
+        fi
+    done
 }
 report_error() {
     state='not running'
@@ -307,6 +382,12 @@ finish() {
     if [ "$LOCKED" != 1 ]; then report_error; exit "$result"; fi
     if [ "$PUBLISHING" = 1 ] && [ ! -e "$SET" ] && [ -d "$PREV" ]; then
         mv "$PREV" "$SET" || { ERROR="$ERROR; previous set remains at $PREV"; result=1; }
+    fi
+    if [ "$PUBLISHED" = 0 ] && [ -n "$LEGACY_ARCHIVE" ]; then
+        for legacy_name in $ARCHIVED; do
+            mv "$LEGACY_ARCHIVE/$legacy_name" "$BASE/$legacy_name" || { ERROR="$ERROR; legacy copy retained at $LEGACY_ARCHIVE/$legacy_name"; result=1; }
+        done
+        rmdir "$LEGACY_ARCHIVE" || result=1
     fi
     if [ "$result" -eq 0 ] && [ "$RESTORING" = 1 ]; then
         if ! verify_live "$TMP/MANIFEST.sha256"; then ERROR='verify: replacement live set is incomplete'; result=1; fi
@@ -324,6 +405,9 @@ finish() {
     fi
     if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 0 ]; then
         if ! start_services; then ERROR="$ERROR; service start failed"; fi
+    fi
+    if [ "$result" -eq 0 ] && [ "$RESTORING" = 1 ]; then
+        retain_originals || { ERROR='retention: cannot prune older originals'; result=1; }
     fi
     # Keep the lock, snapshots and every original if recovery needs an operator.
     if [ "$RECOVERY_INCOMPLETE" = 0 ]; then
@@ -367,6 +451,7 @@ done
 integrity "$TMP" || fail 'integrity: copied SQLite database is not ok'
 write_manifest || fail 'manifest: cannot write checksums'
 validate_set "$TMP" || fail 'manifest: temporary set failed validation'
+archive_legacy || fail 'archive: cannot retain legacy flat backups'
 # Rename complete directories on the same filesystem. Keep the old set until
 # publication succeeds; the EXIT trap restores it if the final rename fails.
 if [ -e "$SET" ] || [ -L "$SET" ]; then
@@ -378,11 +463,14 @@ fi
 mv "$TMP" "$SET" || fail 'publish: cannot rename complete temporary set'
 TMP=
 PUBLISHING=0
+PUBLISHED=1
 SUCCESS="OK: backup $SET"
 exit 0
 `,
   "restore.sh": `#!/bin/sh
 # Standalone LuCI helper. Keep the shared safety functions identical in both scripts.
+# Restore reports and keeps the newest pre-restore generation after verified
+# success; older generations are pruned then. Incomplete recovery never prunes.
 # OSI_CS_ROOT prefixes filesystem paths for the isolated failure-injection tests.
 set -u
 umask 077
@@ -390,9 +478,9 @@ ROOT=\${OSI_CS_ROOT:-}
 BASE="$ROOT/srv/backup"
 SET="$BASE/chirpstack-set"
 PREV="$BASE/chirpstack-set.prev"
-LOCK="$BASE/.chirpstack-backup-restore.lock"
+LOCK="$BASE/.chirpstack-maintenance.lock"
 REDIS="$ROOT/srv/redis/dump.rdb"
-FILES='chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.redis'
+FILES='chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.sqlite-journal chirpstack.redis'
 TMP=
 CHECK=
 LOCKED=0
@@ -402,6 +490,9 @@ ORIGINAL_MANIFEST=
 RECOVERY_INCOMPLETE=0
 RESTORING=0
 PUBLISHING=0
+PUBLISHED=0
+LEGACY_ARCHIVE=
+ARCHIVED=
 ERROR='unexpected exit'
 SUCCESS=
 PROBE=
@@ -467,7 +558,7 @@ integrity() {
     # set or the restore staging bytes: validate a second, disposable copy.
     CHECK=$(mktemp -d "$BASE/.chirpstack-check.XXXXXX") || return 1
     chmod 700 "$CHECK" || return 1
-    for check_name in chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm; do
+    for check_name in chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.sqlite-journal; do
         if [ -f "$1/$check_name" ]; then
             copy_checked "$1/$check_name" "$CHECK/$check_name" || return 1
         fi
@@ -492,7 +583,7 @@ validate_set() {
     while IFS= read -r line || [ -n "$line" ]; do
         expected=\${line%%  *}
         name=\${line#*  }
-        case "$name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.redis) ;; *) return 1 ;; esac
+        case "$name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.sqlite-journal|chirpstack.redis) ;; *) return 1 ;; esac
         [ "$line" = "$expected  $name" ] || return 1
         case "$seen" in *" $name "*) return 1 ;; esac
         seen="$seen$name "
@@ -527,7 +618,7 @@ record_originals() {
 verify_live() {
     live_seen=' '
     while read -r expected live_name; do
-        case "$live_name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.redis) ;; *) return 1 ;; esac
+        case "$live_name" in chirpstack.sqlite|chirpstack.sqlite-wal|chirpstack.sqlite-shm|chirpstack.sqlite-journal|chirpstack.redis) ;; *) return 1 ;; esac
         live_path "$live_name"
         [ -f "$LIVE" ] && [ ! -L "$LIVE" ] || return 1
         hash_file "$LIVE" || return 1
@@ -586,6 +677,7 @@ quote_path() {
     done
 }
 report_recovery() {
+    printf '%s\\n' "$STAMP" > "$LOCK/recovery" || log 'ERROR: cannot record recovery ownership' >&2
     log "ERROR: ROLLBACK INCOMPLETE: services will not be started; recovery lock retained at $LOCK" >&2
     for recovery_name in $FILES; do
         live_path "$recovery_name"
@@ -595,41 +687,107 @@ report_recovery() {
         recovery_state=absent
         if [ -e "$recovery" ]; then recovery_state=present; fi
         log "RECOVERY: $recovery_name: live $LIVE ($live_state); original $recovery ($recovery_state)" >&2
-        if [ -e "$recovery.pending" ]; then log "RECOVERY: pending copy $recovery.pending" >&2; fi
     done
     log "RECOVERY: validated replacement snapshot and original hashes retained at $TMP" >&2
     log 'BEGIN RECOVERY COMMANDS' >&2
-    log 'service chirpstack stop &&' >&2
-    log 'service redis stop &&' >&2
+    log '(' >&2
+    quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
+    quote_path "$STAMP"; log "recovery_token=$QUOTED" >&2
+    cat >&2 <<'RECOVERY_START'
+if mkdir "$recovery_lock" 2>/dev/null; then
+    printf '%s\\n' "$recovery_token" > "$recovery_lock/recovery" || exit 1
+else
+    [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || { echo 'ERROR: another maintenance owner holds the lock'; exit 1; }
+fi
+recovery_fail() { echo "ERROR: recovery $*; lock retained" >&2; exit 1; }
+trap 'recovery_result=$?; trap - 0; if [ "$recovery_result" -ne 0 ]; then printf "%s\\n" "$recovery_token" > "$recovery_lock/recovery"; service chirpstack stop; service redis stop; fi; exit "$recovery_result"' 0
+service chirpstack stop || recovery_fail 'stop ChirpStack'
+service redis stop || recovery_fail 'stop Redis'
+RECOVERY_START
     if [ "$PROBE" = pidof ]; then
-        log 'if pidof chirpstack redis-server >/dev/null 2>&1; then echo "Processes still running"; false; else test "$?" -eq 1; fi &&' >&2
+        log 'recovery_running() { pidof "$1" >/dev/null 2>&1; }' >&2
     else
-        log 'if pgrep -x "chirpstack|redis-server" >/dev/null 2>&1; then echo "Processes still running"; false; else test "$?" -eq 1; fi &&' >&2
+        log 'recovery_running() { pgrep -x "$1" >/dev/null 2>&1; }' >&2
     fi
-    for recovery_name in $MOVED; do
+    cat >&2 <<'RECOVERY_STOP'
+for recovery_process in chirpstack redis-server; do
+    recovery_running "$recovery_process"
+    [ "$?" -eq 1 ] || recovery_fail 'processes still running or probe failed'
+done
+RECOVERY_STOP
+    while read -r expected recovery_name; do
+        case " $MOVED " in *" $recovery_name "*) ;; *) continue ;; esac
         live_path "$recovery_name"
         quote_path "$LIVE.pre-restore-$STAMP"; recovery_from=$QUOTED
-        quote_path "$LIVE"
-        log "mv -f $recovery_from $QUOTED &&" >&2
-    done
+        quote_path "$LIVE.pre-restore-$STAMP.pending"; recovery_pending=$QUOTED
+        quote_path "$LIVE"; recovery_to=$QUOTED
+        log "[ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
+        log "cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
+        log "printf '%s  %s\\n' '$expected' $recovery_pending | sha256sum -c - || recovery_fail 'hash $recovery_name'" >&2
+        log "mv -f $recovery_pending $recovery_to || recovery_fail 'rename $recovery_name'" >&2
+    done < "$ORIGINAL_MANIFEST"
     for recovery_name in $FILES; do
         case " $ORIGINAL_FILES " in *" $recovery_name "*) continue ;; esac
         live_path "$recovery_name"; quote_path "$LIVE"
-        log "rm -f $QUOTED &&" >&2
+        log "rm -f $QUOTED || recovery_fail 'remove originally absent $recovery_name'" >&2
     done
     while read -r expected recovery_name; do
         live_path "$recovery_name"; quote_path "$LIVE"
-        log "printf '%s  %s\\n' '$expected' $QUOTED | sha256sum -c - &&" >&2
+        log "printf '%s  %s\\n' '$expected' $QUOTED | sha256sum -c - || recovery_fail 'verify original $recovery_name'" >&2
     done < "$ORIGINAL_MANIFEST"
-    quote_path "$ROOT/srv/chirpstack/chirpstack.sqlite"
-    log "test -s $QUOTED &&" >&2
-    quote_path "$REDIS"
-    log "test -s $QUOTED &&" >&2
-    quote_path "$LOCK"
-    log "rmdir $QUOTED &&" >&2
-    log 'service redis start &&' >&2
-    log 'service chirpstack start' >&2
+    quote_path "$ROOT/srv/chirpstack/chirpstack.sqlite"; log "test -s $QUOTED || recovery_fail 'missing SQLite main file'" >&2
+    quote_path "$REDIS"; log "test -s $QUOTED || recovery_fail 'missing Redis dump'" >&2
+    cat >&2 <<'RECOVERY_END'
+service redis start || recovery_fail 'restart Redis'
+service chirpstack start || recovery_fail 'restart ChirpStack'
+for recovery_process in redis-server chirpstack; do
+    recovery_wait=0
+    until recovery_running "$recovery_process"; do
+        [ "$recovery_wait" -lt 30 ] || recovery_fail "restart $recovery_process not running"
+        sleep 1 || recovery_fail 'restart wait'
+        recovery_wait=$((recovery_wait + 1))
+    done
+done
+RECOVERY_END
+    quote_path "$TMP"; log "rm -rf $QUOTED || recovery_fail 'cleanup verified recovery snapshot'" >&2
+    cat >&2 <<'RECOVERY_UNLOCK'
+rm -f "$recovery_lock/recovery" || recovery_fail 'clear recovery ownership'
+rmdir "$recovery_lock" || recovery_fail 'release lock after restart'
+)
+RECOVERY_UNLOCK
     log 'END RECOVERY COMMANDS' >&2
+}
+retain_originals() {
+    for retained_name in $FILES; do
+        live_path "$retained_name"
+        for retained_path in "$LIVE.pre-restore-"*; do
+            [ -e "$retained_path" ] || continue
+            if [ "$retained_path" = "$LIVE.pre-restore-$STAMP" ]; then
+                log "RETAINED: $retained_path"
+                continue
+            fi
+            retained_generation=\${retained_path#"$LIVE.pre-restore-"}
+            case "$retained_generation" in
+                20??????T??????Z-*) retained_pid=\${retained_generation#*-}; case "$retained_pid" in ''|*[!0-9]*) continue ;; esac ;;
+                *) continue ;;
+            esac
+            [ -f "$retained_path" ] && [ ! -L "$retained_path" ] || return 1
+            rm -f "$retained_path" || return 1
+        done
+    done
+}
+archive_legacy() {
+    for legacy_name in $FILES; do
+        if [ -e "$BASE/$legacy_name" ] || [ -L "$BASE/$legacy_name" ]; then
+            [ -f "$BASE/$legacy_name" ] && [ ! -L "$BASE/$legacy_name" ] || return 1
+            if [ -z "$LEGACY_ARCHIVE" ]; then
+                LEGACY_ARCHIVE=$(mktemp -d "$BASE/chirpstack-legacy-XXXXXX") || return 1
+                chmod 700 "$LEGACY_ARCHIVE" || return 1
+            fi
+            mv "$BASE/$legacy_name" "$LEGACY_ARCHIVE/$legacy_name" || return 1
+            ARCHIVED="$ARCHIVED $legacy_name"
+        fi
+    done
 }
 report_error() {
     state='not running'
@@ -644,6 +802,12 @@ finish() {
     if [ "$LOCKED" != 1 ]; then report_error; exit "$result"; fi
     if [ "$PUBLISHING" = 1 ] && [ ! -e "$SET" ] && [ -d "$PREV" ]; then
         mv "$PREV" "$SET" || { ERROR="$ERROR; previous set remains at $PREV"; result=1; }
+    fi
+    if [ "$PUBLISHED" = 0 ] && [ -n "$LEGACY_ARCHIVE" ]; then
+        for legacy_name in $ARCHIVED; do
+            mv "$LEGACY_ARCHIVE/$legacy_name" "$BASE/$legacy_name" || { ERROR="$ERROR; legacy copy retained at $LEGACY_ARCHIVE/$legacy_name"; result=1; }
+        done
+        rmdir "$LEGACY_ARCHIVE" || result=1
     fi
     if [ "$result" -eq 0 ] && [ "$RESTORING" = 1 ]; then
         if ! verify_live "$TMP/MANIFEST.sha256"; then ERROR='verify: replacement live set is incomplete'; result=1; fi
@@ -661,6 +825,9 @@ finish() {
     fi
     if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 0 ]; then
         if ! start_services; then ERROR="$ERROR; service start failed"; fi
+    fi
+    if [ "$result" -eq 0 ] && [ "$RESTORING" = 1 ]; then
+        retain_originals || { ERROR='retention: cannot prune older originals'; result=1; }
     fi
     # Keep the lock, snapshots and every original if recovery needs an operator.
     if [ "$RECOVERY_INCOMPLETE" = 0 ]; then
@@ -757,7 +924,16 @@ const files = {
   'backup.sh': at('/opt/chirpstack/backup.sh'),
   'restore.sh': at('/opt/chirpstack/restore.sh'),
 };
-const hash = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+function hash(p) {
+  const digest = crypto.createHash('sha256');
+  const fd = fs.openSync(p, 'r');
+  try {
+    const chunk = Buffer.alloc(65536);
+    let count;
+    while ((count = fs.readSync(fd, chunk, 0, chunk.length, null)) !== 0) digest.update(chunk.subarray(0, count));
+    return digest.digest('hex');
+  } finally { fs.closeSync(fd); }
+}
 function header() {
   const fd = fs.openSync(dbFile, 'r');
   try {
@@ -770,13 +946,30 @@ function header() {
 }
 // Restrict recognition to the sqlite section of the configuration heredoc.
 // Accept #670's commented multiline list and the one-shot's single line.
-function configured(sqliteBlock) {
+function pragmaValues(sqliteBlock) {
   const text = sqliteBlock.replace(/^\s*#.*$/gm, '');
   const match = /^\s*pragmas\s*=\s*\[([^\]]*)\]\s*$/m.exec(text);
-  if (!match) return false;
+  if (!match) return null;
   const values = match[1].split(',').map((v) => v.trim()).filter(Boolean);
-  return values.includes('"busy_timeout = 5000"') && values.includes('"journal_mode = WAL"') &&
-    values.every((v) => /^"[^"\r\n]*"$/.test(v));
+  return values.every((v) => /^"[^"\r\n]*"$/.test(v)) ? values : null;
+}
+function configured(sqliteBlock) {
+  const values = pragmaValues(sqliteBlock);
+  const required = ['"busy_timeout = 5000"', '"journal_mode = WAL"', '"foreign_keys = ON"'];
+  return values !== null && values.length === required.length && values.every((v, i) => v === required[i]);
+}
+function requestsWal(text) {
+  const values = pragmaValues(text) || [];
+  let journal = 'DELETE';
+  for (const value of values) {
+    const match = /^"journal_mode\s*=\s*(\w+)"$/.exec(value);
+    if (match) journal = match[1].toUpperCase();
+  }
+  return journal === 'WAL';
+}
+function convertedInit(text) {
+  if (/^\s*pragmas\s*=/m.test(text)) return text.replace(/^[ \t]*pragmas\s*=\s*\[[^\]]*\]/m, pragma);
+  return text.replace(anchor + '\n', anchor + '\n' + pragma + '\n');
 }
 function shape(text, allowWal) {
   const fail = () => { throw Error('init script shape not recognised; not modified'); };
@@ -790,8 +983,11 @@ function shape(text, allowWal) {
   if (!(start < here && here < a && a < eof && eof < end) || lines[a - 1] !== '\t\t[sqlite]') fail();
   const nextSection = lines.findIndex((l, i) => i > a && /^\s*\[/.test(l));
   const pragmas = lines.filter((l) => /^\s*pragmas\s*=/.test(l));
-  const wal = pragmas.length === 1 && configured(lines.slice(a + 1, nextSection < 0 ? eof : Math.min(nextSection, eof)).join('\n'));
-  if (pragmas.length && !(allowWal && wal)) fail();
+  const block = lines.slice(a + 1, nextSection < 0 ? eof : Math.min(nextSection, eof)).join('\n');
+  const wal = pragmas.length === 1 && configured(block);
+  const values = pragmaValues(block);
+  const repairable = values && values.includes('"busy_timeout = 5000"') && values.includes('"journal_mode = WAL"');
+  if (pragmas.length && !(allowWal && pragmas.length === 1 && repairable)) fail();
   return wal;
 }
 function copy(source, dest) {
@@ -904,10 +1100,13 @@ async function main() {
       // the one-shot's pragma line inserted. Anything else was changed since.
       const before = fs.readFileSync(path.join(arg, 'chirpstack.init'), 'utf8');
       const current = fs.readFileSync(init, 'utf8');
-      const converted = before.replace(anchor + '\n', anchor + '\n' + pragma + '\n');
+      if (requestsWal(before)) throw Error('rollback target requests WAL; not a DELETE rollback target');
+      const converted = convertedInit(before);
       if (current !== before && current !== converted) throw Error('backup init does not match the current init; not modified');
       break;
     }
+    case 'rollback-mode': console.log(requestsWal(fs.readFileSync(path.join(arg, 'chirpstack.init'), 'utf8')) ? 'WAL' : 'DELETE'); break;
+    case 'validate-scripts': savedScripts(arg); break;
     case 'header': console.log(header()); break;
     case 'init-state': console.log(shape(fs.readFileSync(init, 'utf8'), true) ? 'yes' : 'no'); break;
     case 'preflight': {
@@ -957,8 +1156,8 @@ async function main() {
       break;
     }
     case 'insert': {
-      const text = fs.readFileSync(init, 'utf8'); shape(text, false);
-      const next = text.replace(anchor + '\n', anchor + '\n' + pragma + '\n');
+      const text = fs.readFileSync(init, 'utf8'); shape(text, true);
+      const next = convertedInit(text);
       shape(next, true);
       // <<- EOF strips tabs: prove the rendered sqlite block contains both
       // literal lines before atomically publishing the otherwise unchanged init.
@@ -1071,16 +1270,24 @@ start_cs() {
 }
 rollback_changed() {
     rollback_result=0
+    expected_journal=$(cs_node rollback-mode "$BACKUP") || return 1
     if stop_cs; then
         cs_node restore-config "$BACKUP" || rollback_result=1
         "$SYNC" || rollback_result=1
         current=$(cs_node header 2>/dev/null) || current=unknown
-        case "$current" in
-            WAL) if cs_node delete; then log 'RESTORED: SQLite DELETE journal (current data retained)' >&2
+        if [ "$expected_journal" = WAL ]; then
+            # The original init requests WAL. Preserve that outcome with current
+            # helpers, rather than claiming a DELETE rollback it would undo.
+            cs_node install && "$SYNC" || rollback_result=1
+            log 'RESTORED: WAL-configured init retained with current helpers' >&2
+        else
+            case "$current" in
+                WAL) if cs_node delete; then log 'RESTORED: SQLite DELETE journal (current data retained)' >&2
                  else log 'NOT RESTORED: SQLite DELETE journal' >&2; rollback_result=1; fi ;;
-            DELETE) log 'RESTORED: SQLite already DELETE; database untouched' >&2 ;;
-            *) log 'NOT RESTORED: unreadable SQLite header; database untouched' >&2; rollback_result=1 ;;
-        esac
+                DELETE) log 'RESTORED: SQLite already DELETE; database untouched' >&2 ;;
+                *) log 'NOT RESTORED: unreadable SQLite header; database untouched' >&2; rollback_result=1 ;;
+            esac
+        fi
     else
         log 'NOT RESTORED: init, scripts and journal (ChirpStack did not stop)' >&2
         rollback_result=1
@@ -1090,6 +1297,10 @@ rollback_changed() {
     else log 'NOT RESTORED: ChirpStack start failed' >&2; rollback_result=1; fi
     final_journal=$(cs_node header 2>/dev/null) || final_journal=unknown
     log "SQLite journal after restart: $final_journal" >&2
+    if [ "$final_journal" != "$expected_journal" ]; then
+        log "NOT RESTORED: expected $expected_journal journal, found $final_journal" >&2
+        rollback_result=1
+    fi
     log "Database backup is an operator-restore artefact only; never copied over live data: $BACKUP" >&2
     return "$rollback_result"
 }
@@ -1102,37 +1313,63 @@ finish() {
         if cs_node restore-scripts "$BACKUP" && "$SYNC"; then
             log "ROLLED BACK: previous backup/restore helpers; backup $BACKUP" >&2
         else
+            KEEP_LOCK=1
+            record_phase recovery-failed
             log "ERROR: helper rollback incomplete; see RESTORED/NOT RESTORED above; backup $BACKUP" >&2
         fi
     fi
     if [ "$result" -ne 0 ] && [ "$STOPPED" = 1 ]; then
         if [ "$MODIFIED" = 1 ]; then
             if rollback_changed; then log "ROLLED BACK: ChirpStack init, scripts and SQLite journal; backup $BACKUP" >&2
-            else log "ERROR: rollback incomplete; see RESTORED/NOT RESTORED above; backup $BACKUP" >&2; fi
+            else KEEP_LOCK=1; record_phase recovery-failed; log "ERROR: rollback incomplete; see RESTORED/NOT RESTORED above; backup $BACKUP" >&2; fi
         else
             start_cs || log 'ERROR: could not restart unchanged ChirpStack' >&2
         fi
     fi
-    if [ "$LOCKED" = 1 ]; then
+    if [ "$LOCKED" = 1 ] && [ "$KEEP_LOCK" = 0 ]; then
         cs_node clean-temps || result=1
-        rm -f "$LOCK/backup" || result=1
+        rm -f "$LOCK/backup" "$LOCK/state" "$LOCK/state.tmp" || result=1
         rmdir "$LOCK" || result=1
     fi
     exit "$result"
 }
+record_phase() {
+    PHASE=$1
+    printf '%s %s\n' "$BACKUP_TYPE" "$PHASE" > "$LOCK/state.tmp" && mv "$LOCK/state.tmp" "$LOCK/state" || die 'cannot record maintenance phase'
+}
 refuse_lock() {
-    if recovery_backup=$(cat "$LOCK/backup" 2>/dev/null) && [ -n "$recovery_backup" ]; then
-        die "another WAL one-shot is running or its lock remains: $LOCK; backup $recovery_backup; after confirming no one-shot is running, remove $LOCK/backup and $LOCK, then run sh /tmp/chirpstack-sqlite-wal.sh --rollback $recovery_backup"
+    recovery_backup=$(cat "$LOCK/backup" 2>/dev/null) || recovery_backup=
+    recovery_type=unknown
+    recovery_phase=unknown
+    if [ -f "$LOCK/state" ]; then read -r recovery_type recovery_phase < "$LOCK/state" || recovery_phase=unknown; fi
+    recovery_clear="rm -f '$LOCK/backup' '$LOCK/state' '$LOCK/state.tmp' && rmdir '$LOCK'"
+    recovery_prefix="another maintenance operation is running or its lock remains: $LOCK; type $recovery_type, phase $recovery_phase"
+    if [ -z "$recovery_backup" ]; then
+        die "$recovery_prefix; no backup directory was recorded; inspect service state and /srv/backup; not modified"
     fi
-    # Never guess a backup: the newest directory may belong to an earlier run.
-    die "another WAL one-shot is running or its lock remains: $LOCK; no backup directory was recorded; inspect $ROOT/srv/backup and the ChirpStack state by hand before removing $LOCK; not modified"
+    case "$recovery_type:$recovery_phase" in
+        helper-only:backup-verified|helper-only:installing|helper-only:recovery-failed)
+            if cs_node validate-scripts "$recovery_backup"; then
+                die "$recovery_prefix; backup $recovery_backup; after confirming no maintenance owner is running, $recovery_clear; then run sh /tmp/chirpstack-sqlite-wal.sh --recover-helpers '$recovery_backup' (restores helpers without stopping ChirpStack)"
+            fi
+            die "$recovery_prefix; incomplete helper backup at $recovery_backup; not a recovery target; inspect helper files and manifest; do not stop ChirpStack for helper recovery" ;;
+        full:backup-verified|full:changing|full:installing|full:starting|full:recovery-failed)
+            if cs_node validate-backup "$recovery_backup"; then
+                recovery_journal=$(cs_node rollback-mode "$recovery_backup") || die "$recovery_prefix; cannot determine backup journal intent; inspect $recovery_backup"
+                if [ "$recovery_journal" = WAL ]; then
+                    die "$recovery_prefix; backup $recovery_backup has a WAL-configured init; after confirming no maintenance owner is running, $recovery_clear; then run sh /tmp/chirpstack-sqlite-wal.sh --apply; this is not a DELETE rollback target"
+                fi
+                die "$recovery_prefix; verified full backup $recovery_backup; after confirming no maintenance owner is running, $recovery_clear; then run sh /tmp/chirpstack-sqlite-wal.sh --rollback '$recovery_backup'"
+            fi ;;
+    esac
+    die "$recovery_prefix; incomplete full backup; not a rollback target: $recovery_backup; check the manifest, init and helper files against the backup and inspect ChirpStack process state before restarting unchanged files; never copy database files over live data"
 }
 
 MODE=${1:---check}
 case "$MODE" in
-    --check|--apply) [ "$#" -le 1 ] || die 'usage: chirpstack-sqlite-wal.sh [--check|--apply|--rollback <backup-dir>]' ;;
-    --rollback) [ "$#" = 2 ] || die '--rollback needs a backup directory'; BACKUP=$2 ;;
-    *) die 'usage: chirpstack-sqlite-wal.sh [--check|--apply|--rollback <backup-dir>]' ;;
+    --check|--apply) [ "$#" -le 1 ] || die 'usage: chirpstack-sqlite-wal.sh [--check|--apply|--rollback <backup-dir>|--recover-helpers <backup-dir>]' ;;
+    --rollback|--recover-helpers) [ "$#" = 2 ] || die "$MODE needs a backup directory"; BACKUP=$2 ;;
+    *) die 'usage: chirpstack-sqlite-wal.sh [--check|--apply|--rollback <backup-dir>|--recover-helpers <backup-dir>]' ;;
 esac
 
 command -v node >/dev/null 2>&1 || die 'Node unavailable; not modified'
@@ -1151,76 +1388,93 @@ if [ "$MODE" = --check ]; then
 fi
 
 [ "$("$ID" -u)" = 0 ] || die 'must run as root; not modified'
-[ ! -d "$LOCK" ] || refuse_lock
+mkdir -p "$ROOT/srv/backup" || die 'cannot create backup parent'
+# All mode/target decisions are made after the shared maintenance lock is held.
+mkdir "$LOCK" 2>/dev/null || refuse_lock
+LOCKED=1
+trap finish 0
+trap 'exit 1' HUP INT TERM
 if [ "$MODE" = --apply ]; then
     required=$(cs_node preflight) || exit 1
     if [ "$required" = already ]; then
-        [ "$(cs_node scripts-needed)" = yes ] || { log 'OK: already WAL'; exit 0; }
-        SCRIPTS_ONLY=1
+        scripts_needed=$(cs_node scripts-needed) || die 'cannot inspect helper state'
+        case "$scripts_needed" in
+            no) log 'OK: already WAL'; exit 0 ;;
+            yes) SCRIPTS_ONLY=1 ;;
+            *) die 'unexpected helper-state result' ;;
+        esac
     fi
     case "$required" in restart:*) RESTART_ONLY=1; required=${required#restart:} ;; esac
     if [ "$SCRIPTS_ONLY" = 0 ]; then
         free=$("$DF" -Pk "$ROOT/srv" | awk 'NR == 2 { print $4 }') || die 'could not read free space'
         case "$free" in ''|*[!0-9]*) die 'could not read free space' ;; esac
         [ "$free" -ge "$required" ] || die 'not enough free space on /srv (need twice the database and sidecars); not modified'
+        BACKUP_TYPE=full
+    else
+        BACKUP_TYPE=helper-only
     fi
+    BACKUP="$ROOT/srv/backup/chirpstack-wal-$("$DATE" -u +%Y%m%dT%H%M%SZ)"
+    (umask 077; mkdir "$BACKUP") || die 'backup directory already exists or cannot be created'
+    log "OK: backup directory $BACKUP"
+elif [ "$MODE" = --recover-helpers ]; then
+    BACKUP_TYPE=helper-only
+    cs_node validate-scripts "$BACKUP" || exit 1
 else
+    BACKUP_TYPE=full
     cs_node validate-backup "$BACKUP" || exit 1
     cs_node rollback-match "$BACKUP" || exit 1
     cs_node header >/dev/null || exit 1
     node -e 'require(process.env.OSI_CS_SQLITE_MODULE || process.argv[1])' "$ROOT/srv/node-red/node_modules/sqlite3" || die 'sqlite3 module unavailable'
 fi
-log 'OK: preconditions checked'
-# mkdir is atomic: a concurrent one-shot must never stop the same database.
-mkdir -p "$ROOT/var/run" || die 'cannot create run directory'
-mkdir "$LOCK" 2>/dev/null || refuse_lock
-LOCKED=1
-trap finish 0
-trap 'exit 1' HUP INT TERM
-if [ "$MODE" = --apply ]; then
-    BACKUP="$ROOT/srv/backup/chirpstack-wal-$("$DATE" -u +%Y%m%dT%H%M%SZ)"
-    mkdir -p "$ROOT/srv/backup" || die 'cannot create backup parent'
-    (umask 077; mkdir "$BACKUP") || die 'backup directory already exists or cannot be created'
-    log "OK: backup directory $BACKUP"
-fi
 printf '%s\n' "$BACKUP" > "$LOCK/backup" || die 'cannot record recovery backup'
-if [ "$SCRIPTS_ONLY" = 1 ]; then
-    # ChirpStack and its database are already converted; only the helpers are
-    # stale, so ChirpStack keeps running and the database is not copied.
-    cs_node backup-scripts "$BACKUP" && "$SYNC" && cs_node manifest-scripts "$BACKUP" && "$SYNC" || die 'helper script backup failed'
+if [ "$MODE" = --apply ]; then record_phase backup-started; else record_phase backup-verified; fi
+log 'OK: preconditions checked'
+if [ "$MODE" = --recover-helpers ]; then
+    record_phase backup-verified
     HELPERS_CHANGED=1
+    cs_node restore-scripts "$BACKUP" && "$SYNC" || die 'helper recovery failed'
+    HELPERS_CHANGED=0
+    log 'OK: previous helpers restored without stopping ChirpStack'
+    exit 0
+fi
+if [ "$SCRIPTS_ONLY" = 1 ]; then
+    cs_node backup-scripts "$BACKUP" && "$SYNC" && cs_node manifest-scripts "$BACKUP" && "$SYNC" || die 'helper script backup failed'
+    record_phase backup-verified
+    HELPERS_CHANGED=1
+    record_phase installing
     cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed; previous helpers in '"$BACKUP"
     HELPERS_CHANGED=0
     log "OK: already WAL; WAL-aware backup/restore scripts installed; previous helpers in $BACKUP"
     exit 0
 fi
-# Set before stop: even a failed stop must try to restart the service.
 STOPPED=1
 stop_cs || die 'ChirpStack did not stop within 30 seconds; restarting unchanged'
 log 'OK: ChirpStack stopped'
 if [ "$MODE" = --rollback ]; then
-    # This path already performs recovery; do not retry it in the EXIT trap.
     trap '' HUP INT TERM
     STOPPED=0
-    rollback_changed || die 'rollback incomplete; see RESTORED/NOT RESTORED above'
+    record_phase changing
+    rollback_changed || { KEEP_LOCK=1; record_phase recovery-failed; die 'rollback incomplete; see RESTORED/NOT RESTORED above'; }
     log "OK: ChirpStack configuration restored; journal $final_journal; backup $BACKUP"
     exit 0
 fi
 cs_node backup "$BACKUP" && "$SYNC" && cs_node manifest "$BACKUP" && "$SYNC" || die 'backup or manifest failed'
+record_phase backup-verified
 log 'OK: stopped database, sidecars, init and helper scripts backed up with manifest'
 cs_node integrity || die 'SQLite integrity check failed; restarting unchanged'
 log 'OK: SQLite integrity check passed'
 MODIFIED=1
+record_phase changing
 if [ "$RESTART_ONLY" = 0 ]; then
     cs_node insert && "$SYNC" || die 'init insertion failed'
-    log 'OK: pragma inserted after sqlite path; owner and mode preserved'
-    cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed'
-    log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
+    log 'OK: required pragmas set after sqlite path; owner and mode preserved'
 else
     log 'OK: existing WAL pragmas retained; restarting ChirpStack to switch the header'
-    cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed'
-    log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
 fi
+record_phase installing
+cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed'
+log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
+record_phase starting
 start_cs || die 'ChirpStack failed to start or API port 8080 unavailable'
 log 'OK: ChirpStack running and API port reachable'
 journal=$(cs_node header) || die 'cannot verify converted header'

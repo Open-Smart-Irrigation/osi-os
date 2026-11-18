@@ -66,7 +66,11 @@ stop)
     kill -"$TEST_STOP_SIGNAL" "$PPID"
   fi
   [ "\${TEST_STOP_STUCK:-0}" != 1 ] || exit 0
-  rm -f "$OSI_CS_ROOT/running" "$OSI_CS_ROOT/proc/1/exe" ;;
+  rm -f "$OSI_CS_ROOT/running" "$OSI_CS_ROOT/proc/1/exe"
+  if [ "\${TEST_PAUSE_STOP:-0}" = 1 ] && [ ! -f "$OSI_CS_ROOT/stop-paused" ]; then
+    echo paused > "$OSI_CS_ROOT/stop-paused"
+    while [ ! -f "$OSI_CS_ROOT/stop-resume" ]; do /usr/bin/sleep 0.01; done
+  fi ;;
 start)
   echo start >> "$OSI_CS_ROOT/service-calls"
   if grep -q pragmas "$OSI_CS_ROOT/etc/init.d/chirpstack"; then
@@ -105,11 +109,24 @@ if (process.env.TEST_SLOW_POLL === '1' && ['running', 'port'].includes(op)) {
 if (op === 'port' && process.env.TEST_BAD_PORT === '1' && process.env.OSI_CS_API_PORT === '0') {
   fs.appendFileSync(process.env.OSI_CS_ROOT + '/bad-port-polls', 'poll\\n');
 }
+const originalReadFile = fs.readFileSync;
+fs.readFileSync = function(file, ...args) {
+  if (process.env.TEST_BOUNDED_HASH === '1' && typeof file === 'string' && /chirpstack\\.sqlite(?:-(?:wal|shm|journal))?$/.test(file)) throw Error('database-sized read refused');
+  return originalReadFile.call(this, file, ...args);
+};
+const originalRead = fs.readSync;
+fs.readSync = function(fd, buffer, offset, length, position) {
+  if (process.env.TEST_BOUNDED_HASH === '1' && length > 65536) throw Error('unbounded hash chunk');
+  return originalRead.apply(this, arguments);
+};
+if (op === 'backup' && process.env.TEST_KILL_DURING_BACKUP === '1') { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
 const originalRename = fs.renameSync;
 fs.renameSync = function(from, to) {
   if (op === 'install' && process.env.TEST_SECOND_HELPER_FAIL === '1' && to.endsWith('/restore.sh')) throw Error('injected second helper install failure');
   if (op === 'restore-config' && process.env.TEST_RESTORE_FAIL === '1' && to.endsWith('/backup.sh')) throw Error('injected backup.sh restore failure');
-  return originalRename.apply(this, arguments);
+  const result = originalRename.apply(this, arguments);
+  if (op === 'install' && process.env.TEST_KILL_AFTER_FIRST_HELPER === '1' && to.endsWith('/backup.sh')) { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
+  return result;
 };
 const originalFsync = fs.fsyncSync;
 fs.fsyncSync = function(fd) {
@@ -130,7 +147,7 @@ if (op === 'install' && process.env.TEST_KILL_BEFORE_INSTALL === '1') { process.
   const run = (args = [], extra = {}) => spawnSync(shell, [...shellArgs, script, ...args], { env: { ...env, ...extra }, encoding: 'utf8', timeout: 20000 });
   const state = () => Object.fromEntries(['etc/init.d/chirpstack', 'opt/chirpstack/backup.sh', 'opt/chirpstack/restore.sh', 'srv/chirpstack/chirpstack.sqlite'].map((f) => [f, [hash(p(f)), fs.statSync(p(f)).mtimeMs, fs.statSync(p(f)).mode]]));
   const journal = () => [...fs.readFileSync(p('srv/chirpstack/chirpstack.sqlite')).subarray(18, 20)];
-  const backup = () => p(`srv/backup/${fs.readdirSync(p('srv/backup'))[0]}`);
+  const backup = () => p(`srv/backup/${fs.readdirSync(p('srv/backup')).find(n => n.startsWith('chirpstack-wal-'))}`);
   return { root, p, run, state, journal, backup, env };
 }
 function ok(r, status = 0) { assert.ifError(r.error); assert.equal(r.status, status, `${r.error || ''}\n${r.stdout}\n${r.stderr}`); }
@@ -300,16 +317,18 @@ for (const init of [converted, fs.readFileSync(path.join(fixtures, 'feed-670/chi
     const checked = g.run(); ok(checked); assert.match(checked.stdout, /running: no; backup\/restore WAL-aware: no/);
     const once = hash(g.p('etc/init.d/chirpstack')); ok(g.run(['--apply']));
     assert.equal(hash(g.p('etc/init.d/chirpstack')), once);
-    assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
   });
 }
 
-test('stale lock names the backup and explicit recovery command before configured preflight', async (t) => {
-  const g = await gateway(t, converted); const lock = g.p('var/run/chirpstack-sqlite-wal.lock');
-  fs.mkdirSync(lock, { recursive: true }); fs.writeFileSync(path.join(lock, 'backup'), g.p('srv/backup/interrupted') + '\n');
+test('verified full stale lock names its backup and phase-specific recovery action', async (t) => {
+  const g = await gateway(t); ok(g.run(['--apply']));
+  const backup = g.backup(); const lock = g.p('srv/backup/.chirpstack-maintenance.lock');
+  fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, 'backup'), backup + '\n');
+  fs.writeFileSync(path.join(lock, 'state'), 'full installing\n');
   const before = g.state(); const r = g.run(['--apply']); ok(r, 1);
-  assert.match(r.stderr, /lock remains/); assert.ok(r.stderr.includes(`--rollback ${g.p('srv/backup/interrupted')}`));
-  assert.ok(r.stderr.includes(lock)); assert.deepEqual(g.state(), before);
+  assert.match(r.stderr, /lock remains/); assert.match(r.stderr, /--rollback /);
+  assert.ok(r.stderr.includes(backup)); assert.ok(r.stderr.includes(lock)); assert.deepEqual(g.state(), before);
 });
 
 for (const signal of ['HUP', 'INT', 'TERM', 'PIPE']) {
@@ -317,7 +336,7 @@ for (const signal of ['HUP', 'INT', 'TERM', 'PIPE']) {
     const g = await gateway(t); const r = g.run(['--apply'], { TEST_STOP_SIGNAL: signal });
     ok(r, signal === 'PIPE' ? 0 : 1);
     assert.ok(fs.existsSync(g.p('running')));
-    assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
     assert.match(fs.readFileSync(g.p('service-calls'), 'utf8'), /start/);
   });
 }
@@ -325,7 +344,7 @@ for (const signal of ['HUP', 'INT', 'TERM', 'PIPE']) {
 test('TERM after init edit uses lossless rollback and releases lock', async (t) => {
   const g = await gateway(t); const r = g.run(['--apply'], { TEST_START_SIGNAL: 'TERM' });
   ok(r, 1); assert.match(r.stderr, /ROLLED BACK:/); restored(g);
-  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+  assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
   const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
   assert.equal(d.prepare('SELECT count(*) AS n FROM uplinks').get().n, 2); d.close();
 });
@@ -341,7 +360,7 @@ test('dropped output pipe still attempts restart and releases lock', async (t) =
   });
   assert.equal(r.signal, null); assert.ok([0, 1].includes(r.status));
   assert.ok(fs.existsSync(g.p('running')));
-  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+  assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
 });
 
 test('an init helper process is not mistaken for the ChirpStack daemon', async (t) => {
@@ -364,14 +383,15 @@ test('native sqlite3 callback integrity and lossless DELETE rollback', { skip: n
 for (const [name, extra, message] of [
   ['one config file cannot be restored', { TEST_RESTORE_FAIL: '1' }, /NOT RESTORED: backup\.sh.*injected/],
   ['DELETE conversion fails', { TEST_DELETE_FAIL: '1' }, /NOT RESTORED: SQLite DELETE journal/],
-]) test(`incomplete rollback still starts ChirpStack: ${name}`, async (t) => {
+]) test(`incomplete rollback starts ChirpStack and retains recovery metadata: ${name}`, async (t) => {
   const g = await gateway(t);
   const r = g.run(['--apply'], { TEST_BAD_CONFIG: '1', ...extra }); ok(r, 1);
   assert.match(r.stderr, /rollback incomplete/); assert.match(r.stderr, message);
   assert.match(r.stderr, /RESTORED: ChirpStack started/);
   assert.match(r.stderr, /RESTORED: chirpstack\.init/); assert.match(r.stderr, /RESTORED: restore\.sh/);
   assert.ok(fs.existsSync(g.p('running')));
-  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+  assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), true);
+  assert.equal(fs.readFileSync(g.p('srv/backup/.chirpstack-maintenance.lock/state'), 'utf8'), 'full recovery-failed\n');
   const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
   assert.equal(d.prepare('SELECT count(*) AS n FROM uplinks').get().n, 2); d.close();
 });
@@ -381,7 +401,7 @@ test('backup hash mismatch refuses before editing init and restarts unchanged se
   const r = g.run(['--apply'], { TEST_BAD_COPY: '1' }); ok(r, 1);
   assert.match(r.stderr, /backup copy mismatch/); assert.deepEqual(g.state(), before);
   assert.match(fs.readFileSync(g.p('service-calls'), 'utf8'), /stop\nstart\n/);
-  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+  assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
 });
 
 test('already stopped service tolerates nonzero procd stop result', async (t) => {
@@ -392,7 +412,7 @@ test('already stopped service tolerates nonzero procd stop result', async (t) =>
 test('stale lock without a recorded backup refuses without guessing one', async (t) => {
   const g = await gateway(t, converted);
   const backup = g.p('srv/backup/chirpstack-wal-20260101T000000Z'); fs.mkdirSync(backup);
-  fs.mkdirSync(g.p('var/run/chirpstack-sqlite-wal.lock'), { recursive: true });
+  fs.mkdirSync(g.p('srv/backup/.chirpstack-maintenance.lock'), { recursive: true });
   const r = g.run(['--apply']); ok(r, 1);
   assert.match(r.stderr, /no backup directory was recorded/);
   assert.ok(!r.stderr.includes('--rollback'), 'never points at a guessed backup');
@@ -408,7 +428,7 @@ test('a kill between the init edit and the helper install is repaired by the nex
   assert.notEqual(killed.status, 0);
   assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), converted, 'the init edit landed');
   assert.equal(fs.readFileSync(g.p('opt/chirpstack/restore.sh'), 'utf8'), '#!/bin/sh\necho old-restore\n', 'the stock helper remained');
-  const lock = g.p('var/run/chirpstack-sqlite-wal.lock');
+  const lock = g.p('srv/backup/.chirpstack-maintenance.lock');
   assert.ok(fs.existsSync(path.join(lock, 'backup')), 'an uncatchable kill leaves the lock and its recorded backup');
   const refused = g.run(['--apply']); ok(refused, 1); assert.match(refused.stderr, /--rollback /);
   fs.rmSync(lock, { recursive: true });
@@ -453,7 +473,7 @@ test('--rollback refuses when the current init no longer matches the backup', as
 for (const init of [converted, fs.readFileSync(path.join(fixtures, 'feed-670/chirpstack.init'), 'utf8')]) {
   test('configured init whose header fails to switch retains data during rollback', async (t) => {
     const g = await gateway(t, init); const r = g.run(['--apply'], { TEST_NO_WAL: '1' }); ok(r, 1);
-    assert.match(r.stderr, /SQLite header did not switch/); assert.match(r.stderr, /ROLLED BACK:/);
+    assert.match(r.stderr, /SQLite header did not switch/); assert.match(r.stderr, /NOT RESTORED: expected WAL journal, found DELETE/); assert.doesNotMatch(r.stderr, /ROLLED BACK:/);
     assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), init);
     assert.deepEqual(g.journal(), [1, 1]); assert.ok(fs.existsSync(g.p('running')));
     const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
@@ -494,5 +514,103 @@ for (const absent of [false, true]) test(`helper-only second-file failure restor
   assert.equal(hash(g.p('srv/chirpstack/chirpstack.sqlite')), dbBefore);
   assert.equal(fs.existsSync(g.p('service-calls')), false, 'helper-only rollback never stops or starts ChirpStack');
   assert.ok(fs.existsSync(g.p('running')));
-  assert.equal(fs.existsSync(g.p('var/run/chirpstack-sqlite-wal.lock')), false);
+  assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+});
+
+for (const [name, list] of [
+  ['later timeout override', '"busy_timeout = 5000", "journal_mode = WAL", "foreign_keys = ON", "busy_timeout = 1000"'],
+  ['missing foreign keys', '"busy_timeout = 5000", "journal_mode = WAL"'],
+  ['later journal override', '"busy_timeout = 5000", "journal_mode = WAL", "foreign_keys = ON", "journal_mode = DELETE"'],
+]) test(`review effective pragmas: ${name} requires conversion and is repaired`, async t => {
+  const init = original.replace('\t\tpath="/srv/chirpstack/chirpstack.sqlite"\n', `$&\t\tpragmas = [${list}]\n`);
+  const g = await gateway(t, init);
+  const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close();
+  for (const f of ['backup.sh', 'restore.sh']) fs.copyFileSync(path.join(feed, f), g.p('opt/chirpstack/' + f));
+  const check = g.run(['--check']); ok(check, 3); assert.match(check.stdout, /init pragmas: no/);
+  ok(g.run(['--apply'])); assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), converted);
+});
+test('review refuses DELETE rollback to an init that requests WAL', async t => {
+  const g = await gateway(t, converted); ok(g.run(['--apply']));
+  const before = g.state(), calls = fs.readFileSync(g.p('service-calls'), 'utf8');
+  const r = g.run(['--rollback', g.backup()]); ok(r, 1); assert.match(r.stderr, /target.*WAL|WAL.*target/);
+  assert.deepEqual(g.state(), before); assert.equal(fs.readFileSync(g.p('service-calls'), 'utf8'), calls);
+});
+for (const mode of ['apply', 'rollback']) test(`review rechecks ${mode} after acquiring lock`, async t => {
+  const g = await gateway(t);
+  if (mode === 'rollback') ok(g.run(['--apply']));
+  const backup = mode === 'rollback' ? g.backup() : null;
+  const calls = fs.existsSync(g.p('service-calls')) ? fs.readFileSync(g.p('service-calls'), 'utf8') : '';
+  fs.writeFileSync(g.p('bin/mkdir'), `#!/bin/sh
+case "$*" in *.lock*)
+  if [ ! -f "$OSI_CS_ROOT/raced-init" ]; then
+    echo raced > "$OSI_CS_ROOT/raced-init"
+    ${mode === 'apply' ? 'sed -i \'s/path=/unexpected_path=/\' "$OSI_CS_ROOT/etc/init.d/chirpstack"' : 'echo "# changed by previous owner" >> "$OSI_CS_ROOT/etc/init.d/chirpstack"'}
+  fi ;;
+esac
+exec /usr/bin/mkdir "$@"
+`, { mode: 0o755 });
+  const r = g.run(mode === 'apply' ? ['--apply'] : ['--rollback', backup]); ok(r, 1);
+  assert.equal(fs.existsSync(g.p('service-calls')) ? fs.readFileSync(g.p('service-calls'), 'utf8') : '', calls, 'raced state refused before service stop');
+});
+test('review helper-state failure cannot report already WAL', async t => {
+  const g = await gateway(t, converted);
+  const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close();
+  fs.unlinkSync(g.p('opt/chirpstack/backup.sh')); fs.mkdirSync(g.p('opt/chirpstack/backup.sh'));
+  const r = g.run(['--apply']); ok(r, 1); assert.doesNotMatch(r.stdout, /OK: already WAL/);
+  assert.equal(fs.existsSync(g.p('service-calls')), false);
+});
+test('review hashing never reads a database-sized buffer', async t => {
+  const g = await gateway(t); const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
+  d.exec('CREATE TABLE payload (b BLOB); INSERT INTO payload VALUES (zeroblob(4194304))'); d.close();
+  ok(g.run(['--apply'], { TEST_BOUNDED_HASH: '1' }));
+  ok(g.run(['--rollback', g.backup()], { TEST_BOUNDED_HASH: '1' })); restored(g);
+});
+for (const kind of ['helper-only', 'full-incomplete']) test(`review stale recovery instructions match ${kind} phase`, async t => {
+  const g = await gateway(t, kind === 'helper-only' ? converted : original);
+  if (kind === 'helper-only') { const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close(); }
+  const killed = g.run(['--apply'], kind === 'helper-only' ? { TEST_KILL_AFTER_FIRST_HELPER: '1' } : { TEST_KILL_DURING_BACKUP: '1' });
+  assert.ifError(killed.error); assert.notEqual(killed.status, 0);
+  const r = g.run(['--apply']); ok(r, 1);
+  if (kind === 'helper-only') {
+    assert.match(r.stderr, /--recover-helpers/);
+    const dir = g.backup();
+    fs.rmSync(g.p('srv/backup/.chirpstack-maintenance.lock'), { recursive: true });
+    ok(g.run(['--recover-helpers', dir]));
+    assert.equal(fs.readFileSync(g.p('opt/chirpstack/backup.sh'), 'utf8'), '#!/bin/sh\necho old-backup\n');
+    assert.equal(fs.existsSync(g.p('service-calls')), false);
+  } else {
+    assert.match(r.stderr, /incomplete full backup; not a rollback target/);
+    assert.doesNotMatch(r.stderr, /then run .*--rollback/);
+    assert.equal(fs.existsSync(g.p('running')), false);
+  }
+});
+for (const ownerMode of ['helper', 'one-shot']) test(`review maintenance lock shared with ${ownerMode} owner`, async t => {
+  const g = await gateway(t); fs.mkdirSync(g.p('srv/redis')); fs.writeFileSync(g.p('srv/redis/dump.rdb'), 'dump'); fs.writeFileSync(g.p('redis-running'), 'yes');
+  fs.writeFileSync(g.p('bin/service'), `#!/bin/sh
+if [ "$1" = chirpstack ]; then exec "$OSI_CS_ROOT/service" "$2"; fi
+case "$2" in stop) rm -f "$OSI_CS_ROOT/redis-running";; start) echo yes > "$OSI_CS_ROOT/redis-running";; esac
+`, { mode: 0o755 });
+  fs.writeFileSync(g.p('bin/pidof'), '#!/bin/sh\ncase "$1" in chirpstack) test -f "$OSI_CS_ROOT/running";; redis-server) test -f "$OSI_CS_ROOT/redis-running";; esac\n', { mode: 0o755 });
+  fs.writeFileSync(g.p('bin/sqlite3'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
+  const helper = path.join(feed, 'backup.sh');
+  const owner = spawn(shell, [...shellArgs, ownerMode === 'helper' ? helper : script, ...(ownerMode === 'helper' ? [] : ['--apply'])], { env: { ...g.env, TEST_PAUSE_STOP: '1' }, stdio: 'ignore' });
+  const completed = new Promise((resolve, reject) => { owner.on('error', reject); owner.on('close', status => resolve({ status })); });
+  try {
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(g.p('stop-paused'))) { assert.ok(Date.now() < deadline); await new Promise(r => setTimeout(r, 10)); }
+    const calls = fs.readFileSync(g.p('service-calls'), 'utf8');
+    const contender = ownerMode === 'helper' ? g.run(['--apply']) : spawnSync(shell, [...shellArgs, helper], { env: g.env, encoding: 'utf8', timeout: 10000 });
+    ok(contender, 1);
+    assert.equal(fs.readFileSync(g.p('service-calls'), 'utf8'), calls);
+    assert.equal(fs.existsSync(g.p('running')), false);
+  } finally { fs.writeFileSync(g.p('stop-resume'), 'yes'); const timer = setTimeout(() => owner.kill('SIGKILL'), 10000); try { ok(await completed); } finally { clearTimeout(timer); } }
+});
+
+test('review WAL-requesting automatic recovery reports WAL and retains current helpers', async t => {
+  const g = await gateway(t, converted);
+  const r = g.run(['--apply'], { TEST_START_SIGNAL: 'TERM' }); ok(r, 1);
+  assert.match(r.stderr, /ROLLED BACK:/); assert.match(r.stderr, /WAL-configured init retained/);
+  assert.doesNotMatch(r.stderr, /RESTORED: SQLite DELETE journal/);
+  assert.deepEqual(g.journal(), [2, 2]);
+  for (const f of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p('opt/chirpstack/' + f)), fs.readFileSync(path.join(feed, f)));
 });
