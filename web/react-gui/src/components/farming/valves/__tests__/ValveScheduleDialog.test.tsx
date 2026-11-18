@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 
@@ -24,6 +24,10 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.preview': '{{days}} {{start}}–{{end}} · {{minutes}} min',
     'scheduleDialog.previewLiters': '≈ {{liters}} L',
     'scheduleDialog.onceNote': 'One-time opens are sent by the gateway at that minute; the gateway must be online.',
+    'scheduleDialog.awaitingConfirmation': "Sent, waiting for the valve's confirmation (until {{time}})",
+    'scheduleDialog.notConfirmed': 'Not confirmed — check the valve',
+    'scheduleDialog.onceFired': 'Fired',
+    'scheduleDialog.onceReportedOpen': 'Valve reported open',
     'scheduleDialog.dispatchStatus': 'Dispatch: {{state}}',
     'scheduleDialog.dispatchStates.SENT': 'Sent to the radio network',
     'scheduleDialog.dispatchStates.PENDING': 'PENDING',
@@ -278,23 +282,165 @@ describe('ValveScheduleDialog', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
-  it('shows an unknown one-time dispatch outcome in the schedule row', async () => {
+  it('S4: shows a fired schedule ahead of a legacy unknown dispatch state', async () => {
     schedulesMock.mockResolvedValue({
       ...emptyResponse(),
       schedules: [{ scheduleUuid: 'once-unknown', deviceEui: '0016C001F1000001', kind: 'ONCE', label: 'One open', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 20, timezone: 'Europe/Zurich', enabled: true, onceState: 'FIRED', dispatchState: 'UNKNOWN', dispatchCommandId: 'cmd-1', dispatchCreatedAt: '2026-08-19T10:00:00Z', dispatchAttemptedAt: '2026-08-19T10:00:00Z' }],
     });
     renderDialog(makeValve());
     expect(await screen.findByText('One open')).toBeInTheDocument();
-    expect(await screen.findByText(/Dispatch: UNKNOWN/)).toBeInTheDocument();
+    expect(await screen.findByText('Fired')).toBeInTheDocument();
+    expect(screen.queryByText(/Dispatch: UNKNOWN/)).not.toBeInTheDocument();
   });
 
   it('shows the translated radio network wording for a sent one-time dispatch', async () => {
     schedulesMock.mockResolvedValue({
       ...emptyResponse(),
-      schedules: [{ scheduleUuid: 'once-sent', deviceEui: '0016C001F1000001', kind: 'ONCE', label: 'One open', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 20, timezone: 'Europe/Zurich', enabled: true, onceState: 'FIRED', dispatchState: 'SENT', dispatchCommandId: 'cmd-1', dispatchCreatedAt: '2026-08-19T10:00:00Z', dispatchAttemptedAt: '2026-08-19T10:00:00Z' }],
+      schedules: [{ scheduleUuid: 'once-sent', deviceEui: '0016C001F1000001', kind: 'ONCE', label: 'One open', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 20, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: 'SENT', dispatchCommandId: 'cmd-1', dispatchCreatedAt: '2026-08-19T10:00:00Z', dispatchAttemptedAt: '2026-08-19T10:00:00Z' }],
     });
     renderDialog(makeValve());
     expect(await screen.findByText(/Dispatch: Sent to the radio network/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { onceState: 'PENDING' as const, dispatchState: 'UNKNOWN' as const, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null, text: "Sent, waiting for the valve's confirmation (until 12:38 PM)" },
+    { onceState: 'SKIPPED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: 'uncertain' as const, text: 'Not confirmed — check the valve' },
+    { onceState: 'FIRED' as const, dispatchState: 'SKIPPED' as const, awaitingConfirmationUntil: null, onceOutcome: null, text: 'Fired' },
+    { onceState: 'FIRED' as const, dispatchState: 'SKIPPED' as const, onceProof: 'observed_open' as const, awaitingConfirmationUntil: null, onceOutcome: null, text: 'Valve reported open' },
+  ])('shows the one-time outcome: $text', async ({ text, ...status }) => {
+    schedulesMock.mockResolvedValue({
+      ...emptyResponse(),
+      schedules: [{ scheduleUuid: 'once-status', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Once status', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, ...status }],
+    });
+    renderDialog(makeValve());
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.queryByText(/Dispatch: UNKNOWN/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dispatch: SKIPPED/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { name: 'polls while waiting', now: '2026-08-19T10:30:00Z', advance: 30050, outcome: 'uncertain', text: 'Not confirmed — check the valve' },
+    { name: 'revalidates just after the earliest deadline', now: '2026-08-19T10:37:55Z', advance: 5150, outcome: 'fired', text: 'Fired' },
+  ])('S3: $name and replaces the waiting text', async ({ now, advance, outcome, text }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(now));
+    const schedule = { scheduleUuid: 'review-waiting', deviceEui: 'A840410000000001', kind: 'ONCE' as const,
+      label: 'Review waiting', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z',
+      durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING' as const,
+      dispatchState: 'UNKNOWN' as const, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null };
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [schedule] });
+    const view = renderDialog(makeValve());
+    try {
+      expect(await screen.findByText(/Sent, waiting for the valve/)).toBeInTheDocument();
+      const calls = schedulesMock.mock.calls.length;
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...schedule,
+        onceState: outcome === 'fired' ? 'FIRED' : 'SKIPPED', dispatchState: 'SKIPPED',
+        awaitingConfirmationUntil: null, onceOutcome: outcome === 'uncertain' ? 'uncertain' : null }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(advance); });
+      expect(schedulesMock.mock.calls.length).toBeGreaterThan(calls);
+      expect(screen.getByText(text)).toBeInTheDocument();
+      expect(screen.queryByText(/Sent, waiting for the valve/)).not.toBeInTheDocument();
+      const settledCalls = schedulesMock.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(settledCalls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('S3: keeps refreshing an attempted row when the deadline clears before the worker settles it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-19T10:37:55Z'));
+    const schedule = { scheduleUuid: 'worker-lag', deviceEui: 'A840410000000001', kind: 'ONCE' as const,
+      label: 'Worker lag', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z',
+      durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING' as const,
+      dispatchState: 'UNKNOWN' as const, dispatchAttemptedAt: '2026-08-19T10:03:00Z',
+      awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null };
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [schedule] });
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText(/Sent, waiting for the valve/);
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...schedule, awaitingConfirmationUntil: null }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5150); });
+      const calls = schedulesMock.mock.calls.length;
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...schedule,
+        awaitingConfirmationUntil: null, onceState: 'SKIPPED', dispatchState: 'SKIPPED', onceOutcome: 'uncertain' }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30050); });
+      expect(schedulesMock.mock.calls.length).toBeGreaterThan(calls);
+      expect(screen.getByText('Not confirmed — check the valve')).toBeInTheDocument();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('R2_TRANSPORT_ONLY_LAG: polls past a cleared deadline until a transport-only row settles', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-19T10:37:55Z'));
+    const row = { scheduleUuid: 'transport-only', deviceEui: 'A840410000000001', kind: 'ONCE' as const,
+      label: 'Transport only', weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z',
+      durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING' as const,
+      dispatchState: 'UNKNOWN' as const, dispatchAttemptedAt: null,
+      awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null };
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [row] });
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText(/Sent, waiting for the valve/);
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...row, awaitingConfirmationUntil: null }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5150); });
+      const calls = schedulesMock.mock.calls.length;
+      schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{ ...row,
+        awaitingConfirmationUntil: null, onceState: 'SKIPPED', dispatchState: 'SKIPPED', onceOutcome: 'uncertain' }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBeGreaterThan(calls);
+      expect(screen.getByText('Not confirmed — check the valve')).toBeInTheDocument();
+      const settledCalls = schedulesMock.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(settledCalls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('R2 S3: unmount cancels transport-only polling and deadline revalidation', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-08-19T10:37:55Z'));
+    schedulesMock.mockResolvedValue({ ...emptyResponse(), schedules: [{
+      scheduleUuid: 'unmount-pending', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Pending',
+      weekdaysMask: null, startTime: null, fireAt: '2026-08-19T10:00:00Z', durationMinutes: 2,
+      timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: 'UNKNOWN',
+      dispatchAttemptedAt: null, awaitingConfirmationUntil: '2026-08-19T10:38:00Z', onceOutcome: null,
+    }] });
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText(/Sent, waiting for the valve/);
+      const calls = schedulesMock.mock.calls.length;
+      view.unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(calls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['empty', 'planned', 'planned without intent'])('S3: adds no polling for %s schedules without an attempt', async (kind) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const response = emptyResponse();
+    if (kind !== 'empty') response.schedules.push({ scheduleUuid: 'planned-once', deviceEui: 'A840410000000001', kind: 'ONCE', label: 'Planned', weekdaysMask: null, startTime: null, fireAt: '2026-08-20T10:00:00Z', durationMinutes: 2, timezone: 'Europe/Zurich', enabled: true, onceState: 'PENDING', dispatchState: kind === 'planned without intent' ? null : 'PENDING' });
+    schedulesMock.mockResolvedValue(response);
+    const view = renderDialog(makeValve());
+    try {
+      await screen.findByText('Schedules');
+      const calls = schedulesMock.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3600000); });
+      expect(schedulesMock.mock.calls.length).toBe(calls);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it('badges each weekday with the first push row as the API returns it, even when queuedAt disagrees (clock stepped back)', async () => {

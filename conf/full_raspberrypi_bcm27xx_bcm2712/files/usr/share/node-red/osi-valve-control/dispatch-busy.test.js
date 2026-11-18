@@ -12,7 +12,7 @@ const busy = () => Object.assign(new Error('database is locked'), { code: 'SQLIT
 
 // Inject after the transaction body so the real fixture must roll back every
 // partial write, including reservation/snapshot and INTENT/ATTEMPTED changes.
-async function harness(t, { transaction = 4, failures = 2, error = busy(), busyMs = 0, enqueueMs = 0 } = {}) {
+async function harness(t, { transaction = 4, failures = 2, error = busy(), busyMs = 0, enqueueMs = 0, enqueueError } = {}) {
   const fixture = await tempDb();
   t.after(fixture.cleanup);
   let elapsed = 0;
@@ -45,7 +45,12 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
     retryClock: () => elapsed,
     sleep: async (ms) => { sleeps.push(ms); elapsed += ms; },
     warn: (message) => warnings.push(message),
-    transport: { async enqueueDownlink() { enqueueCalls += 1; elapsed += enqueueMs; return { id: 'busy-queue' }; } },
+    transport: { async enqueueDownlink() {
+      enqueueCalls += 1;
+      elapsed += enqueueMs;
+      if (enqueueError) throw enqueueError;
+      return { id: 'busy-queue' };
+    } },
   };
   return { fixture, args, sleeps, warnings, phases, error,
     get elapsed() { return elapsed; }, get injections() { return injections; }, get enqueueCalls() { return enqueueCalls; },
@@ -54,6 +59,17 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
       return row ? JSON.parse(row.transport_json) : null;
     },
   };
+}
+
+async function reserveConditionalOwner(h) {
+  const occurrence = { schedule_uuid: 'busy-schedule', local_date: '2026-10-18', local_time: '10:00' };
+  await h.fixture.db.run('INSERT INTO irrigation_occurrences(schedule_uuid, local_date, local_time, device_eui, due_at, state, expires_at, requested_duration_minutes, reservation_start_at, reservation_end_at, reserved_minutes) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [
+    occurrence.schedule_uuid, occurrence.local_date, occurrence.local_time, FIXTURE_EUI, AT, 'PENDING', '2026-10-18T10:10:00.000Z', 2, AT, '2026-10-18T10:12:00.000Z', 2,
+  ]);
+  const reserved = await dispatch.reserveValveCommand({ db: h.fixture.db, command: {
+    ...h.args.command, conditional: true, occurrence,
+  }, now: AT });
+  return { type: 'expectation', id: reserved.expectation.expectation_id };
 }
 
 for (const [stage, transaction] of [['reservation', 1], ['before claim', 2], ['claim', 3]]) {
@@ -95,6 +111,110 @@ test('post-enqueue busy retries ACCEPTED bookkeeping without another enqueue', a
   assert.equal((await h.state()).phase, 'ACCEPTED');
   assert.ok(!h.phases.includes('UNKNOWN'));
 });
+
+for (const [phase, enqueueError] of [
+  ['enqueue_rejected', Object.assign(new Error('enqueue rejected'), {
+    provenance: 'chirpstack_enqueue_preacceptance', grpcCode: 3, step: 'enqueueDownlink',
+  })],
+  ['enqueue_failed_before_acceptance', Object.assign(new Error('local preflight failed'), {
+    code: 'enqueue_failed_before_acceptance', provenance: 'local_preflight', step: 'enqueueDownlink',
+  })],
+  ['UNKNOWN', new Error('transport unavailable')],
+]) {
+  test(`${phase} bookkeeping retries a busy write and preserves the enqueue failure`, async (t) => {
+    const h = await harness(t, { failures: 1, enqueueError });
+    const result = await dispatch.executeValveAttempt(h.args);
+    assert.equal(result.accepted, false);
+    assert.equal(result.phase, phase);
+    assert.equal(result.queue_id, null);
+    assert.equal(result.error, enqueueError);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2);
+    assert.deepEqual(h.sleeps, [100]);
+    assert.deepEqual(h.warnings, []);
+    const state = await h.state();
+    assert.equal(state.phase, phase);
+    if (phase === 'UNKNOWN') {
+      assert.equal(state.error, enqueueError.message);
+      assert.ok(state.unknown_at);
+      assert.equal(state.failure_code, undefined);
+    } else {
+      assert.equal(state.failure_code, phase);
+      assert.ok(state.failed_at);
+      assert.equal(state.error, undefined);
+    }
+    assert.equal(state.queue_id, undefined);
+  });
+
+  test(`${phase} persistent busy surfaces the original database error after three attempts`, async (t) => {
+    const h = await harness(t, { failures: Infinity, enqueueError });
+    await assert.rejects(dispatch.executeValveAttempt(h.args), (error) => error === h.error);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 3);
+    assert.deepEqual(h.sleeps, [100, 200]);
+    assert.ok(h.elapsed < 9000);
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  });
+
+  test(`${phase} busy waits stop retries within the shared deadline`, async (t) => {
+    const h = await harness(t, { failures: Infinity, enqueueError, busyMs: 1800, enqueueMs: 1000 });
+    await assert.rejects(dispatch.executeValveAttempt(h.args), (error) => error === h.error);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2, 'no room for another 5 s database wait');
+    assert.deepEqual(h.sleeps, [100]);
+    assert.equal(h.elapsed, 4700);
+    assert.ok(h.elapsed < 9000);
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  });
+
+  if (phase === 'UNKNOWN') continue;
+
+  test(`${phase} conditional expiry retries after rejection persistence and releases the reservation`, async (t) => {
+    // Direct enqueue commits beforeClaim, claim, rejection, then expiry.
+    const h = await harness(t, { transaction: 4, failures: 1, enqueueError });
+    const owner = await reserveConditionalOwner(h);
+    const result = await dispatch.enqueueValveCommand({ ...h.args, owner, item: FRAME });
+    assert.equal(result.accepted, false);
+    assert.equal(result.phase, phase);
+    assert.equal(result.error, enqueueError);
+    assert.equal(h.enqueueCalls, 1);
+    assert.equal(h.injections, 2);
+    assert.deepEqual(h.sleeps, [100]);
+    assert.equal((await h.state()).failure_code, phase);
+    assert.equal(h.phases.filter((value) => value === phase).length, 1, 'rejection persistence committed without retry');
+    const occurrence = await h.fixture.db.get('SELECT state, queue_id, sent_at FROM irrigation_occurrences WHERE command_id=?', ['busy-command']);
+    assert.equal(occurrence.state, 'EXPIRED');
+    assert.equal(occurrence.queue_id, null);
+    assert.equal(occurrence.sent_at, null);
+    const accounting = await dispatch.getDailyAccounting({ db: h.fixture.db, deviceEui: FIXTURE_EUI, timezone: 'UTC' });
+    assert.equal(accounting.days['2026-10-18'] || 0, 0);
+    const next = await dispatch.reserveValveCommand({ db: h.fixture.db,
+      command: { ...h.args.command, command_id: 'next-command' }, now: AT, effectContext: { ordinary_candidate: true } });
+    assert.ok(next.expectation);
+    assert.equal(next.replayed, false);
+    assert.equal(h.enqueueCalls, 1, 'reserving the next command sends no frame');
+  });
+
+  for (const [bound, busyMs, enqueueMs, attempts, sleeps, elapsed] of [
+    ['attempt', 0, 0, 3, [100, 200], 300],
+    ['deadline', 1800, 1000, 2, [100], 4700],
+  ]) {
+    test(`${phase} conditional expiry ${bound} exhaustion surfaces the database error`, async (t) => {
+      const h = await harness(t, { transaction: 4, failures: Infinity, enqueueError, busyMs, enqueueMs });
+      const owner = await reserveConditionalOwner(h);
+      await assert.rejects(dispatch.enqueueValveCommand({ ...h.args, owner, item: FRAME }), (error) => error === h.error);
+      assert.equal(h.enqueueCalls, 1);
+      assert.equal(h.injections, attempts);
+      assert.deepEqual(h.sleeps, sleeps);
+      assert.equal(h.elapsed, elapsed);
+      assert.ok(h.elapsed < 9000);
+      assert.equal((await h.state()).phase, phase);
+      assert.equal((await h.state()).failure_code, phase);
+      assert.equal(h.phases.filter((value) => value === phase).length, 1);
+      assert.equal((await h.fixture.db.get('SELECT state FROM irrigation_occurrences WHERE command_id=?', ['busy-command'])).state, 'ATTEMPTED');
+    });
+  }
+}
 
 test('post-enqueue persistent busy warns, stays claimed for recovery, and still answers ACCEPTED', async (t) => {
   const h = await harness(t, { failures: Infinity });
