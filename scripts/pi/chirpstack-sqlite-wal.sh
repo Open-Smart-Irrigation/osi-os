@@ -1,14 +1,24 @@
 #!/bin/sh
-# Run per gateway after operator review: sh chirpstack-sqlite-wal.sh --apply
+# After copying this script to /tmp, use this on a flaky SSH link:
+# setsid sh /tmp/chirpstack-sqlite-wal.sh --apply > /tmp/cs-wal.log 2>&1 < /dev/null &
+# Run per gateway only after operator review.
 # OSI_CS_ROOT prefixes filesystem paths for tests. Other OSI_CS_* overrides
-# select the test service, sqlite module and API port; defaults are the Pi's.
+# select test commands, the service, sqlite module and API port; defaults are the Pi's.
 set -u
+# A lost SSH output pipe must not bypass the EXIT recovery path.
+trap '' PIPE
+ID=${OSI_CS_ID:-id}
+DATE=${OSI_CS_DATE:-date}
+SLEEP=${OSI_CS_SLEEP:-sleep}
+DF=${OSI_CS_DF:-df}
+SYNC=${OSI_CS_SYNC:-sync}
 ROOT=${OSI_CS_ROOT:-}
 INIT="$ROOT/etc/init.d/chirpstack"
 SERVICE=${OSI_CS_SERVICE:-$INIT}
 BACKUP=
 STOPPED=0
 MODIFIED=0
+RESTART_ONLY=0
 LOCKED=0
 LOCK="$ROOT/var/run/chirpstack-sqlite-wal.lock"
 
@@ -92,6 +102,16 @@ function header() {
     throw Error('unrecognised SQLite journal header');
   } finally { fs.closeSync(fd); }
 }
+// Restrict recognition to the sqlite section of the configuration heredoc.
+// Accept #670's commented multiline list and the one-shot's single line.
+function configured(sqliteBlock) {
+  const text = sqliteBlock.replace(/^\s*#.*$/gm, '');
+  const match = /^\s*pragmas\s*=\s*\[([^\]]*)\]\s*$/m.exec(text);
+  if (!match) return false;
+  const values = match[1].split(',').map((v) => v.trim()).filter(Boolean);
+  return values.includes('"busy_timeout = 5000"') && values.includes('"journal_mode = WAL"') &&
+    values.every((v) => /^"[^"\r\n]*"$/.test(v));
+}
 function shape(text, allowWal) {
   const fail = () => { throw Error('init script shape not recognised; not modified'); };
   const lines = text.split('\n');
@@ -102,27 +122,35 @@ function shape(text, allowWal) {
   const here = lines.indexOf('\tcat >> /var/etc/$PACKAGE_NAME/$PACKAGE_NAME.toml <<- EOF', start);
   const eof = lines.indexOf('\tEOF', here + 1);
   if (!(start < here && here < a && a < eof && eof < end) || lines[a - 1] !== '\t\t[sqlite]') fail();
+  const nextSection = lines.findIndex((l, i) => i > a && /^\s*\[/.test(l));
   const pragmas = lines.filter((l) => /^\s*pragmas\s*=/.test(l));
-  const wal = pragmas.length === 1 && lines[a + 1] === pragma;
+  const wal = pragmas.length === 1 && configured(lines.slice(a + 1, nextSection < 0 ? eof : Math.min(nextSection, eof)).join('\n'));
   if (pragmas.length && !(allowWal && wal)) fail();
   return wal;
 }
 function copy(source, dest) {
   const s = fs.statSync(source);
   if (!s.isFile()) throw Error('not a regular file: ' + source);
+  const sourceHash = hash(source);
   fs.copyFileSync(source, dest, fs.constants.COPYFILE_EXCL);
+  if (hash(dest) !== sourceHash || hash(source) !== sourceHash) throw Error('backup copy mismatch: ' + source);
   fs.chownSync(dest, s.uid, s.gid);
   fs.chmodSync(dest, s.mode & 0o7777);
   fs.utimesSync(dest, s.atime, s.mtime);
 }
 function publish(dest, content, metadata, validate) {
-  const temp = dest + '.wal-' + process.pid;
+  // Hidden name: even an uncatchable kill must not leave a boot init entry.
+  const temp = path.join(path.dirname(dest), '.' + path.basename(dest) + '.wal-' + process.pid);
   try {
     fs.writeFileSync(temp, content, { flag: 'wx', mode: 0o600 });
     fs.chownSync(temp, metadata.uid, metadata.gid);
     fs.chmodSync(temp, metadata.mode & 0o7777);
     if (validate) validate(temp);
+    const fd = fs.openSync(temp, 'r');
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(temp, dest);
+    const dir = fs.openSync(path.dirname(dest), 'r');
+    try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
   } finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
 }
 function saved(dir) {
@@ -143,10 +171,6 @@ function saved(dir) {
 }
 async function sql(query) {
   const sqlite = require(process.env.OSI_CS_SQLITE_MODULE || at('/srv/node-red/node_modules/sqlite3'));
-  if (sqlite.DatabaseSync) {
-    const d = new sqlite.DatabaseSync(dbFile);
-    try { return d.prepare(query).all(); } finally { d.close(); }
-  }
   // No CREATE: an absent database must never turn into an empty database.
   return new Promise((resolve, reject) => {
     const d = new sqlite.Database(dbFile, sqlite.OPEN_READWRITE, (err) => {
@@ -158,28 +182,42 @@ async function sql(query) {
 }
 async function main() {
   switch (op) {
-    case 'running': {
-      let running = false;
+    case 'running':
+    case 'identity': {
+      const identities = [];
       for (const pid of fs.readdirSync(at('/proc')).filter((p) => /^\d+$/.test(p))) {
         try {
-          if (fs.readFileSync(at('/proc/') + pid + '/comm', 'utf8').trim() === 'chirpstack') running = true;
+          const base = at('/proc/') + pid;
+          if (fs.readlinkSync(base + '/exe') !== '/usr/bin/chirpstack') continue;
+          const cmd = fs.readFileSync(base + '/cmdline', 'utf8').split('\0');
+          if (cmd[0] !== '/usr/bin/chirpstack') continue;
+          // starttime detects PID reuse as well as a procd respawn.
+          const stat = fs.readFileSync(base + '/stat', 'utf8').split(') ')[1].split(' ');
+          identities.push(pid + ':' + stat[19]);
         } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ESRCH') throw error; }
       }
-      console.log(running ? 'yes' : 'no'); break;
+      identities.sort();
+      console.log(op === 'identity' ? identities.join(',') : identities.length ? 'yes' : 'no'); break;
+    }
+    case 'recovery-backup': {
+      const parent = at('/srv/backup');
+      const dirs = fs.readdirSync(parent).filter((name) => /^chirpstack-wal-/.test(name) && fs.statSync(path.join(parent, name)).isDirectory()).sort();
+      if (!dirs.length) throw Error('no backup directory found');
+      console.log(path.join(parent, dirs[dirs.length - 1])); break;
     }
     case 'header': console.log(header()); break;
     case 'init-state': console.log(shape(fs.readFileSync(init, 'utf8'), true) ? 'yes' : 'no'); break;
     case 'preflight': {
       if (require('child_process').spawnSync('sh', ['-n', init]).status !== 0) throw Error('init script shape not recognised; not modified');
-      if (shape(fs.readFileSync(init, 'utf8'), true) && header() === 'WAL') { console.log('already'); return; }
-      shape(fs.readFileSync(init, 'utf8'), false);
+      const ready = shape(fs.readFileSync(init, 'utf8'), true);
+      if (ready && header() === 'WAL') { console.log('already'); return; }
       header();
       require(process.env.OSI_CS_SQLITE_MODULE || at('/srv/node-red/node_modules/sqlite3'));
       let size = 0;
       for (const name of ['chirpstack.sqlite', 'chirpstack.sqlite-wal', 'chirpstack.sqlite-shm', 'chirpstack.sqlite-journal']) {
         if (fs.existsSync(files[name])) size += fs.statSync(files[name]).size;
       }
-      console.log(Math.ceil(size * 2 / 1024));
+      console.log((ready ? 'restart:' : '') + Math.ceil(size * 2 / 1024));
       break;
     }
     case 'backup': {
@@ -222,6 +260,16 @@ async function main() {
       });
       break;
     }
+    case 'clean-temps': {
+      for (const dest of [init, files['backup.sh'], files['restore.sh']]) {
+        const dir = path.dirname(dest), prefix = '.' + path.basename(dest) + '.wal-';
+        if (!fs.existsSync(dir)) continue;
+        for (const name of fs.readdirSync(dir)) {
+          if (name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length))) fs.unlinkSync(path.join(dir, name));
+        }
+      }
+      break;
+    }
     case 'install': {
       if (fs.existsSync(at('/opt/chirpstack'))) {
         for (const [name, text] of Object.entries(feedScripts)) publish(files[name], text, { uid: process.getuid(), gid: process.getgid(), mode: 0o755 });
@@ -233,24 +281,27 @@ async function main() {
       console.log(yes ? 'yes' : 'no'); break;
     }
     case 'restore-config': {
-      const { present } = saved(arg);
+      let present;
+      try { ({ present } = saved(arg)); }
+      catch (error) { console.error('NOT RESTORED: chirpstack.init, backup.sh, restore.sh (backup validation failed)'); throw error; }
+      const failed = [];
       for (const name of ['chirpstack.init', 'backup.sh', 'restore.sh']) {
-        if (present.has(name)) { const p = path.join(arg, name); publish(files[name], fs.readFileSync(p), fs.statSync(p)); }
-        else if (fs.existsSync(files[name])) fs.unlinkSync(files[name]);
+        try {
+          if (present.has(name)) { const p = path.join(arg, name); publish(files[name], fs.readFileSync(p), fs.statSync(p)); }
+          else if (fs.existsSync(files[name])) fs.unlinkSync(files[name]);
+          console.error('RESTORED: ' + name + (present.has(name) ? '' : ' (originally absent)'));
+        } catch (error) {
+          console.error('NOT RESTORED: ' + name + ': ' + error.message);
+          failed.push(name);
+        }
       }
-      break;
-    }
-    case 'restore-db': {
-      const { present } = saved(arg);
-      for (const name of ['chirpstack.sqlite', 'chirpstack.sqlite-wal', 'chirpstack.sqlite-shm', 'chirpstack.sqlite-journal']) {
-        if (present.has(name)) { const p = path.join(arg, name); publish(files[name], fs.readFileSync(p), fs.statSync(p)); }
-        else if (fs.existsSync(files[name])) fs.unlinkSync(files[name]);
-      }
+      if (failed.length) throw Error('configuration restoration failed: ' + failed.join(', '));
       break;
     }
     case 'config': {
       const text = fs.readFileSync(at('/var/etc/chirpstack/chirpstack.toml'), 'utf8');
-      if (!text.split('\n').some((line) => line.trim() === pragma.trim())) throw Error('generated configuration lacks pragmas');
+      const block = /(?:^|\n)\s*\[sqlite\]([^]*?)(?=\n\s*\[|$)/.exec(text);
+      if (!block || !configured(block[1])) throw Error('generated configuration lacks pragmas');
       break;
     }
     case 'port': {
@@ -271,51 +322,72 @@ CS_NODE
 
 running() { [ "$(cs_node running)" = yes ]; }
 stop_cs() {
-    "$SERVICE" stop || return 1
-    stop_deadline=$(( $(date +%s) + 30 ))
+    # procd can return nonzero for an already-stopped service. Trust /proc.
+    "$SERVICE" stop || :
+    stop_deadline=$(( $("$DATE" +%s) + 30 ))
     process_state=$(cs_node running) || return 1
     while [ "$process_state" = yes ]; do
-        [ "$(date +%s)" -lt "$stop_deadline" ] || return 1
-        sleep 1 || return 1
+        [ "$("$DATE" +%s)" -lt "$stop_deadline" ] || return 1
+        "$SLEEP" 1 || return 1
         process_state=$(cs_node running) || return 1
     done
 }
 start_cs() {
     "$SERVICE" start || return 1
-    start_deadline=$(( $(date +%s) + 60 ))
+    start_deadline=$(( $("$DATE" +%s) + 60 ))
     while :; do
         if running && cs_node port >/dev/null 2>&1; then return 0; fi
-        [ "$(date +%s)" -lt "$start_deadline" ] || return 1
-        sleep 1 || return 1
+        [ "$("$DATE" +%s)" -lt "$start_deadline" ] || return 1
+        "$SLEEP" 1 || return 1
     done
 }
 rollback_changed() {
-    # Never restore an old database over one ChirpStack has converted and
-    # possibly written to. An unreadable header is uncertain: try SQLite's
-    # lossless DELETE conversion, and leave stopped if that cannot succeed.
-    stop_cs || return 1
-    cs_node restore-config "$BACKUP" || return 1
-    current=$(cs_node header 2>/dev/null) || current=unknown
-    if [ "$current" = DELETE ] && [ "$MODE" = --apply ]; then
-        cs_node restore-db "$BACKUP" || return 1
+    rollback_result=0
+    if stop_cs; then
+        cs_node restore-config "$BACKUP" || rollback_result=1
+        "$SYNC" || rollback_result=1
+        current=$(cs_node header 2>/dev/null) || current=unknown
+        case "$current" in
+            WAL) if cs_node delete; then log 'RESTORED: SQLite DELETE journal (current data retained)' >&2
+                 else log 'NOT RESTORED: SQLite DELETE journal' >&2; rollback_result=1; fi ;;
+            DELETE) log 'RESTORED: SQLite already DELETE; database untouched' >&2 ;;
+            *) log 'NOT RESTORED: unreadable SQLite header; database untouched' >&2; rollback_result=1 ;;
+        esac
     else
-        cs_node delete || return 1
+        log 'NOT RESTORED: init, scripts and journal (ChirpStack did not stop)' >&2
+        rollback_result=1
     fi
-    start_cs || return 1
+    # Always try, even if stop, validation, a file restore or SQLite failed.
+    if start_cs; then log 'RESTORED: ChirpStack started' >&2
+    else log 'NOT RESTORED: ChirpStack start failed' >&2; rollback_result=1; fi
+    final_journal=$(cs_node header 2>/dev/null) || final_journal=unknown
+    log "SQLite journal after restart: $final_journal" >&2
+    log "Database backup is an operator-restore artefact only; never copied over live data: $BACKUP" >&2
+    return "$rollback_result"
 }
 finish() {
     result=$?
-    trap - 0 HUP INT TERM
+    trap - 0
+    # Cleanup must finish even if the terminal keeps sending signals.
+    trap '' HUP INT TERM
     if [ "$result" -ne 0 ] && [ "$STOPPED" = 1 ]; then
         if [ "$MODIFIED" = 1 ]; then
             if rollback_changed; then log "ROLLED BACK: ChirpStack init, scripts and SQLite journal; backup $BACKUP" >&2
-            else log "ERROR: rollback incomplete; keep backup $BACKUP and inspect ChirpStack before restarting" >&2; fi
+            else log "ERROR: rollback incomplete; see RESTORED/NOT RESTORED above; backup $BACKUP" >&2; fi
         else
             start_cs || log 'ERROR: could not restart unchanged ChirpStack' >&2
         fi
     fi
-    [ "$LOCKED" != 1 ] || rmdir "$LOCK" || result=1
+    if [ "$LOCKED" = 1 ]; then
+        cs_node clean-temps || result=1
+        rm -f "$LOCK/backup" || result=1
+        rmdir "$LOCK" || result=1
+    fi
     exit "$result"
+}
+refuse_lock() {
+    recovery_backup=$(cat "$LOCK/backup" 2>/dev/null) || recovery_backup=$(cs_node recovery-backup 2>/dev/null) || recovery_backup="$ROOT/srv/backup/chirpstack-wal-<UTC> (no backup recorded)"
+    die "another WAL one-shot is running or its lock remains: $LOCK; backup $recovery_backup; after confirming no one-shot is running, remove $LOCK/backup and $LOCK, then run sh /tmp/chirpstack-sqlite-wal.sh --rollback $recovery_backup"
 }
 
 MODE=${1:---check}
@@ -333,16 +405,18 @@ if [ "$MODE" = --check ]; then
     scripts_state=$(cs_node scripts-state) || exit 1
     process_state=$(cs_node running) || exit 1
     log "init pragmas: $init_state; journal: $journal; running: $process_state; backup/restore WAL-aware: $scripts_state"
-    if [ "$init_state:$journal:$scripts_state:$process_state" = yes:WAL:yes:yes ]; then log 'OK: already WAL'; exit 0; fi
+    if [ "$init_state:$journal" = yes:WAL ]; then log 'OK: already WAL'; exit 0; fi
     log 'needs conversion'
     exit 3
 fi
 
-[ "$(id -u)" = 0 ] || die 'must run as root; not modified'
+[ "$("$ID" -u)" = 0 ] || die 'must run as root; not modified'
+[ ! -d "$LOCK" ] || refuse_lock
 if [ "$MODE" = --apply ]; then
     required=$(cs_node preflight) || exit 1
     if [ "$required" = already ]; then log 'OK: already WAL'; exit 0; fi
-    free=$(df -Pk "$ROOT/srv" | awk 'NR == 2 { print $4 }') || die 'could not read free space'
+    case "$required" in restart:*) RESTART_ONLY=1; required=${required#restart:} ;; esac
+    free=$("$DF" -Pk "$ROOT/srv" | awk 'NR == 2 { print $4 }') || die 'could not read free space'
     case "$free" in ''|*[!0-9]*) die 'could not read free space' ;; esac
     [ "$free" -ge "$required" ] || die 'not enough free space on /srv (need twice the database and sidecars); not modified'
 else
@@ -353,42 +427,49 @@ fi
 log 'OK: preconditions checked'
 # mkdir is atomic: a concurrent one-shot must never stop the same database.
 mkdir -p "$ROOT/var/run" || die 'cannot create run directory'
-mkdir "$LOCK" 2>/dev/null || die 'another WAL one-shot is running (or its lock remains); not modified'
+mkdir "$LOCK" 2>/dev/null || refuse_lock
 LOCKED=1
 trap finish 0
 trap 'exit 1' HUP INT TERM
 if [ "$MODE" = --apply ]; then
-    BACKUP="$ROOT/srv/backup/chirpstack-wal-$(date -u +%Y%m%dT%H%M%SZ)"
+    BACKUP="$ROOT/srv/backup/chirpstack-wal-$("$DATE" -u +%Y%m%dT%H%M%SZ)"
     mkdir -p "$ROOT/srv/backup" || die 'cannot create backup parent'
     (umask 077; mkdir "$BACKUP") || die 'backup directory already exists or cannot be created'
     log "OK: backup directory $BACKUP"
 fi
+printf '%s\n' "$BACKUP" > "$LOCK/backup" || die 'cannot record recovery backup'
 # Set before stop: even a failed stop must try to restart the service.
 STOPPED=1
 stop_cs || die 'ChirpStack did not stop within 30 seconds; restarting unchanged'
 log 'OK: ChirpStack stopped'
 if [ "$MODE" = --rollback ]; then
-    MODIFIED=1
-    cs_node restore-config "$BACKUP" && cs_node delete || die 'rollback failed'
-    start_cs || die 'ChirpStack did not start after rollback'
+    # This path already performs recovery; do not retry it in the EXIT trap.
+    trap '' HUP INT TERM
     STOPPED=0
-    log "OK: ChirpStack restored to DELETE journal; backup $BACKUP"
+    rollback_changed || die 'rollback incomplete; see RESTORED/NOT RESTORED above'
+    log "OK: ChirpStack configuration restored; journal $final_journal; backup $BACKUP"
     exit 0
 fi
-cs_node backup "$BACKUP" && sync && cs_node manifest "$BACKUP" && sync || die 'backup or manifest failed'
+cs_node backup "$BACKUP" && "$SYNC" && cs_node manifest "$BACKUP" && "$SYNC" || die 'backup or manifest failed'
 log 'OK: stopped database, sidecars, init and helper scripts backed up with manifest'
 cs_node integrity || die 'SQLite integrity check failed; restarting unchanged'
 log 'OK: SQLite integrity check passed'
 MODIFIED=1
-cs_node insert || die 'init insertion failed'
-log 'OK: pragma inserted after sqlite path; owner and mode preserved'
-cs_node install || die 'WAL-aware backup/restore installation failed'
-log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
+if [ "$RESTART_ONLY" = 0 ]; then
+    cs_node insert && "$SYNC" || die 'init insertion failed'
+    log 'OK: pragma inserted after sqlite path; owner and mode preserved'
+    cs_node install && "$SYNC" || die 'WAL-aware backup/restore installation failed'
+    log 'OK: WAL-aware backup/restore scripts installed when /opt/chirpstack exists'
+else
+    log 'OK: existing WAL pragmas retained; restarting ChirpStack to switch the header'
+fi
 start_cs || die 'ChirpStack failed to start or API port 8080 unavailable'
 log 'OK: ChirpStack running and API port reachable'
 journal=$(cs_node header) || die 'cannot verify converted header'
 [ "$journal" = WAL ] || die 'SQLite header did not switch to 02 02'
-sleep 10 && running && cs_node config || die 'post-start health or generated pragma check failed'
+daemon_identity=$(cs_node identity) || die 'cannot record ChirpStack process'
+[ -n "$daemon_identity" ] || die 'ChirpStack process disappeared'
+"$SLEEP" 10 && [ "$(cs_node identity)" = "$daemon_identity" ] && cs_node config || die 'post-start health or generated pragma check failed'
 log 'OK: header 02 02, ChirpStack still running after 10 seconds, generated pragmas verified'
 STOPPED=0
 log "OK: ChirpStack SQLite on WAL; backup $BACKUP"

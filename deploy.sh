@@ -189,14 +189,13 @@ note_chirpstack_wal() {
     ' "${OSI_CS_DB:-/srv/chirpstack/chirpstack.sqlite}" 2>/dev/null; then
         :
     else
-        cs_wal_status=$?
-        if [ "$cs_wal_status" = 3 ]; then
-            echo "NOTE: ChirpStack SQLite is not on WAL; after operator review run: sh scripts/pi/chirpstack-sqlite-wal.sh --apply"
+        ncw_status=$?
+        if [ "$ncw_status" = 3 ]; then
+            echo "NOTE: ChirpStack SQLite is not on WAL; after operator review, copy scripts/pi/chirpstack-sqlite-wal.sh to /tmp on the gateway, then run: setsid sh /tmp/chirpstack-sqlite-wal.sh --apply > /tmp/cs-wal.log 2>&1 < /dev/null &"
         fi
     fi
     return 0
 }
-note_chirpstack_wal
 
 # deploy lock begin
 take_deploy_lock || exit 1
@@ -4217,6 +4216,7 @@ if [ "$soil_profile_repair_failed" = 1 ]; then
     echo ""
 fi
 print_bootstrap_note
+note_chirpstack_wal
 # An unverified start is the deploy's last line (exit 0: the new release runs).
 if [ "$PROBE_OK" = "unverified" ]; then
     echo "UNVERIFIED: payloads/$DEPLOY_STAMP runs, but its start could not be confirmed: $NODE_RED_START_REASON. The next deploy checks it again."
