@@ -65,6 +65,7 @@ TMP=
 CHECK=
 LOCKED=0
 MOVED=
+UNCLEAR_MOVES=
 ORIGINAL_FILES=
 ORIGINAL_MANIFEST=
 RECOVERY_INCOMPLETE=0
@@ -198,6 +199,26 @@ record_originals() {
         fi
     done
 }
+original_hash() {
+    ORIGINAL_HASH=
+    while read -r original_expected original_name; do
+        if [ "$original_name" = "$1" ]; then ORIGINAL_HASH=$original_expected; return 0; fi
+    done < "$ORIGINAL_MANIFEST"
+    return 1
+}
+hash_matches() {
+    [ -f "$1" ] && [ ! -L "$1" ] && hash_file "$1" && [ "$HASH" = "$2" ]
+}
+classify_live_move() {
+    # A failed mv can still have renamed the file. Both paths and the original
+    # hash must prove the outcome before recovery can change service state.
+    MOVE_OUTCOME=unclear
+    if [ ! -e "$1" ] && [ ! -L "$1" ] && hash_matches "$2" "$3"; then
+        MOVE_OUTCOME=moved
+    elif hash_matches "$1" "$3" && [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        MOVE_OUTCOME=not-moved
+    fi
+}
 verify_live() {
     live_seen=' '
     while read -r expected live_name; do
@@ -226,11 +247,19 @@ rollback() {
         live_path "$rollback_name"
         recovery="$LIVE.pre-restore-$STAMP"
         pending="$recovery.pending"
+        original_hash "$rollback_name" || return 1
         # Keep every original until recovery is verified. Stage a checked copy
         # beside the live path, then atomically replace it; never unlink the
         # replacement before the rename succeeds.
         if [ ! -e "$pending" ] && [ ! -L "$pending" ] && copy_checked "$recovery" "$pending"; then
-            mv "$pending" "$LIVE" || rollback_result=1
+            if ! mv "$pending" "$LIVE"; then
+                classify_live_move "$pending" "$LIVE" "$ORIGINAL_HASH"
+                case "$MOVE_OUTCOME" in
+                    moved) ;; # The checked original is back despite the status.
+                    not-moved) rollback_result=1 ;;
+                    unclear) ERROR="$ERROR; move outcome unclear: $pending -> $LIVE"; return 1 ;;
+                esac
+            fi
         else
             rollback_result=1
         fi
@@ -270,6 +299,7 @@ report_recovery() {
         recovery_state=absent
         if [ -e "$recovery" ]; then recovery_state=present; fi
         log "RECOVERY: $recovery_name: live $LIVE ($live_state); original $recovery ($recovery_state)" >&2
+        if [ -e "$recovery.pending" ]; then log "RECOVERY: pending copy $recovery.pending" >&2; fi
     done
     log "RECOVERY: validated replacement snapshot and original hashes retained at $TMP" >&2
     log 'BEGIN RECOVERY COMMANDS' >&2
@@ -277,12 +307,23 @@ report_recovery() {
     quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
     quote_path "$STAMP"; log "recovery_token=$QUOTED" >&2
     cat >&2 <<'RECOVERY_START'
-if mkdir "$recovery_lock" 2>/dev/null; then
-    printf '%s\\n' "$recovery_token" > "$recovery_lock/recovery" || exit 1
-else
-    [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || { echo 'ERROR: another maintenance owner holds the lock'; exit 1; }
-fi
+[ -d "$recovery_lock" ] && [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || {
+    echo 'ERROR: recovery already completed or another maintenance owner holds the lock' >&2
+    exit 1
+}
 recovery_fail() { echo "ERROR: recovery $*; lock retained" >&2; exit 1; }
+recovery_hash_matches() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    printf '%s  %s\\n' "$2" "$1" | sha256sum -c - >/dev/null 2>&1
+}
+recovery_move() {
+    if mv -f "$1" "$2"; then return 0; fi
+    if [ ! -e "$1" ] && [ ! -L "$1" ] && recovery_hash_matches "$2" "$3"; then return 0; fi
+    if recovery_hash_matches "$1" "$3" && [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        recovery_fail "rename did not take effect: $1 -> $2"
+    fi
+    recovery_fail "move outcome unclear: $1 -> $2"
+}
 trap 'recovery_result=$?; trap - 0; if [ "$recovery_result" -ne 0 ]; then printf "%s\\n" "$recovery_token" > "$recovery_lock/recovery"; service chirpstack stop; service redis stop; fi; exit "$recovery_result"' 0
 service chirpstack stop || recovery_fail 'stop ChirpStack'
 service redis stop || recovery_fail 'stop Redis'
@@ -299,15 +340,19 @@ for recovery_process in chirpstack redis-server; do
 done
 RECOVERY_STOP
     while read -r expected recovery_name; do
-        case " $MOVED " in *" $recovery_name "*) ;; *) continue ;; esac
+        case " $MOVED $UNCLEAR_MOVES " in *" $recovery_name "*) ;; *) continue ;; esac
         live_path "$recovery_name"
         quote_path "$LIVE.pre-restore-$STAMP"; recovery_from=$QUOTED
         quote_path "$LIVE.pre-restore-$STAMP.pending"; recovery_pending=$QUOTED
         quote_path "$LIVE"; recovery_to=$QUOTED
-        log "[ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
-        log "cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
-        log "printf '%s  %s\\n' '$expected' $recovery_pending | sha256sum -c - || recovery_fail 'hash $recovery_name'" >&2
-        log "mv -f $recovery_pending $recovery_to || recovery_fail 'rename $recovery_name'" >&2
+        log "if recovery_hash_matches $recovery_from '$expected'; then" >&2
+        log "  [ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
+        log "  cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
+        log "  recovery_hash_matches $recovery_pending '$expected' || recovery_fail 'hash $recovery_name'" >&2
+        log "  recovery_move $recovery_pending $recovery_to '$expected'" >&2
+        log "elif ! recovery_hash_matches $recovery_to '$expected'; then" >&2
+        log "  recovery_fail 'no verified original for $recovery_name; inspect recovery paths'" >&2
+        log 'fi' >&2
     done < "$ORIGINAL_MANIFEST"
     for recovery_name in $FILES; do
         case " $ORIGINAL_FILES " in *" $recovery_name "*) continue ;; esac
@@ -423,7 +468,9 @@ finish() {
     if [ "$result" -eq 0 ]; then
         if ! start_services; then ERROR='restart: service start failed'; result=1; fi
     fi
-    if [ "$result" -ne 0 ] && { [ -n "$MOVED" ] || [ "$RESTORING" = 1 ]; }; then
+    if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 1 ]; then
+        report_recovery
+    elif [ "$result" -ne 0 ] && { [ -n "$MOVED" ] || [ "$RESTORING" = 1 ]; }; then
         if rollback; then log 'ROLLED BACK: original SQLite files and Redis dump restored'
         else
             RECOVERY_INCOMPLETE=1
@@ -524,6 +571,7 @@ TMP=
 CHECK=
 LOCKED=0
 MOVED=
+UNCLEAR_MOVES=
 ORIGINAL_FILES=
 ORIGINAL_MANIFEST=
 RECOVERY_INCOMPLETE=0
@@ -657,6 +705,26 @@ record_originals() {
         fi
     done
 }
+original_hash() {
+    ORIGINAL_HASH=
+    while read -r original_expected original_name; do
+        if [ "$original_name" = "$1" ]; then ORIGINAL_HASH=$original_expected; return 0; fi
+    done < "$ORIGINAL_MANIFEST"
+    return 1
+}
+hash_matches() {
+    [ -f "$1" ] && [ ! -L "$1" ] && hash_file "$1" && [ "$HASH" = "$2" ]
+}
+classify_live_move() {
+    # A failed mv can still have renamed the file. Both paths and the original
+    # hash must prove the outcome before recovery can change service state.
+    MOVE_OUTCOME=unclear
+    if [ ! -e "$1" ] && [ ! -L "$1" ] && hash_matches "$2" "$3"; then
+        MOVE_OUTCOME=moved
+    elif hash_matches "$1" "$3" && [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        MOVE_OUTCOME=not-moved
+    fi
+}
 verify_live() {
     live_seen=' '
     while read -r expected live_name; do
@@ -685,11 +753,19 @@ rollback() {
         live_path "$rollback_name"
         recovery="$LIVE.pre-restore-$STAMP"
         pending="$recovery.pending"
+        original_hash "$rollback_name" || return 1
         # Keep every original until recovery is verified. Stage a checked copy
         # beside the live path, then atomically replace it; never unlink the
         # replacement before the rename succeeds.
         if [ ! -e "$pending" ] && [ ! -L "$pending" ] && copy_checked "$recovery" "$pending"; then
-            mv "$pending" "$LIVE" || rollback_result=1
+            if ! mv "$pending" "$LIVE"; then
+                classify_live_move "$pending" "$LIVE" "$ORIGINAL_HASH"
+                case "$MOVE_OUTCOME" in
+                    moved) ;; # The checked original is back despite the status.
+                    not-moved) rollback_result=1 ;;
+                    unclear) ERROR="$ERROR; move outcome unclear: $pending -> $LIVE"; return 1 ;;
+                esac
+            fi
         else
             rollback_result=1
         fi
@@ -729,6 +805,7 @@ report_recovery() {
         recovery_state=absent
         if [ -e "$recovery" ]; then recovery_state=present; fi
         log "RECOVERY: $recovery_name: live $LIVE ($live_state); original $recovery ($recovery_state)" >&2
+        if [ -e "$recovery.pending" ]; then log "RECOVERY: pending copy $recovery.pending" >&2; fi
     done
     log "RECOVERY: validated replacement snapshot and original hashes retained at $TMP" >&2
     log 'BEGIN RECOVERY COMMANDS' >&2
@@ -736,12 +813,23 @@ report_recovery() {
     quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
     quote_path "$STAMP"; log "recovery_token=$QUOTED" >&2
     cat >&2 <<'RECOVERY_START'
-if mkdir "$recovery_lock" 2>/dev/null; then
-    printf '%s\\n' "$recovery_token" > "$recovery_lock/recovery" || exit 1
-else
-    [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || { echo 'ERROR: another maintenance owner holds the lock'; exit 1; }
-fi
+[ -d "$recovery_lock" ] && [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || {
+    echo 'ERROR: recovery already completed or another maintenance owner holds the lock' >&2
+    exit 1
+}
 recovery_fail() { echo "ERROR: recovery $*; lock retained" >&2; exit 1; }
+recovery_hash_matches() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    printf '%s  %s\\n' "$2" "$1" | sha256sum -c - >/dev/null 2>&1
+}
+recovery_move() {
+    if mv -f "$1" "$2"; then return 0; fi
+    if [ ! -e "$1" ] && [ ! -L "$1" ] && recovery_hash_matches "$2" "$3"; then return 0; fi
+    if recovery_hash_matches "$1" "$3" && [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        recovery_fail "rename did not take effect: $1 -> $2"
+    fi
+    recovery_fail "move outcome unclear: $1 -> $2"
+}
 trap 'recovery_result=$?; trap - 0; if [ "$recovery_result" -ne 0 ]; then printf "%s\\n" "$recovery_token" > "$recovery_lock/recovery"; service chirpstack stop; service redis stop; fi; exit "$recovery_result"' 0
 service chirpstack stop || recovery_fail 'stop ChirpStack'
 service redis stop || recovery_fail 'stop Redis'
@@ -758,15 +846,19 @@ for recovery_process in chirpstack redis-server; do
 done
 RECOVERY_STOP
     while read -r expected recovery_name; do
-        case " $MOVED " in *" $recovery_name "*) ;; *) continue ;; esac
+        case " $MOVED $UNCLEAR_MOVES " in *" $recovery_name "*) ;; *) continue ;; esac
         live_path "$recovery_name"
         quote_path "$LIVE.pre-restore-$STAMP"; recovery_from=$QUOTED
         quote_path "$LIVE.pre-restore-$STAMP.pending"; recovery_pending=$QUOTED
         quote_path "$LIVE"; recovery_to=$QUOTED
-        log "[ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
-        log "cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
-        log "printf '%s  %s\\n' '$expected' $recovery_pending | sha256sum -c - || recovery_fail 'hash $recovery_name'" >&2
-        log "mv -f $recovery_pending $recovery_to || recovery_fail 'rename $recovery_name'" >&2
+        log "if recovery_hash_matches $recovery_from '$expected'; then" >&2
+        log "  [ ! -L $recovery_pending ] || recovery_fail 'pending path is a symlink'" >&2
+        log "  cp -p $recovery_from $recovery_pending || recovery_fail 'copy $recovery_name'" >&2
+        log "  recovery_hash_matches $recovery_pending '$expected' || recovery_fail 'hash $recovery_name'" >&2
+        log "  recovery_move $recovery_pending $recovery_to '$expected'" >&2
+        log "elif ! recovery_hash_matches $recovery_to '$expected'; then" >&2
+        log "  recovery_fail 'no verified original for $recovery_name; inspect recovery paths'" >&2
+        log 'fi' >&2
     done < "$ORIGINAL_MANIFEST"
     for recovery_name in $FILES; do
         case " $ORIGINAL_FILES " in *" $recovery_name "*) continue ;; esac
@@ -882,7 +974,9 @@ finish() {
     if [ "$result" -eq 0 ]; then
         if ! start_services; then ERROR='restart: service start failed'; result=1; fi
     fi
-    if [ "$result" -ne 0 ] && { [ -n "$MOVED" ] || [ "$RESTORING" = 1 ]; }; then
+    if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 1 ]; then
+        report_recovery
+    elif [ "$result" -ne 0 ] && { [ -n "$MOVED" ] || [ "$RESTORING" = 1 ]; }; then
         if rollback; then log 'ROLLED BACK: original SQLite files and Redis dump restored'
         else
             RECOVERY_INCOMPLETE=1
@@ -964,10 +1058,22 @@ record_originals || fail 'preflight: cannot record stopped original hashes'
 for name in $FILES; do
     live_path "$name"
     if [ -e "$LIVE" ]; then
-        # Ignore catchable signals only over the rename + bookkeeping pair.
+        original_hash "$name" || fail "move: missing original hash for $name"
+        # Ignore catchable signals over the rename and its outcome bookkeeping.
         trap '' HUP INT TERM
-        if mv "$LIVE" "$LIVE.pre-restore-$STAMP"; then MOVED="$MOVED $name"
-        else fail "move: cannot retain original $name"; fi
+        if mv "$LIVE" "$LIVE.pre-restore-$STAMP"; then
+            MOVED="$MOVED $name"
+        else
+            classify_live_move "$LIVE" "$LIVE.pre-restore-$STAMP" "$ORIGINAL_HASH"
+            case "$MOVE_OUTCOME" in
+                moved) MOVED="$MOVED $name" ;;
+                not-moved) ;;
+                unclear) UNCLEAR_MOVES="$UNCLEAR_MOVES $name"; RECOVERY_INCOMPLETE=1 ;;
+            esac
+            trap 'fail "signal: interrupted"' HUP INT TERM
+            if [ "$RECOVERY_INCOMPLETE" = 1 ]; then fail "move outcome unclear: $name"; fi
+            fail "move: cannot retain original $name (outcome $MOVE_OUTCOME)"
+        fi
         trap 'fail "signal: interrupted"' HUP INT TERM
     fi
 done
