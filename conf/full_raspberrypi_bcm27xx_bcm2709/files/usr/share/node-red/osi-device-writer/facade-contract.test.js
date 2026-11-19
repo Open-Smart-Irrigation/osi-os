@@ -207,4 +207,53 @@ describe('osi-device-writer bound through the osi-db-helper facade (as the flow 
       verify.close();
     }
   });
+
+  it('rolls back canonical and quarantine writes on failure, then retries both through the real facade', async () => {
+    const db = new osiDb.Database(dbPath);
+    const manifest = [{key:'ambient_temperature',edgeField:'ambient_temperature'}];
+    const normalized = {recordedAt:'2026-11-19T10:00:00Z',channels:{ambient_temperature:20},unknown:{retry_unknown_sensor:23}};
+    const meta = {deveui:TEST_DEVEUI,uplinkKey:writer.eventKey('uc512',{deduplicationId:'facade-quarantine-retry'})};
+    try {
+      await db.run("CREATE TRIGGER temporary_quarantine_failure BEFORE INSERT ON ingest_quarantine BEGIN SELECT RAISE(ABORT,'temporary quarantine write failure'); END");
+      await assert.rejects(writer.writeDeviceData(db,manifest,normalized,meta),/temporary quarantine write failure/);
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM device_data WHERE uplink_key=?',[meta.uplinkKey])).n,0);
+      assert.equal((await db.get("SELECT COUNT(*) AS n FROM ingest_quarantine WHERE channel='retry_unknown_sensor'")).n,0);
+      await db.run('DROP TRIGGER temporary_quarantine_failure');
+      assert.equal((await writer.writeDeviceData(db,manifest,normalized,meta)).inserted,true);
+      assert.equal((await writer.writeDeviceData(db,manifest,normalized,meta)).duplicate,true);
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM device_data WHERE uplink_key=?',[meta.uplinkKey])).n,1);
+      assert.equal((await db.get("SELECT COUNT(*) AS n FROM ingest_quarantine WHERE channel='retry_unknown_sensor'")).n,1);
+    } finally { await db.close(); }
+  });
+
+  it('reuses the caller transaction and leaves both writes subject to its rollback', async () => {
+    const db = new osiDb.Database(dbPath);
+    const meta = {deveui:TEST_DEVEUI,uplinkKey:writer.eventKey('uc512',{deduplicationId:'caller-rollback'})};
+    try {
+      await assert.rejects(db.transaction(async tx => {
+        assert.equal(typeof tx.transaction,'undefined','production transaction scopes have no nested BEGIN API');
+        const result = await writer.writeDeviceData(tx,[],{recordedAt:'2026-11-19T10:00:00Z',unknown:{caller_unknown_sensor:23}},meta);
+        assert.equal(result.inserted,true);
+        assert.equal((await tx.get("SELECT COUNT(*) AS n FROM ingest_quarantine WHERE channel='caller_unknown_sensor'")).n,1);
+        throw new Error('caller abort');
+      }),/caller abort/);
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM device_data WHERE uplink_key=?',[meta.uplinkKey])).n,0);
+      assert.equal((await db.get("SELECT COUNT(*) AS n FROM ingest_quarantine WHERE channel='caller_unknown_sensor'")).n,0);
+    } finally { await db.close(); }
+  });
+
+
+  it('serializes concurrent redeliveries and their quarantine through the real facade', async () => {
+    const db = new osiDb.Database(dbPath);
+    const meta = {deveui:TEST_DEVEUI,uplinkKey:writer.eventKey('uc512',{deduplicationId:'concurrent-quarantine'})};
+    try {
+      const write = () => writer.writeDeviceData(db,[],{recordedAt:'2026-11-19T10:00:00Z',unknown:{concurrent_unknown_sensor:23}},meta);
+      const results = await Promise.all([write(),write()]);
+      assert.equal(results.filter(result => result.inserted).length,1);
+      assert.equal(results.filter(result => result.duplicate).length,1);
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM device_data WHERE uplink_key=?',[meta.uplinkKey])).n,1);
+      assert.equal((await db.get("SELECT COUNT(*) AS n FROM ingest_quarantine WHERE channel='concurrent_unknown_sensor'")).n,1);
+    } finally { await db.close(); }
+  });
+
 });

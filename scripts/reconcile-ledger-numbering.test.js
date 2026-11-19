@@ -31,6 +31,7 @@ const { snapshotSchema, compareSchemas } = require('./semantic-schema-compare');
 const REPO = path.resolve(__dirname, '..');
 const MAIN_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const MAIN_VERSIONS = loadMigrations(MAIN_MIGRATIONS_DIR).map(m => m.version);
+const MAIN_TAIL = MAIN_VERSIONS.filter(version => version > 53);
 const REAL_FIXTURES_DIR = path.join(REPO, 'scripts/fixtures/lineages');
 
 const scratch = createTestScratch('reconcile-test-');
@@ -607,6 +608,14 @@ function buildDeviceMigrationsDir(root, lineage, throughVersion, extra = {}) {
 
 async function tableDigest(runner, table, orderBy) {
   const rows = await runner.all(`SELECT * FROM ${table} ORDER BY ${orderBy}`);
+  // Migration 0081 adds a receipt key, not historical measurement data.
+  // Require its NULL default before comparing every pre-existing value.
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(row, 'uplink_key')) {
+      assert.equal(row.uplink_key, null, 'historical receipt keys must remain NULL');
+      delete row.uplink_key;
+    }
+  }
   return { count: rows.length, sha256: sha(JSON.stringify(rows)) };
 }
 
@@ -668,18 +677,18 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   // agronomy, FAO-56 stage keys, zone weather_source sync, zone stage start
   // date, daily agronomy record sync, WATERMARK cloud parity, journal V2
   // plot-group snapshots, journal catalog v11) are also genuinely new to this
-  // device, so pending is {22,23,24,25,54,...,head}.
-  // Derive the exact list through the ordered head; the proven historical
-  // mappings above still fix which versions this fixture already covers.
+  // device, so pending includes the four historical holes and every version after 53.
+  // Compare the complete ordered tail and the frozen historical holes,
+  // never only a prefix or a subset.
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, MAIN_VERSIONS.filter(version => (version >= 22 && version <= 25) || version >= 54));
+  assert.deepEqual(pending, [22, 23, 24, 25, ...MAIN_TAIL]);
 
   // The real applyPending can now carry the device the rest of the way home.
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, MAIN_VERSIONS.filter(version => (version >= 22 && version <= 25) || version >= 54));
+  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, ...MAIN_TAIL]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
 });
 
@@ -748,7 +757,7 @@ test('non-valve lineage at version 53: exact remaps for main-carried tail, holes
   const appliedRows = await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'");
   const applied = new Set(appliedRows.map((r) => r.version));
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  const expectedPending = MAIN_VERSIONS.filter(version => (version >= 22 && version <= 25) || (version >= 54 && ![61, 68, 69, 70].includes(version)));
+  const expectedPending = [22, 23, 24, 25, ...MAIN_TAIL.filter(version => ![61, 68, 69, 70].includes(version))];
   assert.deepEqual(pending, expectedPending);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
@@ -785,8 +794,8 @@ test('non-valve lineage at version 53: exact remaps for main-carried tail, holes
 // A customer line applied the SDI-12 transmission archive as its own 0076.
 // Main ships those exact bytes as 0080 (header comment untouched), so
 // reconciliation must renumber the row by exact checksum, with no lineage
-// fixture, and the carry-forward fills every remaining ordered migration, including holes 0076-0079.
-test('customer line with SDI-12 archive at 76: exact remap to 80, remaining ordered migrations applied after it', { timeout: 1_800_000 }, async () => {
+// fixture, and the carry-forward must then fill main's holes 0076-0079.
+test('customer line with SDI-12 archive at 76: exact remap to 80, all remaining ordered migrations applied after it', { timeout: 1_800_000 }, async () => {
   const root = scratch();
   const deviceDir = path.join(root, 'device-customer-line');
   fs.mkdirSync(deviceDir);
@@ -827,9 +836,9 @@ test('customer line with SDI-12 archive at 76: exact remap to 80, remaining orde
 
   const applied = new Set((await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version));
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, MAIN_VERSIONS.filter(version => version >= 76 && version !== 80));
+  assert.deepEqual(pending, MAIN_VERSIONS.filter(version => version > 75 && version !== 80));
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, MAIN_VERSIONS.filter(version => version >= 76 && version !== 80));
+  assert.deepEqual(carryRes.applied, MAIN_VERSIONS.filter(version => version > 75 && version !== 80));
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
 
   // Same schema as a fresh database built from main's seed, and the archived row is untouched.
@@ -894,7 +903,7 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, MAIN_VERSIONS.filter(version => version >= 26));
+  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), ...MAIN_TAIL]);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
   assert.deepEqual(carryRes.applied, pending);

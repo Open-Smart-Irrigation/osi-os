@@ -35,7 +35,7 @@ and rebuilt bundled databases.
 5. Expose `historyRepairPendingByTable` from fresh SQLite counts on the existing
    authenticated `/api/sync/state` route. Include zeroes for supported tables.
    Extract the route's quick-check formatter to keep the node below its base size.
-   Migration `0081__history_repair_progress_indexes.sql` adds partial indexes over
+   Migration `0082__history_repair_progress_indexes.sql` adds partial indexes over
    pending cloud dirty keys and unresolved repair quarantines. Add them to the
    seed and schema contract, then rebuild all bundled images through the seed
    builder and reapply the committed calibration snapshot. No boot DDL changes.

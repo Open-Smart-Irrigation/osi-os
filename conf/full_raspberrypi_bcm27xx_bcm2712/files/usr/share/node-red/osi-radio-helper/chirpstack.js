@@ -63,7 +63,7 @@ function fromChirpStack(input, context = {}) {
   const isTester = context.isFieldTester === true;
   return {
     deveui: String(device.devEui || event.devEui || '').trim().toUpperCase(),
-    recorded_at: time, deduplication_id: event.deduplicationId || event.deduplication_id || null,
+    recorded_at: time, deduplication_id: event.deduplicationId || event.deduplication_id || require('../osi-uplink-dedup-guard/durable').eventKey('radio:' + String(device.devEui || event.devEui || '').trim().toUpperCase(),event),
     metadata: {
       radio: {frequency_hz: tx.frequency ?? null, spreading_factor: lora.spreadingFactor ?? null,
         bandwidth_hz: lora.bandwidth ?? null, coding_rate: lora.codeRate ?? null,

@@ -572,6 +572,12 @@ function quarantineHash(tableName, historyKeyValue, error) {
 }
 
 function prepareRow(tableName, gatewayEui, row) {
+  // The receipt is edge-local. Adding it to SQLite must not extend the
+  // existing history payload contract or change the canonical hash.
+  if (tableName === 'device_data' && Object.prototype.hasOwnProperty.call(row, 'uplink_key')) {
+    row = { ...row };
+    delete row.uplink_key;
+  }
   if (tableName === 'valve_actuation_expectations') {
     const valveControl = require('../osi-valve-control');
     if (typeof valveControl.isV1LocalOnlyExpectation !== 'function') {
