@@ -12,15 +12,15 @@ const FAN_PRESETS = [
 ] as const;
 
 function tempColor(c: number): string {
-  if (c < 55) return 'var(--toggle-on)';
-  if (c < 70) return 'var(--warn-border)';
+  if (c < 55) return 'var(--success-text)';
+  if (c < 70) return 'var(--warn-text)';
   return 'var(--error-text)';
 }
 
 function loadColor(load: number, cores: number): string {
   const pct = load / cores;
-  if (pct < 0.6) return 'var(--toggle-on)';
-  if (pct < 0.85) return 'var(--warn-border)';
+  if (pct < 0.6) return 'var(--success-text)';
+  if (pct < 0.85) return 'var(--warn-text)';
   return 'var(--error-text)';
 }
 
@@ -153,7 +153,7 @@ export const SystemPanel: React.FC = () => {
                 className="h-full rounded-full transition-all duration-500"
                 style={{
                   width: `${Math.min(100, (stats.cpu_temp_c / 85) * 100)}%`,
-                  background: tempColor(stats.cpu_temp_c),
+                  background: stats.cpu_temp_c < 55 ? 'var(--toggle-on)' : stats.cpu_temp_c < 70 ? 'var(--warn-border)' : 'var(--danger-fg)',
                 }}
               />
             </div>

@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import type { ForecastEnvironment, DailyForecast, HourlyForecast, RainFocus } from '../../../types/farming';
-import { formatForecastHighLow } from '../../../utils/forecastFormat';
+import { formatForecastTemperature, formatWeatherValue } from '../../../utils/forecastFormat';
 import { WeatherIcon } from './WeatherIcon';
 import { parseCalendarDay, useDateFormat, type DateFormatter } from '../../../utils/datetime';
 
@@ -46,33 +46,27 @@ function fmtEta(isoStr: string | null, fmt: DateFormatter, t: Translate): string
   return fmt.weekday(d, { hour: '2-digit', minute: '2-digit' }) ?? time;
 }
 
-function rainClass(mm: number): string {
-  if (mm < 2)   return 'bg-sky-50 text-sky-700 border-sky-200';
-  if (mm < 10)  return 'bg-blue-100 text-blue-800 border-blue-300';
-  return              'bg-blue-200 text-blue-900 border-blue-400';
-}
-
 // ── Rain summary pills ────────────────────────────────────────────────────────
 
 interface RainPillProps { label: string; value: string; highlight?: boolean; sub?: string | null }
 
 const RainPill: React.FC<RainPillProps> = ({ label, value, highlight, sub }) => (
   <div className={`flex min-h-[44px] flex-col items-center justify-center rounded-xl px-3 py-2 border ${highlight
-    ? 'bg-blue-50 border-blue-200'
+    ? 'bg-[var(--info-bg)] border-[var(--info-border)] text-[var(--info-text)]'
     : 'bg-[var(--card)] border-[var(--border)]'}`}>
-    <span className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-semibold mb-0.5">{label}</span>
-    <span className={`text-sm font-bold tabular-nums ${highlight ? 'text-blue-700' : 'text-[var(--text)]'}`}>
+    <span className={`text-[10px] uppercase tracking-widest font-semibold mb-0.5 ${highlight ? 'text-[var(--info-text)]' : 'text-[var(--text-secondary)]'}`}>{label}</span>
+    <span className={`text-sm font-bold tabular-nums ${highlight ? 'text-[var(--info-text)]' : 'text-[var(--text)]'}`}>
       {value}
     </span>
-    {sub && <span className="text-[10px] tabular-nums text-[var(--text-tertiary)]">{sub}</span>}
+    {sub && <span className={`text-[10px] tabular-nums ${highlight ? 'text-[var(--info-text)]' : 'text-[var(--text-secondary)]'}`}>{sub}</span>}
   </div>
 );
 
 // A forecast total is null when no hour of its horizon carries a rain value:
 // unknown, so a dash rather than 0.0 mm. A partly covered 24 h total says how
 // many hours it covers.
-function formatRainTotal(mm: number | null | undefined): string {
-  return mm == null ? '—' : `${mm.toFixed(1)} mm`;
+function formatRainTotal(mm: number | null | undefined, locale: string): string {
+  return formatWeatherValue(mm, locale, 1, 'mm');
 }
 
 function coverageLabel(rf: RainFocus, t: Translate): string | null {
@@ -88,30 +82,31 @@ function coverageLabel(rf: RainFocus, t: Translate): string | null {
 // ── Daily strip ───────────────────────────────────────────────────────────────
 
 const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isToday }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const fmt = useDateFormat();
-  const rain = day.rainMm ?? 0;
-  const highLow = formatForecastHighLow(day.maxTempC, day.minTempC);
+  const rain = day.rainMm;
+  const hasTemperature = [day.maxTempC, day.minTempC].some(value => value != null && Number.isFinite(value));
+  const temperature = hasTemperature
+    ? `${formatForecastTemperature(day.maxTempC, i18n.language)} / ${formatForecastTemperature(day.minTempC, i18n.language)}`
+    : t('environment.forecast.unavailable', { defaultValue: 'Unavailable' });
   return (
-    <div className={`snap-start flex-shrink-0 w-24 flex flex-col items-center gap-1 rounded-xl p-2 border
+    <div className={`snap-start flex-shrink-0 w-36 flex flex-col items-center gap-1 rounded-xl p-2 border
       ${isToday
-        ? 'bg-[var(--primary)]/10 border-[var(--primary)]'
+        ? 'bg-[var(--secondary-bg)] border-[var(--primary)]'
         : 'bg-[var(--card)] border-[var(--border)]'}`}>
       <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date, fmt, t)}</span>
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
       <span className="min-h-[16px] text-xs font-medium tabular-nums text-[var(--text)] whitespace-nowrap">
-        {highLow === 'Unavailable'
-          ? t('environment.forecast.unavailable', { defaultValue: 'Unavailable' })
-          : highLow}
+        {temperature}
       </span>
-      {rain > 0 && (
-        <span className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${rainClass(rain)}`}>
-          {rain.toFixed(1)} mm
+      {rain != null && Number.isFinite(rain) && (
+        <span className="text-[10px] font-semibold rounded-full px-1.5 py-0.5 border bg-[var(--info-bg)] text-[var(--info-text)] border-[var(--info-border)]">
+          {formatWeatherValue(rain, i18n.language, 1, 'mm')}
         </span>
       )}
-      {(day.rainProbabilityPct ?? 0) > 20 && (
-        <span className="text-[10px] text-sky-600">
-          {day.rainProbabilityPct!.toFixed(0)}%
+      {day.rainProbabilityPct != null && Number.isFinite(day.rainProbabilityPct) && (
+        <span className="text-[10px] text-[var(--text-secondary)]">
+          {formatWeatherValue(day.rainProbabilityPct, i18n.language, 0, '%')}
         </span>
       )}
     </div>
@@ -120,10 +115,10 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
 
 // ── Hourly chart ──────────────────────────────────────────────────────────────
 
-interface ChartPoint { hour: string; rain: number; prob: number }
+interface ChartPoint { hour: string; rain: number | null; prob: number | null }
 
 const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const fmt = useDateFormat();
   if (hourly.length === 0) return null;
 
@@ -133,13 +128,13 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
     .filter(h => new Date(h.time).getTime() <= cutoff)
     .map(h => ({
       hour: fmtHour(h.time, fmt),
-      rain: h.rainMm ?? 0,
-      prob: h.rainProbabilityPct ?? 0,
+      rain: h.rainMm,
+      prob: h.rainProbabilityPct,
     }));
 
   if (points.length === 0) return null;
 
-  const maxRain = Math.max(...points.map(p => p.rain), 1);
+  const maxRain = Math.max(...points.map(p => p.rain ?? 0), 1);
 
   return (
     <div className="flex flex-col gap-2">
@@ -147,31 +142,35 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
         {t('environment.forecast.hourlyTitle', { defaultValue: 'Hourly rain (next 24 h)' })}
       </p>
       <ResponsiveContainer width="100%" height={130}>
-        <ComposedChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
+        <ComposedChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
           <XAxis
             dataKey="hour"
             tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
             interval="preserveStartEnd"
+            minTickGap={24}
             tickLine={false}
             axisLine={false}
           />
           <YAxis
             yAxisId="rain"
             domain={[0, maxRain * 1.2]}
-            tick={{ fontSize: 10, fill: '#3b82f6' }}
+            tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${v.toFixed(0)}`}
+            unit={'\u00a0mm'}
+            width={62}
+            tickFormatter={v => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6, useGrouping: false }).format(v)}
           />
           <YAxis
             yAxisId="prob"
             orientation="right"
             domain={[0, 100]}
-            tick={{ fontSize: 10, fill: '#94a3b8' }}
+            tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${v}%`}
+            width={54}
+            tickFormatter={v => formatWeatherValue(v, i18n.language, 0, '%')}
           />
           <Tooltip
             contentStyle={{
@@ -179,16 +178,19 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
               border: '1px solid var(--border)',
               borderRadius: 8,
               fontSize: 11,
+              color: 'var(--text)',
             }}
             formatter={(val: number, name: string) =>
-              name === 'rain' ? [`${val.toFixed(1)} mm`, 'Rain'] : [`${val.toFixed(0)}%`, 'Probability']}
+              name === 'rain'
+                ? [formatWeatherValue(val, i18n.language, 1, 'mm'), t('environment.forecast.rain', { defaultValue: 'Rain' })]
+                : [formatWeatherValue(val, i18n.language, 0, '%'), t('environment.forecast.probability', { defaultValue: 'Probability' })]}
           />
-          <Bar yAxisId="rain" dataKey="rain" fill="#3b82f6" radius={[3,3,0,0]} opacity={0.85} />
+          <Bar yAxisId="rain" dataKey="rain" fill="var(--primary)" radius={[3,3,0,0]} />
           <Line
             yAxisId="prob"
             type="monotone"
             dataKey="prob"
-            stroke="#94a3b8"
+            stroke="var(--text-secondary)"
             strokeWidth={1.5}
             dot={false}
             strokeDasharray="4 2"
@@ -202,7 +204,7 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[] }> = ({ hourly }) => {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const fmt = useDateFormat();
 
   if (!forecast.available || !forecast.rainFocus) {
@@ -225,13 +227,13 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <RainPill
           label={t('environment.forecast.next24h', { defaultValue: 'Next 24 h' })}
-          value={formatRainTotal(rf.totalNext24hMm)}
+          value={formatRainTotal(rf.totalNext24hMm, i18n.language)}
           highlight={(rf.totalNext24hMm ?? 0) > 0}
           sub={coverageLabel(rf, t)}
         />
         <RainPill
           label={t('environment.forecast.next72h', { defaultValue: 'Next 72 h' })}
-          value={formatRainTotal(rf.totalNext72hMm)}
+          value={formatRainTotal(rf.totalNext72hMm, i18n.language)}
           highlight={(rf.totalNext72hMm ?? 0) > 0}
         />
         <RainPill
@@ -241,7 +243,7 @@ export const ForecastTab: React.FC<Props> = ({ forecast, location }) => {
         />
         <RainPill
           label={t('environment.forecast.rainHours', { defaultValue: 'Rain hours' })}
-          value={`${rf.rainHoursNext24h}h`}
+          value={formatWeatherValue(rf.rainHoursNext24h, i18n.language, 0, 'h')}
           highlight={rf.rainHoursNext24h > 0}
         />
       </div>

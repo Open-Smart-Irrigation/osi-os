@@ -516,7 +516,22 @@
       "noData": "Nessun dato agronomico disponibile",
       "fromSource": "da {{source}}",
       "kcHelpLabel": "Informazioni sul coefficiente colturale",
-      "kcHelp": "Kc FAO-56 per {{crop}}: iniziale {{ini}}, fase centrale {{mid}}, finale {{end}}. Fase attuale: {{stage}}."
+      "kcHelp": "Kc FAO-56 per {{crop}}: iniziale {{ini}}, fase centrale {{mid}}, finale {{end}}. Fase attuale: {{stage}}.",
+      "evapotranspiration": "Evapotraspirazione",
+      "conditions": "Condizioni",
+      "vpdStatus": {
+        "saturated": "Saturo",
+        "low": "Basso",
+        "moderate": "Moderato",
+        "high": "Alto",
+        "stressRisk": "Rischio di stress"
+      },
+      "thiStatus": {
+        "normal": "Normale",
+        "alert": "Allerta",
+        "danger": "Pericolo",
+        "emergency": "Emergenza"
+      }
     },
     "forecast": {
       "dayToday": "Oggi",
@@ -534,7 +549,11 @@
       "noData": "Previsioni non disponibili",
       "noLocation": "Imposta le coordinate della zona per abilitare le previsioni",
       "hourlyTitle": "Pioggia oraria (prossime 24 h)",
-      "unavailable": "Non disponibile"
+      "unavailable": "Non disponibile",
+      "rain": "Pioggia",
+      "probability": "Probabilità",
+      "hourlyHelpLabel": "Informazioni sulla pioggia oraria",
+      "hourlyHelp": "Le barre mostrano la pioggia in millimetri; la linea tratteggiata mostra la probabilità di pioggia in percentuale."
     },
     "metrics": {
       "air_temperature_c": "Temp. aria",
@@ -548,6 +567,24 @@
       "uv_index": "Indice UV",
       "soil_temperature_c": "Temp. suolo",
       "soil_moisture_pct": "Umidità suolo"
+    },
+    "compass": {
+      "N": "N",
+      "NNE": "NNE",
+      "NE": "NE",
+      "ENE": "ENE",
+      "E": "E",
+      "ESE": "ESE",
+      "SE": "SE",
+      "SSE": "SSE",
+      "S": "S",
+      "SSW": "SSO",
+      "SW": "SO",
+      "WSW": "OSO",
+      "W": "O",
+      "WNW": "ONO",
+      "NW": "NO",
+      "NNW": "NNO"
     }
   },
   "zoneConfig": {
@@ -1160,5 +1197,29 @@
     "rangeState": "Stato dell’intervallo",
     "outsideRange": "L’ultima misura meccanica è fuori dall’intervallo di calibrazione salvato. La variazione del fusto sulla scheda principale è nascosta fino alla verifica della calibrazione.",
     "calibrationDetails": "I dettagli di calibrazione del rapporto e dell’ADC sono nelle impostazioni avanzate della scheda LSN50."
+  },
+  "weatherCard": {
+    "minuteInterval": "Intervallo di {{value}} min",
+    "secondInterval": "Intervallo di {{value}} s",
+    "perTenMinutes": "{{value}} {{unit}} ogni 10 min",
+    "rateOverInterval": "{{value}} mm/h su {{interval}}",
+    "thisInterval": "Questo intervallo",
+    "gust": "Raffica {{value}} m/s",
+    "lastUplink": "Ultima trasmissione: {{value}} mm",
+    "manageZones": "Gestisci le zone assegnate",
+    "zoneAssignments": "Zone assegnate",
+    "noZones": "Nessuna zona disponibile",
+    "save": "Salva",
+    "saving": "Salvataggio…",
+    "saveFailed": "Salvataggio non riuscito",
+    "counterStatus": {
+      "first_sample": "In attesa della prossima trasmissione per calcolare la differenza.",
+      "duplicate_timestamp": "Trasmissione con data e ora duplicate ignorata.",
+      "out_of_order": "Trasmissione fuori sequenza ignorata.",
+      "counter_reset": "Rilevato azzeramento del contatore; differenza dell’intervallo ignorata.",
+      "invalid_interval": "Intervallo di trasmissione non valido; differenza ignorata.",
+      "cumulative_baseline": "Valore iniziale del contatore pioggia impostato; in attesa della prossima trasmissione per calcolare la differenza.",
+      "intensity_only": "Quantità di pioggia sconosciuta per questo intervallo; è stata trasmessa solo l’intensità."
+    }
   }
 }
