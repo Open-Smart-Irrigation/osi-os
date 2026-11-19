@@ -49,6 +49,14 @@ function step(state, deveui, segment) {
     return { action: 'passthrough', message: emit(segment, segment.ascii), frames: segment.frame ? [segment.frame] : [], status: 'passthrough' };
   }
   var buf = state[deveui];
+  // A repeated MQTT envelope is not a second segment at the same index.
+  // Keep the buffered sequence intact even when the decoder cache was reset.
+  const previous = buf && buf.segments[segment.index];
+  const eventKey = require('../osi-uplink-dedup-guard/durable').eventKey;
+  const key = eventKey('sdi12', segment.frame && segment.frame.event);
+  if (previous && key && key === eventKey('sdi12', previous.frame && previous.frame.event)) {
+    return { action: 'buffered', status: 'duplicate segment' };
+  }
   var resetReason = null;
   if (buf) {
     if (buf.count !== segment.count) resetReason = 'count';

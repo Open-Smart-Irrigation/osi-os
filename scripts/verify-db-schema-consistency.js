@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const { SEED_DB_PATHS: seedDatabasePaths } = require('./seed-db-paths');
 
 const schemaContract = {
+  uplink_effect_receipts: ['deveui', 'uplink_key', 'effect'],
   chameleon_reading_links: ["chameleon_reading_id", "device_data_id", "linked_at"],
   tensiomark_observations: ["id", "device_data_id", "deveui", "recorded_at", "received_at", "raw_response", "payload_base64", "configuration_hash", "configuration_json", "disposition", "normalized_json"],
   radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],
@@ -66,6 +67,7 @@ const schemaContract = {
     'sdi12_channel_layout_json',
   ],
   device_data: [
+    'uplink_key',
     'id',
     'deveui',
     'swt_wm1',
@@ -243,6 +245,7 @@ const schemaContract = {
     'gateway_device_eui', 'actor_user_uuid', 'base_sync_version', 'operation',
   ],
   watermark_readings: [
+    'uplink_key',
     'id',
     'deveui',
     'recorded_at',
@@ -1152,6 +1155,7 @@ const schemaContract = {
     'updated_at',
   ],
   sdi12_transmissions: [
+    'uplink_key',
     'id', 'deveui', 'recorded_at', 'received_at', 'payload_version',
     'raw_ascii', 'frames_json', 'context_json',
   ],
@@ -1265,11 +1269,11 @@ const requiredIndexes = {
   tensiomark_observations: ["idx_tensiomark_observations_device_time", "idx_tensiomark_observations_device_data"],
   sync_outbox_recovery_audit: ['idx_sync_outbox_recovery_audit_event'],
   installation_recovery_audit: ['idx_installation_recovery_audit_operation'],
-  device_data: ['idx_device_data_deveui_recorded_at'],
+  device_data: ['idx_device_data_deveui_recorded_at', 'uq_device_data_uplink'],
   dendrometer_readings: ['idx_dendro_readings_deveui_time'],
   chameleon_readings: ['idx_chameleon_readings_deveui_time', 'idx_chameleon_readings_array_id'],
   chameleon_calibrations: ['idx_chameleon_calibrations_sensor_id'],
-  watermark_readings: ['idx_watermark_readings_deveui_time', 'idx_watermark_readings_device_data'],
+  watermark_readings: ['idx_watermark_readings_deveui_time', 'idx_watermark_readings_device_data', 'uq_watermark_readings_uplink'],
   gateway_health_samples: ['idx_gateway_health_samples_eui_time', 'idx_gateway_health_samples_time'],
   gateway_health_hourly: ['idx_gateway_health_hourly_time'],
   zone_seasons: [
@@ -1336,7 +1340,7 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
-  sdi12_transmissions: ['idx_sdi12_transmissions_device_time'],
+  sdi12_transmissions: ['idx_sdi12_transmissions_device_time', 'uq_sdi12_transmissions_uplink'],
   sdi12_recipe_deployments: ['idx_sdi12_recipe_deployments_status'],
   journal_crop_cycle_plots: [
     'idx_ccp_plot_open',
@@ -1373,6 +1377,15 @@ const requiredIndexes = {
 };
 
 const requiredIndexSqlFragments = {
+  uq_device_data_uplink: [
+    'unique index', 'on device_data(deveui, uplink_key)', 'where uplink_key is not null',
+  ],
+  uq_watermark_readings_uplink: [
+    'unique index', 'on watermark_readings(deveui, uplink_key)', 'where uplink_key is not null',
+  ],
+  uq_sdi12_transmissions_uplink: [
+    'unique index', 'on sdi12_transmissions(deveui, uplink_key)', 'where uplink_key is not null',
+  ],
   ux_chameleon_reading_links_device_data: [
     'unique index',
     'on chameleon_reading_links(device_data_id)',

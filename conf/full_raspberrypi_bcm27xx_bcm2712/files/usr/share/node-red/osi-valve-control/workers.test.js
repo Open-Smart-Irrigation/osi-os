@@ -2200,3 +2200,22 @@ test('S8: a transport-only legacy attempt retains the full recorded three-hour w
   await f.tick('2026-08-19T13:04:01Z');
   assert.equal((await store.listSchedules(f.db, f.deviceEui))[0].once_state, 'FIRED');
 });
+
+
+test('an MQTT ACK replay cannot consume the next queued push', async () => {
+  const fixture = await tempDb();
+  const { db } = fixture;
+  const deviceEui = '0016C001F1000001';
+  const uplink = {deduplicationId:'one-clock-ack',fCnt:1,time:'2026-08-19T10:00:00Z'};
+  const input = {db,deviceEui,uplink,decoded:{RTC_Port:12,RTC_status:'00'},fPort:2,receivedAt:uplink.time,warn:()=>{}};
+  try {
+    for (const push_id of ['first','second']) {
+      await store.insertPushes(db,[{push_id,device_eui:deviceEui,purpose:'CLOCK_SYNC',weekday:null,fport:12,payload_hex:'00',plan_hash:null}]);
+      await db.run('UPDATE valve_schedule_pushes SET transport_json=? WHERE push_id=?',
+        [JSON.stringify({phase:'ACCEPTED',queue_id:push_id,attempted_at:'2026-08-19T09:59:00Z'}),push_id]);
+      const result = await W.handleUplink(input);
+      assert.equal(result.acked,push_id==='first'?1:0);
+    }
+    assert.equal((await db.get("SELECT state FROM valve_schedule_pushes WHERE push_id='second'")).state,'QUEUED');
+  } finally {fixture.cleanup();}
+});

@@ -2516,7 +2516,28 @@ expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the l
 expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
-expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+// Durable MOD9 receipt invariants: ignored inserts cannot lend a previous row id.
+expectIncludes('LSN50 Normalize + Write', 'FROM device_data WHERE id = ?", [writeResult.deviceDataId])', 'reads the persisted/clamped row by the canonical writer returned id');
+expectExcludes('LSN50 Normalize + Write', 'last_insert_rowid()', 'never uses a connection-wide prior insert id for an uplink');
+{
+  const source = String(findNodeByName('LSN50 Normalize + Write')?.func || '');
+  const transaction = /db\.transaction\(async function \(t\) \{([\s\S]*?)\n    \}\);/.exec(source);
+  const body = transaction ? transaction[1] : '';
+  const writeAt = body.indexOf('var writeResult = await writerRes.value.writeDeviceData(t,');
+  const duplicateAt = body.indexOf('if (writeResult.duplicate) return { writeResult: writeResult };');
+  const readAt = body.indexOf('var savedRow = await t.get(');
+  const captureAt = body.indexOf('await rainRes.value.captureLsn50Observation(t, savedRow)');
+  const downstreamAt = source.indexOf('if (result.writeResult.duplicate) return null;', transaction ? transaction.index + transaction[0].length : 0);
+  const attributionAt = source.indexOf('if (result.rainObservation) d.rainObservationId');
+  if (!transaction || writeAt < 0 || duplicateAt <= writeAt || readAt <= duplicateAt || captureAt <= readAt
+      || (source.match(/captureLsn50Observation\(/g) || []).length !== 1
+      || downstreamAt < 0 || attributionAt <= downstreamAt) {
+    fail('LSN50 Normalize + Write must skip duplicate effects and read its returned row id before rain capture in the same transaction');
+  } else {
+    console.log('OK LSN50 duplicate receipt skips rain capture and downstream effects; row readback shares its write transaction');
+  }
+}
+// End durable MOD9 receipt invariants.
 expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
 expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
 expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
