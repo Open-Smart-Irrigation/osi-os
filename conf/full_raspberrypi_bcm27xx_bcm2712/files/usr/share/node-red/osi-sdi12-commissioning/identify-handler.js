@@ -280,6 +280,8 @@ return (async () => {
 function handleIdentifyReply({msg,node,osiDb,osiLib,env,global,crypto}) {
 var info = msg.sdi12;
 if (!info) return [null, null];
+const { sdi12Key, claimEffect } = require('../osi-uplink-dedup-guard/durable');
+const uplinkKey = sdi12Key(info);
 var normalizeLoad = osiLib.require('sdi12-normalize');
 if (!normalizeLoad.ok) { node.error('SDI12 identify response: normalizer unavailable', msg); return [null, null]; }
 var response = String((info.decoded && info.decoded.datas_sum) || '').trim();
@@ -296,7 +298,11 @@ return (async () => {
       return [msg, null];
     }
     if (hasTensiomarkLayout(row)) {
-      await db.run('DELETE FROM sdi12_identify_attempts WHERE deveui=?',[String(info.deveui).trim().toUpperCase()]);
+      await db.transaction(async tx => {
+        if (await claimEffect(tx, info.deveui, uplinkKey, 'sdi12-identify')) {
+          await tx.run('DELETE FROM sdi12_identify_attempts WHERE deveui=?',[String(info.deveui).trim().toUpperCase()]);
+        }
+      });
       return [msg,null];
     }
     var observedAt = new Date(info.recordedAt || Date.now()).toISOString();
@@ -308,6 +314,7 @@ return (async () => {
         return [msg, null];
       }
       var advanced = await db.transaction(async function(tx) {
+        if (!await claimEffect(tx, deveui, uplinkKey, 'sdi12-identify')) return false;
         var current = await tx.get(
           'SELECT ia.stage, d.sdi12_channel_layout_json FROM sdi12_identify_attempts ia ' +
             'INNER JOIN devices d ON d.deveui = ia.deveui WHERE ia.deveui = ?',
@@ -334,6 +341,7 @@ return (async () => {
     }
     var hit = normalizeLoad.value.matchProfile(response);
     await db.transaction(async function(tx) {
+      if (!await claimEffect(tx, deveui, uplinkKey, 'sdi12-identify')) return;
       var currentDevice = await tx.get('SELECT sdi12_channel_layout_json FROM devices WHERE deveui=?',[deveui]);
       if (hasTensiomarkLayout(currentDevice)) { await tx.run('DELETE FROM sdi12_identify_attempts WHERE deveui=?',[deveui]); return; }
       if (hit) {

@@ -522,12 +522,16 @@ async function recoverValveObservation({ db, deviceEui, now } = {}) {
   }));
 }
 
-async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedAt, warn }) {
+async function handleUplink({ db, deviceEui, decoded, fPort, rawBytes, receivedAt, warn, uplink }) {
   const { acks, generationHint } = interpretUplink(decoded, fPort, rawBytes || null);
   const at = receivedAt || new Date().toISOString();
   let outcome;
   try {
     outcome = await db.transaction(async (tx) => {
+      const { eventKey, claimEffect } = require('../osi-uplink-dedup-guard/durable');
+      if (!await claimEffect(tx, deviceEui, eventKey('strega-ack', uplink), 'strega-ack')) {
+        return { acked: 0, generationPromoted: false, planAcked: false, readiness: null };
+      }
       let generationPromoted = false;
       if (generationHint === 'GEN2') {
         const s = await store.getSettings(tx, deviceEui);
