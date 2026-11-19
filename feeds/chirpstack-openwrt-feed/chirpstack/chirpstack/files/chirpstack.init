@@ -60,6 +60,7 @@ configuration() {
 
 		[integration.mqtt]
 		json=true
+		qos=1
 		server="tcp://127.0.0.1:1883/"
 	EOF
 

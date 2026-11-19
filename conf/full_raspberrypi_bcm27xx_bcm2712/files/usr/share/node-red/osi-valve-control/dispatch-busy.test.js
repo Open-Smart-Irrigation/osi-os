@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { AsyncResource } = require('node:async_hooks');
 const { tempDb, FIXTURE_EUI } = require('./test-helpers');
 const dispatch = require('./dispatch');
 
@@ -20,6 +21,8 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
   let injections = 0;
   let enqueueCalls = 0;
   const sleeps = [];
+  const recoveryJobs = [];
+  let failureLimit = failures;
   const warnings = [];
   const phases = [];
   const db = { ...fixture.db, async transaction(callback) {
@@ -31,7 +34,7 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
       } });
       if (inject) {
         injections += 1;
-        if (injections <= failures) { elapsed += busyMs; throw error; }
+        if (injections <= failureLimit) { elapsed += busyMs; throw error; }
       }
       return value;
     });
@@ -44,6 +47,8 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
     frame: FRAME, now: AT, trustedContext: { runtimeNow: () => Date.parse(AT) },
     retryClock: () => elapsed,
     sleep: async (ms) => { sleeps.push(ms); elapsed += ms; },
+    scheduleRecovery: (callback, delay) => recoveryJobs.push({ callback: AsyncResource.bind(callback), delay }),
+    enqueueNow: () => Date.parse(AT) + 1000,
     warn: (message) => warnings.push(message),
     transport: { async enqueueDownlink() {
       enqueueCalls += 1;
@@ -52,7 +57,12 @@ async function harness(t, { transaction = 4, failures = 2, error = busy(), busyM
       return { id: 'busy-queue' };
     } },
   };
-  return { fixture, args, sleeps, warnings, phases, error,
+  return { fixture, args, sleeps, warnings, phases, error, recoveryJobs,
+    stopFailing() { failureLimit = 0; },
+    async recover() {
+      assert.ok(recoveryJobs.length, 'recovery was scheduled');
+      return recoveryJobs.shift().callback();
+    },
     get elapsed() { return elapsed; }, get injections() { return injections; }, get enqueueCalls() { return enqueueCalls; },
     async state() {
       const row = await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', ['busy-command']);
@@ -233,6 +243,32 @@ test('post-enqueue persistent busy warns, stays claimed for recovery, and still 
   assert.equal(recovered.phase, 'UNKNOWN');
   const replay = await dispatch.executeValveAttempt({ ...h.args, db: h.fixture.db });
   assert.equal(replay.replayed, true);
+  assert.equal(h.enqueueCalls, 1);
+});
+
+test('accepted bookkeeping recovery gives up after five permanent failures', async (t) => {
+  const h = await harness(t, { failures: Infinity });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.equal(result.accepted, true);
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
+  h.stopFailing();
+  await h.fixture.db.run("UPDATE valve_actuation_expectations SET transport_json='{not json' WHERE command_id=?", ['busy-command']);
+  let runs = 0;
+  while (h.recoveryJobs.length && runs < 1000) { await h.recover(); runs += 1; }
+  assert.equal(runs, 5);
+  assert.ok(h.warnings.some((message) => /recovery gave up after 5 attempts.*recovery required/.test(message)));
+  assert.equal(h.enqueueCalls, 1);
+});
+
+test('accepted bookkeeping recovery under a lasting busy stops after its attempt budget', async (t) => {
+  const h = await harness(t, { failures: Infinity });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.equal(result.accepted, true);
+  let runs = 0;
+  while (h.recoveryJobs.length && runs < 1000) { await h.recover(); runs += 1; }
+  assert.equal(runs, 150);
+  assert.ok(h.warnings.some((message) => /recovery gave up after 150 attempts.*recovery required/.test(message)));
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
   assert.equal(h.enqueueCalls, 1);
 });
 
@@ -417,4 +453,181 @@ test('a real enqueue error retains the existing UNKNOWN result without retry', a
   assert.equal(calls, 1);
   assert.deepEqual(h.sleeps, []);
   assert.equal((await h.state()).phase, 'UNKNOWN');
+});
+
+test('accepted bookkeeping recovers outside the request after its busy retry bound', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.deepEqual({ accepted: result.accepted, phase: result.phase, queue_id: result.queue_id },
+    { accepted: true, phase: 'ACCEPTED', queue_id: 'busy-queue' });
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
+  assert.equal(h.injections, 3);
+  assert.equal(h.recoveryJobs.length, 1);
+  assert.equal(h.recoveryJobs[0].delay, 1000);
+  const repeat = h.recoveryJobs[0].callback;
+  await h.recover();
+  assert.equal((await h.state()).phase, 'ACCEPTED');
+  assert.equal((await h.state()).queue_id, 'busy-queue');
+  assert.equal((await h.state()).accepted_at, '2026-10-18T10:00:01.000Z');
+  assert.equal(h.warnings.length, 2);
+  assert.match(h.warnings[1], /accepted enqueue bookkeeping recovered.*queue busy-queue/);
+  assert.ok(h.warnings[1].includes('expectation:' + result.owner.id));
+  await repeat();
+  assert.equal(h.warnings.length, 2, 'replaying recovery is a no-op');
+  assert.equal(h.recoveryJobs.length, 0);
+  assert.equal(h.enqueueCalls, 1);
+});
+
+test('accepted recovery keeps retrying with capped backoff after repeated busy failures', async (t) => {
+  const h = await harness(t, { failures: Infinity });
+  await dispatch.executeValveAttempt(h.args);
+  const delays = [];
+  for (let i = 0; i < 8; i += 1) {
+    delays.push(h.recoveryJobs[0]?.delay);
+    await h.recover();
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  }
+  assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+  h.stopFailing();
+  await h.recover();
+  assert.equal((await h.state()).phase, 'ACCEPTED');
+  assert.equal(h.enqueueCalls, 1);
+});
+
+for (const later of ['cancel', 'flush', 'observation', 'recovery', 'queue proof', 'different attempt', 'missing owner']) {
+  test(`accepted recovery preserves a later ${later}`, async (t) => {
+    const h = await harness(t, { failures: 3 });
+    const result = await dispatch.executeValveAttempt(h.args);
+    const db = h.fixture.db;
+    if (later === 'cancel') {
+      await db.run("UPDATE valve_actuation_expectations SET reconciliation_state='CANCELLED', cancel_reason='operator_cancel' WHERE expectation_id=?", [result.owner.id]);
+    } else if (later === 'flush') {
+      const flushed = await dispatch.flushValveQueue({ db, deviceEui: FIXTURE_EUI, now: AT,
+        transport: { getDeviceQueue: async () => [{ id: 'busy-queue', ...FRAME }], flushDeviceQueue: async () => ({}) } });
+      assert.equal(flushed.ok, true);
+    } else if (later === 'observation') {
+      await db.run("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING', observed_open_at=? WHERE expectation_id=?", [AT, result.owner.id]);
+    } else if (later === 'recovery') {
+      await dispatch.recoverValveCommand({ db, deviceEui: FIXTURE_EUI, owner: result.owner, now: AT });
+    } else if (later === 'different attempt') {
+      await db.transaction((tx) => dispatch.updateOwnerTransportTx(tx, result.owner, { attempted_at: '2026-10-18T10:00:02.000Z' }));
+    } else if (later === 'missing owner') {
+      await db.run('DELETE FROM valve_actuation_expectations WHERE expectation_id=?', [result.owner.id]);
+    } else {
+      await db.transaction((tx) => dispatch.updateOwnerTransportTx(tx, result.owner, { queue_id: 'other-queue' }));
+    }
+    const before = await db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [result.owner.id]);
+    await h.recover();
+    assert.deepEqual(await db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [result.owner.id]), before);
+    assert.equal(h.recoveryJobs.length, 0);
+    assert.equal(h.enqueueCalls, 1);
+  });
+}
+
+test('accepted recovery updates its old expectation and leaves a newer command untouched', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  const first = await dispatch.executeValveAttempt(h.args);
+  const next = await dispatch.executeValveAttempt({ ...h.args, db: h.fixture.db,
+    command: { ...h.args.command, command_id: 'new-command' },
+    transport: { enqueueDownlink: async () => ({ id: 'new-queue' }) } });
+  assert.notEqual(first.owner.id, next.owner.id);
+  const before = await h.fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [next.owner.id]);
+  await h.recover();
+  assert.equal((await h.state()).queue_id, 'busy-queue');
+  assert.deepEqual(await h.fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [next.owner.id]), before);
+});
+
+test('accepted recovery joins the valve writer instead of retaining the released claim', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  await dispatch.executeValveAttempt(h.args);
+  let release;
+  let entered;
+  const held = new Promise((resolve) => { entered = resolve; });
+  const writer = dispatch.withValveWriter(FIXTURE_EUI, async () => {
+    entered();
+    await new Promise((resolve) => { release = resolve; });
+  });
+  await held;
+  const recovering = h.recover();
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await h.state()).phase, 'ATTEMPTED');
+  } finally { release(); }
+  await writer;
+  await recovering;
+  assert.equal((await h.state()).phase, 'ACCEPTED');
+});
+
+test('one-time settlement uses a recovered queue id as this command receipt', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  await dispatch.executeValveAttempt(h.args);
+  await h.recover();
+  const store = require('./store');
+  const workers = require('./workers');
+  await store.insertSchedule(h.fixture.db, { schedule_uuid: 'recovered-once', device_eui: FIXTURE_EUI,
+    kind: 'ONCE', fire_at: AT, duration_minutes: 2, timezone: 'UTC', enabled: 1 });
+  await h.fixture.db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?,?,?,'ATTEMPTED',?)",
+    ['recovered-once', FIXTURE_EUI, 'busy-command', AT]);
+  let enqueues = 0;
+  const result = await workers.runOnceTick({ db: h.fixture.db, now: new Date('2026-10-18T10:00:05.000Z'),
+    warn: () => {}, transport: { getDeviceQueue: async () => [], enqueueDownlink: async () => { enqueues += 1; throw new Error('must not resend'); } } });
+  assert.equal(result.fired.length, 1);
+  assert.equal((await h.fixture.db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='recovered-once'")).state, 'SENT');
+  assert.equal((await h.state()).queue_id, 'busy-queue');
+  assert.equal(h.enqueueCalls, 1);
+  assert.equal(enqueues, 0);
+});
+
+test('accepted recovery completes a failed conditional SENT write without changing its receipt', async (t) => {
+  const h = await harness(t, { transaction: 5, failures: 3 });
+  const owner = await reserveConditionalOwner(h);
+  const result = await dispatch.enqueueValveCommand({ ...h.args, owner, item: FRAME });
+  assert.equal(result.accepted, true);
+  const before = await h.state();
+  assert.equal(before.phase, 'ACCEPTED');
+  assert.equal((await h.fixture.db.get('SELECT state FROM irrigation_occurrences WHERE command_id=?', ['busy-command'])).state, 'ATTEMPTED');
+  await h.recover();
+  assert.deepEqual(await h.state(), before);
+  const occurrence = await h.fixture.db.get('SELECT state, queue_id, sent_at FROM irrigation_occurrences WHERE command_id=?', ['busy-command']);
+  assert.equal(occurrence.state, 'SENT');
+  assert.equal(occurrence.queue_id, 'busy-queue');
+  assert.equal(occurrence.sent_at, before.accepted_at);
+  assert.equal(h.enqueueCalls, 1);
+});
+
+test('one-time queue proof cannot borrow the queue id recovered for a manual open', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  await dispatch.executeValveAttempt(h.args);
+  await h.recover();
+  const store = require('./store');
+  const workers = require('./workers');
+  await store.insertSchedule(h.fixture.db, { schedule_uuid: 'other-once', device_eui: FIXTURE_EUI,
+    kind: 'ONCE', fire_at: AT, duration_minutes: 2, timezone: 'UTC', enabled: 1 });
+  await h.fixture.db.run("INSERT INTO valve_once_dispatch_intents(schedule_uuid, device_eui, command_id, state, attempted_at) VALUES (?,?,?,'ATTEMPTED',?)",
+    ['other-once', FIXTURE_EUI, 'other-once-command', AT]);
+  await dispatch.executeValveAttempt({ ...h.args, db: h.fixture.db,
+    command: { ...h.args.command, command_id: 'other-once-command' },
+    transport: { enqueueDownlink: async () => { throw new Error('unknown handoff'); } } });
+  const result = await workers.runOnceTick({ db: h.fixture.db, now: new Date('2026-10-18T10:00:05.000Z'),
+    queueReadNow: () => Date.parse('2026-10-18T10:00:05.000Z'), warn: () => {},
+    transport: { getDeviceQueue: async () => [{ id: 'busy-queue', ...FRAME }],
+      enqueueDownlink: async () => { throw new Error('must not resend'); } } });
+  assert.equal(result.fired.length, 0);
+  assert.equal((await h.fixture.db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='other-once'")).state, 'UNKNOWN');
+  assert.equal((await h.state()).queue_id, 'busy-queue');
+});
+
+test('accepted recovery preserves cancellation through the cancel API', async (t) => {
+  const h = await harness(t, { failures: 3 });
+  const first = await dispatch.executeValveAttempt(h.args);
+  const cancelled = await require('./cancel').cancelActuation({ db: h.fixture.db, deviceEui: FIXTURE_EUI,
+    expectationId: first.owner.id, now: new Date(AT), warn: () => {},
+    transport: { getDeviceQueue: async () => [{ id: 'busy-queue', ...FRAME }], flushDeviceQueue: async () => ({}) } });
+  assert.equal(cancelled.ok, true);
+  assert.equal(cancelled.outcome, 'cancelled');
+  const before = await h.fixture.db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', [first.owner.id]);
+  await h.recover();
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
+  assert.deepEqual(await h.fixture.db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', [first.owner.id]), before);
+  assert.equal(h.enqueueCalls, 1);
 });

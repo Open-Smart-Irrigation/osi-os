@@ -1,29 +1,10 @@
 'use strict';
-// osi-uplink-dedup-guard -- bounded, in-memory idempotency check for the
-// ChirpStack uplink ingest path (F83, 2026-09-17 overnight stabilization).
-//
-// Problem: republishing the same uplink (same DevEUI + fCnt + ChirpStack
-// deduplicationId) on application/+/device/+/event/up produces a second
-// device_data row. In production this happens on MQTT QoS-1 redelivery after
-// a Node-RED/mosquitto reconnect, and on a ChirpStack retry -- reproduced
-// live on Silvan (T16f harness C1, PR #270 body: "36/37: duplicate delivery
-// is not deduplicated at ingest"). Double rows double-count rain/volumes and
-// downstream rollups.
-//
-// This is deliberately NOT a durable fix: no schema change tonight (a UNIQUE
-// index on device_data would need one, and is a separate, reviewed change).
-// This module is a process-lifetime LRU-ish cache -- it resets on every
-// Node-RED restart, exactly like the rest of in-memory flow state.
-//
-// Two known coverage limits (see also the PR body):
-//   - Process-lifetime only: a Node-RED restart empties the cache, so a
-//     redelivery that happens to straddle a restart is not caught. That is
-//     the same limitation every other in-memory flow cache in this repo has.
-//   - 10-minute TTL (default): a redelivery arriving more than DEFAULT_TTL_MS
-//     after the original is not caught either. Both limits are the reason
-//     this is explicitly NOT a substitute for a durable UNIQUE constraint.
-// The "MQTT IN (Radio Observations)" -> radio-capture-fn ingest path (a
-// separate, non-device_data radio-observations table) is out of scope.
+// Bounded in-memory duplicate hints and durable network identity builders.
+// createGuard() and the default singleton are process-local: restart or TTL
+// expiry forgets them. Canonical writers additionally persist the key from
+// durable.js under a partial unique index (migration 0081). A database row,
+// rather than this pre-write hint, proves an uplink was committed.
+// Radio capture and transactional rain ingest use their own durable identities.
 //
 // Keying:
 //   - Prefer ChirpStack's own `deduplicationId` when present. ChirpStack
@@ -32,13 +13,9 @@
 //     two different deduplicationIds are never collapsed, regardless of
 //     devEui/fCnt, and a redelivery (same physical event, republished)
 //     always carries the SAME deduplicationId.
-//   - Fall back to (devEui, fCnt, time-bucket) only when deduplicationId is
-//     absent. fCnt ALONE is not safe across a rejoin (LoRaWAN resets a
-//     device's own frame counter on rejoin), so the fallback also buckets
-//     the local receipt time into fixed windows (default: the same size as
-//     the cache's own TTL) -- two uplinks sharing a devEui+fCnt but more
-//     than one bucket apart in wall-clock receipt time are never treated as
-//     the same event.
+//   - Fall back to the same original network timestamp/frame identity used
+//     by durable.js. Receipt time controls cache expiry only. Without a usable
+//     network identity, fail open instead of suppressing a new reading.
 //   - Every key is namespaced by an optional `source` (e.g. 'kiwi', 'strega',
 //     's2120', 'lorain', 'lsn50', 'uc512', 'sdi12'). All 10 `mqtt in` nodes
 //     in flows.json share the identical wildcard topic
@@ -90,40 +67,18 @@ function safeIdentityString(value) {
   return null;
 }
 
-function safeFiniteNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value === 'string') {
-    const n = Number(value); // Number() on a string never throws, unlike on an object
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-// Pure function: given uplink identity fields, decide the cache key. Never
-// touches any cache state, so it is trivially unit-testable on its own, and
-// never throws regardless of input shape (see the fail-open note above).
-function buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = {}) {
-  const prefix = (typeof source === 'string' && source) ? source + ':' : '';
-
-  const dedupIdRaw = safeIdentityString(deduplicationId);
-  const dedupId = dedupIdRaw != null ? dedupIdRaw.trim() : '';
-  if (dedupId) return prefix + 'D:' + dedupId;
-
-  const euiRaw = safeIdentityString(devEui);
-  const eui = euiRaw != null ? euiRaw.trim().toUpperCase() : '';
-  const fCntNumber = safeFiniteNumber(fCnt);
-  if (!eui || fCntNumber === null) {
-    // Not enough identity to dedup safely. Returning null tells the caller
-    // to treat this as never-a-duplicate -- an occasional extra row is far
-    // safer than silently dropping telemetry we cannot positively identify.
-    return null;
-  }
-  const bucketSize = (typeof bucketMs === 'number' && Number.isFinite(bucketMs) && bucketMs > 0)
-    ? bucketMs
-    : DEFAULT_TTL_MS;
-  const now = (typeof receivedAtMs === 'number' && Number.isFinite(receivedAtMs)) ? receivedAtMs : Date.now();
-  const bucket = Math.floor(now / bucketSize);
-  return prefix + 'F:' + eui + ':' + fCntNumber + ':' + bucket;
+// Both guards use eventKey; the memory map additionally scopes by device,
+// just as the database's (deveui,uplink_key) unique index does.
+function buildDedupKey(identity = {}) {
+  try {
+    const event = identity.event || identity;
+    const source = typeof identity.source === 'string' && identity.source ? identity.source : 'uplink';
+    const euiRaw = safeIdentityString(identity.devEui ?? event.deviceInfo?.devEui);
+    const eui = euiRaw == null ? '' : euiRaw.trim().toUpperCase();
+    if (!eui && !(typeof event.deduplicationId === 'string' && event.deduplicationId.trim())) return null;
+    const key = require('./durable').eventKey(source, event);
+    return key ? eui + ':' + key : null;
+  } catch (_error) { return null; }
 }
 
 // A bounded, TTL-evicting cache of "keys already seen". Insertion order in a
@@ -183,9 +138,8 @@ function createGuard(options) {
   // input.
   function isDuplicateUplink(identity) {
     try {
-      const { source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = identity || {};
-      const key = buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs });
-      return checkAndRecord(key, receivedAtMs);
+      const key = buildDedupKey(identity);
+      return checkAndRecord(key, identity && identity.receivedAtMs);
     } catch (_e) {
       return false;
     }
@@ -235,6 +189,7 @@ function warnOncePerWindow(node, context, key, nowMs, windowMs, message) {
 const defaultGuard = createGuard();
 
 module.exports = {
+  ...require('./durable'),
   createGuard,
   buildDedupKey,
   isDuplicateUplink: defaultGuard.isDuplicateUplink,

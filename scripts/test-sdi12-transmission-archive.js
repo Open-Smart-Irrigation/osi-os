@@ -97,6 +97,49 @@ async function archive(db, msg, overrides = {}) {
 }
 const archiveWarnings = res => res.warnings.filter(w => /layout classification|archive|decoded payload/i.test(w));
 
+test('redelivery after clearing the process cache keeps one archive and canonical row', async () => {
+  const db = fixture();
+  const guard = require(path.join(NR,'osi-uplink-dedup-guard'))._defaultGuard;
+  try {
+    for (let replay=0; replay<2; replay++) {
+      guard.reset();
+      const g = await gate(db,event(RAW,{fCnt:9001}));
+      const stored = await archive(db,g.result[0]);
+      assert.deepEqual(stored.errors,[]);
+    }
+    assert.equal(records(db).length,1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+  } finally {db.close();guard.reset();}
+});
+
+test('replayed SDI12 observation with a clamped time counts one commissioning failure', async () => {
+  const db = fixture();
+  const guard = require(path.join(NR,'osi-uplink-dedup-guard'))._defaultGuard;
+  const realNow = Date.now;
+  let now = Date.parse('2026-11-19T10:00:00Z');
+  Date.now = () => now;
+  try {
+    // A failed observation counts once, even when the canonical writer must
+    // clamp its timestamp to a new local receipt time on each redelivery.
+    db.prepare("INSERT INTO sdi12_recipe_deployments(deveui,status,queue_drained_at,updated_at) VALUES(?,'queued',?,?)")
+      .run(EUI,'2026-10-28T09:00:00.000Z','2026-10-28T09:00:00.000Z');
+    for (let replay=0; replay<3; replay++) {
+      guard.reset();
+      const g = await gate(db,event(RAW,{fCnt:9002,time:'1970-01-01T00:00:00Z'}));
+      const written = await archive(db,g.result[0]);
+      if (replay > 0) {
+        assert.equal(written.result[0],null);
+        assert.equal(written.result[1],null);
+      }
+      now += 1000;
+    }
+    const deployment = db.prepare('SELECT status,failed_observation_count FROM sdi12_recipe_deployments WHERE deveui=?').get(EUI);
+    assert.equal(deployment.failed_observation_count,1);
+    assert.equal(deployment.status,'queued');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+  } finally {Date.now=realNow;db.close();guard.reset();}
+});
+
 test('config query feeds the write node and includes identity and deployment provenance', () => {
   assert.deepEqual(loadNode('sdi12-config-sqlite').wires, [['sdi12-write-fn']]);
   assert.throws(() => loadNode('sdi12-archive-fn'), /node not found/);
@@ -143,7 +186,8 @@ test('config SELECT snapshots deployment provenance with zero and null semantics
     const recipeJson = '{"frames":[{"value":"01"}]}';
     db.prepare("UPDATE sdi12_recipe_deployments SET desired_version=7,desired_layout_hash='layout-hash',compatible_layout_json=?,compatible_recipe_json=?,compatible_at='2026-10-27T10:00:00Z',status='observed_compatible' WHERE deveui=?").run(layoutJson,recipeJson,EUI);
     db.prepare('UPDATE devices SET sdi12_identity=NULL WHERE deveui=?').run(EUI);
-    const second = await archive(db,g.result[0]);
+    const secondGate = await gate(db,event(RAW,{fCnt:2}));
+    const second = await archive(db,secondGate.result[0]);
     original = records(db)[0].context_json;
     context = JSON.parse(records(db)[1].context_json);
     assert.equal(context.deploymentDesiredVersion,7);
@@ -859,4 +903,96 @@ test('repeated low-disk calls within an hour warn once, and again after the hour
     assert.equal(warnings.length, 3);
     assert.equal(records(db).length, 2);
   } finally { db.close(); }
+});
+
+test('unsupported frame redelivery across cache resets commits one quarantine and commissioning failure', async () => {
+  const db = fixture();
+  const guard = require(path.join(NR,'osi-uplink-dedup-guard'))._defaultGuard;
+  const realNow = Date.now;
+  let now = Date.parse('2026-11-19T10:00:00Z');
+  Date.now = () => now;
+  try {
+    db.prepare("INSERT INTO sdi12_recipe_deployments(deveui,status,queue_drained_at,updated_at) VALUES(?,'queued',?,?)")
+      .run(EUI,'2026-10-28T09:00:00.000Z','2026-10-28T09:00:00.000Z');
+    const e=event(RAW,{fCnt:9100,time:'1970-01-01T00:00:00Z'});
+    const bytes=Buffer.from([0x0d,0x50,0x03]);
+    e.data=bytes.toString('base64');
+    e.object=JSON.parse(JSON.stringify(codec.decodeUplink({fPort:2,bytes:[...bytes]}).data));
+    assert.equal(e.object.unsupported_payload,'payver_3');
+    for (let replay=0;replay<3;replay++) {
+      guard.reset();
+      const g=await gate(db,JSON.parse(JSON.stringify(e)));
+      const a=await archive(db,g.result[0]);
+      assert.deepEqual(a.errors,[]);
+      now+=1000;
+    }
+    const dep=db.prepare('SELECT status,failed_observation_count FROM sdi12_recipe_deployments WHERE deveui=?').get(EUI);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,0);
+    assert.equal(dep.failed_observation_count,1);
+    assert.equal(dep.status,'queued');
+  } finally {Date.now=realNow;db.close();guard.reset();}
+});
+
+
+test('rejection and commissioning receipts roll back together when observation fails', async () => {
+  const db = fixture();
+  const commissioning = require(path.join(NR,'osi-sdi12-commissioning'));
+  const key = require(path.join(NR,'osi-uplink-dedup-guard')).eventKey('sdi12',{deduplicationId:'rollback-rejection'});
+  const input = {deveui:EUI,uplinkKey:key,quarantine:{channel:'unsupported',raw:'payver_3'},observe:true,
+    observedAt:'2026-11-19T10:00:00Z',normalization:null,outcome:{inserted:false,quarantined:true}};
+  try {
+    db.prepare("INSERT INTO sdi12_recipe_deployments(deveui,status,queue_drained_at,updated_at) VALUES(?,'queued',?,?)")
+      .run(EUI,'2026-10-28T09:00:00Z','2026-10-28T09:00:00Z');
+    db.exec("CREATE TRIGGER refuse_observation BEFORE UPDATE ON sdi12_recipe_deployments BEGIN SELECT RAISE(ABORT,'observation failed'); END");
+    await assert.rejects(commissioning.recordRejectedAcquisition(facadeDb(db),input),/observation failed/);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM uplink_effect_receipts').get().n,0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,0);
+    db.exec('DROP TRIGGER refuse_observation');
+    assert.equal((await commissioning.recordRejectedAcquisition(facadeDb(db),input)).duplicate,false);
+    assert.equal((await commissioning.recordRejectedAcquisition(facadeDb(db),{...input,observedAt:'2026-11-19T10:00:01Z'})).duplicate,true);
+    assert.equal(db.prepare('SELECT failed_observation_count AS n FROM sdi12_recipe_deployments WHERE deveui=?').get(EUI).n,1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
+  } finally {db.close();}
+});
+
+
+test('an old identify reply cannot advance a later discovery attempt', async () => {
+  const db = fixture();
+  const commissioning = require(path.join(NR,'osi-sdi12-commissioning'));
+  try {
+    db.prepare('UPDATE devices SET sdi12_channel_layout_json=NULL,chirpstack_app_id=? WHERE deveui=?').run('test-app',EUI);
+    const original = event(RAW,{fCnt:9200});
+    const info = {deveui:EUI,fPort:100,recordedAt:original.time,decoded:{datas_sum:'0'},frames:[{event:original}]};
+    const handle = () => commissioning.handleIdentifyReply({msg:{sdi12:info},node:{warn(){},error(error){throw Error(error);},status(){}},osiDb:osiDbFor(db),
+      osiLib:{require(name){return {ok:true,value:require(path.join(NR,'osi-'+name))};}}});
+    for (let delivery=0;delivery<2;delivery++) {
+      db.prepare("INSERT INTO sdi12_identify_attempts(deveui,stage,requested_at,updated_at) VALUES(?,'discovering',?,?) ON CONFLICT(deveui) DO UPDATE SET stage='discovering'")
+        .run(EUI,original.time,original.time);
+      const output = await handle();
+      if(delivery===0) assert.ok(output[1]);
+      else {
+        assert.equal(output[1],null);
+        assert.equal(db.prepare('SELECT stage FROM sdi12_identify_attempts WHERE deveui=?').get(EUI).stage,'discovering');
+      }
+    }
+  } finally {db.close();}
+});
+
+
+test('redelivering a buffered multipart frame after a cache reset leaves reassembly unchanged', async () => {
+  const db = fixture();
+  const guard = require(path.join(NR,'osi-uplink-dedup-guard'))._defaultGuard;
+  try {
+    const frame=event('+12.3',{count:2,index:0,fCnt:9300});
+    guard.reset();
+    const first=await gate(db,frame);
+    assert.equal(first.result,null);
+    const before=JSON.stringify(first.flowState.sdi12_reassembly);
+    guard.reset();
+    const replay=await gate(db,JSON.parse(JSON.stringify(frame)),first.flowState);
+    assert.equal(replay.result,null);
+    assert.equal(JSON.stringify(replay.flowState.sdi12_reassembly),before);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,0);
+  } finally {db.close();guard.reset();}
 });

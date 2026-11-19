@@ -84,7 +84,7 @@ async function run(db, sql, params) {
 
 async function transaction(db, callback) {
   if (db && typeof db.transaction === 'function') return db.transaction(callback);
-  if (!db || typeof db.exec !== 'function') throw new TypeError('Database does not provide transaction()');
+  if (!db || typeof db.prepare !== 'function' || typeof db.exec !== 'function') throw new TypeError('Database does not provide transaction()');
   await db.exec('BEGIN IMMEDIATE');
   try {
     const result = await callback(db);
