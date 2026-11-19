@@ -1620,6 +1620,11 @@ case "$MODE" in
 esac
 
 command -v node >/dev/null 2>&1 || die 'Node unavailable; not modified'
+# Check the installed helpers' interpreter: a different one-shot shell can
+# expose a BusyBox flock applet that /bin/sh cannot use. Refuse before writes.
+if [ -e "$ROOT/opt/chirpstack" ] && ! /bin/sh -c 'command -v flock >/dev/null 2>&1'; then
+    die 'flock is required for backup/restore recovery; install BusyBox flock or util-linux flock before retrying; not modified'
+fi
 
 if [ "$MODE" = --check ]; then
     init_state=$(cs_node init-state) || exit 1

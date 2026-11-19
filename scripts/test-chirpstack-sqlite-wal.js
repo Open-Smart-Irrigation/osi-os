@@ -149,11 +149,25 @@ if (op === 'install' && process.env.TEST_KILL_BEFORE_INSTALL === '1') { process.
 `);
   const env = { ...process.env, PATH: `${p('bin')}:${path.dirname(process.execPath)}:${process.env.PATH}`, OSI_CS_ROOT: root, OSI_CS_SQLITE_MODULE: process.env.OSI_CS_TEST_SQLITE_MODULE || p('sqlite3-adapter.cjs'), OSI_CS_ID: p('bin/id'), OSI_CS_DATE: p('bin/date'), OSI_CS_SLEEP: p('bin/sleep'), OSI_CS_DF: p('bin/df'), OSI_CS_SYNC: p('bin/sync'), OSI_CS_SERVICE: p('service'), OSI_CS_API_PORT: String(server.address().port), NODE_NO_WARNINGS: '1' };
   t.after(() => { server.close(); fs.rmSync(root, { recursive: true, force: true }); });
-  const run = (args = [], extra = {}) => spawnSync(shell, [...shellArgs, script, ...args], { env: { ...env, ...extra }, encoding: 'utf8', timeout: 20000 });
+  // Static BusyBox ash prefers its applets over PATH, bypassing race and
+  // process-probe stubs. Shell functions keep those same stubs observable.
+  const invocation = (file, args = [], childEnv = env) => {
+    const mocked = childEnv.PATH.split(path.delimiter).includes(p('bin')) ? fs.readdirSync(p('bin')) : [];
+    const prelude = mocked.map(name => {
+      assert.match(name, /^[A-Za-z_][A-Za-z0-9_]*$/);
+      const target = p(`bin/${name}`).replaceAll("'", "'\\''");
+      return `${name}() { '${target}' "$@"; }`;
+    }).join('\n');
+    return [...shellArgs, '-c', `${prelude}\nfixture_script=$1; shift; . "$fixture_script"`, file, file, ...args];
+  };
+  const run = (args = [], extra = {}) => {
+    const childEnv = { ...env, ...extra };
+    return spawnSync(shell, invocation(script, args, childEnv), { env: childEnv, encoding: 'utf8', timeout: 20000 });
+  };
   const state = () => Object.fromEntries(['etc/init.d/chirpstack', 'opt/chirpstack/backup.sh', 'opt/chirpstack/restore.sh', 'srv/chirpstack/chirpstack.sqlite'].map((f) => [f, [hash(p(f)), fs.statSync(p(f)).mtimeMs, fs.statSync(p(f)).mode]]));
   const journal = () => [...fs.readFileSync(p('srv/chirpstack/chirpstack.sqlite')).subarray(18, 20)];
   const backup = () => p(`srv/backup/${fs.readdirSync(p('srv/backup')).find(n => n.startsWith('chirpstack-wal-'))}`);
-  return { root, p, run, state, journal, backup, env };
+  return { root, p, run, state, journal, backup, env, invocation };
 }
 function ok(r, status = 0) { assert.ifError(r.error); assert.equal(r.status, status, `${r.error || ''}\n${r.stdout}\n${r.stderr}`); }
 function restored(g, init = original) {
@@ -202,6 +216,47 @@ for (const [variant, init, expected] of initVariants) {
     ok(result, 1); assert.match(result.stderr, /ROLLED BACK:/); restored(failed, init);
   });
 }
+
+function withoutFlock(g) {
+  const dir = g.p('without-flock'); fs.mkdirSync(dir);
+  for (const name of ['sh', 'mkdir', 'cat', 'mv', 'rm', 'rmdir', 'awk', 'chmod', 'sed', 'grep', 'ln', 'touch']) {
+    const target = process.env.PATH.split(path.delimiter).map(d => path.join(d, name)).find(file => {
+      try { fs.accessSync(file, fs.constants.X_OK); return true; } catch { return false; }
+    });
+    assert.ok(target, name); fs.symlinkSync(target, path.join(dir, name));
+  }
+  const PATH = `${g.p('bin')}:${dir}`;
+  const probe = spawnSync('/bin/sh', ['-c', 'command -v flock'], { env: { ...g.env, PATH } });
+  assert.ifError(probe.error);
+  assert.ok([1, 127].includes(probe.status), 'the installed helpers would have no flock command');
+  return { PATH };
+}
+for (const state of ['DELETE', 'WAL with old helpers', 'WAL with current helpers']) {
+  for (const mode of ['--apply', '--check']) test(`${mode} refuses missing flock before any change: ${state}`, async t => {
+    const g = await gateway(t, state === 'DELETE' ? original : converted);
+    if (state !== 'DELETE') {
+      const db = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); db.exec('PRAGMA journal_mode=WAL'); db.close();
+    }
+    if (state === 'WAL with current helpers') {
+      for (const name of ['backup.sh', 'restore.sh']) fs.copyFileSync(path.join(feed, name), g.p(`opt/chirpstack/${name}`));
+    }
+    const before = g.state();
+    const result = g.run([mode], withoutFlock(g)); ok(result, 1);
+    assert.match(result.stderr, /flock is required.*not modified/);
+    assert.doesNotMatch(result.stdout, /OK:|backup\/restore WAL-aware: yes/);
+    assert.deepEqual(g.state(), before);
+    assert.deepEqual(fs.readdirSync(g.p('srv/backup')), []);
+    assert.equal(fs.existsSync(g.p('service-calls')), false, 'no service downtime');
+  });
+}
+test('missing flock permits conversion when no helpers are installed', async t => {
+  const g = await gateway(t); const extra = withoutFlock(g);
+  fs.rmSync(g.p('opt/chirpstack'), { recursive: true });
+  ok(g.run(['--apply'], extra));
+  assert.deepEqual(g.journal(), [2, 2]);
+  assert.equal(fs.existsSync(g.p('opt/chirpstack')), false);
+  ok(g.run(['--check'], extra));
+});
 
 test('streamed operator command reads its embedded helper without consuming script input', async (t) => {
   const g = await gateway(t);
@@ -571,6 +626,7 @@ esac
 exec /usr/bin/mkdir "$@"
 `, { mode: 0o755 });
   const r = g.run(mode === 'apply' ? ['--apply'] : ['--rollback', backup]); ok(r, 1);
+  assert.equal(fs.readFileSync(g.p('raced-init'), 'utf8'), 'raced\n', 'the lock-acquisition race was injected');
   assert.equal(fs.existsSync(g.p('service-calls')) ? fs.readFileSync(g.p('service-calls'), 'utf8') : '', calls, 'raced state refused before service stop');
 });
 test('review helper-state failure cannot report already WAL', async t => {
@@ -611,20 +667,34 @@ for (const ownerMode of ['helper', 'one-shot']) test(`review maintenance lock sh
 if [ "$1" = chirpstack ]; then exec "$OSI_CS_ROOT/service" "$2"; fi
 case "$2" in stop) rm -f "$OSI_CS_ROOT/redis-running";; start) echo yes > "$OSI_CS_ROOT/redis-running";; esac
 `, { mode: 0o755 });
-  fs.writeFileSync(g.p('bin/pidof'), '#!/bin/sh\ncase "$1" in chirpstack) test -f "$OSI_CS_ROOT/running";; redis-server) test -f "$OSI_CS_ROOT/redis-running";; esac\n', { mode: 0o755 });
+  fs.writeFileSync(g.p('bin/pidof'), '#!/bin/sh\nprintf \'%s\\n\' "$1" >> "$OSI_CS_ROOT/pidof-calls"\ncase "$1" in chirpstack) test -f "$OSI_CS_ROOT/running";; redis-server) test -f "$OSI_CS_ROOT/redis-running";; esac\n', { mode: 0o755 });
   fs.writeFileSync(g.p('bin/sqlite3'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
   const helper = path.join(feed, 'backup.sh');
-  const owner = spawn(shell, [...shellArgs, ownerMode === 'helper' ? helper : script, ...(ownerMode === 'helper' ? [] : ['--apply'])], { env: { ...g.env, TEST_PAUSE_STOP: '1' }, stdio: 'ignore' });
-  const completed = new Promise((resolve, reject) => { owner.on('error', reject); owner.on('close', status => resolve({ status })); });
+  const owner = spawn(shell, g.invocation(ownerMode === 'helper' ? helper : script, ownerMode === 'helper' ? [] : ['--apply']), { env: { ...g.env, TEST_PAUSE_STOP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  owner.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  owner.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+  const completed = new Promise((resolve, reject) => {
+    owner.on('error', reject); owner.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
   try {
     const deadline = Date.now() + 5000;
     while (!fs.existsSync(g.p('stop-paused'))) { assert.ok(Date.now() < deadline); await new Promise(r => setTimeout(r, 10)); }
     const calls = fs.readFileSync(g.p('service-calls'), 'utf8');
-    const contender = ownerMode === 'helper' ? g.run(['--apply']) : spawnSync(shell, [...shellArgs, helper], { env: g.env, encoding: 'utf8', timeout: 10000 });
+    const contender = ownerMode === 'helper' ? g.run(['--apply']) : spawnSync(shell, g.invocation(helper), { env: g.env, encoding: 'utf8', timeout: 10000 });
     ok(contender, 1);
     assert.equal(fs.readFileSync(g.p('service-calls'), 'utf8'), calls);
     assert.equal(fs.existsSync(g.p('running')), false);
-  } finally { fs.writeFileSync(g.p('stop-resume'), 'yes'); const timer = setTimeout(() => owner.kill('SIGKILL'), 10000); try { ok(await completed); } finally { clearTimeout(timer); } }
+  } finally {
+    fs.writeFileSync(g.p('stop-resume'), 'yes');
+    const timer = setTimeout(() => { stderr += '\nowner exceeded 10-second completion deadline'; owner.kill('SIGKILL'); }, 10000);
+    try {
+      const result = await completed;
+      t.diagnostic(`owner ${ownerMode}: status ${result.status}, signal ${result.signal}\n${result.stdout}\n${result.stderr}`);
+      ok(result);
+    } finally { clearTimeout(timer); }
+  }
+  assert.match(fs.readFileSync(g.p('pidof-calls'), 'utf8'), /chirpstack/, 'the process-probe stub ran');
 });
 
 test('review WAL-requesting automatic recovery reports WAL and retains current helpers', async t => {
