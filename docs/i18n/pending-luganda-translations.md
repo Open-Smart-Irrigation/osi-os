@@ -422,3 +422,14 @@ Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from this table in the same change.
+
+## UI FIX-LIST B4 (Analysis)
+
+| Keys | Reason |
+|---|---|
+| `analysis.preset.metricLabel`, `analysis.preset.more`, `analysis.export.label` (3 keys in `common.json`) | B4 changed the cross-zone metric picker label and added its More disclosure and the Export menu label. The first B4 commit supplied unreviewed Luganda text. No human Luganda pass is on record, so these keys now ship the English source text: "Compare a metric across zones", "More metrics" and "Export". |
+
+Tracked in `web/react-gui/tests/b4AnalysisPendingLuganda.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts that each key remains byte-identical
+to English. A human Luganda pass must remove each key from that list and this
+row in the same change.
