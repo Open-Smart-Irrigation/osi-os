@@ -912,6 +912,18 @@ async function repairProgress(q) {
   return { historyRepairPendingByTable: await pendingRepairCounts(q), historyRepairUnresolvedByTable: await unresolvedRepairCounts(q) };
 }
 
+function repairPosition(comparison) {
+  return [comparison.tableName, comparison.segmentKey];
+}
+
+function compareRepairPositions(left, right) {
+  for (let i = 0; i < 2; i++) {
+    if (left[i] < right[i]) return -1;
+    if (left[i] > right[i]) return 1;
+  }
+  return 0;
+}
+
 async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui, request = null, currentClock = null, clock = () => performance.now() }) {
   const REPAIR_CAP = 2000;
   request = request || { generatedAt: now };
@@ -923,10 +935,29 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       const error = new Error('manifest work deadline'); error.code = 'MANIFEST_BUDGET'; throw error;
     }
   };
-  const pageKey = 'history_repair_cursor:' + crypto.createHash('sha256').update(JSON.stringify([request.scope || null, comparisons.map(c => c && [c.tableName,c.segmentKey])])).digest('hex');
+  // A page's membership can change on every refresh. Resume by ordered segment
+  // identity within the link, including when the previous segment was removed.
+  // Keep disjoint manifest pages independent; match refreshed ranges by their
+  // largest overlap so shifted page boundaries do not restart every batch.
+  // The versioned key leaves old page-hash offsets unused without a migration.
+  comparisons = comparisons.filter(Boolean).sort((left, right) => compareRepairPositions(repairPosition(left), repairPosition(right)));
+  const pageKey = 'history_repair_cursor:v2';
+  const scope = request.scope || null;
   const saved = (await q('SELECT value FROM app_settings WHERE key=?', [pageKey]))[0];
-  let index = saved ? Number(saved.value) : 0;
-  if (!Number.isInteger(index) || index < 0 || index >= comparisons.length) index = 0;
+  const cursor = saved ? JSON.parse(saved.value) : null;
+  const pages = cursor && cursor.scope === scope && Array.isArray(cursor.pages) ? cursor.pages : [];
+  let page = null, largestOverlap = 0;
+  for (const candidate of pages) {
+    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) return {
+      repairCount: 0, repairSkipped: comparisons.filter(c => c.repairRequested === true).length,
+      examinedRows: 0, examinedSegments: 0, quarantinedSegments: 0
+    };
+    const overlap = comparisons.filter(comparison => compareRepairPositions(repairPosition(comparison), candidate.first) >= 0 && compareRepairPositions(repairPosition(comparison), candidate.last) <= 0).length;
+    if (overlap > largestOverlap) { page = candidate; largestOverlap = overlap; }
+  }
+  const after = page ? page.after : null;
+  let index = after ? comparisons.findIndex(comparison => compareRepairPositions(repairPosition(comparison), after) > 0) : 0;
+  if (index < 0) index = 0; // Wrap to revisit deferred work and earlier insertions.
   let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
   const pendingRepair = {};
   while (index < comparisons.length && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
@@ -1047,7 +1078,15 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     }
   }
   repairSkipped += comparisons.slice(index).filter(c => c && c.repairRequested === true).length;
-  await db.transaction(async tx => tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [pageKey, String(index >= comparisons.length ? 0 : index), now]));
+  // index advances only after a segment is handled. A rolled-back deadline or
+  // row-budget deferral retains the position before that segment for retry.
+  // A completed page starts a fresh pass even if more tail segments arrive.
+  if (comparisons.length) {
+    if (!page) { page = {}; pages.push(page); }
+    Object.assign(page, { first: repairPosition(comparisons[0]), last: repairPosition(comparisons[comparisons.length - 1]),
+      after: index >= comparisons.length ? null : index > 0 ? repairPosition(comparisons[index - 1]) : after });
+  }
+  await db.transaction(async tx => saveRepairState(tx, pageKey, { scope, pages }, now));
   return { repairCount, repairSkipped, examinedRows, examinedSegments, quarantinedSegments };
 }
 

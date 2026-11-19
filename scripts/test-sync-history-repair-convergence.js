@@ -61,6 +61,70 @@ function sqliteAdapter(db) {
   } };
 }
 for (const profile of PROFILES) {
+  for (const growing of [false, true]) {
+    test(`${profile}: repair continuation reaches position 40 on a ${growing ? 'growing' : 'stable'} comparison page`, async t => {
+      // Issue #691: append a later-sorting segment before every refresh, as in
+      // the reviewer's five-round membership probe. No source rows are needed
+      // to observe whether the worker reaches the target checkpoint.
+      const { db, h } = fixture(t, profile, 0);
+      const adapter = sqliteAdapter(db);
+      const comparison = day => ({ tableName: 'device_data', segmentKey: SENSOR + '|' + day, repairRequested: true });
+      const comparisons = Array.from({ length: 40 }, (_, i) => comparison(new Date(Date.UTC(2026, 6, i + 1)).toISOString().slice(0, 10)));
+      const target = 'history_repair_segment:' + JSON.stringify(['device_data', comparisons[39].segmentKey]);
+      for (let round = 0; round < 5; round++) {
+        if (growing) comparisons.push(comparison(new Date(Date.UTC(2026, 7, 10 + round)).toISOString().slice(0, 10)));
+        const result = await h.helper.queueManifestRepairs({ comparisons, db: adapter, q: adapter.q,
+          sourceQuery: async () => [], now: '2026-11-19', gatewayEui: GATEWAY, clock: () => 0 });
+        assert.ok(result.examinedSegments <= 32);
+      }
+      assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(target), 'position 40 must be visited within five refreshes');
+    });
+  }
+  test(`${profile}: repair continuation survives removals and reordering, wraps to earlier additions, and resets on relink`, async t => {
+    const { db, h } = fixture(t, profile, 0);
+    const adapter = sqliteAdapter(db);
+    const comparison = day => ({ tableName: 'device_data', segmentKey: SENSOR + '|' + day, repairRequested: true });
+    let comparisons = Array.from({ length: 40 }, (_, i) => comparison(new Date(Date.UTC(2026, 6, i + 1)).toISOString().slice(0, 10)));
+    const checkpoint = c => 'history_repair_segment:' + JSON.stringify([c.tableName, c.segmentKey]);
+    const call = (helper, scope = 'first-link') => helper.queueManifestRepairs({ comparisons, db: adapter, q: adapter.q,
+      sourceQuery: async () => [], now: '2026-11-19', gatewayEui: GATEWAY, request: { scope }, clock: () => 0 });
+    await call(h.helper);
+    const target = comparisons[39];
+    const removed = comparisons[31];
+    const earlier = comparison('2026-06-30');
+    comparisons = [earlier, ...comparisons.filter((c, i) => i >= 16 && c !== removed)].reverse();
+    const restarted = createHarness({ db, profile, env: { DEVICE_EUI: GATEWAY } });
+    const second = await call(restarted.helper);
+    assert.equal(second.examinedSegments, 8, 'removed resume anchor still seeks to its successor');
+    assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(target)));
+    assert.equal(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(earlier)), undefined, 'earlier addition waits for wrap');
+    comparisons.push(comparison('2026-08-10'));
+    await call(restarted.helper);
+    assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(earlier)), 'a completed page wraps even when later segments keep arriving');
+    // Leave the cursor partway through a larger page, then change link scope.
+    comparisons = Array.from({ length: 40 }, (_, i) => comparison(new Date(Date.UTC(2026, 8, i + 1)).toISOString().slice(0, 10)));
+    await call(restarted.helper);
+    const relinked = await call(restarted.helper, 'second-link');
+    assert.equal(relinked.examinedSegments, 32, 'a new link starts at the beginning');
+    const first = JSON.parse(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(comparisons[0])).value);
+    assert.equal(first.scope, 'second-link');
+  });
+  test(`${profile}: rotating disjoint growing pages retain independent repair positions`, async t => {
+    const { db, h } = fixture(t, profile, 0);
+    const adapter = sqliteAdapter(db);
+    const pages = [5, 8].map(month => Array.from({ length: 40 }, (_, i) => ({
+      tableName: 'device_data', segmentKey: SENSOR + '|' + new Date(Date.UTC(2026, month, i + 1)).toISOString().slice(0, 10), repairRequested: true
+    })));
+    const targets = pages.map(page => 'history_repair_segment:' + JSON.stringify(['device_data', page[39].segmentKey]));
+    for (let round = 0; round < 5; round++) {
+      for (const [pageIndex, page] of pages.entries()) {
+        page.push({ ...page[0], segmentKey: SENSOR + '|' + new Date(Date.UTC(2026, [5, 8][pageIndex], 41 + round)).toISOString().slice(0, 10) });
+        await h.helper.queueManifestRepairs({ comparisons: page, db: adapter, q: adapter.q, sourceQuery: async () => [],
+          now: '2026-11-19', gatewayEui: GATEWAY, request: { scope: 'same-link' }, clock: () => 0 });
+      }
+    }
+    for (const target of targets) assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(target), 'each disjoint page reaches position 40');
+  });
   test(`${profile}: upgrade rechecks legacy done keys when the cloud reports a mismatch`, async t => {
     const { db, h } = fixture(t, profile, 3);
     db.prepare("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,changed_at,status) VALUES('cloud','device_data',?,'repair','2026-07-01','done')").run(key(1));
