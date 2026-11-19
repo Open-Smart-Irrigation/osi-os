@@ -26,6 +26,38 @@ stays out of the way.
 the change from the next ordinary deploy. No image rebuild, no extra on-device
 step.
 
+## ChirpStack capture on images
+
+Images carrying ChirpStack package `4.12.1-4` forward its stdout and stderr
+through procd to the same system log. The generated
+`/var/etc/chirpstack/chirpstack.toml` sets `[logging] level="warn"`, retaining
+warnings and errors while suppressing routine per-uplink info messages. These
+images need no temporary ChirpStack capture patch. A script upgrade on stock
+ChirpStack Gateway OS keeps its existing ChirpStack init and does not acquire
+this capture.
+
+Check the image's init and generated level before collecting evidence:
+
+```sh
+grep -n 'procd_set_param std' /etc/init.d/chirpstack
+sed -n '/^\[logging\]/,/^\[/p' /var/etc/chirpstack/chirpstack.toml
+logread | grep -i chirpstack | tail -20
+grep -i chirpstack /data/log/osi-system.log | tail -20
+```
+
+Expect both stream parameters and `level="warn"`. A healthy service may emit
+no warnings, so empty log output alone does not disprove capture.
+
+The persistent writer follows the whole system log with `logread -f -F` and
+rotates at 2048 KiB, keeping one previous file. It has no per-service rate
+limit. For scale, an assumed five uplinks/s at just one 250-byte info line per
+uplink would add 4.3 MiB/hour: one file fills in about 28 minutes, and a
+128 KiB ring in about 105 seconds, before other services contribute. This is
+a sizing example, not a measured device rate. The `warn` level removes that
+routine load; repeated faults can still churn both logs. Compare file growth
+and retained timestamps during field verification. An operator-selected sink
+keeps its own size and path settings.
+
 ## When this may run
 
 Never during a deploy window. The 2026-09-13 deploy train must be reported
