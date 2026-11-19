@@ -170,7 +170,14 @@ function createFakeCloud(helper, options = {}) {
 
 function createHarness(options) {
   const profile = options.profile || PROFILES[0];
-  const { flows, helper } = loadProfile(profile);
+  const { flows, helper: profileHelper } = loadProfile(profile);
+  // Schedule-count tests can hold the cooperative budgets fixed independently
+  // of Date and runner pauses. Deadline tests keep their own advancing clocks.
+  const helper = options.helperClock ? {
+    ...profileHelper,
+    loadDirtyRows: args => profileHelper.loadDirtyRows({ ...args, clock: options.helperClock }),
+    queueManifestRepairs: args => profileHelper.queueManifestRepairs({ ...args, clock: options.helperClock })
+  } : profileHelper;
   const db = options.db || new DatabaseSync(options.dbPath || ':memory:');
   let clock = Date.parse(options.start || '2026-10-05T12:00:00.000Z');
   class FakeDate extends Date {

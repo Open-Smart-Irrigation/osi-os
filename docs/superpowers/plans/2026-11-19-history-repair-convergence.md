@@ -50,6 +50,12 @@ Check a cooperative two-second deadline during preparation and inside the atomic
 enqueue. Roll back an unfinished segment on expiry and retain its continuation;
 three unsuccessful attempts become an unresolved repair quarantine. Each page
 keeps its own continuation so pages of 500 do not continually restart at row one.
+Continuation currently requires stable page membership: its key hashes the entire
+ordered comparison list. Adding a later-sorting segment before every refresh
+resets a 40-segment page to position zero, so the 32-segment budget can repeatedly
+skip position 40 even though that segment remains in every request. The fixed-page
+regressions prove continuation only while membership stays unchanged. A follow-up
+must persist a stable resume position and test membership changes between refreshes.
 Source reads are capped with SQL LIMIT; hashing happens before the write
 transaction. Individual SQL operations may finish after the deadline.
 A segment blocked by its own table's pending-key capacity advances the page

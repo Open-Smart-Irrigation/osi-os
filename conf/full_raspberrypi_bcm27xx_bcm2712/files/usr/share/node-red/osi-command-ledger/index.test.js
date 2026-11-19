@@ -51,10 +51,27 @@ test.after(() => {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
+for (const closeFails of [false, true]) {
+  test(`seed failure preserves SQLITE_FULL and closes after automatic rollback (close failure: ${closeFails})`, () => {
+    const original = Object.assign(new Error('fixture database or disk is full'), { code: 'SQLITE_FULL' });
+    const calls = [];
+    class FailedDatabase {
+      exec(sql) {
+        calls.push(sql === seedSql ? 'seed' : sql);
+        if (sql === seedSql) throw original;
+        if (sql === 'ROLLBACK') throw new Error('cannot rollback - no transaction is active');
+      }
+      close() { calls.push('close'); if (closeFails) throw new Error('close failed'); }
+    }
+    assert.throws(() => new TestDb(FailedDatabase), error => error === original);
+    assert.deepEqual(calls, ['PRAGMA foreign_keys=ON; BEGIN IMMEDIATE', 'seed', 'ROLLBACK', 'close']);
+  });
+}
+
 class TestDb {
-  constructor() {
+  constructor(NativeDatabase = DatabaseSync) {
     dbCounter += 1;
-    this.native = new DatabaseSync(path.join(tempRoot, 'db-' + dbCounter + '.db'));
+    this.native = new NativeDatabase(path.join(tempRoot, 'db-' + dbCounter + '.db'));
     // Batch fixture DDL so a disk-backed TMPDIR does not fsync hundreds of
     // schema statements per test. Ledger transactions start after this commit.
     this.native.exec('PRAGMA foreign_keys=ON; BEGIN IMMEDIATE');
@@ -62,8 +79,8 @@ class TestDb {
       this.native.exec(seedSql);
       this.native.exec('COMMIT');
     } catch (error) {
-      this.native.exec('ROLLBACK');
-      this.native.close();
+      try { this.native.exec('ROLLBACK'); } catch (cleanupError) { /* SQLite may have rolled back already. */ }
+      try { this.native.close(); } catch (cleanupError) { /* Preserve the seed failure. */ }
       throw error;
     }
     assert.equal(this.native.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);

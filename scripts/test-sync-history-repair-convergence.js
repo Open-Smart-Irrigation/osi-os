@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { performance } = require('node:perf_hooks');
 const { PROFILES, createHarness } = require('./history-sync-flow-harness');
 const GATEWAY = '0016C001F1000001';
 const SENSOR = 'A840410000000001';
@@ -46,6 +47,18 @@ function fixture(t, profile, count = 300, extra = {}) {
   db.exec('COMMIT');
   h.memory.set('history_sync_last_table', 'tensiomark_observations');
   return { db, h, insert };
+}
+function sqliteAdapter(db) {
+  const q = async (sql, params = []) => db.prepare(sql).all(...params);
+  return { q, transaction: async executor => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await executor({ all: q, get: async (sql, params = []) => db.prepare(sql).get(...params),
+        run: async (sql, params = []) => db.prepare(sql).run(...params) });
+      db.exec('COMMIT');
+      return result;
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  } };
 }
 for (const profile of PROFILES) {
   test(`${profile}: upgrade rechecks legacy done keys when the cloud reports a mismatch`, async t => {
@@ -161,6 +174,104 @@ for (const profile of PROFILES) {
     assert.equal(pending(db),2,'the new account is not blocked by the old account repair budget');
     assert.equal((await h.helper.unresolvedRepairCounts(async sql=>db.prepare(sql).all())).device_data,0);
   });
+  for (const expiry of ['preparation', 'enqueue']) {
+    test(`${profile}: deadline after relink clears the previous quarantine (${expiry})`, async t => {
+      const { db, h } = fixture(t, profile, 2);
+      const adapter = sqliteAdapter(db);
+      const built = await h.invoke('sync-history-manifest-build', {});
+      const segment = built.payload.segments[0];
+      const checkpoint = 'history_repair_segment:' + JSON.stringify(['device_data', segment.segmentKey]);
+      const fingerprint = JSON.stringify([segment.hashVersion, segment.canonicalRowCount, segment.syncablePayloadHash, segment.quarantinedCount, segment.tombstoneCount]);
+      db.prepare('INSERT INTO app_settings(key,value) VALUES(?,?)').run(checkpoint, JSON.stringify({ version: 2, scope: 'old-link', fingerprint, round: 3, budgetFailures: 3, unresolved: 'round_limit' }));
+      db.prepare("INSERT INTO sync_history_quarantine(peer_node,table_name,history_key,reason,first_seen_at,last_seen_at) VALUES('cloud','device_data',?,'manifest_repair_exhausted','2026-11-01','2026-11-01')").run('REPAIR_SEGMENT|' + segment.segmentKey);
+      let elapsed = 0;
+      const request = built._historyManifest;
+      const txDb = { transaction: executor => adapter.transaction(tx => executor({ ...tx, get: async (...args) => {
+        const row = await tx.get(...args);
+        if (expiry === 'enqueue' && args[0].includes('SELECT status FROM sync_history_dirty_keys')) elapsed = 2001;
+        return row;
+      } })) };
+      const call = slow => h.helper.queueManifestRepairs({ comparisons: [{ tableName: 'device_data', segmentKey: segment.segmentKey, repairRequested: true }],
+        db: slow ? txDb : adapter, q: adapter.q, sourceQuery: async (table, sql, params) => {
+          if (slow && expiry === 'preparation') elapsed = 2001;
+          return adapter.q(sql, params);
+        }, now: new Date(h.now()).toISOString(), gatewayEui: GATEWAY, request, clock: () => elapsed });
+      await call(true);
+      const state = JSON.parse(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint).value);
+      assert.equal(state.scope, request.scope);
+      assert.equal(state.budgetFailures, 1);
+      assert.equal(state.unresolved, undefined, 'the old link quarantine must not suppress the new link');
+      assert.equal((await h.helper.unresolvedRepairCounts(adapter.q)).device_data, 0);
+      elapsed = 0;
+      await call(false);
+      assert.equal(pending(db), 2, 'the next response for the same content can enqueue');
+    });
+    test(`${profile}: deadline budget belongs to the attempted fingerprint (${expiry})`, async t => {
+      const { db, h } = fixture(t, profile, 2);
+      const adapter = sqliteAdapter(db);
+      let elapsed = 0;
+      let slow = true;
+      let request;
+      const txDb = { transaction: executor => adapter.transaction(tx => executor({ ...tx, get: async (...args) => {
+        const row = await tx.get(...args);
+        if (slow && expiry === 'enqueue' && args[0].includes('SELECT status FROM sync_history_dirty_keys')) elapsed = 2001;
+        return row;
+      } })) };
+      const call = async () => {
+        elapsed = 0;
+        const rows = db.prepare('SELECT * FROM device_data').all();
+        const segmentKey = h.helper.segmentKey('device_data', rows[0]);
+        const manifest = h.helper.buildSegment('device_data', GATEWAY, segmentKey, rows).manifest;
+        request = { scope: 'same-link', segments: [manifest] };
+        await h.helper.queueManifestRepairs({ comparisons: [{ tableName: 'device_data', segmentKey, repairRequested: true }],
+          db: txDb, q: adapter.q, sourceQuery: async (table, sql, params) => {
+            if (slow && expiry === 'preparation') elapsed = 2001;
+            return adapter.q(sql, params);
+          }, now: new Date(h.now()).toISOString(), gatewayEui: GATEWAY, request, clock: () => elapsed });
+      };
+      const state = () => JSON.parse(db.prepare("SELECT value FROM app_settings WHERE key LIKE 'history_repair_segment:%'").get().value);
+      await call(); await call();
+      assert.equal(state().budgetFailures, 2);
+      const firstFingerprint = state().fingerprint;
+      db.exec('UPDATE device_data SET swt_1=99 WHERE id=1');
+      await call();
+      assert.equal(state().budgetFailures, 1, 'F2 must not inherit two F1 deadline failures');
+      assert.notEqual(state().fingerprint, firstFingerprint);
+      assert.equal((await h.helper.unresolvedRepairCounts(adapter.q)).device_data, 0);
+      await call(); await call();
+      assert.equal(state().budgetFailures, 3, 'repeated timeouts for F2 exhaust its own budget');
+      assert.equal(state().unresolved, 'work_deadline');
+      const marker = db.prepare("SELECT payload_hash FROM sync_history_quarantine WHERE reason='manifest_repair_exhausted'").get();
+      assert.equal(marker.payload_hash, crypto.createHash('sha256').update(state().fingerprint).digest('hex'));
+    });
+  }
+  test(`${profile}: a partial or duplicate ACK fences only segments whose dirty keys completed`, async t => {
+    const { db, h } = fixture(t, profile, 2);
+    // Two adjacent IDs in different segments fit in one batch.
+    db.exec("UPDATE device_data SET recorded_at='2026-07-02T00:00:00.000Z' WHERE id=2; DELETE FROM sync_history_segments; DELETE FROM sync_history_dirty_keys");
+    const rows = db.prepare('SELECT * FROM device_data').all();
+    for (const row of rows) {
+      const segment = h.helper.buildSegment('device_data', GATEWAY, h.helper.segmentKey('device_data', row), [row]).manifest;
+      db.prepare("INSERT INTO sync_history_segments(peer_node,table_name,segment_key,hash_version,canonical_row_count,syncable_row_count,syncable_payload_hash,computed_at) VALUES('cloud','device_data',?,1,1,1,?,'2026-11-01')").run(segment.segmentKey, segment.syncablePayloadHash);
+    }
+    await h.manifest();
+    const built = await h.invoke('sync-history-build', {});
+    assert.equal(built._historyBatch.segmentKeys.length, 2);
+    h.cloud.index.clear();
+    const delayed = await h.invoke('sync-history-manifest-http', await h.invoke('sync-history-manifest-build', {}));
+    const args = { batch: built._historyBatch, response: { results: [{ historyKey: key(1), status: 'APPLIED' }, { historyKey: key(2), status: 'RETRYABLE_ERROR' }] },
+      tableName: 'device_data', gatewayEui: GATEWAY, sourceQuery: async (table, sql, params) => db.prepare(sql).all(...params), db: sqliteAdapter(db), manifestClock: h.memory.get('history_manifest_clock') };
+    await h.helper.completeDirtyBatch(args);
+    const states = () => db.prepare("SELECT value FROM app_settings WHERE key LIKE 'history_repair_segment:%' ORDER BY key").all().map(row => JSON.parse(row.value));
+    assert.deepEqual(states().map(state => !!state.ackFence), [true, false]);
+    const before = states();
+    await h.helper.completeDirtyBatch({ ...args, manifestClock: { ...args.manifestClock, sequence: args.manifestClock.sequence + 1 } });
+    assert.deepEqual(states(), before, 'a duplicate ACK that completes no key cannot move the fence');
+    const oldRequest = states()[1].lastRequest.sequence;
+    await h.invoke('sync-history-manifest-mark', delayed);
+    assert.ok(states()[1].lastRequest.sequence > oldRequest, 'the retryable segment still processes its in-flight mismatch');
+    assert.deepEqual(h.warnings, []);
+  });
   test(`${profile}: an empty local segment with extra cloud rows also exhausts its repair budget`, async t => {
     const {db,h}=fixture(t,profile,2);
     await h.manifest();await h.tick();
@@ -217,13 +328,13 @@ for (const profile of PROFILES) {
       // Round-two review probe: one backed-off key prevents atomic enqueue of
       // a 3,000-row segment, before unrelated device history on the same page.
       const { db, h } = fixture(t, profile, 1);
-      const blockedKey = `DENDROMETER_READINGS|${GATEWAY}|1`;
       const insert = db.prepare('INSERT INTO dendrometer_readings(id,deveui,position_um,recorded_at) VALUES(?,?,20,?)');
       db.exec('BEGIN');
       for (let id = 1; id <= 3000; id++) insert.run(id, SENSOR, '2026-07-01T00:00:00.000Z');
       db.exec('COMMIT');
       db.prepare("UPDATE sync_history_cursors SET snapshot_high_id=3000,last_acked_id=3000 WHERE table_name='dendrometer_readings'").run();
       const rows = db.prepare('SELECT * FROM dendrometer_readings').all();
+      const blockedKey = h.helper.historyKey('dendrometer_readings', GATEWAY, rows[0]);
       const segment = h.helper.segmentKey('dendrometer_readings', rows[0]);
       const m = h.helper.buildSegment('dendrometer_readings', GATEWAY, segment, rows).manifest;
       db.prepare("INSERT INTO sync_history_segments(peer_node,table_name,segment_key,hash_version,canonical_row_count,syncable_row_count,syncable_payload_hash,computed_at) VALUES('cloud','dendrometer_readings',?,1,?,?,?,'2026-11-01')").run(segment,m.canonicalRowCount,m.syncableRowCount,m.syncablePayloadHash);
@@ -392,6 +503,17 @@ for (const profile of PROFILES) {
     assert.equal(response.payload.historyRepairPendingByTable.device_data, 0);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM sync_history_dirty_keys WHERE status='done'").get().n, 2);
   });
+  test(`${profile}: manifest ACKs preserve every source history table through the delegated helper`, async t => {
+    const { db, h } = fixture(t, profile, 2);
+    const snapshot = () => Object.fromEntries(h.helper.tableNames().map(table => [table, db.prepare('SELECT * FROM ' + table).all()]));
+    const before = snapshot();
+    await h.manifest();
+    assert.deepEqual(snapshot(), before, 'a mismatch only queues repair keys');
+    await h.tick();
+    await h.manifest();
+    assert.deepEqual(snapshot(), before, 'parity only clears repair state');
+    assert.deepEqual(h.warnings, []);
+  });
   test(`${profile}: a radio manifest confirming parity preserves completed repairs`, async t => {
     const { db } = fixture(t, profile, 1);
     const radio = new DatabaseSync(':memory:');
@@ -409,7 +531,14 @@ for (const profile of PROFILES) {
     const status = () => db.prepare("SELECT status FROM sync_history_dirty_keys WHERE table_name='radio_uplinks'").get().status;
     assert.equal(status(), 'done');
     h.advance(300000);
-    await h.manifest();
+    const manifest = await h.invoke('sync-history-manifest-build', {});
+    assert.ok(manifest.payload.segments.some(segment => segment.tableName === 'radio_uplinks' && segment.segmentKey === comparison.segmentKey), 'the ACK publishes the radio segment to the manifest cache');
+    const answered = await h.invoke('sync-history-manifest-http', manifest);
+    const radioComparison = answered.payload.segments.find(segment => segment.tableName === 'radio_uplinks' && segment.segmentKey === comparison.segmentKey);
+    assert.ok(radioComparison, 'the cloud compared the expected radio segment');
+    assert.deepEqual(radioComparison.mismatchFields, []);
+    assert.equal(radioComparison.repairRequested, false);
+    await h.invoke('sync-history-manifest-mark', answered);
     assert.equal(status(), 'done');
     radio.exec("UPDATE radio_uplinks SET metadata_json='{\"version\":1,\"receivers\":[],\"changed\":true}',dirty_generation=2");
     await mark();
@@ -417,7 +546,11 @@ for (const profile of PROFILES) {
     assert.deepEqual(h.warnings, []);
   });
   test(`${profile}: 10,000 repairs converge in 800 ticks with refreshes and continuous tail`, async t => {
-    const { db, h, insert } = fixture(t, profile, 10000, { manifestEvery: 10, includeRadio: true });
+    // Simulate an arbitrarily slow runner clock. The scheduling assertion must
+    // use its injected helper clock; separate tests cover cooperative deadlines.
+    let runnerTime = 0;
+    t.mock.method(performance, 'now', () => (runnerTime += 201));
+    const { db, h, insert } = fixture(t, profile, 10000, { manifestEvery: 10, includeRadio: true, helperClock: () => 0 });
     const tables = h.helper.tableNames({ includeRadio: true });
     assert.equal(tables.length, 10);
     let visits = 0;

@@ -86,6 +86,12 @@ for (const fragment of [
   includes(manifestMark, fragment, 'Mark History Manifest ACK');
 }
 excludes(manifestMark.toUpperCase(), 'DELETE FROM', 'Mark History Manifest ACK');
+// Cover the delegated SQL too. This scans the whole helper, including functions
+// called by queueManifestRepairs; dynamic table names also fail the allowlist.
+for (const deletion of historySource.matchAll(/\bDELETE\s+FROM\s+(\S+)/gi)) {
+  assert.strictEqual(deletion[1], 'sync_history_quarantine', 'history helper may delete only synthetic repair quarantine markers');
+}
+
 for (const fragment of ['repairRequested', 'segmentQuery(', 'sync_history_dirty_keys', "change_kind='repair'", "status='done'", 'history_repair_segment:']) {
   includes(historySource, fragment, 'history sync helper');
 }

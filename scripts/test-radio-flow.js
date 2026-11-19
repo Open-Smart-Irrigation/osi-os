@@ -52,7 +52,8 @@ function assertHistoryRouting({build,mark,manifest,dirty,complete,queue}) {
  assert.match(complete,/if \(tableName === 'radio_uplinks'\)[\s\S]*radioRows\.set\(submitted, await sourceQuery\(tableName,\s*lookup.sql,\s*lookup.params\)\)/);
  assert.match(complete,/const rows = tableName === 'radio_uplinks' \? radioRows.get\(submitted\) : await tx.all\(lookup.sql, lookup.params\)/);
  assert.match(complete,/await db.transaction\(/);
- assert.match(complete,/await tx.run\(\s*"UPDATE sync_history_dirty_keys/);
+ assert.match(complete,/const updated = await tx.all\(\s*"UPDATE sync_history_dirty_keys/);
+ assert.match(complete,/RETURNING row_key/);
  assert.match(complete,/rb.generation=\?/);
  assert.match(manifest,/helper\.queueManifestRepairs\(\{ comparisons, db: _db, q, sourceQuery,/);
  assert.match(queue,/const readSql = lookup.sql \+ ' LIMIT \?'/);

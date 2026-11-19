@@ -288,10 +288,16 @@ const historyMarkSource = canonicalFlows.find((node) => node.id === 'sync-histor
 async function applyDirtyAck(dirtyRowKeys) {
   const submittedHistoryKey = 'VALVE_ACTUATION|NEW_EUI|exp-1';
   const actualHelper = require(helperPaths[0]);
-  const sourceRow = { expectation_id: 'exp-1', command_id: 'fixture-command', device_eui: 'fixture-device' };
+  const sourceRow = { expectation_id: 'exp-1', command_id: 'fixture-command', device_eui: 'fixture-device', commanded_at: '2026-07-01T00:00:00.000Z' };
   const completed = [];
   const database = {
     all(sql, params, callback) {
+      if (sql.includes("UPDATE sync_history_dirty_keys SET status='done'")) {
+        assert.ok(sql.includes('RETURNING row_key'));
+        completed.push(params[1]);
+        callback(null, [{ row_key: params[1] }]);
+        return;
+      }
       if (sql.includes('FROM sync_history_cursors')) {
         callback(null, [{ state: 'tail', last_acked_id: null }]);
         return;
@@ -303,9 +309,6 @@ async function applyDirtyAck(dirtyRowKeys) {
       callback(null, []);
     },
     run(sql, params, callback) {
-      if (sql.includes("UPDATE sync_history_dirty_keys SET status='done'")) {
-        completed.push(params[1]);
-      }
       callback(null);
     },
     close(callback) {
@@ -355,7 +358,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     { Database: function Database() { return database; } },
     flow,
     { get: () => '' },
-    { error() {}, warn() {} },
+    { error: assert.fail, warn: assert.fail },
     {
       statusCode: 200,
       _historyBatch: {

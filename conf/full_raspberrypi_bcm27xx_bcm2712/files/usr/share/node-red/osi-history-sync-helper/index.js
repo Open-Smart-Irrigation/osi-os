@@ -807,6 +807,7 @@ async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sour
     radioRows.set(submitted, await sourceQuery(tableName, lookup.sql, lookup.params));
   }
   await db.transaction(async tx => {
+    const completedSegments = new Set();
     for (const [dirtyKey, submitted] of completed) {
       const version = (batch.dirtyVersions || {})[dirtyKey];
       const hash = (batch.dirtyPayloadHashes || {})[submitted];
@@ -815,12 +816,13 @@ async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sour
       const lookup = rowByHistoryKeyQuery(tableName, submitted);
       const rows = tableName === 'radio_uplinks' ? radioRows.get(submitted) : await tx.all(lookup.sql, lookup.params);
       if (!rows.length || prepareRow(tableName, gatewayEui, rows[0]).payloadHash !== hash) continue;
-      await tx.run(
-        "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=? AND status='pending' AND changed_at=?" + (tableName === 'radio_uplinks' ? " AND EXISTS(SELECT 1 FROM radio_history_bridge rb WHERE rb.history_key=sync_history_dirty_keys.row_key AND rb.generation=?)" : ''),
+      const updated = await tx.all(
+        "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=? AND status='pending' AND changed_at=?" + (tableName === 'radio_uplinks' ? " AND EXISTS(SELECT 1 FROM radio_history_bridge rb WHERE rb.history_key=sync_history_dirty_keys.row_key AND rb.generation=?)" : '') + " RETURNING row_key",
         [tableName, dirtyKey, version].concat(tableName === 'radio_uplinks' ? [(batch.dirtyGenerations || {})[submitted] ?? -1] : [])
       );
+      if (updated.length) completedSegments.add(segmentKey(tableName, rows[0]));
     }
-    for (const segment of batch.segmentKeys || []) {
+    for (const segment of completedSegments) {
       const key = 'history_repair_segment:' + JSON.stringify([tableName, segment]);
       const value = await tx.get('SELECT value FROM app_settings WHERE key=?', [key]);
       if (!value) continue;
@@ -973,10 +975,12 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     // tables proceed; the page wraps back to retry it after its pending work drains.
     if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) { repairSkipped++; index++; continue; }
     if ((rows.length > remaining && examinedRows !== rows.length) || (repairCount > 0 && repairCount + rows.length > REPAIR_CAP)) break;
+    let attemptedFingerprint = reportedFingerprint;
     try {
       const prepared = [];
       for (const row of rows) { deadline(); prepared.push(prepareRow(table, gatewayEui, row)); }
       const fingerprint = manifestFingerprint(buildPreparedSegment(table, segment, prepared).manifest);
+      attemptedFingerprint = fingerprint;
       deadline();
       const added = await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
@@ -1021,9 +1025,18 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       // repeatedly unserviceable segment becomes explicit unresolved work.
       await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (request.scope && state.scope !== request.scope) { state.round = 0; state.budgetFailures = 0; }
+        if (obsoleteManifest(request, state, currentClock)) return;
+        // A failed attempt belongs to its link and content, even if preparation
+        // expired before the normal generation check. In that case the request
+        // manifest is the available content fingerprint.
+        if ((request.scope && state.scope !== request.scope) || state.fingerprint !== attemptedFingerprint) {
+          state.round = 0;
+          state.budgetFailures = 0;
+          delete state.unresolved;
+          await clearRepairQuarantine(tx, table, segment);
+        }
         state.scope = request.scope;
-        state.fingerprint = state.fingerprint || reportedFingerprint;
+        state.fingerprint = attemptedFingerprint;
         state.budgetFailures = (state.budgetFailures || 0) + 1;
         if (state.budgetFailures >= MANIFEST_REPAIR_LIMITS.rounds) {
           state.unresolved = 'work_deadline'; await quarantineRepair(tx, table, segment, state, now); quarantinedSegments++; index++;
