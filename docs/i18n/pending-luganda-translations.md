@@ -444,6 +444,15 @@ Luganda pass must remove each translated key from the allowlist and this
 section in the same change. The six legacy Users keys remain in their
 existing entry above.
 
+## UI FIX-LIST B2 (Monitors)
+
+| Keys | Reason |
+|---|---|
+| `monitor.current`, `monitor.minimum`, `monitor.maximum`, `monitor.hours`, `monitor.days`, `monitor.readings`, `monitor.noData`, `monitor.failedToLoad` (8 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `rainMonitor.noData`, `rainMonitor.windowTotal`, `rainMonitor.peakInterval`, `rainMonitor.wetIntervals`, `rainMonitor.rainyDays`, `rainMonitor.wettestDay`, `rainMonitor.noIntervalData`, `rainMonitor.noWindowData`, `rainMonitor.intervalTitle`, `rainMonitor.dailyTitle` (10 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `windMonitor.currentSpeed`, `windMonitor.peakGust`, `windMonitor.currentDirection`, `windMonitor.speed`, `windMonitor.gust`, `windMonitor.direction`, `windMonitor.speedAndGust`, `windMonitor.roseTitle`, `windMonitor.samples`, `windMonitor.noData`, `windMonitor.noSpeedData`, `windMonitor.notEnoughData`, `windMonitor.allCalm`, `windMonitor.chartError`, `windMonitor.timestamps` (15 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `dendrometerMonitor.title`, `dendrometerMonitor.aboveRange`, `dendrometerMonitor.belowRange`, `dendrometerMonitor.noData`, `dendrometerMonitor.rawOnly`, `dendrometerMonitor.awaitingBaseline`, `dendrometerMonitor.noCalibratedData`, `dendrometerMonitor.stemTitle`, `dendrometerMonitor.stemDescription`, `dendrometerMonitor.mechanicalTitle`, `dendrometerMonitor.mechanicalDescription`, `dendrometerMonitor.engineering`, `dendrometerMonitor.currentPosition`, `dendrometerMonitor.windowRange`, `dendrometerMonitor.strokeUsed`, `dendrometerMonitor.strokeValue`, `dendrometerMonitor.rangeState`, `dendrometerMonitor.outsideRange`, `dendrometerMonitor.calibrationDetails` (19 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+
 ## UI FIX-LIST B4 (Analysis)
 
 | Keys | Reason |

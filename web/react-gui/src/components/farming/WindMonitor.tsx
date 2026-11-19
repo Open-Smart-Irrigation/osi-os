@@ -9,6 +9,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useTranslation } from 'react-i18next';
+import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
 import { computeWindRose, formatWindDirection, type WindSample } from '../../utils/wind';
 
@@ -39,7 +41,7 @@ const TIME_WINDOWS = [
   { label: '90 d', hours: 2160 },
 ];
 
-class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode; errorLabel: string }, { hasError: boolean }> {
   state = { hasError: false };
 
   static getDerivedStateFromError() {
@@ -50,7 +52,7 @@ class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode 
     if (this.state.hasError) {
       return (
         <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
-          Unable to load wind rose chart.
+          {this.props.errorLabel}
         </div>
       );
     }
@@ -58,15 +60,14 @@ class WindRoseErrorBoundary extends React.Component<{ children: React.ReactNode 
   }
 }
 
-function fmtTick(iso: string, hours: number): string {
-  const d = new Date(iso);
+function fmtTick(iso: string, hours: number, format: DateFormatter): string {
   if (hours <= 24) {
-    return d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return format.time(iso) ?? '—';
   }
   if (hours <= 168) {
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return format.date(iso, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—';
   }
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
+  return format.date(iso) ?? '—';
 }
 
 function formatSpeed(value: number | null | undefined): string {
@@ -151,38 +152,41 @@ function pairWindRoseSamples(speedRows: SensorHistoryPoint[], directionRows: Sen
   });
 }
 
-const WindTooltip = ({ active, payload, label, hours }: any) => {
+const WindTooltip = ({ active, payload, label, hours, format }: any) => {
+  const { t } = useTranslation('devices');
   if (!active || !payload?.length) return null;
   const point = payload[0]?.payload as WindHistoryPoint | undefined;
   if (!point) return null;
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
-      <p className="mb-1 text-[var(--text-tertiary)]">{fmtTick(label, hours)}</p>
+      <p className="mb-1 text-[var(--text-tertiary)]">{fmtTick(label, hours, format)}</p>
       {point.wind_speed_mps != null && (
-        <p className="font-bold text-[var(--text)]">Speed: {point.wind_speed_mps.toFixed(1)} m/s</p>
+        <p className="font-bold text-[var(--text)]">{t('windMonitor.speed')}: {point.wind_speed_mps.toFixed(1)} m/s</p>
       )}
       {point.wind_gust_mps != null && (
-        <p className="text-[var(--text-secondary)]">Gust: {point.wind_gust_mps.toFixed(1)} m/s</p>
+        <p className="text-[var(--text-secondary)]">{t('windMonitor.gust')}: {point.wind_gust_mps.toFixed(1)} m/s</p>
       )}
       {point.wind_direction_deg != null && (
-        <p className="text-[var(--text-secondary)]">Direction: {formatWindDirection(point.wind_direction_deg)}</p>
+        <p className="text-[var(--text-secondary)]">{t('windMonitor.direction')}: {formatWindDirection(point.wind_direction_deg)}</p>
       )}
     </div>
   );
 };
 
 export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
+  const { t } = useTranslation('devices');
+  const format = useDateFormat();
   const [hours, setHours] = useState(24);
   const [data, setData] = useState<WindHistoryPoint[]>([]);
   const [windRoseSamples, setWindRoseSamples] = useState<WindSample[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setError(false);
 
     Promise.all([
       sensorAPI.getHistory(deveui, 'wind_speed_mps', hours),
@@ -196,9 +200,9 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
           setLoading(false);
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!cancelled) {
-          setError(err.message || 'Failed to load');
+          setError(true);
           setLoading(false);
         }
       });
@@ -237,12 +241,12 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
       }}
     >
       <div className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-[var(--bg)] shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-[var(--header-bg)] px-6 py-4">
-          <div>
-            <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Wind</h2>
-            <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
+        <div className="flex shrink-0 items-center justify-between gap-3 bg-[var(--header-bg)] px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="high-contrast-text break-words text-2xl font-bold text-[var(--header-text)]">{t('windMonitor.title')}</h2>
+            <p className="mt-0.5 truncate text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
           </div>
-          <button onClick={onClose} className="touch-target px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]">×</button>
+          <button aria-label={t('monitor.close')} onClick={onClose} className="touch-target shrink-0 px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]">×</button>
         </div>
 
         <div className="flex flex-wrap gap-2 px-6 pt-4">
@@ -256,24 +260,24 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >
-              {window.label}
+              {t(window.hours <= 24 ? 'monitor.hours' : 'monitor.days', { count: window.hours <= 24 ? window.hours : window.hours / 24 })}
             </button>
           ))}
         </div>
 
         {!loading && !error && hasAnyData && (
-          <div className="grid grid-cols-3 gap-3 px-6 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-6 pt-4">
             <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-              <p className="text-xs font-semibold text-[var(--text-tertiary)]">CURRENT SPEED</p>
+              <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('windMonitor.currentSpeed')}</p>
               <p className="text-xl font-bold text-[var(--text)]">{formatSpeed(currentSpeed)}</p>
             </div>
             <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-              <p className="text-xs font-semibold text-[var(--text-tertiary)]">PEAK GUST</p>
+              <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('windMonitor.peakGust')}</p>
               <p className="text-xl font-bold text-[var(--text)]">{formatSpeed(peakGust)}</p>
             </div>
             <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-              <p className="text-xs font-semibold text-[var(--text-tertiary)]">CURRENT DIRECTION</p>
-              <p className="text-xl font-bold text-[var(--text)]">{formatWindDirection(currentDirection)}</p>
+              <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('windMonitor.currentDirection')}</p>
+              <p className="text-xl font-bold text-[var(--text)]">{currentDirection == null ? '—' : formatWindDirection(currentDirection)}</p>
             </div>
           </div>
         )}
@@ -285,17 +289,21 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
             </div>
           )}
           {error && (
-            <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">{error}</div>
+            <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">{t('monitor.failedToLoad')}</div>
           )}
           {!loading && !error && !hasAnyData && (
             <div className="flex flex-1 items-center justify-center">
-              <p className="text-lg text-[var(--text-tertiary)]">No wind data in the last {hours} hours.</p>
+              <p className="text-lg text-[var(--text-tertiary)]">{t('windMonitor.noData', { hours })}</p>
             </div>
           )}
           {!loading && !error && hasAnyData && (
             <>
               <div>
-                <h3 className="mb-3 font-bold text-[var(--text)]">Speed and gust (m/s)</h3>
+                <h3 className="mb-3 font-bold text-[var(--text)]">{t('windMonitor.speedAndGust')}</h3>
+                <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-[var(--text-secondary)]">
+                  <span className="flex items-center gap-2"><span aria-hidden="true" className="h-0.5 w-5 bg-[#4f46e5]" />{t('windMonitor.speed')}</span>
+                  <span className="flex items-center gap-2"><span aria-hidden="true" className="h-0.5 w-5 bg-[#dc2626]" />{t('windMonitor.gust')}</span>
+                </div>
                 {hasChartData ? (
                   <ResponsiveContainer width="100%" height={260}>
                     <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -309,20 +317,20 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                       <XAxis
                         dataKey="t"
                         ticks={ticks}
-                        tickFormatter={(value) => fmtTick(value, hours)}
+                        tickFormatter={(value) => fmtTick(value, hours, format)}
                         tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                         axisLine={{ stroke: 'var(--border)' }}
                         tickLine={false}
                       />
                       <YAxis
-                        domain={['auto', 'auto']}
+                        domain={[0, 'auto']}
                         tickFormatter={(value) => value.toFixed(1)}
                         tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                         axisLine={false}
                         tickLine={false}
                         width={56}
                       />
-                      <Tooltip content={<WindTooltip hours={hours} />} />
+                      <Tooltip content={<WindTooltip format={format} hours={hours} />} />
                       <Area
                         type="monotone"
                         dataKey="wind_speed_mps"
@@ -346,20 +354,22 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                   </ResponsiveContainer>
                 ) : (
                   <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
-                    No wind-speed or gust samples are available in this window.
+                    {t('windMonitor.noSpeedData')}
                   </div>
                 )}
               </div>
 
               <div>
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="font-bold text-[var(--text)]">Wind rose (direction × speed)</h3>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-bold text-[var(--text)]">{t('windMonitor.roseTitle')}</h3>
                   <p className="text-xs text-[var(--text-tertiary)]">
-                    {windRose.validSamples} samples · {Math.round(windRose.calmPct)}% calm
+                    {t('windMonitor.samples', { count: windRose.validSamples, calm: Math.round(windRose.calmPct) })}
                   </p>
                 </div>
-                {windRose.validSamples >= MIN_ROSE_SAMPLES ? (
-                  <WindRoseErrorBoundary key={`${hours}-${windRose.validSamples}`}>
+                {windRose.validSamples > 0 && windRose.calmSamples === windRose.validSamples ? (
+                  <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">{t('windMonitor.allCalm')}</div>
+                ) : windRose.validSamples >= MIN_ROSE_SAMPLES ? (
+                  <WindRoseErrorBoundary errorLabel={t('windMonitor.chartError')} key={`${hours}-${windRose.validSamples}`}>
                     <Suspense
                       fallback={
                         <div className="flex h-[340px] items-center justify-center">
@@ -372,13 +382,13 @@ export const WindMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                   </WindRoseErrorBoundary>
                 ) : (
                   <div className="rounded-lg bg-[var(--card)] p-4 text-sm text-[var(--text-tertiary)]">
-                    Not enough wind data to plot a rose in this window.
+                    {t('windMonitor.notEnoughData')}
                   </div>
                 )}
               </div>
 
               <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
-                {data.length} timestamps · last {hours} h
+                {t('windMonitor.timestamps', { count: data.length, hours })}
               </p>
             </>
           )}

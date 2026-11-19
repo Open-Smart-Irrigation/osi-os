@@ -79,6 +79,7 @@ export const SensorMonitor: React.FC<Props> = ({
   onClose,
 }) => {
   const { t: tCommon } = useTranslation('common');
+  const { t } = useTranslation('devices');
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, true, onClose);
   const format = useDateFormat();
@@ -90,7 +91,7 @@ export const SensorMonitor: React.FC<Props> = ({
   const [hours, setHours] = useState(24);
   const [canonicalData, setCanonicalData] = useState<SensorHistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     setSelectedField(initialField ?? field);
@@ -112,7 +113,7 @@ export const SensorMonitor: React.FC<Props> = ({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setError(false);
     sensorAPI.getHistory(deveui, selectedField, hours)
       .then((rows) => {
         if (!cancelled) {
@@ -120,9 +121,9 @@ export const SensorMonitor: React.FC<Props> = ({
           setLoading(false);
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!cancelled) {
-          setError(err.message || 'Failed to load');
+          setError(true);
           setLoading(false);
         }
       });
@@ -167,7 +168,7 @@ export const SensorMonitor: React.FC<Props> = ({
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >
-              {window.label}
+              {t(window.hours <= 24 ? 'monitor.hours' : 'monitor.days', { count: window.hours <= 24 ? window.hours : window.hours / 24 })}
             </button>
           ))}
         </div>
@@ -193,9 +194,9 @@ export const SensorMonitor: React.FC<Props> = ({
         {!loading && !error && data.length > 0 && (
           <div className="px-4 sm:px-6 pt-4 grid grid-cols-3 gap-2 sm:gap-3 shrink-0">
             {[
-              { label: 'CURRENT', value: latest },
-              { label: 'MIN', value: minVal },
-              { label: 'MAX', value: maxVal },
+              { label: t('monitor.current'), value: latest },
+              { label: t('monitor.minimum'), value: minVal },
+              { label: t('monitor.maximum'), value: maxVal },
             ].map((item) => (
               <div key={item.label} className="min-w-0 bg-[var(--card)] rounded-lg p-2 sm:p-3 text-center">
                 <p className="truncate text-[var(--text-tertiary)] text-xs font-semibold" title={item.label}>{item.label}</p>
@@ -220,19 +221,19 @@ export const SensorMonitor: React.FC<Props> = ({
             </div>
           )}
           {error && (
-            <div className="bg-[var(--error-bg)] text-[var(--error-text)] rounded-lg p-4 text-center">{error}</div>
+            <div className="bg-[var(--error-bg)] text-[var(--error-text)] rounded-lg p-4 text-center">{t('monitor.failedToLoad')}</div>
           )}
           {!loading && !error && data.length === 0 && (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-[var(--text-tertiary)] text-lg">
-                No {activeLabel.toLowerCase()} data in the last {hours} hours.
+                {t('monitor.noData', { metric: activeLabel, hours })}
               </p>
             </div>
           )}
           {!loading && !error && data.length > 0 && (
             <>
               <div>
-                <h3 className="text-[var(--text)] font-bold mb-3 break-words">{activeUnit ? `${activeLabel} (${activeUnit})` : activeLabel}</h3>
+                <h3 aria-label={activeUnit ? `${activeLabel} (${activeUnit})` : activeLabel} className="text-[var(--text)] font-bold mb-3 break-words">{activeUnit || activeLabel}</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <defs>
@@ -272,7 +273,7 @@ export const SensorMonitor: React.FC<Props> = ({
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-              <p className="text-[var(--text-tertiary)] text-xs text-center pb-2">{data.length} readings · last {hours} h</p>
+              <p className="text-[var(--text-tertiary)] text-xs text-center pb-2">{t('monitor.readings', { count: data.length, hours })}</p>
             </>
           )}
         </div>
