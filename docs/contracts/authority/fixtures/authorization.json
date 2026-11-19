@@ -1,0 +1,5386 @@
+{
+  "contract_version": "authority-v1",
+  "representation": "Normalized apply-time authority inputs, not a deployed token/command schema. allow means authority only; all independent safety/capability gates still apply. effects=1 permits one logical action at authorized edge application, not at cloud issuance. admin_accounts represents a privileged account/grant mutation. session.signature_valid does not assert current session validity.",
+  "cases": [
+    {
+      "id": "admin-local_only-0-admin_accounts",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-local_only-0-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-local_only-0-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-local_only-0-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-local_only-0-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-local_only-0-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-local_only-0-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "admin-local_only-1-admin_accounts",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-local_only-1-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-local_only-1-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-local_only-1-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-local_only-1-system_reboot",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-local_only-1-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-local_only-1-system_fan",
+      "origin": "edge",
+      "mode": "local_only",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "admin-linked_online-0-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_online-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_online-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-linked_online-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_online-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-linked_online-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_online-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "admin-linked_online-1-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_online-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_online-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-linked_online-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_online-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-linked_online-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_online-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "admin-linked_offline-0-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_offline-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_offline-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-linked_offline-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_offline-0-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-linked_offline-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_offline-0-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "admin-linked_offline-1-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_offline-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "admin-linked_offline-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "owner-linked_offline-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_offline-1-system_reboot",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "owner-linked_offline-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-linked_offline-1-system_fan",
+      "origin": "edge",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-valve_open",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-valve_open",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-valve_open",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-valve_open",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-valve_cancel",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-valve_cancel",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-valve_cancel",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-valve_cancel",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-valve_cancel",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-valve_cancel",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-valve_cancel",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-valve_cancel",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_cancel",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-strega_timed",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-strega_timed",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-strega_timed",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-strega_timed",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-strega_timed",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-strega_timed",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-strega_timed",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-strega_timed",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_timed",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-strega_partial",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-strega_partial",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-strega_partial",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-strega_partial",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-strega_partial",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-strega_partial",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-strega_partial",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-strega_partial",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_partial",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-strega_flush",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-strega_flush",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-strega_flush",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-strega_flush",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-strega_flush",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-strega_flush",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-strega_flush",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-strega_flush",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "strega_flush",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-chameleon_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-chameleon_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-chameleon_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-chameleon_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-chameleon_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-chameleon_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-chameleon_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-chameleon_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "chameleon_config",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-zone_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-zone_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-zone_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-zone_config",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-zone_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-zone_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-zone_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-zone_config",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_config",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-zone_schedule",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-zone_schedule",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-zone_schedule",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-zone_schedule",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-zone_schedule",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-zone_schedule",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-zone_schedule",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-zone_schedule",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_schedule",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-device_rename",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-device_rename",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-device_rename",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-device_rename",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-device_rename",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-device_rename",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-device_rename",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-device_rename",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_rename",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-device_flags",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-device_flags",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-device_flags",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-device_flags",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-device_flags",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-device_flags",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-device_flags",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-device_flags",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_flags",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-device_remove",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-device_remove",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-device_remove",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-device_remove",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-device_remove",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-device_remove",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-device_remove",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-device_remove",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "device_remove",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-edge-admin-policy_change",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-edge-researcher-policy_change",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-edge-policy_change",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-edge-policy_change",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "granted-cloud-admin-policy_change",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "granted-cloud-researcher-policy_change",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": true,
+        "supported": true
+      },
+      "preconditions": "Retained supported action, valid bounded payload, all non-authority safety gates pass. device_remove means OSI unclaim/detach semantics, never radio-record erasure."
+    },
+    {
+      "id": "outsider-cloud-policy_change",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "viewer-cloud-policy_change",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "policy_change",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "read-edge-admin-read_history",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-admin-read_history",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-admin-read_analysis",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-admin-read_analysis",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-admin-read_csv",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-admin-read_csv",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-researcher-read_history",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-researcher-read_history",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-researcher-read_analysis",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-researcher-read_analysis",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-researcher-read_csv",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-researcher-read_csv",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-viewer-read_history",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-viewer-read_history",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_history",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-viewer-read_analysis",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-viewer-read_analysis",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_analysis",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-edge-viewer-read_csv",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "read-cloud-viewer-read_csv",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "read_csv",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 0,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "radio-deny-edge-admin-radio_observations",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-researcher-radio_observations",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-viewer-radio_observations",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-edge-radio_observations",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-edge-radio_observations",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-admin-radio_observations",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-researcher-radio_observations",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-viewer-radio_observations",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-cloud-radio_observations",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-cloud-radio_observations",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "radio-deny-edge-admin-radio_configuration",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-researcher-radio_configuration",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-viewer-radio_configuration",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-edge-radio_configuration",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-edge-radio_configuration",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-admin-radio_configuration",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-researcher-radio_configuration",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-viewer-radio_configuration",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-cloud-radio_configuration",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-cloud-radio_configuration",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "radio-deny-edge-admin-radio_survey",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-researcher-radio_survey",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-edge-viewer-radio_survey",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-edge-radio_survey",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-edge-radio_survey",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-admin-radio_survey",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-researcher-radio_survey",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-deny-cloud-viewer-radio_survey",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "installer_required"
+      }
+    },
+    {
+      "id": "radio-installer-cloud-radio_survey",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Abstract installer entitlement confirmed for this gateway; concrete representation awaits Q1."
+    },
+    {
+      "id": "radio-disabled-installer-cloud-radio_survey",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_survey",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "disabled-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "unknown-role-valve_open",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "unknown",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "invalid_role"
+      }
+    },
+    {
+      "id": "disabled-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "unknown-role-system_reboot",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "unknown",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "invalid_role"
+      }
+    },
+    {
+      "id": "disabled-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": false,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "account_disabled"
+      }
+    },
+    {
+      "id": "unknown-role-admin_accounts",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "unknown",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "invalid_role"
+      }
+    },
+    {
+      "id": "admin-no-grant-valve",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "zoneless-valve-owner",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      },
+      "resource": {
+        "assigned": false
+      }
+    },
+    {
+      "id": "unassigned-soil-owner",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "soil_depth_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "device_owner": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": false,
+        "soil_depth_capable": true
+      }
+    },
+    {
+      "id": "unassigned-soil-admin",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "soil_depth_config",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "resource": {
+        "assigned": false,
+        "soil_depth_capable": true
+      }
+    },
+    {
+      "id": "unassigned-soil-outsider",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "soil_depth_config",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      },
+      "resource": {
+        "assigned": false,
+        "soil_depth_capable": true
+      }
+    },
+    {
+      "id": "viewer-create-zone",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_create",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "member-create-zone",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "zone_create",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      }
+    },
+    {
+      "id": "member-manage-accounts",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "admin_accounts",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "cloud-global-admin-only",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": null,
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "cloud_role": "ADMIN",
+        "gateway_membership_confirmed": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "gateway_authority_required"
+      }
+    },
+    {
+      "id": "cloud-super-admin-only",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": null,
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "cloud_role": "SUPER_ADMIN",
+        "gateway_membership_confirmed": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "gateway_authority_required"
+      }
+    },
+    {
+      "id": "cloud-fleet-reader",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": null,
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "cloud_role": "FLEET_READER",
+        "gateway_membership_confirmed": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "gateway_authority_required"
+      }
+    },
+    {
+      "id": "legacy-owner-valve",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "device_owner": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Legacy owner path; valid session/current enabled account; supported bounded actuation."
+    },
+    {
+      "id": "legacy-foreign-valve",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      },
+      "preconditions": "Scoped resource grants are unavailable while scoped access is off."
+    },
+    {
+      "id": "cloud-admin-linked_online-0-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_online-0-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_online-0-system_fan",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_online-0-system_fan",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_offline-0-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_offline-0-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_offline-0-system_fan",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_offline-0-system_fan",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": false,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_online-1-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_online-1-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_online-1-system_fan",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_online-1-system_fan",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_offline-1-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_offline-1-system_reboot",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "cloud-admin-linked_offline-1-system_fan",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Gateway mapping and current enabled admin confirmed. Effects count applies only after authorized edge application, including after reconnect."
+    },
+    {
+      "id": "cloud-owner-linked_offline-1-system_fan",
+      "origin": "cloud",
+      "mode": "linked_offline",
+      "scoped_access": true,
+      "action": "system_fan",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false,
+        "gateway_membership_confirmed": true,
+        "local_actor_mapped": true,
+        "gateway_ownership_proven": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized",
+        "canonical_state_at_issue": "unchanged",
+        "request_state_at_issue": "pending"
+      },
+      "preconditions": "Owner-to-local-actor mapping and current gateway ownership are proven under Q2; otherwise use unresolved mapping case."
+    },
+    {
+      "id": "viewer-owner-system",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "allow",
+        "effects": 1,
+        "reason": "authorized"
+      },
+      "preconditions": "Independently proven gateway owner; zone/device ownership alone is insufficient."
+    },
+    {
+      "id": "viewer-owner-resource-write",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": true,
+        "zone_relation": "owned",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "insufficient_role"
+      }
+    },
+    {
+      "id": "installer-no-zone-valve",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "valve_open",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "deny",
+        "effects": 0,
+        "reason": "resource_not_found"
+      }
+    },
+    {
+      "id": "cloud-owner-no-local-identity",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "system_reboot",
+      "actor": {
+        "gateway_role": null,
+        "gateway_owner": true,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "unresolved",
+        "effects": 0,
+        "reason": "actor_mapping_undecided",
+        "question": "Q2"
+      }
+    },
+    {
+      "id": "viewer-installer-entitlement-undecided",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_configuration",
+      "actor": {
+        "gateway_role": "viewer",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": true
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "unresolved",
+        "effects": 0,
+        "reason": "installer_viewer_combination_undecided",
+        "question": "Q1"
+      }
+    },
+    {
+      "id": "installer-missing-entitlement-wire",
+      "origin": "edge",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "radio_observations",
+      "actor": {
+        "gateway_role": "admin",
+        "gateway_owner": false,
+        "zone_relation": "none",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "unresolved",
+        "effects": 0,
+        "reason": "installer_representation_undecided",
+        "question": "Q1"
+      }
+    },
+    {
+      "id": "cloud-prediction-authority",
+      "origin": "cloud",
+      "mode": "linked_online",
+      "scoped_access": true,
+      "action": "prediction_setting",
+      "actor": {
+        "gateway_role": "researcher",
+        "gateway_owner": false,
+        "zone_relation": "granted",
+        "enabled": true,
+        "installer": false
+      },
+      "session": {
+        "signature_valid": true
+      },
+      "expected": {
+        "decision": "unresolved",
+        "effects": 0,
+        "reason": "prediction_boundary_undecided",
+        "question": "Q5"
+      }
+    }
+  ]
+}

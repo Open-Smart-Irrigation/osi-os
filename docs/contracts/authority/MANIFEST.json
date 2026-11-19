@@ -1,0 +1,40 @@
+{
+  "contract_version": "authority-v1",
+  "status": "0.9 implementation contract; unresolved cross-repo details listed in v1.md",
+  "sources": {
+    "edge_commit": "ec822b556a4bf789774a2e4deda7841d469dc631",
+    "cloud_commit": "b002b807b32744979c118bf8f40b3136f2a75a32"
+  },
+  "files": [
+    "v1.md",
+    "auth-consumers.md",
+    "fixtures/auth-consumers.json",
+    "fixtures/authorization.json",
+    "fixtures/revocation.json"
+  ],
+  "modes": [
+    "local_only",
+    "linked_online",
+    "linked_offline"
+  ],
+  "gateway_roles": [
+    "admin",
+    "researcher",
+    "viewer"
+  ],
+  "cloud_account_roles": [
+    "USER",
+    "ADMIN",
+    "SUPER_ADMIN",
+    "FLEET_READER"
+  ],
+  "open_questions": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q5",
+    "Q6"
+  ],
+  "validation": "node scripts/test-authority-contract.js"
+}
