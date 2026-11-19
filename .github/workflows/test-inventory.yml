@@ -49,6 +49,8 @@ jobs:
             scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
+      - name: ChirpStack SQLite WAL one-shot
+        run: node --test scripts/test-chirpstack-sqlite-wal.js
       - name: Shell tests
         run: |
           sh scripts/test-gateway-identity-helper.sh

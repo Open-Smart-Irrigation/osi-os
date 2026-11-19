@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { resolveDateLocale } from '../../utils/datetime';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
 import {
   hasRainData,
@@ -43,19 +44,19 @@ const TIME_WINDOWS: RainWindow[] = [
 const DEFAULT_WINDOW_INDEX = 1; // '24 h'
 const RAIN_COLOR = '#2563eb';
 
-function fmtIntervalTick(iso: string): string {
+function fmtIntervalTick(iso: string, language?: string): string {
   const date = new Date(iso);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' })
+    ? date.toLocaleString(resolveDateLocale(language), { hour: '2-digit', minute: '2-digit' })
     : iso;
 }
 
 // A farm day key is already the farm's calendar date: format it as that
 // date, never re-read in the browser's zone.
-function fmtDayTick(day: string): string {
+function fmtDayTick(day: string, language?: string): string {
   const date = new Date(`${day}T12:00:00Z`);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' })
+    ? date.toLocaleDateString(resolveDateLocale(language), { timeZone: 'UTC', month: 'short', day: 'numeric' })
     : day;
 }
 
@@ -64,10 +65,11 @@ function fmtMm(value: number | null | undefined): string {
 }
 
 const IntervalTooltip = ({ active, payload, label }: any) => {
+  const { i18n } = useTranslation('devices');
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
-      <p className="mb-1 text-[var(--text-tertiary)]">{fmtIntervalTick(label)}</p>
+      <p className="mb-1 text-[var(--text-tertiary)]">{fmtIntervalTick(label, i18n.language)}</p>
       <p className="font-bold text-[var(--text)]">{fmtMm(payload[0]?.value ?? null)}</p>
     </div>
   );
@@ -78,13 +80,14 @@ const IntervalTooltip = ({ active, payload, label }: any) => {
 // samples > 0 with total_mm === 0 is a genuine measured-dry day. The current
 // day is labelled "so far": it ends at the request time.
 const DailyTooltip = ({ active, payload, label, soFarLabel }: any) => {
+  const { t, i18n } = useTranslation('devices');
   if (!active || !payload?.length) return null;
   const row: RainChartDay | undefined = payload[0]?.payload;
   const noData = !row || row.total_mm === null;
-  const amount = noData ? 'no data' : fmtMm(row.total_mm);
+  const amount = noData ? t('rainMonitor.noData') : fmtMm(row.total_mm);
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
-      <p className="mb-1 text-[var(--text-tertiary)]">{fmtDayTick(label)}</p>
+      <p className="mb-1 text-[var(--text-tertiary)]">{fmtDayTick(label, i18n.language)}</p>
       <p className="font-bold text-[var(--text)]">
         {row?.so_far ? `${amount} · ${soFarLabel}` : amount}
       </p>
@@ -93,19 +96,19 @@ const DailyTooltip = ({ active, payload, label, soFarLabel }: any) => {
 };
 
 export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const [windowIndex, setWindowIndex] = useState(DEFAULT_WINDOW_INDEX);
   const [intervalData, setIntervalData] = useState<SensorHistoryPoint[]>([]);
   const [dailyHistory, setDailyHistory] = useState<RainHistory | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   const selectedWindow = TIME_WINDOWS[windowIndex];
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setError(false);
     const selected = TIME_WINDOWS[windowIndex];
     const request =
       selected.mode === 'interval'
@@ -125,9 +128,9 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
       .then(() => {
         if (!cancelled) setLoading(false);
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (!cancelled) {
-          setError(err instanceof Error && err.message ? err.message : 'Failed to load');
+          setError(true);
           setLoading(false);
         }
       });
@@ -175,18 +178,18 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
       }}
     >
       <div className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-[var(--bg)] shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between bg-[var(--header-bg)] px-6 py-4">
-          <div>
-            <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Rainfall</h2>
-            <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
+        <div className="flex shrink-0 items-center justify-between gap-3 bg-[var(--header-bg)] px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="high-contrast-text break-words text-2xl font-bold text-[var(--header-text)]">{t('rainMonitor.title')}</h2>
+            <p className="mt-0.5 truncate text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
           </div>
-          <button onClick={onClose} className="touch-target px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]">×</button>
+          <button aria-label={t('monitor.close')} onClick={onClose} className="touch-target shrink-0 px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]">×</button>
         </div>
 
         <div className="flex flex-wrap gap-2 px-6 pt-4">
           {TIME_WINDOWS.map((option, index) => (
             <button
-              key={option.label}
+              key={index}
               onClick={() => setWindowIndex(index)}
               className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors ${
                 windowIndex === index
@@ -194,45 +197,45 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                   : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
               }`}
             >
-              {option.label}
+              {t(option.mode === 'interval' ? 'monitor.hours' : 'monitor.days', { count: option.mode === 'interval' ? option.hours : option.days })}
             </button>
           ))}
         </div>
 
         {!loading && !error && hasData && (
-          <div className="grid grid-cols-3 gap-3 px-6 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 px-6 pt-4">
             {selectedWindow.mode === 'interval' ? (
               <>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">WINDOW TOTAL</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.windowTotal')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">{fmtMm(intervalSummary.totalMm)}</p>
                 </div>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">PEAK INTERVAL</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.peakInterval')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">{fmtMm(intervalSummary.peakMm)}</p>
                 </div>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">WET INTERVALS</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.wetIntervals')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">{String(intervalSummary.wetIntervals)}</p>
                 </div>
               </>
             ) : (
               <>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">WINDOW TOTAL</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.windowTotal')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">{fmtMm(dailySummary.totalMm)}</p>
                 </div>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">RAINY DAYS</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.rainyDays')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">{String(dailySummary.rainyDays)}</p>
                 </div>
                 <div className="rounded-lg bg-[var(--card)] p-3 text-center">
-                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">WETTEST DAY</p>
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">{t('rainMonitor.wettestDay')}</p>
                   <p className="text-xl font-bold text-[var(--text)]">
                     {dailySummary.wettestDay ? fmtMm(dailySummary.wettestDay.total_mm) : '—'}
                   </p>
                   {dailySummary.wettestDay && (
-                    <p className="text-xs text-[var(--text-tertiary)]">{fmtDayTick(dailySummary.wettestDay.day)}</p>
+                    <p className="text-xs text-[var(--text-tertiary)]">{fmtDayTick(dailySummary.wettestDay.day, i18n.language)}</p>
                   )}
                 </div>
               </>
@@ -247,28 +250,28 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
             </div>
           )}
           {error && (
-            <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">{error}</div>
+            <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">{t('monitor.failedToLoad')}</div>
           )}
           {!loading && !error && !hasData && (
             <div className="flex flex-1 items-center justify-center">
               <p className="text-lg text-[var(--text-tertiary)]">
                 {selectedWindow.mode === 'interval'
-                  ? `No rainfall recorded in the last ${selectedWindow.hours} hours.`
-                  : 'No rainfall recorded in this window.'}
+                  ? t('rainMonitor.noIntervalData', { hours: selectedWindow.hours })
+                  : t('rainMonitor.noWindowData')}
               </p>
             </div>
           )}
           {!loading && !error && hasData && selectedWindow.mode === 'interval' && (
             <>
               <div>
-                <h3 className="mb-3 font-bold text-[var(--text)]">Rainfall per interval (mm)</h3>
+                <h3 className="mb-3 font-bold text-[var(--text)]">{t('rainMonitor.intervalTitle')}</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={intervalData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
                     <XAxis
                       dataKey="t"
                       ticks={intervalTicks}
-                      tickFormatter={fmtIntervalTick}
+                      tickFormatter={(value) => fmtIntervalTick(value, i18n.language)}
                       tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                       axisLine={{ stroke: 'var(--border)' }}
                       tickLine={false}
@@ -287,20 +290,20 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                 </ResponsiveContainer>
               </div>
               <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
-                {intervalData.length} readings · last {selectedWindow.hours} h
+                {t('monitor.readings', { count: intervalData.length, hours: selectedWindow.hours })}
               </p>
             </>
           )}
           {!loading && !error && hasData && selectedWindow.mode === 'daily' && (
             <>
               <div>
-                <h3 className="mb-3 font-bold text-[var(--text)]">Daily rainfall (mm)</h3>
+                <h3 className="mb-3 font-bold text-[var(--text)]">{t('rainMonitor.dailyTitle')}</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={chartDays} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
                     <XAxis
                       dataKey="day"
-                      tickFormatter={fmtDayTick}
+                      tickFormatter={(value) => fmtDayTick(value, i18n.language)}
                       tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                       axisLine={{ stroke: 'var(--border)' }}
                       tickLine={false}

@@ -413,6 +413,25 @@ regardless of payload. To inspect or change ChirpStack config on a live Pi:
   /etc/init.d/chirpstack start
   ```
 
+### ChirpStack journal after a package upgrade
+
+Run `sh scripts/pi/chirpstack-sqlite-wal.sh --check` (read-only) to see the
+gateway's journal state and configured pragmas. An `opkg` upgrade to a
+`chirpstack` package whose init lacks the locally added pragmas replaces
+`/etc/init.d/chirpstack` and silently drops the 5 s busy wait; the database
+stays WAL. The current OSI feed init already carries these pragmas. After
+an upgrade, re-run `--check`, then `--apply` if it reports missing pragmas.
+
+Backup, restore and the one-shot share `/srv/backup/.chirpstack-maintenance.lock`.
+Restore reports every retained `.pre-restore-*` original. After verified success
+it keeps only the newest generation; incomplete recovery keeps all generations
+and the lock. Printed recovery commands can be rerun after a partial failure and
+release the lock only after a checked restart. Use the phase-specific recovery
+action printed for a stale one-shot lock; helper-only recovery never stops
+ChirpStack. A successful new backup archives legacy flat files under
+`/srv/backup/chirpstack-legacy-*` so released downgrade helpers cannot copy stale
+data over the live files.
+
 ### ChirpStack backup and restore helpers (LuCI buttons)
 
 `/opt/chirpstack/backup.sh` and `restore.sh` run from the LuCI backup and restore

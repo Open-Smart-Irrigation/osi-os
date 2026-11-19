@@ -23,18 +23,18 @@ interface KiwiSensorCardProps {
 
 interface SensorDef {
   field: string;
-  label: string;
+  labelKey: `kiwiSensor.${'soilWaterTension1' | 'soilWaterTension2' | 'lightIntensity' | 'ambientTemperature' | 'relativeHumidity'}`;
   unit: string;
   color: string;
   decimals: number;
 }
 
 const SENSORS: SensorDef[] = [
-  { field: 'swt_1',               label: 'Soil Water Tension 1', unit: 'kPa', color: '#3b82f6', decimals: 1 },
-  { field: 'swt_2',               label: 'Soil Water Tension 2', unit: 'kPa', color: '#6366f1', decimals: 1 },
-  { field: 'light_lux',           label: 'Light Intensity',      unit: 'lux', color: '#f59e0b', decimals: 0 },
-  { field: 'ambient_temperature', label: 'Ambient Temperature',  unit: '°C',  color: '#f97316', decimals: 1 },
-  { field: 'relative_humidity',   label: 'Relative Humidity',    unit: '%',   color: '#06b6d4', decimals: 0 },
+  { field: 'swt_1',               labelKey: 'kiwiSensor.soilWaterTension1', unit: 'kPa', color: '#3b82f6', decimals: 1 },
+  { field: 'swt_2',               labelKey: 'kiwiSensor.soilWaterTension2', unit: 'kPa', color: '#6366f1', decimals: 1 },
+  { field: 'light_lux',           labelKey: 'kiwiSensor.lightIntensity',      unit: 'lux', color: '#f59e0b', decimals: 0 },
+  { field: 'ambient_temperature', labelKey: 'kiwiSensor.ambientTemperature',  unit: '°C',  color: '#f97316', decimals: 1 },
+  { field: 'relative_humidity',   labelKey: 'kiwiSensor.relativeHumidity',    unit: '%',   color: '#06b6d4', decimals: 0 },
 ];
 
 const SENSOR_BY_FIELD = Object.fromEntries(SENSORS.map(s => [s.field, s]));
@@ -471,7 +471,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           deveui={device.deveui}
           deviceName={device.name}
           field={monitor.field}
-          label={monitor.field === 'swt_1' || monitor.field === 'swt_2' ? sensorLabel(device, monitor.field, monitor.label) : monitor.label}
+          label={monitor.field === 'swt_1' || monitor.field === 'swt_2' ? sensorLabel(device, monitor.field, t(monitor.labelKey)) : t(monitor.labelKey)}
           unit={monitor.unit}
           color={monitor.color}
           decimals={monitor.decimals}
