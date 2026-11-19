@@ -287,23 +287,39 @@ const historyMarkSource = canonicalFlows.find((node) => node.id === 'sync-histor
 
 async function applyDirtyAck(dirtyRowKeys) {
   const submittedHistoryKey = 'VALVE_ACTUATION|NEW_EUI|exp-1';
+  const actualHelper = require(helperPaths[0]);
+  const sourceRow = { expectation_id: 'exp-1', command_id: 'fixture-command', device_eui: 'fixture-device', commanded_at: '2026-07-01T00:00:00.000Z' };
   const completed = [];
   const database = {
     all(sql, params, callback) {
+      if (sql.includes("UPDATE sync_history_dirty_keys SET status='done'")) {
+        assert.ok(sql.includes('RETURNING row_key'));
+        completed.push(params[1]);
+        callback(null, [{ row_key: params[1] }]);
+        return;
+      }
       if (sql.includes('FROM sync_history_cursors')) {
         callback(null, [{ state: 'tail', last_acked_id: null }]);
+        return;
+      }
+      if (sql.includes('FROM valve_actuation_expectations')) {
+        callback(null, [sourceRow]);
         return;
       }
       callback(null, []);
     },
     run(sql, params, callback) {
-      if (sql.includes("UPDATE sync_history_dirty_keys SET status='done'")) {
-        completed.push(params[1]);
-      }
       callback(null);
     },
     close(callback) {
       callback();
+    },
+    async transaction(executor) {
+      return executor({
+        all: (sql, params) => new Promise((resolve, reject) => database.all(sql, params, (e, rows) => e ? reject(e) : resolve(rows))),
+        get: (sql, params) => new Promise((resolve, reject) => database.all(sql, params, (e, rows) => e ? reject(e) : resolve(rows[0]))),
+        run: (sql, params) => new Promise((resolve, reject) => database.run(sql, params, e => e ? reject(e) : resolve()))
+      });
     }
   };
   const flowState = new Map();
@@ -316,6 +332,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     }
   };
   const helper = {
+    completeDirtyBatch: actualHelper.completeDirtyBatch,
     serverConfirmsDurable: () => true,
     cursorPatchFromResponse: () => ({
       last_acked_id: '1',
@@ -341,7 +358,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     { Database: function Database() { return database; } },
     flow,
     { get: () => '' },
-    { error() {}, warn() {} },
+    { error: assert.fail, warn: assert.fail },
     {
       statusCode: 200,
       _historyBatch: {
@@ -349,12 +366,15 @@ async function applyDirtyAck(dirtyRowKeys) {
         batchId: 'batch-1',
         phase: 'correction',
         dirtyKeys: dirtyRowKeys,
+        dirtyVersions: Object.fromEntries(dirtyRowKeys.map(rowKey => [rowKey, 'fixture-version'])),
+        dirtyPayloadHashes: { [submittedHistoryKey]: actualHelper.prepareRow('valve_actuation_expectations', 'NEW_EUI', sourceRow).payloadHash },
         dirtyRowKeysByHistoryKey: {
           [submittedHistoryKey]: dirtyRowKeys
         },
         segmentKeys: []
       },
       payload: {
+        gatewayDeviceEui: 'NEW_EUI',
         phase: 'correction',
         durableMirrorConfirmed: true,
         ackedThroughId: 1,

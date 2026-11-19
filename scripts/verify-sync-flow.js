@@ -14,6 +14,7 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
 const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
+const historySyncSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-history-sync-helper', 'index.js'), 'utf8');
 // Issue #356: the Chameleon insert and backfill bodies and the scheduler SWT query
 // live in these modules; their function nodes only delegate.
 const chameleonHelperSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-chameleon-helper', 'index.js'), 'utf8');
@@ -1728,7 +1729,8 @@ expectIncludes('Build History Batch', 'last_shadow_acked_id', 'uses shadow ACK p
 expectIncludes('Build History Batch', 'helper.prepareRow', 'hashes and validates rows through the shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('Build History Batch', 'snapshot_high_key', 'captures natural-key backfill high-water marks');
-expectIncludes('Build History Batch', 'sync_history_dirty_keys', 'drains correction and repair dirty keys');
+expectIncludes('Build History Batch', 'helper.loadDirtyRows(', 'drains correction and repair dirty keys through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'sync_history_dirty_keys', 'selects dirty history keys');
 expectIncludes('Build History Batch', "'tensiomark_observations'", 'classifies Tensiomark observation dirty keys as correction history');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
 expectIncludes('Mark History Batch ACK', "batch.phase === 'shadow'", 'keeps shadow cursor progress separate from durable progress');
@@ -1750,10 +1752,11 @@ expectExcludes('Build History Manifest', "'LIMIT 500'", 'does not cap history ma
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
-expectIncludes('Mark History Manifest ACK', 'repairRequested', 'turns manifest mismatches into repair work');
-expectIncludes('Mark History Manifest ACK', 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
+expectIncludes('Mark History Manifest ACK', 'helper.queueManifestRepairs(', 'turns manifest mismatches into repair work through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'repairRequested', 'queues requested manifest repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
 expectIncludes('Build History Batch', "flow.get('history_repair_turns')", 'lets new tail rows go out between repair batches');
-expectIncludes('Mark History Manifest ACK', "change_kind='repair'", 'persists requested history repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, "change_kind='repair'", 'persists requested history repairs');
 expectExcludes('Mark History Manifest ACK', 'DELETE FROM', 'never treats manifests as deletion instructions');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
