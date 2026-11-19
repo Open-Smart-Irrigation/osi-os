@@ -423,6 +423,27 @@ Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from this table in the same change.
 
+## UI FIX-LIST B3 (Admin Users)
+
+| Keys | Reason |
+|---|---|
+| `users.administration`, `users.title`, `users.accessGrants`, `users.dashboard` | B3 extracted the Users page heading and navigation labels into `settings.json`. No human Luganda pass yet, so `lg` ships the English source text. |
+| `users.createUser`, `users.username`, `users.temporaryPassword`, `users.role` | B3 extracted the create-user form labels and action into `settings.json`. `lg` ships the English source text until a human Luganda pass. |
+| `users.roleFor`, `users.roles.admin`, `users.roles.researcher`, `users.roles.viewer` | B3 extracted the account-specific role label and displayed role names into `settings.json`. Stored role identifiers remain unchanged. `lg` ships the English source text until a human Luganda pass. |
+| `users.status`, `users.created`, `users.actions`, `users.loading`, `users.enabled`, `users.disabled`, `users.enable`, `users.disable` | B3 extracted the user table headings, loading text, account states and enable/disable actions into `settings.json`. `lg` ships the English source text until a human Luganda pass. |
+| `users.resetPassword`, `users.resetFor`, `users.newTemporaryPassword`, `users.confirmTemporaryPassword`, `users.savePassword`, `users.cancel`, `users.passwordMismatch` | B3 extracted the local password-reset labels, actions and mismatch validation into `settings.json`. `lg` ships the English source text until a human Luganda pass. Preserve `{{username}}` in `users.resetFor`. |
+| `users.loadError`, `users.saveError` | B3 extracted the user-list and account-change fallback errors into `settings.json`. `lg` ships the English source text until a human Luganda pass. |
+| `users.scrollHint` | B3 added the user table's horizontal-scrolling instruction in `settings.json`. `lg` ships the English source text until a human Luganda pass. |
+
+These 30 string leaves are tracked in
+`web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts` by
+`PENDING_HUMAN_LUGANDA`, derived from `Object.keys(en.users)`. The test checks
+nested role labels through deep equality and requires the pending `lg` values
+to match `en`. Preserve `{{username}}` in `users.roleFor` as well. A human
+Luganda pass must remove each translated key from the allowlist and this
+section in the same change. The six legacy Users keys remain in their
+existing entry above.
+
 ## UI FIX-LIST B4 (Analysis)
 
 | Keys | Reason |

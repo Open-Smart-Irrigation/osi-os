@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatHistoryCalendarMonthLabel, isFutureCalendarDate, latestCalendarMonth } from '../../../history/calendarMonth';
+import { formatHistoryCalendarMonthLabel, isFutureCalendarDate, latestCalendarMonth, type CalendarMonth } from '../../../history/calendarMonth';
+import { farmDateKey } from '../../../utils/rainDay';
 import { soilStatusVisual } from '../../../history/soilStatus';
 import type {
   HistoryCalendar,
@@ -23,6 +24,7 @@ interface HistoryMonthCalendarViewProps {
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
   selectedDate?: string | null;
   todayIso?: string;
+  requestedMonth?: CalendarMonth;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -172,18 +174,20 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
   onInspectDate,
   selectedDate,
   todayIso,
+  requestedMonth,
 }) => {
-  const { t: translate } = useTranslation('history');
+  const { t: translate, i18n } = useTranslation('history');
   const t = translate as HistoryTranslate;
-  const days = Array.isArray(calendar?.days) ? calendar.days : [];
-  const month = latestCalendarMonth(calendar);
-  const monthLabel = formatHistoryCalendarMonthLabel(calendar) ?? t('history.calendar.title');
+  const month = requestedMonth ?? latestCalendarMonth(calendar);
+  const prefix = month ? `${month.year}-${String(month.month).padStart(2, '0')}-` : '';
+  const days = useMemo(() => (Array.isArray(calendar?.days) ? calendar.days.filter((day) => day.date.startsWith(prefix)) : []), [calendar, prefix]);
+  const monthLabel = formatHistoryCalendarMonthLabel(calendar, month ?? undefined, i18n?.resolvedLanguage || i18n?.language) ?? t('history.calendar.title');
   const cells = useMemo(() => (calendar && month ? buildCells(calendar, month) : []), [calendar, month]);
   const [internalSelectedDate, setInternalSelectedDate] = useState<string | null>(null);
   const touchTapRef = React.useRef<{ date: string; pointerId: number; x: number; y: number } | null>(null);
   const suppressNextClickRef = React.useRef(false);
   const TOUCH_TAP_SLOP_PX = 10;
-  const todayIsoDate = todayIso ?? new Date().toISOString().slice(0, 10);
+  const todayIsoDate = todayIso ?? farmDateKey(Date.now(), calendar?.timezone || 'UTC');
 
   const legendMarkers = useMemo(() => {
     const seen = new Map<string, HistoryCalendarMarker>();
@@ -196,7 +200,7 @@ export const HistoryMonthCalendarView: React.FC<HistoryMonthCalendarViewProps> =
     return [...seen.values()];
   }, [days]);
 
-  if (!calendar || !month || days.length === 0) {
+  if (!calendar || !month || (!requestedMonth && days.length === 0)) {
     return (
       <section
         role="region"

@@ -118,6 +118,32 @@ function dendroCalendarJuly2026(): HistoryCalendar {
 }
 
 describe('HistoryMonthCalendarView', () => {
+  it('keeps the requested month and ignores adjacent-month cells and markers', () => {
+    const calendar = soilCalendarMay2026();
+    calendar.days.push({ date: '2026-06-01', state: 'optimal', coveragePct: 100, coverageConfidence: 'configured', markers: [{ type: 'manual_override', severity: 'info', labelKey: 'Adjacent month only' }] });
+    render(<HistoryMonthCalendarView cardType="soil" calendar={calendar} requestedMonth={{ year: 2026, month: 5 }} />);
+    expect(screen.getByRole('grid', { name: /May 2026/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('calendar-cell-2026-06-01')).not.toBeInTheDocument();
+    expect(screen.queryByText('Adjacent month only')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty requested month as a grid without jumping to returned data', () => {
+    render(<HistoryMonthCalendarView cardType="soil" calendar={{ timezone: 'UTC', days: [] }} requestedMonth={{ year: 2024, month: 2 }} todayIso="2024-03-01" />);
+    expect(screen.getByRole('grid', { name: /February 2024/ })).toBeInTheDocument();
+    expect(screen.getByTestId('calendar-cell-2024-02-29')).toHaveAttribute('data-state', 'no_data');
+  });
+
+  it('uses the farm date to decide which days are future', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-05-11T22:30:00Z'));
+    try {
+      render(<HistoryMonthCalendarView cardType="soil" calendar={{ ...soilCalendarMay2026(), timezone: 'Europe/Zurich' }} />);
+      expect(screen.getByTestId('calendar-cell-2026-05-12').tagName).toBe('BUTTON');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('formats the active month from calendar data for shared detail context', () => {
     const calendarWithJuneDays: HistoryCalendar = {
       timezone: 'UTC',
