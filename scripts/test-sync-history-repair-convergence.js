@@ -250,6 +250,73 @@ for (const profile of PROFILES) {
       assert.ok(rounds <= Math.ceil(schedule.pageSize / 32), 'fixed pages finish within the same round bound as main');
     });
   }
+  test(`${profile}: repeated real ACK races on a 500-entry answer cannot starve the current tail`, async t => {
+    const { db, h, insert } = fixture(t, profile, 0);
+    const adapter = sqliteAdapter(db);
+    const comparisons = Array.from({ length: 500 }, (_, i) => ({ tableName: 'device_data',
+      segmentKey: SENSOR + '|' + new Date(Date.UTC(2020, 0, i + 1)).toISOString().slice(0, 10), repairRequested: true }));
+    for (let i = 0; i < 32; i++) insert.run(i + 1, SENSOR, comparisons[i].segmentKey.split('|')[1] + 'T00:00:00.000Z');
+    const requestAt = now => h.helper.captureManifestRequest(h.memory, { gatewayDeviceEui: GATEWAY, generatedAt: now, segments: [] },
+      { id: 1, server_url: 'https://cloud.invalid' }, { server_url: 'https://cloud.invalid', cloud_user_id: 'fixture' });
+    const setup = (page, sourceQuery) => h.helper.queueManifestRepairs({ comparisons: page, db: adapter, q: adapter.q,
+      sourceQuery, now: '2026-11-19', gatewayEui: GATEWAY, request: requestAt('2026-11-19'), clock: () => 0 });
+    await setup(comparisons.slice(0, 32), async (table, sql, params) => adapter.q(sql, params));
+    for (let offset = 32; offset < 500; offset += 32) {
+      await setup(comparisons.slice(offset, offset + 32), async () => []);
+      await setup(comparisons.slice(offset, offset + 32), async () => []);
+    }
+    const dirtyKeys = Array.from({ length: 32 }, (_, i) => key(i + 1));
+    const fencedKeys = comparisons.slice(0, 32).map(c => 'history_repair_segment:' + JSON.stringify([c.tableName, c.segmentKey]));
+    const fencedState = () => db.prepare('SELECT key,value,updated_at FROM app_settings WHERE key IN (' + fencedKeys.map(() => '?').join(',') + ') ORDER BY key').all(...fencedKeys);
+    const current = new Set(comparisons.slice(32).map(c => c.segmentKey));
+    const seen = new Set();
+    let rounds = 0;
+    for (; rounds < 100 && seen.size < current.size; rounds++) {
+      const now = new Date(Date.UTC(2026, 10, 19) + (rounds + 1) * 1000).toISOString();
+      const request = requestAt(now); // Manifest build precedes the row ACKs.
+      for (let id = 1; id <= 32; id++) {
+        db.prepare('UPDATE device_data SET swt_1=? WHERE id=?').run(21 + rounds, id);
+        db.prepare("UPDATE sync_history_dirty_keys SET status='pending',change_kind='repair',changed_at=? WHERE row_key=?").run(now, key(id));
+      }
+      const dirtyPayloadHashes = Object.fromEntries(db.prepare('SELECT * FROM device_data ORDER BY id').all().map(row => {
+        const prepared = h.helper.prepareRow('device_data', GATEWAY, row);
+        return [prepared.historyKey, prepared.payloadHash];
+      }));
+      await h.helper.completeDirtyBatch({ batch: { dirtyKeys, dirtyVersions: Object.fromEntries(dirtyKeys.map(k => [k, now])), dirtyPayloadHashes },
+        response: { results: dirtyKeys.map(historyKey => ({ historyKey, status: 'APPLIED' })) }, tableName: 'device_data', gatewayEui: GATEWAY,
+        sourceQuery: async (table, sql, params) => adapter.q(sql, params), db: adapter, now, manifestClock: request.clock });
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM sync_history_dirty_keys WHERE table_name='device_data' AND status='done'").get().n, 32, 'real ACKs must complete all 32 dirty keys');
+      const before = fencedState();
+      let inspections = 0, elapsed = 0, expire = false;
+      const answer = () => h.helper.queueManifestRepairs({ comparisons, db: adapter, q: async (sql, params = []) => {
+        if (sql === 'SELECT value FROM app_settings WHERE key=?') {
+          inspections++;
+          if (expire && inspections === 5) elapsed = 2001;
+        }
+        return adapter.q(sql, params);
+      }, sourceQuery: async (table, sql, params) => {
+        const segment = params[0] + '|' + params[1];
+        assert.ok(current.has(segment), 'the ACK fence must prevent examination of every stale source segment');
+        seen.add(segment);
+        return [];
+      }, now, gatewayEui: GATEWAY, request, currentClock: request.clock, clock: () => elapsed });
+      if (rounds === 0) {
+        expire = true;
+        await answer();
+        assert.equal(inspections, 5, 'inspection stops when the cooperative deadline expires');
+        assert.equal(seen.size, 0);
+        assert.deepEqual(fencedState(), before, 'deadline handling must not mutate fenced checkpoints');
+        expire = false; inspections = 0; elapsed = 0;
+      }
+      const result = await answer();
+      assert.ok(inspections <= 500, 'candidate inspection is bounded by the answer limit');
+      assert.ok(result.examinedSegments <= 32, 'eligible segment work is still bounded');
+      assert.deepEqual(fencedState(), before, 'obsolete comparisons must leave every fenced field and rank unchanged');
+    }
+    t.diagnostic(JSON.stringify({ rounds, currentIdentitiesSourceExamined: seen.size, currentTailExamined: seen.has(comparisons[499].segmentKey) }));
+    assert.ok(seen.has(comparisons[499].segmentKey), 'the current tail must actually reach sourceQuery despite repeated ACK races');
+    assert.equal(seen.size, 468);
+  });
   test(`${profile}: upgrade rechecks legacy done keys when the cloud reports a mismatch`, async t => {
     const { db, h } = fixture(t, profile, 3);
     db.prepare("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,changed_at,status) VALUES('cloud','device_data',?,'repair','2026-07-01','done')").run(key(1));

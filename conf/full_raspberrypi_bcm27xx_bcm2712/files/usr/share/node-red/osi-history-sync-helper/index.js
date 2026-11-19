@@ -926,8 +926,9 @@ function compareRepairPositions(left, right) {
 
 async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui, request = null, currentClock = null, clock = () => performance.now() }) {
   const REPAIR_CAP = 2000;
+  const COMPARISON_CAP = 500;
   request = request || { generatedAt: now };
-  if (comparisons.length > 500) throw new Error('history manifest answer exceeds 500 segments');
+  if (comparisons.length > COMPARISON_CAP) throw new Error('history manifest answer exceeds 500 segments');
   const sentSegments = new Map((request.segments || []).map(segment => [JSON.stringify([segment.tableName,segment.segmentKey]),segment]));
   const started = clock();
   const deadline = () => {
@@ -950,13 +951,15 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     compareRepairPositions(repairPosition(left.comparison), repairPosition(right.comparison))).map(entry => entry.comparison);
   const saveExaminedState = (tx, key, state) => saveRepairState(tx, key, { ...state, lastExamined: examination }, now);
   const skippedCheckpoints = new Set();
-  let index = 0;
+  let index = 0, inspectedComparisons = 0;
   let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
   const pendingRepair = {};
-  while (index < comparisons.length && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
+  // Obsolete candidates cost bounded inspection, not one of the 32 work slots.
+  // Their rank and fenced repair state remain untouched.
+  while (index < comparisons.length && inspectedComparisons < COMPARISON_CAP && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
     if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds || examinedRows >= MANIFEST_REPAIR_LIMITS.rows || repairCount >= REPAIR_CAP) break;
     const comparison = comparisons[index];
-    examinedSegments++;
+    inspectedComparisons++;
     if (!comparison) { index++; continue; }
     const table = comparison.tableName, segment = comparison.segmentKey;
     definition(table);
@@ -965,6 +968,8 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     const reportedFingerprint = sent ? manifestFingerprint(sent) : null;
     const prior = repairState(((await q('SELECT value FROM app_settings WHERE key=?', [checkpoint]))[0] || {}).value);
     if (obsoleteManifest(request, prior, currentClock)) { index++; continue; }
+    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) break;
+    examinedSegments++;
     const matched = comparison.repairRequested === false && Array.isArray(comparison.mismatchFields) && comparison.mismatchFields.length === 0;
     if (matched) {
       await db.transaction(async tx => {
