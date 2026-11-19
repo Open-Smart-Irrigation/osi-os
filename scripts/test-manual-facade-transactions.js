@@ -225,11 +225,14 @@ for (const rollback of [false, true]) {
 // Native-only transaction implementations remain: helper internals, the
 // synchronous evidence database and explicit DatabaseSync fallbacks. These
 // exclusions are path-specific; a new facade caller anywhere else fails.
-function manualCalls(source) { return [...source.matchAll(/\b(?:run|exec)\s*\(\s*(['"`])\s*BEGIN\b/gi)]; }
+function manualCalls(source) { return [...source.matchAll(/\b(?:run|exec|all|get|each)\s*\(\s*(['"`])\s*BEGIN\b/gi)]; }
 function walk(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? (entry.name === 'node_modules' ? [] : walk(path.join(dir, entry.name))) : [path.join(dir, entry.name)]); }
 test('grep guard rejects manual BEGIN on every maintained shared facade', () => {
   assert.equal(manualCalls("await db.run('BEGIN IMMEDIATE')").length, 1);
   assert.equal(manualCalls('await db.exec("BEGIN")').length, 1);
+  assert.equal(manualCalls("await db.all('BEGIN IMMEDIATE')").length, 1);
+  assert.equal(manualCalls('await db.get(`BEGIN`)').length, 1);
+  assert.equal(manualCalls("db.each('BEGIN DEFERRED', cb)").length, 1);
   for (const profile of ['bcm2712', 'bcm2709']) {
     const share = SHARE.replace('bcm2712', profile);
     for (const n of JSON.parse(fs.readFileSync(path.join(share, 'flows.json')))) {
