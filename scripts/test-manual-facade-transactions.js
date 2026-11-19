@@ -17,7 +17,8 @@ const SHARE = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/s
 const MODS = path.join(SHARE, 'node-red');
 const helperPath = path.join(MODS, 'osi-db-helper/index.js');
 const flows = JSON.parse(fs.readFileSync(path.join(SHARE, 'flows.json')));
-const replication = require(path.join(MODS, 'osi-irrigation-policy/replication'));
+const replication = require(process.env.OSI_PEER_REPLICATION_UNDER_TEST || path.join(MODS, 'osi-irrigation-policy/replication'));
+const { facadeDb: queuedFixtureDb } = require('./lib/queued-db-fixture');
 const EUI = 'A840410000000001';
 const GATEWAY = '0016C001F1000001';
 const PRIOR = EUI;
@@ -25,6 +26,40 @@ const ARRAY = 'AABBCCDDEEFF0011';
 const USER = 'transaction-owner';
 const ZONE = 'transaction-zone';
 const calibration = { array_id: ARRAY, sensor_id: 'test', sensor1_a: 0, sensor1_b: 1, sensor1_c: 0, sensor2_a: 0, sensor2_b: 1, sensor2_c: 0, sensor3_a: 0, sensor3_b: 1, sensor3_c: 0 };
+
+test('SQLite fixture uses the shipped helper API and keeps foreign writes outside rollback', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-queued-fixture-'));
+  const raw = new DatabaseSync(path.join(dir, 'fixture.db'));
+  t.after(() => { raw.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  raw.exec('CREATE TABLE probe(value TEXT)');
+  const db = queuedFixtureDb(raw);
+  assert.equal(queuedFixtureDb(raw), db, 'one shared queue for the fixture connection');
+  for (const name of ['get', 'all', 'run', 'transaction']) assert.equal(typeof db[name], 'function', name);
+  let entered, release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const held = new Promise((resolve) => { release = resolve; });
+  const failure = new Error('fixture rollback');
+  const owner = db.transaction(async (tx) => {
+    await tx.run("INSERT INTO probe VALUES ('owner')");
+    entered();
+    await held;
+    throw failure;
+  });
+  await started;
+  const plain = db.run("INSERT INTO probe VALUES ('plain')");
+  const other = db.transaction((tx) => tx.run("INSERT INTO probe VALUES ('transaction')"));
+  assert.deepEqual(raw.prepare('SELECT value FROM probe').all().map((row) => row.value), ['owner']);
+  const rejected = assert.rejects(owner, (error) => error === failure);
+  release();
+  await rejected;
+  await Promise.all([plain, other]);
+  assert.deepEqual((await db.all('SELECT value FROM probe')).map((row) => row.value), ['plain', 'transaction']);
+  assert.equal((await db.get('SELECT count(*) AS count FROM probe')).count, 2);
+  await new Promise((resolve, reject) => db.get('SELECT count(*) AS count FROM probe', (error, row) => {
+    if (error) return reject(error);
+    try { assert.equal(row.count, 2); resolve(); } catch (failure) { reject(failure); }
+  }));
+});
 
 function declaration(source, name) {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
@@ -116,7 +151,7 @@ function fixture(t, rollback) {
 async function execute(id, f, msg) {
   const node = flows.find((n) => n.id === id);
   assert.ok(node);
-  return new Function('msg', 'node', 'env', 'osiLib', 'osiDb', 'chameleon', 'crypto', 'global', node.func)(msg, f.node, f.env, f.osiLib, f.osiDb, f.chameleon, crypto, { get() {} });
+  return new Function('msg', 'node', 'env', 'osiLib', 'osiDb', 'chameleon', 'crypto', 'global', 'flow', node.func)(msg, f.node, f.env, f.osiLib, f.osiDb, f.chameleon, crypto, { get() {} }, f.flow);
 }
 
 for (const rollback of [false, true]) {
@@ -337,3 +372,42 @@ test('weather zone set rechecks a grant revoked before BEGIN and preserves both 
   assert.deepEqual((await f.other.all('SELECT zone_id FROM weather_station_zones WHERE deveui=? ORDER BY zone_id', [EUI])).map((r) => r.zone_id), [101, 102]);
   await f.verify();
 });
+
+for (const id of ['sync-bootstrap-mark', 'sync-outbox-mark']) {
+  for (const statusCode of [404, 503]) {
+    test(`${id}: peer capability capture and ${statusCode} invalidation persist after queued commits`, async (t) => {
+      const f = fixture(t, false);
+      // Use the helper's real FIFO without the earlier isolation fault hook.
+      f.owner.transaction = f.other.transaction.bind(f.other);
+      const installation = '11111111-1111-4111-8111-111111111111';
+      const context = { server_url: 'https://cloud.invalid', cloud_user_id: USER, gateway_device_eui: GATEWAY, installation_uuid: installation };
+      await f.other.run(`INSERT INTO installation_identity(singleton_id,installation_uuid,current_gateway_device_eui,previous_gateway_device_euis_json,recovery_state,created_at,updated_at)
+        VALUES(1,?,?, '[]','ACTIVE','2026-11-19','2026-11-19')`, [installation, GATEWAY]);
+      await f.other.run(`INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,peer_capabilities_json,peer_capabilities_context_json,updated_at)
+        VALUES('cloud',1,?,?,?,?, '[]',?,'2026-11-19')`, [context.server_url, USER, GATEWAY, installation, JSON.stringify(context)]);
+      await f.other.run(`INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,occurred_at)
+        VALUES('peer-event','DEVICE',?,'DEVICE_FLAGS_UPDATED','{}','2026-11-19')`, [EUI]);
+      const committedPeer = () => {
+        // A different connection observes committed state only.
+        const observer = new DatabaseSync(f.owner.filename, { readOnly: true });
+        try { return observer.prepare("SELECT * FROM sync_link_state WHERE peer_node='cloud'").get(); }
+        finally { observer.close(); }
+      };
+      const peer = replication.flowPeerDb(f.owner, f.node.warn, 'Peer persistence regression');
+      const capture = await replication.beginPeerRequest(peer, { context, requestId: 'peer-capture' });
+      assert.equal(capture.captured, true);
+      assert.equal(committedPeer().peer_capabilities_request_id, 'peer-capture');
+      assert.deepEqual(JSON.parse(committedPeer().peer_capabilities_context_json), context);
+      const metadata = { _syncConditionalRequestId: 'peer-capture', _syncConditionalPeerContext: context, _syncConditionalGuarded: true, _syncLinkedUserId: null };
+      const payload = { success: true, supportedSyncCapabilities: ['conditional_irrigation_v1'], results: [{ eventUuid: 'peer-event', status: 'APPLIED' }] };
+      await execute(id, f, { ...metadata, _syncEventIds: ['peer-event'], statusCode: 200, payload });
+      assert.deepEqual(JSON.parse(committedPeer().peer_capabilities_json), ['conditional_irrigation_v1'], 'capability acceptance committed before the mark returned');
+      await execute(id, f, { ...metadata, _syncEventIds: ['peer-event'], statusCode, payload: { code: 'CONDITIONAL_IRRIGATION_UNSUPPORTED' } });
+      const invalidated = committedPeer();
+      assert.equal(invalidated.peer_capabilities_json, null, 'guarded failure committed capability removal');
+      assert.equal(invalidated.peer_capabilities_context_json, null);
+      assert.equal(invalidated.peer_capabilities_request_id, null);
+      assert.deepEqual(f.warnings, []);
+    });
+  }
+}
