@@ -186,7 +186,6 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
   if (key) { cols.push('uplink_key'); vals.push(key); }
 
-
   if (shadow) {
     for (const write of plan.quarantineWrites) {
       deadLetterSync(db, deveui, write.channel, write.reason, write.rawValue);
@@ -211,7 +210,6 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   if (plan.quarantineWrites.length > 0) {
     evictQuarantineSync(db);
   }
-
 
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
@@ -254,7 +252,6 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
   if (key) { cols.push('uplink_key'); vals.push(key); }
 
-
   if (shadow) {
     for (const write of plan.quarantineWrites) {
       await deadLetterAsync(db, deveui, write.channel, write.reason, write.rawValue);
@@ -280,7 +277,6 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
     await evictQuarantineAsync(db);
   }
 
-
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
 
@@ -292,7 +288,26 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
 // as the SDI12 node already does).
 function writeDeviceData(db, manifest, normalizeResult, meta, options) {
   if (isPreparedDb(db)) {
-    return writeDeviceDataSync(db, manifest, normalizeResult, meta, options);
+    // SAVEPOINT also works inside a caller's transaction: a local quarantine
+    // error rolls back this write without committing or aborting other work.
+    db.exec('SAVEPOINT osi_device_writer');
+    try {
+      const result = writeDeviceDataSync(db, manifest, normalizeResult, meta, options);
+      db.exec('RELEASE SAVEPOINT osi_device_writer');
+      return result;
+    } catch (error) {
+      try {
+        db.exec('ROLLBACK TO SAVEPOINT osi_device_writer');
+        db.exec('RELEASE SAVEPOINT osi_device_writer');
+      } catch (rollbackError) { error.rollbackError = rollbackError; }
+      throw error;
+    }
+  }
+  // A standalone osi-db-helper handle owns the operation queue and opens one
+  // transaction for the canonical insert, quarantine and eviction. Its scoped
+  // run/get/all/exec object has no transaction method; reuse that caller scope.
+  if (typeof db.transaction === 'function') {
+    return db.transaction(tx => writeDeviceDataAsync(tx, manifest, normalizeResult, meta, options));
   }
   return writeDeviceDataAsync(db, manifest, normalizeResult, meta, options);
 }

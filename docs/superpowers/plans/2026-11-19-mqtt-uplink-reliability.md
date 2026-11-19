@@ -28,7 +28,9 @@ STREGA telemetry and SDI12 handler. STREGA checks its receipt inside the
 observation transaction before a report can update observed state. Preserve
 the existing post-commit close-evidence retry for repeated CLOSED reports. The shared writer returns the existing row
 id with `duplicate: true`; it uses a targeted conflict clause, preserving other
-constraint errors. LSN50 skips derivative writes, and Tensiomark skips evidence
+constraint errors. Canonical and quarantine writes commit together; a failed
+quarantine leaves the canonical event retryable. Legacy rain-conflict receipts
+include the matched observation identity so separate episodes remain distinct. LSN50 skips derivative writes, and Tensiomark skips evidence
 insertion. WATERMARK checks its raw receipt inside the measurement transaction.
 Its rejected-frame receipts are also durable. Deduplicate the SDI12 raw archive
 and skip commissioning/first-join work for an existing canonical observation.

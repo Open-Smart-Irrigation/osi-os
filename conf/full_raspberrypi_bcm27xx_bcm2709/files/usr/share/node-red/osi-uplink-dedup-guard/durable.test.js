@@ -146,3 +146,52 @@ test('concurrent canonical redeliveries write unknown-channel quarantine once', 
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
   } finally {db.close();}
 });
+
+
+for (const asyncShape of [false,true]) {
+  test('quarantine failure rolls back the canonical row and retries both: '+(asyncShape?'facade':'sync'), async () => {
+    const { seedTestDb, facadeDb } = require('../../../../../../../scripts/lib/flow-node-harness');
+    const db = seedTestDb();
+    const handle = asyncShape ? facadeDb(db) : db;
+    const manifest = [{key:'ambient_temperature',edgeField:'ambient_temperature'}];
+    const meta = {deveui:'WX1',uplinkKey:eventKey('uc512',{deduplicationId:'quarantine-retry'})};
+    const normalized = {recordedAt:envelope.time,channels:{ambient_temperature:20},unknown:{unknown_sensor:23}};
+    const write = async () => writer.writeDeviceData(handle,manifest,normalized,meta);
+    writer.resetColumnCache();
+    try {
+      db.exec("CREATE TRIGGER temporary_quarantine_failure BEFORE INSERT ON ingest_quarantine BEGIN SELECT RAISE(ABORT,'temporary quarantine write failure'); END");
+      await assert.rejects(write(),/temporary quarantine write failure/);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,0);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,0);
+      db.exec('DROP TRIGGER temporary_quarantine_failure');
+      assert.equal((await write()).inserted,true);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
+      assert.equal((await write()).duplicate,true);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
+    } finally { db.close(); }
+  });
+}
+
+
+test('sync atomic writer preserves an outer transaction and rolls back its own failed unit', () => {
+  const { seedTestDb } = require('../../../../../../../scripts/lib/flow-node-harness');
+  const db = seedTestDb();
+  const meta = {deveui:'WX1',uplinkKey:eventKey('uc512',{deduplicationId:'sync-outer'})};
+  const normalized = {recordedAt:envelope.time,unknown:{sync_unknown_sensor:23}};
+  writer.resetColumnCache();
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    assert.equal(writer.writeDeviceData(db,[],normalized,meta).inserted,true);
+    assert.equal(db.isTransaction,true,'the writer must not commit its caller transaction');
+    db.exec('ROLLBACK');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,0);
+    db.exec("CREATE TRIGGER temporary_quarantine_failure BEFORE INSERT ON ingest_quarantine BEGIN SELECT RAISE(ABORT,'temporary failure'); END; BEGIN IMMEDIATE;");
+    assert.throws(()=>writer.writeDeviceData(db,[],normalized,meta),/temporary failure/);
+    assert.equal(db.isTransaction,true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,0);
+    db.exec("UPDATE devices SET name='caller work preserved' WHERE deveui='WX1'; COMMIT;");
+    assert.equal(db.prepare("SELECT name FROM devices WHERE deveui='WX1'").get().name,'caller work preserved');
+  } finally {db.close();}
+});

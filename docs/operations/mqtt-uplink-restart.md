@@ -54,12 +54,17 @@ without a canonical measurement: rejection quarantine and commissioning updates
 commit with their receipts in one transaction. Observation failures roll them
 back for retry. Identify replies and STREGA ACKs also use transactional receipts,
 so an old reply cannot advance a later attempt or consume a successor push.
-The shared writer inserts unknown-channel quarantine only for the winning
-canonical insert, including concurrent deliveries.
+The shared writer commits the canonical insert, unknown-channel quarantine
+and eviction in one transaction, including concurrent deliveries. A quarantine
+failure rolls back the canonical row so a retry can recover both. Synchronous
+callers use a savepoint; standalone facade handles own a queued transaction,
+and existing transaction scopes remain owned by their caller.
 
 S2120 and LoRain already claim a durable `rain_observations` event identity.
-Identity-conflict quarantine also has a transactional receipt, so a repeated
-conflict adds no further evidence rows.
+Identity-conflict quarantine also has a transactional receipt. Its legacy key
+uses the matched observation and conflicting payload digest, so a repeated
+conflict adds no further evidence rows while a later frame-counter reuse
+retains its own evidence. The canonical one-hour matching window is unchanged.
 Radio capture already merges observations by installation and deduplication id;
 missing network ids use the same original timestamp/frame fallback. Field-tester
 reply enqueueing has a separate receipt; a failed enqueue rolls it back. MQTT
