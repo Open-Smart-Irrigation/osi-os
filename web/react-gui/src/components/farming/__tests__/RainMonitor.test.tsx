@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
+import en from '../../../../public/locales/en/devices.json';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sensorAPI, type SensorHistoryPoint } from '../../../services/api';
@@ -13,8 +14,12 @@ import { RainMonitor } from '../RainMonitor';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: Record<string, unknown>) =>
-      String(options?.defaultValue ?? _key).replace(/\{\{(\w+)\}\}/g, (_m, name) => String(options?.[name] ?? '')),
+    i18n: { language: 'en' },
+    t: (key: string, options?: Record<string, unknown>) => {
+      const [group, leaf] = key.split('.');
+      const value = (en as unknown as Record<string, Record<string, string>>)[group]?.[leaf];
+      return String(value ?? options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_m, name) => String(options?.[name] ?? ''));
+    },
   }),
 }));
 
@@ -106,7 +111,7 @@ async function openWeek() {
   render(<RainMonitor deveui="A840410000000001" deviceName="Orchard gauge" onClose={vi.fn()} />);
   await screen.findByText('2.0 mm');
   fireEvent.click(screen.getByRole('button', { name: '7 d' }));
-  await screen.findByText('RAINY DAYS');
+  await screen.findByText('Rainy days');
 }
 
 describe('RainMonitor', () => {
@@ -128,7 +133,7 @@ describe('RainMonitor', () => {
 
     expect(await screen.findByText('2.0 mm')).toBeInTheDocument(); // window total
     expect(screen.getByText('1.5 mm')).toBeInTheDocument(); // peak interval
-    expect(screen.getByText('WET INTERVALS')).toBeInTheDocument();
+    expect(screen.getByText('Wet intervals')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(sensorAPI.getHistory).toHaveBeenCalledWith('A840410000000001', 'rain_mm_delta', 24);
     expect(sensorAPI.getDailyRainHistory).not.toHaveBeenCalled();
@@ -197,7 +202,7 @@ describe('RainMonitor', () => {
     vi.mocked(sensorAPI.getHistory).mockRejectedValue(new Error('boom'));
     render(<RainMonitor deveui="A840410000000001" deviceName="Orchard gauge" onClose={vi.fn()} />);
 
-    expect(await screen.findByText('boom')).toBeInTheDocument();
+    expect(await screen.findByText('Unable to load measurement history.')).toBeInTheDocument();
   });
 
   it('excludes a no-data day from the daily summary tiles', async () => {
