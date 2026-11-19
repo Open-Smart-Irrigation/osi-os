@@ -119,6 +119,64 @@ release_deploy_lock() {
     [ "$(readlink "$DEPLOY_LOCK" 2>/dev/null || true)" != "$$" ] || rm -f "$DEPLOY_LOCK"
 }
 
+# deploy outcome begin
+# Only the bundle runner sets DEPLOY_OUTCOME_FILE. The native deploy exit
+# contract stays unchanged; an unverified start is explicitly non-success in
+# the bundle result (exit_code=3, deploy_exit_code=0).
+write_deploy_outcome() {
+    [ -n "${DEPLOY_OUTCOME_FILE:-}" ] || return 0
+    outcome_rc="$1"
+    outcome_code="$outcome_rc"
+    outcome_verdict=refused
+    outcome_reason="deploy refused before activation; inspect the deploy log"
+    if [ "${DEPLOY_HOLD_SERVICES:-0}" = 1 ] || [ "${identityd_deploy_state:-}" = fatal_hold ] || [ "${DEPLOY_OUTCOME_HOLD:-0}" = 1 ]; then
+        outcome_verdict=hold
+        outcome_reason="services held stopped; inspect DEPLOY-HELD and the deploy log"
+    elif [ "${ROLLBACK_RESTORED:-0}" = 1 ]; then
+        outcome_verdict=auto-rollback
+        outcome_reason="deploy failed; the compatible previous payload was restored and its readiness confirmed"
+    elif [ "$outcome_rc" -eq 0 ] && [ "${DEPLOY_COMPLETED:-0}" = 1 ]; then
+        if [ "${PROBE_OK:-}" = 0 ]; then
+            outcome_verdict=success
+            outcome_reason="activation and local health self-check passed"
+        else
+            outcome_verdict=unverified
+            outcome_code=3
+            outcome_reason="the new payload runs but its start could not be verified"
+        fi
+    elif [ "${PAYLOAD_FLIPPED:-0}" = 1 ] || [ "${DB_MIGRATION_COMMITTED:-0}" = 1 ] || [ "${DEPLOY_ACTIVATION_ATTEMPTED:-0}" = 1 ]; then
+        outcome_verdict=failed
+        outcome_reason="deploy failed after activation or migration; inspect the deploy log"
+    fi
+    [ "$outcome_verdict" = success ] || [ "$outcome_code" -ne 0 ] || outcome_code=1
+    if [ "$outcome_verdict" != success ] && [ -n "${NODE_RED_START_REASON:-}" ]; then
+        outcome_reason="$outcome_reason: $NODE_RED_START_REASON"
+    fi
+    if [ "$outcome_verdict" != success ] && [ -f "${DEPLOY_LOGFILE:-}" ]; then
+        outcome_detail="$(awk '/ERROR:|ALERT:|HELD:/ { last=$0 } END { print last }' "$DEPLOY_LOGFILE")"
+        [ -z "$outcome_detail" ] || outcome_reason="$outcome_reason: $outcome_detail"
+    fi
+    # Read the active stamp without invoking or mutating the swap machinery.
+    outcome_active="$(readlink "${SWAP_ROOT:-/srv/node-red}/payloads/active" 2>/dev/null || true)"
+    {
+        printf 'schema=osi-deploy-result/1\nstate=complete\nexit_code=%s\ndeploy_exit_code=%s\nverdict=%s\n' "$outcome_code" "$outcome_rc" "$outcome_verdict"
+        printf 'payload_stamp=%s\nactive_payload_stamp=%s\nbundle_sha256=%s\nlog=%s\n' "${DEPLOY_STAMP:-unknown}" "${outcome_active:-unknown}" "${DEPLOY_BUNDLE_SHA256:-unknown}" "${DEPLOY_LOGFILE:-unknown}"
+        printf 'reason=%s\n' "$(printf '%s' "$outcome_reason" | tr '\n\r' '  ')"
+    } > "$DEPLOY_OUTCOME_FILE.tmp-$$" && mv "$DEPLOY_OUTCOME_FILE.tmp-$$" "$DEPLOY_OUTCOME_FILE"
+}
+# deploy outcome end
+
+early_deploy_exit() {
+    early_status="$1"
+    trap - EXIT INT TERM HUP
+    if ! write_deploy_outcome "$early_status"; then
+        echo "ERROR: could not persist deploy outcome" >&2
+        early_status=1
+    fi
+    cleanup
+    exit "$early_status"
+}
+
 cleanup() {
     # A refusal between staging and the exit handler's takeover (it discards
     # the stage itself) leaves no staged payload behind, nor the links
@@ -133,7 +191,7 @@ cleanup() {
 # A signal ends the deploy through its exit path; a handler that only cleaned
 # up would let the script run on without its directory. HUP too: a tunnel
 # session that dies takes the deploy down through that path, never past it.
-trap cleanup EXIT
+trap 'early_deploy_exit $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
@@ -1729,6 +1787,7 @@ restore_identityd_prior_state() {
 # line says what it loses. A committed deploy removes the file.
 DEPLOY_HELD_FILE="${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD"
 record_deploy_hold() {
+    DEPLOY_OUTCOME_HOLD=1
     rdh_db="${DB_PATH:-/data/db/farming.db}"
     rdh_root="${SWAP_ROOT:-/srv/node-red}"
     rdh_backup_dir="${backup_dir:-${MIGRATE_BACKUP_DIR:-/data/backups/migrate}}"
@@ -1982,6 +2041,10 @@ deploy_exit_handler() {
     # succeeds; a failed one leaves it for the operator.
     if [ "$exit_status" -eq 0 ]; then
         rm -rf "${NODE_RED_ROOT:-/srv/node-red}"/.osi-command-ledger-previous.*
+    fi
+    if [ -n "${DEPLOY_OUTCOME_FILE:-}" ] && ! write_deploy_outcome "$exit_status"; then
+        echo "ERROR: could not persist deploy outcome" >&2
+        exit_status=1
     fi
     cleanup
     exit "$exit_status"
@@ -2840,6 +2903,7 @@ process.stdout.write(String(applied.length));
                 node_red_restart_needed=0
                 return 1
             fi
+            DEPLOY_ACTIVATION_ATTEMPTED=1
             if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \
                ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null; then
                 echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2
@@ -4246,6 +4310,7 @@ if ! write_payload_compatibility "$DEPLOY_STAMP"; then
 fi
 
 # payload activation begin
+DEPLOY_ACTIVATION_ATTEMPTED=1
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
     if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \
@@ -4412,3 +4477,6 @@ note_chirpstack_wal
 if [ "$PROBE_OK" = "unverified" ]; then
     echo "UNVERIFIED: payloads/$DEPLOY_STAMP runs, but its start could not be confirmed: $NODE_RED_START_REASON. The next deploy checks it again."
 fi
+
+# Set only after activation, startup assessment and identityd readiness finish.
+DEPLOY_COMPLETED=1

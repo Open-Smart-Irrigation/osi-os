@@ -41,7 +41,7 @@ function classify(args) {
   const exe = path.basename(args[0] || '');
   if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/deploy-local-server.js'))) return 'server';
   if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/fixture-delay.js'))) return 'delay';
-  if (['sh', 'dash', 'ash', 'busybox', 'setsid'].includes(exe) && args.some(a => a.includes(prefix) && a.includes('/deploy.sh'))) return 'watcher-or-stub';
+  if (['sh', 'dash', 'ash', 'busybox', 'setsid'].includes(exe) && args.some(a => a.includes(prefix)) && args.some(a => a.includes('/deploy.sh'))) return 'watcher-or-stub';
   if (exe === 'tail' && args.some(a => a.startsWith(logPrefix) && a.endsWith('.log'))) return 'log-tail';
   return null;
 }
@@ -239,6 +239,7 @@ build_bundle() {
     RANDOM_SEED=$((RANDOM_SEED + 1))
     mkdir -p "$fixture/scripts"
     cp "$server_js" "$fixture/scripts/deploy-local-server.js"
+    cp "$script_dir/deploy-bundle-manifest.js" "$fixture/scripts/deploy-bundle-manifest.js"
     cat > "$fixture/deploy.sh" <<EOF
 #!/bin/sh
 set -eu
@@ -253,6 +254,12 @@ if [ "\${STUB_DELAY_SECONDS:-0}" -gt 0 ]; then
 fi
 exit $exit_code
 EOF
+    # Exercise the same result formatter as deploy.sh, without gateway work.
+    sed -n '/^# deploy outcome begin$/,/^# deploy outcome end$/p' "$script_dir/../deploy.sh" > "$fixture/outcome.sh"
+    # Prepend the formatter and install its exit trap before the stub body.
+    { printf '#!/bin/sh\n'; cat "$fixture/outcome.sh"; printf 'DEPLOY_COMPLETED=1\nPROBE_OK=0\nDEPLOY_STAMP=fixture\ntrap '\''write_deploy_outcome $?'\'' EXIT\n'; cat "$fixture/deploy.sh"; } > "$fixture/deploy.new"
+    mv "$fixture/deploy.new" "$fixture/deploy.sh"
+    rm "$fixture/outcome.sh"
     cat > "$fixture/scripts/fixture-delay.js" <<'NODE'
 'use strict';
 const fs = require('node:fs');
@@ -274,6 +281,7 @@ if (process.env.STUB_DELAY_NO_MARKER === '1') {
 }
 setTimeout(() => {}, seconds * 1000);
 NODE
+    node "$script_dir/deploy-bundle-manifest.js" create "$fixture" fixture
     tar czf "$bundle_out" -C "$fixture" .
     sha256sum "$bundle_out" | awk '{print $1"  bundle.tar.gz"}' > "$bundle_out.sha256"
 }
@@ -526,7 +534,7 @@ echo "OK"
 echo "=== sha256 mismatch is rejected ==="
 build_bundle 0 "$work/bad.tar.gz"
 printf 'deadbeef  bundle.tar.gz\n' > "$work/bad.tar.gz.sha256"
-if sh "$offline" "$work/bad.tar.gz" 2>"$work/err.log"; then
+if DEPLOY_OFFLINE_TMP_ROOT="$work/tmp" DEPLOY_OFFLINE_LOG_DIR="$work/data" DEPLOY_OFFLINE_TS=bad sh "$offline" "$work/bad.tar.gz" 2>"$work/err.log"; then
     echo "expected sha256 mismatch to fail" >&2
     exit 1
 fi

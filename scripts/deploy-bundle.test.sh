@@ -110,4 +110,28 @@ fi
 fetch_count=$(wc -l < "$fetch_list" | tr -d ' ')
 echo "OK: bundle contains all $fetch_count deploy.sh-derived paths + deploy.sh + react_gui.tar.gz"
 
+echo "verify byte-identical builds across time and umask..."
+sleep 2
+(umask 077; REPO_ROOT="$repo_root" OUT_DIR="$work/second" REACT_GUI_TARBALL="$gui_tar" BUNDLE_TS="20260911T000000Z" \
+  bash "$builder" >"$work/second.log" 2>&1)
+second=$(find "$work/second" -name 'deploy-bundle-*.tar.gz' | head -1)
+second_sha=$(sha256sum "$second" | cut -d ' ' -f1)
+[ "$actual_sha" = "$second_sha" ] || {
+  echo "repeatability failed: $actual_sha != $second_sha" >&2
+  exit 1
+}
+tar xzf "$bundle" -C "$work" ./bundle-manifest.json
+node - "$work/bundle-manifest.json" <<'NODE'
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const manifest = JSON.parse(fs.readFileSync(process.argv[2]));
+assert.equal(manifest.schema, 'osi-deploy-bundle/1');
+assert.match(manifest.files['deploy.sh'], /^[a-f0-9]{64}$/);
+assert.match(manifest.files['react_gui.tar.gz'], /^[a-f0-9]{64}$/);
+NODE
+
+echo "verify no-argument invocation fails clearly with missing default GUI..."
+REPO_ROOT="$work/noarg-repo" OUT_DIR="$work/noarg" bash "$builder" >"$work/noarg.log" 2>&1 && exit 1
+grep -q 'react_gui.tar.gz not found' "$work/noarg.log"
+! grep -q 'unbound variable' "$work/noarg.log"
 echo "deploy-bundle.test: OK"

@@ -20,16 +20,42 @@ choice on a stable LAN.
 
 | Script | Runs on | Job |
 |---|---|---|
-| `scripts/deploy-bundle.sh` | workstation | Packs every file `deploy.sh` can fetch, plus `deploy.sh` and `deploy-local-server.js` themselves, into `dist/deploy-bundle-<sha>-<ts>.tar.gz` + a `.sha256` sidecar. |
+| `scripts/deploy-bundle.sh` | workstation | Packs every file `deploy.sh` can fetch, plus `deploy.sh` and `deploy-local-server.js` themselves, into `dist/deploy-bundle-<sha>.tar.gz` + a `.sha256` sidecar. |
 | `scripts/deploy-push-bundle.sh` | workstation | Streams that tarball to the gateway over one `ssh … 'cat > /tmp/...'` pipe (resumable), then launches `deploy-offline.sh` there. |
 | `scripts/deploy-local-server.js` | gateway | Zero-dependency Node static file server bound to `127.0.0.1`; ships inside the bundle. |
 | `scripts/deploy-offline.sh` | gateway | Extracts the bundle, brings up the local server under `setsid`, then runs `deploy.sh` under a second `setsid` session so it keeps running after your SSH connection ends. |
 
-`deploy.sh` itself is unmodified: it still does `curl -fsSLo dest "$BASE/$src"`
+`deploy.sh` still does `curl -fsSLo dest "$BASE/$src"`
 against `$BASE`. The only difference is that `$BASE` now points at a Node
 server on the gateway's own loopback interface instead of a tunnel back to
 your workstation, so the fetch loop is immune to the exact link that keeps
 dropping.
+
+### Repeatability and file verification
+
+For the same source tree and GUI archive bytes, the builder produces the same
+bundle bytes. It sorts archive entries, sets owners to 0, normalizes file and
+directory modes, fixes mtimes to epoch zero and uses `gzip -n`. Set
+`SOURCE_DATE_EPOCH` to select another fixed mtime. `BUNDLE_TS` is an optional
+legacy filename suffix; it never enters the archive. The manifest records the
+source SHA label and a SHA-256 digest for every regular file except itself.
+It contains no build-machine paths or build times.
+
+The prebuilt GUI archive is an input: rebuilding it with different timestamps
+changes the input bytes and therefore the bundle. To package an existing GUI
+build reproducibly with GNU tar:
+
+```bash
+tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -cf - -C web/react-gui/build . | gzip -n > react_gui.tar.gz
+```
+
+The gateway checks the archive checksum, rejects links, special files and unsafe
+paths before extraction, then verifies the manifest against the entire extracted
+file set before starting the server. A missing, changed or extra file refuses the
+deploy. Older bundles without the manifest must be rebuilt. These checks detect
+incomplete or changed content relative to the supplied sidecar; source selection
+and SSH authentication remain the operator's responsibility.
 
 ### Which paths get bundled
 
@@ -50,26 +76,28 @@ instead of quietly omitting the file from the bundle.
 # 1. Build and package the React GUI (same as the tunnel flow — not built by
 #    deploy-bundle.sh itself; frontend builds OOM this workstation)
 cd web/react-gui && npm ci && npm run build && cd ../..
-tar czf react_gui.tar.gz -C web/react-gui/build .
+tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 --numeric-owner \
+  -cf - -C web/react-gui/build . | gzip -n > react_gui.tar.gz
 
 # 2. Build the bundle
 scripts/deploy-bundle.sh react_gui.tar.gz
-# -> dist/deploy-bundle-<sha>-<ts>.tar.gz (+ .sha256)
+# -> dist/deploy-bundle-<sha>.tar.gz (+ .sha256)
 
 # 3. Push it and launch the deploy
-scripts/deploy-push-bundle.sh root@<pi-ip> dist/deploy-bundle-<sha>-<ts>.tar.gz --wait
+scripts/deploy-push-bundle.sh root@<pi-ip> dist/deploy-bundle-<sha>.tar.gz --wait
 ```
 
 `deploy-push-bundle.sh` forwards everything after the bundle path to
 `deploy-offline.sh` on the gateway. Drop `--wait` to hand the deploy off and
 return immediately — the log path and a `tail -f` hint print before the
-command exits:
+command exits (exit 0 means launch accepted):
 
 ```bash
-scripts/deploy-push-bundle.sh root@<pi-ip> dist/deploy-bundle-<sha>-<ts>.tar.gz
+scripts/deploy-push-bundle.sh root@<pi-ip> dist/deploy-bundle-<sha>.tar.gz
 # ...
-#   Log:  /data/deploy-20260911T120000Z.log
-#   Follow it with: tail -f /data/deploy-20260911T120000Z.log
+#   Log:  /data/deploy-20260911T120000Z-1234.log
+#   Read result: cat '/data/deploy-20260911T120000Z-1234.result'
+#   Launch accepted; the result is pending until state=complete.
 ```
 
 If the SSH session then drops (during the upload, during `--wait`, or any
@@ -83,16 +111,17 @@ time after hand-off), the deploy itself is unaffected:
 - **Session drops after hand-off**: `deploy-offline.sh` already backgrounded
   `sh deploy.sh <port>` under `setsid`, in a session with no controlling
   terminal, so it is not a child of the SSH session and receives no
-  `SIGHUP`. Reconnect and run `tail -f /data/deploy-<ts>.log`.
+  `SIGHUP`. Reconnect and run `cat /data/deploy-<run>.result`, then read the named log.
 
 ### Manually, without `deploy-push-bundle.sh`
 
 If you'd rather copy the tarball over yourself:
 
 ```bash
-scp dist/deploy-bundle-<sha>-<ts>.tar.gz dist/deploy-bundle-<sha>-<ts>.tar.gz.sha256 root@<pi-ip>:/tmp/
-scp scripts/deploy-offline.sh root@<pi-ip>:/tmp/
-ssh root@<pi-ip> 'sh /tmp/deploy-offline.sh /tmp/deploy-bundle-<sha>-<ts>.tar.gz --wait'
+ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz' < dist/deploy-bundle-<sha>.tar.gz
+ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz.sha256' < dist/deploy-bundle-<sha>.tar.gz.sha256
+ssh root@<pi-ip> 'cat > /tmp/deploy-offline.sh' < scripts/deploy-offline.sh
+ssh root@<pi-ip> 'sh /tmp/deploy-offline.sh /tmp/deploy-bundle.tar.gz --wait'
 ```
 
 (The Pis have no `sftp-server`, which plain `scp` needs, so it will fail.
@@ -105,16 +134,55 @@ for exactly this reason.)
 2. Checks free space under `/tmp` before extracting (bundle size × 3 +
    4 MB margin, the same wrap-safe `df -k` idiom `deploy.sh` uses for its own
    migration disk gate).
-3. Extracts to `/tmp/deploy-bundle-<ts>`.
+3. Rejects unsafe archive entries, extracts to `/tmp/deploy-bundle-<run>` and
+   verifies `bundle-manifest.json`. The default run identifier includes UTC time
+   and the launcher PID; an existing run is refused rather than overwritten.
 4. Starts `deploy-local-server.js` under `setsid`, polls
    `http://127.0.0.1:<port>/deploy.sh` until it answers (up to 30s).
-5. Launches `sh deploy.sh <port> > /data/deploy-<ts>.log 2>&1` inside a
+5. Launches `sh deploy.sh <port> > /data/deploy-<run>.log 2>&1` inside a
    *second* `setsid` session that also owns stopping the local server once
    `deploy.sh` exits — success or failure, `--wait` or not. This is what
    makes "the local server always gets stopped" true even when nothing is
    left attached to watch it: the watcher is detached too.
-6. With `--wait`, follows the log and exits with `deploy.sh`'s own exit code.
-   Without it, prints the log path and returns immediately.
+6. Records the terminal verdict in `/data/deploy-<run>.result` with an atomic
+   rename. `--wait` prints that result and returns its `exit_code`. Without
+   `--wait`, the launcher prints the result path and returns immediately.
+
+### Reading the final outcome
+
+Both push and direct offline delivery print the command for that run:
+
+```sh
+cat /data/deploy-<run>.result
+```
+
+The result is plain text, never a shell script: read it with `cat`, do not source
+it. `state=pending` or `state=running` with `verdict=pending` means no final
+verdict exists. If a process is killed without running its exit handler, or the
+gateway loses power, that pending record remains inconclusive. Check its log and
+the payload state before retrying.
+
+| Final verdict | Meaning | `--wait` status |
+|---|---|---|
+| `success` | Activation, local health check and identity supervisor readiness completed. | 0 |
+| `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
+| `hold` | The deploy left services deliberately stopped for operator recovery. | Nonzero deploy status |
+| `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
+| `failed` | Activation or migration failed without a confirmed rollback. | Nonzero deploy status |
+| `unverified` | The new payload runs, but its startup could not be confirmed, or no final lifecycle report was received. | 3 |
+
+`payload_stamp` identifies the attempted payload; `active_payload_stamp` identifies
+the final active link, which can differ after rollback. A refusal before
+`deploy.sh` starts uses `unknown`. The result also records `reason`, `bundle_sha256`, `log` and
+`deploy_exit_code` (the raw script status). The bundle runner returns 3 for an
+unverified start even though the native deploy script retains its existing exit-0
+behavior and leaves the running payload alone. A failed migration, activation or
+health check cannot become a successful bundle verdict.
+
+The detached watcher publishes the final result before its temporary completion
+marker. Its server cleanup and result writing continue after the SSH session ends.
+An SSH transport error during `--wait` describes the connection; reconnect and
+read the result file to learn the deploy outcome.
 
 `deploy.sh`'s own `EXIT`/`INT`/`TERM` traps (Node-RED restart after a
 migration failure, `identityd` state restoration) are untouched: the offline
@@ -137,7 +205,7 @@ successful migration it flips the staged payload (`swap_call flipTo
 "$DEPLOY_STAMP"`) *before* calling `restart_node_red()`, tracked by a
 `PAYLOAD_FLIPPED` flag so the later "Flip payload + local health self-check"
 block doesn't re-flip. This applies to every deploy over this offline path
-exactly as it does to the tunnel flow — `deploy.sh` itself is unmodified
+exactly as it does to the tunnel flow — `deploy.sh` runs the same lifecycle
 between the two, so the fix lands here for free. The historical Uganda catch-up window script
 (`scripts/ops/uganda-catchup-window.sh`) enforced the same rule independently
 with its optional `--expected-flows-sha` check, since that script restarts
