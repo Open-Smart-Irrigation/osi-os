@@ -25,6 +25,20 @@ inode in place so concurrent executions use the same kernel lock. Do not
 remove the maintenance lock or an execution claim by hand to bypass a
 refusal. These checks do not establish power-loss durability.
 
+The helpers require `flock` and refuse before taking a maintenance lock or
+stopping services if it is missing. Both OSI board configurations select the
+BusyBox FLOCK applet. Stock CGOS 4.10.1 support is unknown: this repository
+has no pinned stock build configuration or matching tag. Check that build's
+applet list or provide util-linux flock before installing these helpers.
+The printed recovery block also refuses a missing flock command.
+
+Recovery staging, the original-hash manifest and the ownership token are
+allocated and checked before downtime. The hash record lives outside the
+backup staging directory so publishing a set cannot consume it. A preflight
+allocation or write failure leaves services untouched, releases this run's
+lock, and instructs the operator to repair backup storage and rerun the same
+helper. No recovery block depends on an unallocated record.
+
 ## Pre-repair backup script
 
 The script stops at the first required artifact it cannot secure and prints

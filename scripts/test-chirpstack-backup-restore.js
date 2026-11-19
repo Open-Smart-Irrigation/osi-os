@@ -12,6 +12,11 @@ const feed = path.join(repo, 'feeds/chirpstack-openwrt-feed/chirpstack/chirpstac
 const find = (name) => (process.env.PATH || '').split(path.delimiter).map(d => path.join(d, name)).find(p => {
   try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; }
 });
+const busybox = find('busybox');
+const busyboxApplets = busybox ? spawnSync(busybox, ['--list'], { encoding: 'utf8' }) : null;
+const hasBusyboxFlock = busyboxApplets?.status === 0 && busyboxApplets.stdout.split('\n').includes('flock');
+const flockCommand = hasBusyboxFlock ? `'${busybox}' flock` : `'${find('flock')}'`;
+assert.ok(hasBusyboxFlock || find('flock'), 'install util-linux flock when BusyBox lacks the applet');
 const shells = [];
 if (find('busybox')) shells.push([find('busybox'), ['ash']]);
 if (find('dash')) shells.push([find('dash'), []]);
@@ -38,8 +43,7 @@ for (const [shell, args] of shells) {
     for (const cmd of ['cp', 'mv', 'rm', 'mkdir', 'rmdir', 'mktemp', 'chmod', 'date', 'sha256sum', 'cat']) {
       const target = find(cmd); assert.ok(target, cmd); fs.symlinkSync(target, p(`bin/${cmd}`));
     }
-    if (find('busybox')) exe('flock', `exec '${find('busybox')}' flock "$@"`);
-    else { assert.ok(find('flock'), 'flock'); fs.symlinkSync(find('flock'), p('bin/flock')); }
+    exe('flock', `exec ${flockCommand} "$@"`);
     exe('service', `if [ "$2" = start ] && { [ ! -s "$OSI_CS_ROOT/srv/chirpstack/chirpstack.sqlite" ] || [ ! -s "$OSI_CS_ROOT/srv/redis/dump.rdb" ]; }; then
   echo "$*" >> "$OSI_CS_ROOT/unsafe-start"
 fi
@@ -583,8 +587,9 @@ d.close();
     const lock = g.p('srv/backup/.chirpstack-maintenance.lock');
     const stage = fs.readdirSync(g.p('srv/backup')).find(n => n.startsWith('.chirpstack-stage.'));
     const quote = x => "'" + x.replaceAll("'", "'\\''") + "'";
-    const originals = fs.readFileSync(g.p(`srv/backup/${stage}/ORIGINAL.sha256`), 'utf8').trim().split('\n').filter(Boolean).map(l => l.split('  ')[1]).join(' ');
-    const result = g.commands(prefix + `\nTMP=${quote(g.p('srv/backup/' + stage))}\nSTAMP=${quote(fs.readFileSync(path.join(lock, 'recovery'), 'utf8').trim())}\nORIGINAL_MANIFEST="$TMP/ORIGINAL.sha256"\nORIGINALS_RECORDED=1\nORIGINAL_INVENTORY=1\nSTOP_CHIRPSTACK=1\nSTOP_REDIS=1\nORIGINAL_FILES=${quote(originals)}\nMOVED="$ORIGINAL_FILES"\nPROBE=pidof\nreport_recovery\n`);
+    const state = fs.readdirSync(g.p('srv/backup')).find(n => n.startsWith('.chirpstack-recovery.'));
+    const originals = fs.readFileSync(g.p(`srv/backup/${state}/ORIGINAL.sha256`), 'utf8').trim().split('\n').filter(Boolean).map(l => l.split('  ')[1]).join(' ');
+    const result = g.commands(prefix + `\nTMP=${quote(g.p('srv/backup/' + stage))}\nSTAMP=${quote(fs.readFileSync(path.join(lock, 'recovery'), 'utf8').trim())}\nSTATE=${quote(g.p('srv/backup/' + state))}\nORIGINAL_MANIFEST="$STATE/ORIGINAL.sha256"\nORIGINALS_RECORDED=1\nORIGINAL_INVENTORY=1\nSTOP_CHIRPSTACK=1\nSTOP_REDIS=1\nORIGINAL_FILES=${quote(originals)}\nMOVED="$ORIGINAL_FILES"\nPROBE=pidof\nreport_recovery\n`);
     ok(result); return recoveryBlock(result);
   }
   for (const op of ['backup', 'restore']) test(`${label}: recovery regression ${op} lock acquisition TERM cannot strand lock`, t => {
@@ -874,7 +879,7 @@ if [ "\${WAIT_CLAIM:-0}" = 1 ]; then
     '${find('sleep')}' 0.01
   done
 fi
-exec '${find('busybox')}' flock "$@"
+exec ${flockCommand} "$@"
 `, { mode: 0o755 });
     const child = spawn(shell, [...args, '-c', commands], { env: g.environment({ WAIT_CLAIM: '1' }), stdio: 'ignore' });
     const ended = new Promise(resolve => child.on('close', status => resolve(status)));
@@ -892,6 +897,68 @@ exec '${find('busybox')}' flock "$@"
     } finally {
       fs.writeFileSync(g.p('claim-resume'), 'yes'); if (child.exitCode === null) child.kill('SIGKILL'); await ended;
     }
+  });
+
+  for (const op of ['backup', 'restore']) test(`${label}: ${op} recovery state exists before downtime and survives late mktemp failure`, t => {
+    const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
+    fs.writeFileSync(g.p('bin/mktemp'), `#!/bin/sh
+if [ -f "$OSI_CS_ROOT/start-failed" ]; then exit 1; fi
+case "$*" in *chirpstack-stage*) [ ! -d "$OSI_CS_ROOT/srv/backup/chirpstack-set" ] || [ "${op}" != backup ] || exit 1;; esac
+exec '${find('mktemp')}' "$@"
+`, { mode: 0o755 });
+    // A persistent restart fault ensures recovery, even if a start spawned a writer.
+    const service = fs.readFileSync(g.p('bin/service'), 'utf8');
+    fs.writeFileSync(g.p('bin/service'), service.replace('start) ', 'start) echo yes > "$OSI_CS_ROOT/start-failed"; '));
+    const r = g.run(op, { START_FAIL: 'chirpstack' }); bad(r);
+    const commands = recoveryBlock(r); assert.doesNotMatch(commands, /recovery_manifest=''/);
+    assert.ok(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock/recovery')));
+    fs.writeFileSync(g.p('bin/mktemp'), `#!/bin/sh\nexec '${find('mktemp')}' "$@"\n`, { mode: 0o755 });
+    ok(g.commands(commands)); assert.deepEqual(g.state(), before); g.running();
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+  });
+  for (const op of ['backup', 'restore']) test(`${label}: ${op} recovery-state preflight failure makes no service call`, t => {
+    const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
+    for (const n of ['redis', 'chirpstack']) fs.unlinkSync(g.p(n + '.running'));
+    fs.writeFileSync(g.p('bin/mktemp'), `#!/bin/sh
+case "$*" in *chirpstack-recovery.*) exit 1;; esac
+exec '${find('mktemp')}' "$@"
+`, { mode: 0o755 });
+    const r = g.run(op); bad(r);
+    assert.equal(fs.existsSync(g.p('calls')), false); assert.deepEqual(g.state(), before);
+    assert.doesNotMatch(r.stderr, /BEGIN RECOVERY COMMANDS/);
+    assert.match(r.stderr, /repair.*storage.*rerun/i);
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+    for (const n of ['redis', 'chirpstack']) assert.equal(fs.existsSync(g.p(n + '.running')), false);
+  });
+
+  for (const op of ['backup', 'restore']) test(`${label}: ${op} refuses missing flock before any maintenance change`, t => {
+    const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
+    fs.unlinkSync(g.p('bin/flock'));
+    const r = g.run(op); bad(r); assert.match(r.stderr, /flock is required for recovery/);
+    assert.equal(fs.existsSync(g.p('calls')), false); assert.deepEqual(g.state(), before);
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+  });
+  test(`${label}: printed recovery refuses missing flock without disturbing generation`, t => {
+    const g = gateway(t); g.backup();
+    const r = g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_COPY_AFTER: '1', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
+    fs.unlinkSync(g.p('bin/flock'));
+    const before = g.state(), calls = fs.readFileSync(g.p('calls'), 'utf8');
+    const retry = g.commands(recoveryBlock(r)); assert.notEqual(retry.status, 0);
+    assert.match(retry.stderr, /requires BusyBox flock; lock retained/);
+    assert.deepEqual(g.state(), before); assert.equal(fs.readFileSync(g.p('calls'), 'utf8'), calls);
+    assert.ok(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock/recovery')));
+  });
+  for (const op of ['backup', 'restore']) test(`${label}: ${op} unwritable original manifest aborts with checked storage procedure`, t => {
+    const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
+    fs.unlinkSync(g.p('bin/chmod'));
+    fs.writeFileSync(g.p('bin/chmod'), `#!/bin/sh
+'${find('chmod')}' "$@" || exit 1
+case "$2" in *chirpstack-recovery.*) '${find('mkdir')}' "$2/ORIGINAL.sha256";; esac
+`, { mode: 0o755 });
+    const r = g.run(op); bad(r); assert.match(r.stderr, /repair backup storage and rerun this helper/);
+    assert.doesNotMatch(r.stderr, /BEGIN RECOVERY COMMANDS/);
+    assert.equal(fs.existsSync(g.p('calls')), false); assert.deepEqual(g.state(), before);
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
   });
 
 }

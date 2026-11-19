@@ -16,6 +16,7 @@ LOCK="$BASE/.chirpstack-maintenance.lock"
 REDIS="$ROOT/srv/redis/dump.rdb"
 FILES='chirpstack.sqlite chirpstack.sqlite-wal chirpstack.sqlite-shm chirpstack.sqlite-journal chirpstack.redis'
 TMP=
+STATE=
 CHECK=
 LOCKED=0
 STOP_CHIRPSTACK=0
@@ -163,17 +164,11 @@ record_originals() {
         done
         ORIGINAL_INVENTORY=1
     fi
-    # Backup publication consumes staging. A later restart failure still needs
-    # a private hash record, never extra files inside the published set.
-    if [ -z "$TMP" ] || [ ! -d "$TMP" ]; then
-        TMP=$(mktemp -d "$BASE/.chirpstack-stage.XXXXXX") || return 1
-        chmod 700 "$TMP" || return 1
-    fi
-    ORIGINAL_MANIFEST="$TMP/ORIGINAL.sha256"
-    if [ "$ORIGINAL_MANIFEST_READY" = 0 ]; then
-        : > "$ORIGINAL_MANIFEST" || return 1
-        ORIGINAL_MANIFEST_READY=1
-    fi
+    # All recovery paths were allocated and checked before downtime. Never
+    # allocate recovery metadata after publication has consumed staging.
+    [ -n "$STATE" ] && [ -d "$STATE" ] && [ ! -L "$STATE" ] &&
+        [ -n "$ORIGINAL_MANIFEST" ] && [ -f "$ORIGINAL_MANIFEST" ] &&
+        [ ! -L "$ORIGINAL_MANIFEST" ] && [ "$ORIGINAL_MANIFEST_READY" = 1 ] || return 1
     for inventory_name in $ORIGINAL_FILES; do
         live_path "$inventory_name"
         [ -f "$LIVE" ] && [ ! -L "$LIVE" ] || return 1
@@ -303,7 +298,7 @@ report_recovery() {
         log "RECOVERY: $recovery_name: live $LIVE ($live_state); original $recovery ($recovery_state)" >&2
         if [ -e "$recovery.pending" ]; then log "RECOVERY: pending copy $recovery.pending" >&2; fi
     done
-    log "RECOVERY: recovery snapshot retained at $TMP" >&2
+    log "RECOVERY: original hash record retained at $ORIGINAL_MANIFEST; replacement snapshot $TMP" >&2
     log 'BEGIN RECOVERY COMMANDS' >&2
     log '(' >&2
     quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
@@ -480,7 +475,10 @@ RECOVERY_END
     else
         log "echo 'RECOVERY: original inventory verified; services remain stopped; retry restore.sh'" >&2
     fi
-    quote_path "$TMP"; log "rm -rf $QUOTED || recovery_fail 'cleanup verified recovery snapshot'" >&2
+    if [ -n "$TMP" ]; then
+        quote_path "$TMP"; log "rm -rf $QUOTED || recovery_fail 'cleanup verified recovery snapshot'" >&2
+    fi
+    quote_path "$STATE"; log "rm -rf $QUOTED || recovery_fail 'cleanup verified original hash record'" >&2
     cat >&2 <<'RECOVERY_UNLOCK'
 trap '' HUP INT TERM
 # Rename the owned lock into the claim. Its token stays intact until the
@@ -619,6 +617,7 @@ finish() {
     if [ "$RECOVERY_INCOMPLETE" = 0 ]; then
         if [ -n "$CHECK" ]; then rm -rf "$CHECK" || result=1; fi
         if [ -n "$TMP" ]; then rm -rf "$TMP" || result=1; fi
+        if [ -n "$STATE" ]; then rm -rf "$STATE" || result=1; fi
         if [ -f "$LOCK/recovery" ]; then rm -f "$LOCK/recovery" || result=1; fi
         rmdir "$LOCK" || { ERROR="$ERROR; lock cleanup failed"; result=1; }
     fi
@@ -637,6 +636,7 @@ elif command -v pgrep >/dev/null 2>&1; then
     PROBE=pgrep_exact
 else fail 'preflight: neither pidof nor pgrep is available'; fi
 command -v sha256sum >/dev/null 2>&1 || fail 'preflight: sha256sum is unavailable'
+command -v flock >/dev/null 2>&1 || fail 'preflight: flock is required for recovery; install BusyBox flock or util-linux flock before retrying'
 mkdir -p "$BASE" || fail 'preflight: cannot create backup directory'
 # Ignore signals in the shell AND mkdir child until ownership is recorded.
 trap '' HUP INT TERM
@@ -648,7 +648,17 @@ TMP=$(mktemp -d "$BASE/.chirpstack-stage.XXXXXX") || fail 'preflight: cannot cre
 chmod 700 "$TMP" || fail 'preflight: cannot secure temporary set'
 STAMP=$(date -u +%Y%m%dT%H%M%SZ) || fail 'preflight: cannot read UTC time'
 STAMP="$STAMP-$$"
-printf '%s\n' "$STAMP" > "$LOCK/recovery" || fail 'preflight: cannot record recovery ownership'
+# Abort before any stop if recovery metadata cannot be allocated or written.
+# The operator procedure for these failures needs no missing recovery record:
+# repair backup storage, then rerun the same helper; no services were touched.
+STATE=$(mktemp -d "$BASE/.chirpstack-recovery.XXXXXX") || fail 'preflight: repair backup storage and rerun this helper; cannot allocate recovery state'
+chmod 700 "$STATE" || fail 'preflight: repair backup storage and rerun this helper; cannot secure recovery state'
+ORIGINAL_MANIFEST="$STATE/ORIGINAL.sha256"
+printf '%s' '' > "$ORIGINAL_MANIFEST" || fail 'preflight: repair backup storage and rerun this helper; cannot create original manifest'
+ORIGINAL_MANIFEST_READY=1
+printf '%s\n' "$STAMP" > "$LOCK/recovery" || fail 'preflight: repair backup storage and rerun this helper; cannot record recovery ownership'
+[ -f "$ORIGINAL_MANIFEST" ] && [ ! -L "$ORIGINAL_MANIFEST" ] &&
+    [ "$(cat "$LOCK/recovery")" = "$STAMP" ] || fail 'preflight: repair backup storage and rerun this helper; recovery state verification failed'
 SOURCE=$BASE
 if [ -e "$SET" ] || [ -L "$SET" ]; then
     [ -d "$SET" ] && [ ! -L "$SET" ] || fail 'validate: backup set is not a directory'
