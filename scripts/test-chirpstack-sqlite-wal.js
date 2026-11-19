@@ -16,6 +16,11 @@ const fixtures = path.join(__dirname, 'fixtures/chirpstack-sqlite-wal');
 const original = fs.readFileSync(path.join(fixtures, 'chirpstack.init.orig'), 'utf8');
 const pragma = '\t\tpragmas = ["busy_timeout = 5000", "journal_mode = WAL", "foreign_keys = ON"]';
 const converted = original.replace('\t\tpath="/srv/chirpstack/chirpstack.sqlite"\n', `$&${pragma}\n`);
+const initVariants = [
+  ['without log capture', original, fs.readFileSync(path.join(fixtures, 'chirpstack.init.no-log-capture.wal'), 'utf8')],
+  ['with log capture', fs.readFileSync(path.join(fixtures, 'chirpstack.init.log-capture.orig'), 'utf8'),
+    fs.readFileSync(path.join(fixtures, 'chirpstack.init.log-capture.wal'), 'utf8')],
+];
 const shellCommand = process.env.OSI_CS_TEST_SHELL || (spawnSync('busybox', ['sh', '-c', 'exit 0']).status === 0 ? 'busybox' : 'dash');
 // Keep the test shell available when a refusal case intentionally empties PATH.
 // If neither shell exists, retain the command so spawn fails loudly with ENOENT.
@@ -151,8 +156,8 @@ if (op === 'install' && process.env.TEST_KILL_BEFORE_INSTALL === '1') { process.
   return { root, p, run, state, journal, backup, env };
 }
 function ok(r, status = 0) { assert.ifError(r.error); assert.equal(r.status, status, `${r.error || ''}\n${r.stdout}\n${r.stderr}`); }
-function restored(g) {
-  assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), original);
+function restored(g, init = original) {
+  assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), init);
   assert.equal(fs.readFileSync(g.p('opt/chirpstack/backup.sh'), 'utf8'), '#!/bin/sh\necho old-backup\n');
   assert.equal(fs.readFileSync(g.p('opt/chirpstack/restore.sh'), 'utf8'), '#!/bin/sh\necho old-restore\n');
   assert.equal(fs.statSync(g.p('opt/chirpstack/restore.sh')).mode & 0o777, 0o700);
@@ -161,27 +166,42 @@ function restored(g) {
   assert.ok(fs.existsSync(g.p('running')));
 }
 
-test(`field init converts with ${shell}, backup manifest and byte-identical current feed scripts`, async (t) => {
-  const g = await gateway(t);
-  const before = g.state();
-  const check = g.run(); ok(check, 3); assert.match(check.stdout, /needs conversion/);
-  assert.match(check.stdout, /init pragmas: no/); assert.match(check.stdout, /journal: DELETE/);
-  assert.match(check.stdout, /running: yes/); assert.match(check.stdout, /backup\/restore WAL-aware: no/);
-  assert.deepEqual(g.state(), before, 'check does not open SQLite or write');
-  const applied = g.run(['--apply']); ok(applied); assert.match(applied.stdout, /OK: ChirpStack SQLite on WAL; backup/);
-  assert.deepEqual(g.journal(), [2, 2]);
-  assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), converted);
-  assert.equal(fs.statSync(g.p('etc/init.d/chirpstack')).mode & 0o777, 0o751);
-  assert.equal(fs.readFileSync(path.join(g.backup(), 'chirpstack.init'), 'utf8'), original);
-  assert.equal(fs.statSync(g.backup()).mode & 0o777, 0o700);
-  const manifest = fs.readFileSync(path.join(g.backup(), 'MANIFEST.txt'), 'utf8');
-  for (const file of ['chirpstack.sqlite', 'chirpstack.init', 'backup.sh', 'restore.sh']) assert.ok(manifest.includes(`${hash(path.join(g.backup(), file))}  ${file}\n`));
-  for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
-  ok(g.run(['--check']));
-  const once = g.state(); const backupNames = fs.readdirSync(g.p('srv/backup'));
-  const twice = g.run(['--apply']); ok(twice); assert.match(twice.stdout, /OK: already WAL/);
-  assert.deepEqual(g.state(), once); assert.deepEqual(fs.readdirSync(g.p('srv/backup')), backupNames);
-});
+for (const [variant, init, expected] of initVariants) {
+  test(`field init ${variant} converts with ${shell}, backup manifest and byte-identical current feed scripts`, async (t) => {
+    const g = await gateway(t, init);
+    const before = g.state();
+    const check = g.run(); ok(check, 3); assert.match(check.stdout, /needs conversion/);
+    assert.match(check.stdout, /init pragmas: no/); assert.match(check.stdout, /journal: DELETE/);
+    assert.match(check.stdout, /running: yes/); assert.match(check.stdout, /backup\/restore WAL-aware: no/);
+    assert.deepEqual(g.state(), before, 'check does not open SQLite or write');
+    const applied = g.run(['--apply']); ok(applied); assert.match(applied.stdout, /OK: ChirpStack SQLite on WAL; backup/);
+    assert.deepEqual(g.journal(), [2, 2]);
+    assert.equal(fs.readFileSync(g.p('etc/init.d/chirpstack'), 'utf8'), expected);
+    assert.equal(fs.statSync(g.p('etc/init.d/chirpstack')).mode & 0o777, 0o751);
+    assert.equal(fs.readFileSync(path.join(g.backup(), 'chirpstack.init'), 'utf8'), init);
+    assert.equal(fs.statSync(g.backup()).mode & 0o777, 0o700);
+    const manifest = fs.readFileSync(path.join(g.backup(), 'MANIFEST.txt'), 'utf8');
+    for (const file of ['chirpstack.sqlite', 'chirpstack.init', 'backup.sh', 'restore.sh']) assert.ok(manifest.includes(`${hash(path.join(g.backup(), file))}  ${file}\n`));
+    for (const file of ['backup.sh', 'restore.sh']) assert.deepEqual(fs.readFileSync(g.p(`opt/chirpstack/${file}`)), fs.readFileSync(path.join(feed, file)));
+    ok(g.run(['--check']));
+    const once = g.state(); const backupNames = fs.readdirSync(g.p('srv/backup'));
+    const twice = g.run(['--apply']); ok(twice); assert.match(twice.stdout, /OK: already WAL/);
+    assert.deepEqual(g.state(), once); assert.deepEqual(fs.readdirSync(g.p('srv/backup')), backupNames);
+  });
+
+  test(`field init ${variant} keeps its bytes through explicit and automatic rollback`, async (t) => {
+    const g = await gateway(t, init);
+    ok(g.run(['--apply']));
+    ok(g.run(['--rollback', g.backup()]));
+    restored(g, init);
+    const read = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite'));
+    assert.equal(read.prepare('SELECT count(*) AS n FROM uplinks').get().n, 2); read.close();
+
+    const failed = await gateway(t, init);
+    const result = failed.run(['--apply'], { TEST_BAD_CONFIG: '1' });
+    ok(result, 1); assert.match(result.stderr, /ROLLED BACK:/); restored(failed, init);
+  });
+}
 
 test('streamed operator command reads its embedded helper without consuming script input', async (t) => {
   const g = await gateway(t);
@@ -189,8 +209,9 @@ test('streamed operator command reads its embedded helper without consuming scri
   ok(r); assert.deepEqual(g.journal(), [2, 2]);
 });
 
-test('captured WAL fixture remains byte-identical on an idempotent apply', async (t) => {
-  const wal = fs.readFileSync(path.join(fixtures, 'chirpstack.init.wal'), 'utf8');
+for (const [variant, , wal] of [...initVariants,
+  ['with captured field diagnostics', null, fs.readFileSync(path.join(fixtures, 'chirpstack.init.wal'), 'utf8')],
+]) test(`captured WAL fixture ${variant} remains byte-identical on an idempotent apply`, async (t) => {
   const g = await gateway(t, wal);
   const d = new DatabaseSync(g.p('srv/chirpstack/chirpstack.sqlite')); d.exec('PRAGMA journal_mode=WAL'); d.close();
   // A fully converted gateway already carries the WAL-aware helpers.
