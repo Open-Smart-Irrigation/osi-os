@@ -419,13 +419,21 @@ regardless of payload. To inspect or change ChirpStack config on a live Pi:
 buttons. Their last line says what happened: `OK: ...`, `ERROR: ...`,
 `ROLLED BACK: ...` or `ERROR: ROLLBACK INCOMPLETE`.
 
-- **If `restore.sh` reports a failure, the restore did not happen.** Check the
-  services' data before relying on it.
-- **v0.8.3 limit:** a restore that fails before it moves the first live file
-  restarts ChirpStack and Redis on the files they had before the attempt,
-  without first verifying them.
+- **A reported failure means the outcome is unconfirmed, not that nothing
+  changed.** Only a `ROLLED BACK: ...` line confirms that the original files are
+  back; the helper then verifies them before it restarts the services.
+- **An `ERROR:` without `ROLLED BACK:`** can follow a restore that already
+  replaced the live files and restarted both services, when the final cleanup
+  (temporary sets or the maintenance lock) fails. Check which data ChirpStack
+  and Redis are serving before you act on it.
+- **`RECOVERY: original inventory verified; services remain stopped`:** the
+  original files are in place and unchanged; retry `restore.sh`.
 - **After `ROLLBACK INCOMPLETE`,** the services stay stopped. Follow the printed
   recovery steps exactly before you start anything.
+- **v0.8.3 limit:** a restore that fails before it moves the first live file
+  restarts ChirpStack and Redis on the files they had before the attempt,
+  without first verifying them. Later helpers verify them first; one remaining
+  case (a failed restart that checkpoints the WAL) is tracked in #693.
 
 ### Flows fail to load / all routes 404
 
