@@ -52,7 +52,11 @@ case "$2" in
 stop) [ "\${STOP_STUCK:-}" != "$1" ] || exit 0
       [ "\${STOP_ERROR:-}" != "$1" ] || exit 1
       rm -f "$OSI_CS_ROOT/$1.running" ;;
-start) [ "\${START_FAIL:-}" != "$1" ] || exit 1
+start) if [ "\${PAUSE_START:-}" = "$1" ]; then
+         echo paused > "$OSI_CS_ROOT/copy-paused"
+         while [ ! -f "$OSI_CS_ROOT/copy-resume" ]; do '${find('sleep')}' 0.01; done
+       fi
+       [ "\${START_FAIL:-}" != "$1" ] || exit 1
        if [ "\${START_FAIL_ONCE:-}" = "$1" ] && [ ! -f "$OSI_CS_ROOT/start-failed" ]; then
          echo yes > "$OSI_CS_ROOT/$1.running"
          echo yes > "$OSI_CS_ROOT/start-failed"
@@ -579,19 +583,6 @@ d.close();
       await new Promise(resolve => setTimeout(resolve, 10));
     }
   };
-  // Exercise the shared emitter from each standalone helper using a retained
-  // restore fixture. Backup carries these functions for byte-identical safety.
-  function emittedBy(g, helper, r) {
-    if (helper === 'restore') return recoveryBlock(r);
-    const prefix = fs.readFileSync(path.join(feed, helper + '.sh'), 'utf8').split('# LuCI may close')[0];
-    const lock = g.p('srv/backup/.chirpstack-maintenance.lock');
-    const stage = fs.readdirSync(g.p('srv/backup')).find(n => n.startsWith('.chirpstack-stage.'));
-    const quote = x => "'" + x.replaceAll("'", "'\\''") + "'";
-    const state = fs.readdirSync(g.p('srv/backup')).find(n => n.startsWith('.chirpstack-recovery.'));
-    const originals = fs.readFileSync(g.p(`srv/backup/${state}/ORIGINAL.sha256`), 'utf8').trim().split('\n').filter(Boolean).map(l => l.split('  ')[1]).join(' ');
-    const result = g.commands(prefix + `\nTMP=${quote(g.p('srv/backup/' + stage))}\nSTAMP=${quote(fs.readFileSync(path.join(lock, 'recovery'), 'utf8').trim())}\nSTATE=${quote(g.p('srv/backup/' + state))}\nORIGINAL_MANIFEST="$STATE/ORIGINAL.sha256"\nORIGINALS_RECORDED=1\nORIGINAL_INVENTORY=1\nSTOP_CHIRPSTACK=1\nSTOP_REDIS=1\nORIGINAL_FILES=${quote(originals)}\nMOVED="$ORIGINAL_FILES"\nPROBE=pidof\nreport_recovery\n`);
-    ok(result); return recoveryBlock(result);
-  }
   for (const op of ['backup', 'restore']) test(`${label}: recovery regression ${op} lock acquisition TERM cannot strand lock`, t => {
     const g = gateway(t); if (op === 'restore') g.backup();
     const r = g.run(op, { SIGNAL_LOCK: '1', FAIL_STAGE: '1' }); bad(r);
@@ -607,9 +598,10 @@ d.close();
   });
   for (const helper of ['backup', 'restore']) test(`${label}: recovery regression ${helper} concurrent execution has one owner`, async t => {
     const g = gateway(t); g.backup(); const before = g.state();
-    const r = g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
-    const commands = emittedBy(g, helper, r);
-    const child = spawn(shell, [...args, '-c', commands], { env: g.environment({ PAUSE_COPY: '.pending' }), stdio: 'ignore' });
+    const r = helper === 'backup' ? g.run('backup', { START_FAIL: 'chirpstack' })
+      : g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
+    const commands = recoveryBlock(r);
+    const child = spawn(shell, [...args, '-c', commands], { env: g.environment(helper === 'backup' ? { PAUSE_START: 'chirpstack' } : { PAUSE_COPY: '.pending' }), stdio: 'ignore' });
     const finished = new Promise(resolve => child.on('close', status => resolve(status)));
     try {
       await waitFor(g.p('copy-paused'), child);
@@ -635,10 +627,10 @@ d.close();
     assert.doesNotMatch(fs.readFileSync(g.p('calls'), 'utf8'), /start/);
     ok(g.run('restore')); g.running();
   });
-  for (const helper of ['backup', 'restore']) test(`${label}: recovery regression ${helper} printed absent inventory can unlock for retry`, t => {
+  for (const helper of ['restore']) test(`${label}: recovery regression ${helper} printed absent inventory can unlock for retry`, t => {
     const g = gateway(t); g.backup(); fs.unlinkSync(g.live('chirpstack.redis'));
     const r = g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'chirpstack.sqlite' }); bad(r);
-    ok(g.commands(emittedBy(g, helper, r)));
+    ok(g.commands(recoveryBlock(r)));
     assert.equal(fs.existsSync(g.live('chirpstack.redis')), false);
     assert.doesNotMatch(fs.readFileSync(g.p('calls'), 'utf8'), /start/);
     ok(g.run('restore')); g.running();
@@ -824,16 +816,18 @@ case "$1" in ${target}) kill -TERM "$PPID"; kill -TERM "$$";; esac
   });
   for (const helper of ['backup', 'restore']) test(`${label}: recovery group TERM at claim mkdir is fenced for ${helper}`, t => {
     const g = gateway(t); g.backup();
-    const r = g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
-    const commands = emittedBy(g, helper, r);
+    const r = helper === 'backup' ? g.run('backup', { START_FAIL: 'chirpstack' })
+      : g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
+    const commands = recoveryBlock(r);
     signalCreator(g, '"$OSI_CS_ROOT/srv/backup/.chirpstack-maintenance.lock.recovery-"*');
     ok(g.commands(commands)); g.running();
     assert.deepEqual(fs.readdirSync(g.p('srv/backup')).filter(n => n.includes('.lock.recovery-')), []);
   });
   for (const helper of ['backup', 'restore']) test(`${label}: recovery retries an abandoned empty execution claim for ${helper}`, t => {
     const g = gateway(t); g.backup();
-    const r = g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
-    const commands = emittedBy(g, helper, r);
+    const r = helper === 'backup' ? g.run('backup', { START_FAIL: 'chirpstack' })
+      : g.run('restore', { FAIL_COPY: 'srv/redis/dump.rdb', FAIL_ROLLBACK_MOVE: 'dump.rdb' }); bad(r);
+    const commands = recoveryBlock(r);
     const lock = g.p('srv/backup/.chirpstack-maintenance.lock');
     const token = fs.readFileSync(path.join(lock, 'recovery'), 'utf8').trim();
     fs.mkdirSync(lock + '.recovery-' + token);
@@ -899,7 +893,7 @@ exec ${flockCommand} "$@"
     }
   });
 
-  for (const op of ['backup', 'restore']) test(`${label}: ${op} recovery state exists before downtime and survives late mktemp failure`, t => {
+  for (const op of ['backup', 'restore']) test(`${label}: ${op} recovery survives late mktemp failure`, t => {
     const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
     fs.writeFileSync(g.p('bin/mktemp'), `#!/bin/sh
 if [ -f "$OSI_CS_ROOT/start-failed" ]; then exit 1; fi
@@ -916,7 +910,7 @@ exec '${find('mktemp')}' "$@"
     ok(g.commands(commands)); assert.deepEqual(g.state(), before); g.running();
     assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
   });
-  for (const op of ['backup', 'restore']) test(`${label}: ${op} recovery-state preflight failure makes no service call`, t => {
+  for (const op of ['restore']) test(`${label}: ${op} recovery-state preflight failure makes no service call`, t => {
     const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
     for (const n of ['redis', 'chirpstack']) fs.unlinkSync(g.p(n + '.running'));
     fs.writeFileSync(g.p('bin/mktemp'), `#!/bin/sh
@@ -948,7 +942,7 @@ exec '${find('mktemp')}' "$@"
     assert.deepEqual(g.state(), before); assert.equal(fs.readFileSync(g.p('calls'), 'utf8'), calls);
     assert.ok(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock/recovery')));
   });
-  for (const op of ['backup', 'restore']) test(`${label}: ${op} unwritable original manifest aborts with checked storage procedure`, t => {
+  for (const op of ['restore']) test(`${label}: ${op} unwritable original manifest aborts with checked storage procedure`, t => {
     const g = gateway(t); if (op === 'restore') g.backup(); const before = g.state();
     fs.unlinkSync(g.p('bin/chmod'));
     fs.writeFileSync(g.p('bin/chmod'), `#!/bin/sh
@@ -959,6 +953,39 @@ case "$2" in *chirpstack-recovery.*) '${find('mkdir')}' "$2/ORIGINAL.sha256";; e
     assert.doesNotMatch(r.stderr, /BEGIN RECOVERY COMMANDS/);
     assert.equal(fs.existsSync(g.p('calls')), false); assert.deepEqual(g.state(), before);
     assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+  });
+
+  test(`${label}: backup restart recovery accepts a legitimate checkpoint after failed start`, t => {
+    const g = gateway(t);
+    const service = fs.readFileSync(g.p('bin/service'), 'utf8');
+    const checkpoint = g.p('checkpointed.sqlite');
+    fs.copyFileSync(g.live('chirpstack.sqlite'), checkpoint);
+    for (const suffix of ['-wal', '-shm']) fs.copyFileSync(g.live('chirpstack.sqlite' + suffix), checkpoint + suffix);
+    const db = new DatabaseSync(checkpoint);
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    assert.equal(db.prepare('SELECT * FROM uplinks').all().length, 1); db.close();
+    fs.writeFileSync(g.p('bin/service'), service.replace('start) ', `start) if [ "$1" = chirpstack ]; then
+      cp "$OSI_CS_ROOT/checkpointed.sqlite" "$OSI_CS_ROOT/srv/chirpstack/chirpstack.sqlite"
+      rm -f "$OSI_CS_ROOT/srv/chirpstack/chirpstack.sqlite-wal" "$OSI_CS_ROOT/srv/chirpstack/chirpstack.sqlite-shm"
+      echo yes > "$OSI_CS_ROOT/chirpstack.running"
+    fi
+    `));
+    const r = g.run('backup', { START_FAIL: 'chirpstack' }); bad(r);
+    const commands = recoveryBlock(r);
+    assert.doesNotMatch(commands, /sha256sum|recovery_manifest|service (?:redis|chirpstack) stop/);
+    fs.writeFileSync(g.p('bin/service'), service);
+    const calls = fs.readFileSync(g.p('calls'), 'utf8');
+    const failedRetry = g.commands(commands, { START_FAIL: 'chirpstack' }); assert.notEqual(failedRetry.status, 0);
+    assert.ok(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock/recovery')));
+    assert.doesNotMatch(fs.readFileSync(g.p('calls'), 'utf8').slice(calls.length), /stop/);
+    ok(g.commands(commands)); g.running();
+    assert.equal(fs.existsSync(g.p('srv/backup/.chirpstack-maintenance.lock')), false);
+    const live = new DatabaseSync(g.live('chirpstack.sqlite'));
+    assert.equal(live.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    assert.equal(live.prepare('SELECT * FROM uplinks').all().length, 1); live.close();
+    const replay = g.commands(commands); assert.notEqual(replay.status, 0);
+    ok(g.run('backup')); ok(g.run('restore'));
   });
 
 }

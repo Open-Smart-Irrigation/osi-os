@@ -7,11 +7,15 @@ Part of the osi-live-ops-runbook skill; read SKILL.md first.
 When `/opt/chirpstack/backup.sh` or `restore.sh` prints a recovery block, keep
 that complete block and rerun it after fixing the reported fault. It checks
 the maintenance generation before making service calls, preserves the
-original stop-attempt mask, and verifies the original file inventory before
-restart. An unfinished hash record can be completed only when no live file
-was moved or replaced; hashes already recorded must still match. If the
-original main database or Redis dump was absent, recovery leaves services
-stopped and releases the verified generation so restore can be retried.
+original stop-attempt mask. Backup recovery only starts the services that
+run attempted to stop, checks their processes, and releases the lock last.
+Backup never changes live files and does not compare them with pre-start
+hashes: a service start may legitimately checkpoint SQLite and consume WAL.
+Restore recovery verifies the original inventory before restart because
+restore moves live files. Its unfinished hash record can be completed only
+when no live file was moved or replaced; known hashes must still match. If
+restore's original main database or Redis dump was absent, recovery leaves
+services stopped and releases the verified generation for a restore retry.
 
 An interrupted recovery can leave an empty execution-claim directory. The
 printed block acquires the BusyBox `flock` process lock before clearing that
@@ -32,12 +36,12 @@ has no pinned stock build configuration or matching tag. Check that build's
 applet list or provide util-linux flock before installing these helpers.
 The printed recovery block also refuses a missing flock command.
 
-Recovery staging, the original-hash manifest and the ownership token are
-allocated and checked before downtime. The hash record lives outside the
-backup staging directory so publishing a set cannot consume it. A preflight
-allocation or write failure leaves services untouched, releases this run's
-lock, and instructs the operator to repair backup storage and rerun the same
-helper. No recovery block depends on an unallocated record.
+Both helpers check the ownership token before downtime. Restore also
+preallocates its recovery staging and original-hash manifest; backup has no
+original-set record. A preflight allocation or write failure leaves services
+untouched, releases this run's lock, and instructs the operator to repair
+backup storage and rerun the same helper. No recovery block depends on an
+unallocated record.
 
 ## Pre-repair backup script
 
