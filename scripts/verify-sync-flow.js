@@ -14,6 +14,7 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
 const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
+const historySyncSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-history-sync-helper', 'index.js'), 'utf8');
 // Issue #356: the Chameleon insert and backfill bodies and the scheduler SWT query
 // live in these modules; their function nodes only delegate.
 const chameleonHelperSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-chameleon-helper', 'index.js'), 'utf8');
@@ -1728,7 +1729,8 @@ expectIncludes('Build History Batch', 'last_shadow_acked_id', 'uses shadow ACK p
 expectIncludes('Build History Batch', 'helper.prepareRow', 'hashes and validates rows through the shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('Build History Batch', 'snapshot_high_key', 'captures natural-key backfill high-water marks');
-expectIncludes('Build History Batch', 'sync_history_dirty_keys', 'drains correction and repair dirty keys');
+expectIncludes('Build History Batch', 'helper.loadDirtyRows(', 'drains correction and repair dirty keys through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'sync_history_dirty_keys', 'selects dirty history keys');
 expectIncludes('Build History Batch', "'tensiomark_observations'", 'classifies Tensiomark observation dirty keys as correction history');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
 expectIncludes('Mark History Batch ACK', "batch.phase === 'shadow'", 'keeps shadow cursor progress separate from durable progress');
@@ -1750,10 +1752,11 @@ expectExcludes('Build History Manifest', "'LIMIT 500'", 'does not cap history ma
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
-expectIncludes('Mark History Manifest ACK', 'repairRequested', 'turns manifest mismatches into repair work');
-expectIncludes('Mark History Manifest ACK', 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
+expectIncludes('Mark History Manifest ACK', 'helper.queueManifestRepairs(', 'turns manifest mismatches into repair work through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'repairRequested', 'queues requested manifest repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
 expectIncludes('Build History Batch', "flow.get('history_repair_turns')", 'lets new tail rows go out between repair batches');
-expectIncludes('Mark History Manifest ACK', "change_kind='repair'", 'persists requested history repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, "change_kind='repair'", 'persists requested history repairs');
 expectExcludes('Mark History Manifest ACK', 'DELETE FROM', 'never treats manifests as deletion instructions');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
@@ -2516,7 +2519,28 @@ expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the l
 expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
-expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+// Durable MOD9 receipt invariants: ignored inserts cannot lend a previous row id.
+expectIncludes('LSN50 Normalize + Write', 'FROM device_data WHERE id = ?", [writeResult.deviceDataId])', 'reads the persisted/clamped row by the canonical writer returned id');
+expectExcludes('LSN50 Normalize + Write', 'last_insert_rowid()', 'never uses a connection-wide prior insert id for an uplink');
+{
+  const source = String(findNodeByName('LSN50 Normalize + Write')?.func || '');
+  const transaction = /db\.transaction\(async function \(t\) \{([\s\S]*?)\n    \}\);/.exec(source);
+  const body = transaction ? transaction[1] : '';
+  const writeAt = body.indexOf('var writeResult = await writerRes.value.writeDeviceData(t,');
+  const duplicateAt = body.indexOf('if (writeResult.duplicate) return { writeResult: writeResult };');
+  const readAt = body.indexOf('var savedRow = await t.get(');
+  const captureAt = body.indexOf('await rainRes.value.captureLsn50Observation(t, savedRow)');
+  const downstreamAt = source.indexOf('if (result.writeResult.duplicate) return null;', transaction ? transaction.index + transaction[0].length : 0);
+  const attributionAt = source.indexOf('if (result.rainObservation) d.rainObservationId');
+  if (!transaction || writeAt < 0 || duplicateAt <= writeAt || readAt <= duplicateAt || captureAt <= readAt
+      || (source.match(/captureLsn50Observation\(/g) || []).length !== 1
+      || downstreamAt < 0 || attributionAt <= downstreamAt) {
+    fail('LSN50 Normalize + Write must skip duplicate effects and read its returned row id before rain capture in the same transaction');
+  } else {
+    console.log('OK LSN50 duplicate receipt skips rain capture and downstream effects; row readback shares its write transaction');
+  }
+}
+// End durable MOD9 receipt invariants.
 expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
 expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
 expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');

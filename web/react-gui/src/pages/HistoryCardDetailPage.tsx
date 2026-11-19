@@ -15,7 +15,7 @@ const MobileSoilUplotHistory = lazy(() => import('../components/history/mobile/M
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
-import { clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
+import { calendarMonthForRange, calendarMonthRange, clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { coarserRecoveryAggregation, filterHistoryDataSources, historyRecoveryCapabilities, historySourceChoiceLabel } from '../history/sourceSelection';
 import { useFeatureFlags } from '../history/useFeatureFlags';
@@ -40,7 +40,6 @@ import type {
   HistoryCardSummary,
   HistoryCardSummaryResponse,
   HistoryRangeLabel,
-  HistoryRangeSelection,
   HistoryViewMode,
 } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
@@ -133,36 +132,6 @@ function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string
 
 function formatAggregationLabel(t: HistoryTranslate, aggregation: string): string {
   return t(`history.metadata.aggregation.${aggregation}`);
-}
-
-function monthRangeFromViewport(range: HistoryRangeSelection, monthOffset: number): HistoryRangeSelection {
-  const baseMs = Date.parse(range.to ?? range.from ?? '');
-  const baseDate = Number.isFinite(baseMs) ? new Date(baseMs) : new Date();
-  const monthStart = new Date(Date.UTC(
-    baseDate.getUTCFullYear(),
-    baseDate.getUTCMonth() + monthOffset,
-    1,
-    0,
-    0,
-    0,
-    0,
-  ));
-  const nextMonthStart = new Date(Date.UTC(
-    baseDate.getUTCFullYear(),
-    baseDate.getUTCMonth() + monthOffset + 1,
-    1,
-    0,
-    0,
-    0,
-    0,
-  ));
-
-  return {
-    label: 'custom',
-    from: monthStart.toISOString(),
-    to: new Date(nextMonthStart.getTime() - 1).toISOString(),
-    timezone: range.timezone,
-  };
 }
 
 function isPullRefreshPointerType(pointerType: string): boolean {
@@ -334,7 +303,7 @@ const HistoryDetailError: React.FC<{
 export const HistoryCardDetailPage: React.FC = () => {
   const { zoneId: rawZoneId, gatewayEui: rawGatewayEui, cardId: rawCardId } = useParams();
   const navigate = useNavigate();
-  const { t: translate } = useTranslation('history');
+  const { t: translate, i18n } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const pullStartRef = useRef<PullRefreshStart | null>(null);
   const featureFlags = useFeatureFlags();
@@ -507,11 +476,16 @@ export const HistoryCardDetailPage: React.FC = () => {
     const caption = formatWindowCaption(chartWindow.fromMs, chartWindow.toMs);
     return caption === '-' ? fallback : caption;
   }, [chartWindow, t, timeViewport.viewport.range.label]);
+  const calendarTimezone = resolvedZone?.timezone || timeViewport.viewport.range.timezone;
+  const requestedCalendarMonth = useMemo(
+    () => calendarMonthForRange({ ...timeViewport.viewport.range, timezone: calendarTimezone }, calendarMonthOffset),
+    [calendarMonthOffset, calendarTimezone, timeViewport.viewport.range],
+  );
   const requestRange = useMemo(
     () => (selectedView === 'calendar'
-      ? monthRangeFromViewport(timeViewport.viewport.range, calendarMonthOffset)
+      ? calendarMonthRange(requestedCalendarMonth, calendarTimezone)
       : timeViewport.viewport.range),
-    [calendarMonthOffset, selectedView, timeViewport.viewport.range],
+    [requestedCalendarMonth, calendarTimezone, selectedView, timeViewport.viewport.range],
   );
   const singleDeviceName = useMemo(() => {
     if (!displayCard) return null;
@@ -567,8 +541,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     return new Map((Array.isArray(days) ? days : []).map((day) => [day.date, day]));
   }, [cardData.data?.calendar?.days]);
   const calendarMonthLabel = useMemo(
-    () => formatHistoryCalendarMonthLabel(cardData.data?.calendar),
-    [cardData.data?.calendar],
+    () => formatHistoryCalendarMonthLabel(cardData.data?.calendar, requestedCalendarMonth, i18n?.resolvedLanguage || i18n?.language),
+    [cardData.data?.calendar, requestedCalendarMonth, i18n?.resolvedLanguage, i18n?.language],
   );
   const sourceChoiceText = t('history.sourceFilter.chooseOne', { defaultValue: 'Choose one source' });
   const viewModeLabel = detailViewModeLabel(t, selectedView, visibleRangeLabel, calendarMonthLabel);
@@ -664,8 +638,8 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   const handleMonthSwipe = useCallback((delta: -1 | 1) => {
     const baseIso = timeViewport.viewport.range.to ?? timeViewport.viewport.range.from;
-    setCalendarMonthOffset((offset) => clampCalendarMonthOffset(baseIso, offset, delta));
-  }, [timeViewport.viewport.range.to, timeViewport.viewport.range.from]);
+    setCalendarMonthOffset((offset) => clampCalendarMonthOffset(baseIso, offset, delta, Date.now(), calendarTimezone));
+  }, [timeViewport.viewport.range.to, timeViewport.viewport.range.from, calendarTimezone]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
@@ -920,6 +894,7 @@ export const HistoryCardDetailPage: React.FC = () => {
               window={chartWindow}
               onInspectDate={handleInspectDate}
               selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
+              requestedCalendarMonth={requestedCalendarMonth}
             />
           )}
         </HistoryVisualizationSurface>

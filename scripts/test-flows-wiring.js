@@ -758,7 +758,7 @@ for (const [nodeId, labels] of [
     ['sync-force-build', ['Peer capture', 'Peer capability', 'Peer invalidation']],
 ]) {
     const source = (byId[nodeId] || {}).func || '';
-    const calls = labels.map((label) => `conditionalReplication.flowPeerDb(q, run, (text) => node.warn(text), '${label}')`);
+    const calls = labels.map((label) => `conditionalReplication.flowPeerDb(_db, (text) => node.warn(text), '${label}')`);
     if (calls.some((call) => source.split(call).length !== 2) || /const peerDb = \{/.test(source)) {
         failures.push(`conditional peer: ${nodeId} must build each peer database through replication.flowPeerDb with its own rollback label`);
     }
@@ -1521,8 +1521,8 @@ for (const node of flows) {
         if (!/const q = \(sql, params = \[\]\) =>/.test(node.func)) {
             failures.push(label + ' defines gateway migration preflight without a parameterized q helper');
         }
-        if (!/const run = \(sql, params = \[\]\) =>/.test(node.func)) {
-            failures.push(label + ' defines gateway migration preflight without a parameterized run helper');
+        if (!/await _db\.transaction\(async \(tx\) =>/.test(node.func) || /await run\(['"]BEGIN/.test(node.func)) {
+            failures.push(label + ' must keep gateway migration writes in a queued transaction scope');
         }
     }
     if (node.id === 'sync-force-build'

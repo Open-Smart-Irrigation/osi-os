@@ -71,6 +71,16 @@ describe('ingestProfile3', () => {
   let ctx;
   beforeEach(() => { ctx = freshDb(); });
 
+  it('deduplicates accepted and rejected network events without a process cache', async () => {
+    for (const [deduplicationId,payloadB64] of [['accepted',frameB64([800,3291],[71,4058])],['rejected','AA==']]) {
+      const input = {deveui:DEVEUI,recordedAt:T1,payloadB64,fCnt:7,uplink:{deduplicationId}};
+      await wm.ingestProfile3(ctx.db,input,deps);
+      assert.equal((await wm.ingestProfile3(ctx.db,input,deps)).reason,'duplicate');
+    }
+    assert.equal(ctx.native.prepare('SELECT COUNT(*) AS n FROM watermark_readings').get().n,2);
+    assert.equal(ctx.native.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+  });
+
   it('writes device_data and a raw row; kPa waits for calibration', async () => {
     const res = await ingestAt(ctx.db, T1, frameB64([800, 3291], [71, 4058]));
     assert.equal(res.accepted, true);

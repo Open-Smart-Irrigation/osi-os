@@ -73,7 +73,9 @@ for (const profile of PROFILES) {
     fillerSegments(db, 1203);
     const target = missingDeviceDataSegment(db, h.helper);
     const requested = [];
-    for (let i = 0; i < 4; i += 1) {
+    // Marking is independently budgeted to 32 examined segments per page.
+    // Across three manifest pages, at most 3 * ceil(500 / 32) passes cover all.
+    for (let i = 0; i < 48; i += 1) {
       assert.ok(await h.manifest(), `manifest ${i + 1} was posted`);
       requested.push(...h.cloud.manifests.at(-1));
       h.advance(300000);

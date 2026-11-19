@@ -221,9 +221,9 @@ describe('HistoryDesktopDetail', () => {
     const card = makeCard({ title: 'Soil Moisture', scope: 'zone' });
     renderDesktopDetail([card], card, 'North Block');
 
-    // composeDetailTitle appends zone if not already in title
+    // Keep a visible separator between the card title and the zone.
     await waitFor(() => {
-      expect(screen.getByText('Soil Moisture North Block')).toBeInTheDocument();
+      expect(screen.getByText('Soil Moisture · North Block')).toBeInTheDocument();
     });
   });
 

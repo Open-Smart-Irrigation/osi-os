@@ -23,8 +23,8 @@ try {
   _dedupRes = osiLib.require('uplink-dedup');
   if (_dedupRes.ok && typeof _dedupRes.value.isDuplicateUplink === 'function') {
     _dedupIsDup = !!_dedupRes.value.isDuplicateUplink({
-      source: 'sdi12', deduplicationId: data.deduplicationId,
-      devEui: deveui, fCnt: data.fCnt, receivedAtMs: Date.now()
+      source: 'sdi12',
+      devEui: deveui, event: data, receivedAtMs: Date.now()
     });
   }
 } catch (_dedupErr) {
@@ -40,7 +40,7 @@ if (_dedupIsDup) {
 
 var fPort = Number(data.fPort);
 var decoded = data.object || {};
-msg.sdi12 = { payloadBase64: typeof data.data === 'string' ? data.data : null, deveui: deveui, fPort: fPort, decoded: decoded, recordedAt: data.time || null };
+msg.sdi12 = { payloadBase64: typeof data.data === 'string' ? data.data : null, deveui: deveui, fPort: fPort, decoded: decoded, recordedAt: data.time || null, frames: [{ event: data, receivedAt: new Date().toISOString() }] };
 if (fPort === 100) return [null, msg];
 if (fPort === 2 && decoded.unsupported_payload !== undefined) {
   // Unknown/short payload version: durable evidence, never silent. A firmware
@@ -53,7 +53,6 @@ if (fPort !== 2 || decoded.unsupported_fport !== undefined) {
   node.status({ fill: 'grey', shape: 'ring', text: 'dropped fport ' + fPort + ' ' + deveui });
   return null;
 }
-msg.sdi12.frames = [{ event: data, receivedAt: new Date().toISOString() }];
 if (decoded.Payver !== 2 || decoded.SegCount === undefined) {
   return [msg, null]; // payver 1: unchanged single-uplink path
 }

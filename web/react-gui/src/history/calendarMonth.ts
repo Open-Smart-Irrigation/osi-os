@@ -1,4 +1,38 @@
-import type { HistoryCalendar } from './types';
+import type { HistoryCalendar, HistoryRangeSelection } from './types';
+import { farmDateKey } from '../utils/rainDay';
+
+export interface CalendarMonth { year: number; month: number }
+
+export function calendarMonthForRange(range: HistoryRangeSelection, offset = 0, nowMs = Date.now()): CalendarMonth {
+  const parsed = Date.parse(range.to ?? range.from ?? '');
+  const date = farmDateKey(Number.isFinite(parsed) ? parsed : nowMs, range.timezone || 'UTC');
+  const shifted = new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1 + offset, 1));
+  return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
+}
+
+function monthStartMs(month: CalendarMonth, timezone: string): number {
+  const nominal = Date.UTC(month.year, month.month - 1, 1);
+  const date = new Date(nominal).toISOString().slice(0, 10);
+  // Find the first instant of the farm date, including zones with a midnight DST jump.
+  let lo = nominal - 36 * 3600000;
+  let hi = nominal + 36 * 3600000;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (farmDateKey(mid, timezone) < date) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+export function calendarMonthRange(month: CalendarMonth, timezone: string): HistoryRangeSelection {
+  const next = new Date(Date.UTC(month.year, month.month, 1));
+  return {
+    label: 'custom',
+    timezone,
+    from: new Date(monthStartMs(month, timezone)).toISOString(),
+    to: new Date(monthStartMs({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1 }, timezone) - 1).toISOString(),
+  };
+}
 
 export function latestCalendarMonth(calendar: HistoryCalendar | null | undefined): { year: number; month: number } | null {
   const days = Array.isArray(calendar?.days) ? calendar.days : [];
@@ -23,24 +57,21 @@ export function clampCalendarMonthOffset(
   currentOffset: number,
   delta: -1 | 1,
   nowMs: number = Date.now(),
+  timezone = 'UTC',
 ): number {
   const next = currentOffset + delta;
-  const baseMs = baseIso ? Date.parse(baseIso) : NaN;
-  const base = Number.isFinite(baseMs) ? new Date(baseMs) : new Date(nowMs);
-  const targetMonthStartMs = Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + next, 1);
-  const now = new Date(nowMs);
-  const currentMonthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  return targetMonthStartMs > currentMonthStartMs ? currentOffset : next;
+  const target = calendarMonthForRange({ label: 'custom', from: null, to: baseIso ?? null, timezone }, next, nowMs);
+  const current = calendarMonthForRange({ label: 'custom', from: null, to: null, timezone }, 0, nowMs);
+  return target.year * 12 + target.month > current.year * 12 + current.month ? currentOffset : next;
 }
 
-export function formatHistoryCalendarMonthLabel(calendar: HistoryCalendar | null | undefined): string | null {
-  const month = latestCalendarMonth(calendar);
-  if (!calendar || !month) return null;
-  const timezone = calendar.timezone || 'UTC';
+export function formatHistoryCalendarMonthLabel(calendar: HistoryCalendar | null | undefined, requestedMonth?: CalendarMonth, locale?: string): string | null {
+  const month = requestedMonth ?? latestCalendarMonth(calendar);
+  if (!month) return null;
   const monthDate = new Date(Date.UTC(month.year, month.month - 1, 15, 12));
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale, {
     month: 'long',
     year: 'numeric',
-    timeZone: timezone,
+    timeZone: 'UTC',
   }).format(monthDate);
 }

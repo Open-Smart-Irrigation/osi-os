@@ -251,7 +251,9 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     [viewport, effectiveBounds, handleReset],
   );
 
-  const headerTitle = desktopCardHeaderTitle(selectedCard, zoneName);
+  const cardTitle = desktopCardHeaderTitle(selectedCard, null);
+  const composedTitle = desktopCardHeaderTitle(selectedCard, zoneName);
+  const headerTitle = composedTitle === cardTitle ? cardTitle : `${cardTitle} · ${composedTitle.slice(cardTitle.length).trim()}`;
 
   return (
     <div className="flex h-full min-h-0 flex-row overflow-hidden">
@@ -287,14 +289,14 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
       {/* Main content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
+        <div data-testid="history-desktop-toolbar" className="flex max-h-[50%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h2 className="w-full break-words text-base font-semibold text-[var(--text)]">{headerTitle}</h2>
             {sourceOptions.length > 0 ? (
               <div
                 role="group"
                 aria-label={t('history.desktop.sourceSelectorLabel', { defaultValue: 'Sources' })}
-                className="flex overflow-hidden rounded border border-[var(--border)]"
+                className="flex max-w-full flex-wrap rounded border border-[var(--border)]"
               >
                 {sourceOptions.map((source) => (
                   <button
@@ -303,7 +305,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     aria-pressed={selectedSourceKey === source.key}
                     onClick={() => setSelectedSourceKey(source.key)}
                     disabled={requiresExplicitSource && source.key === null}
-                    className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                    className={`shrink-0 whitespace-nowrap px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedSourceKey === source.key
                         ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
@@ -318,7 +320,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
             <div
               role="group"
               aria-label={t('history.desktop.modeLabel', { defaultValue: 'View mode' })}
-              className="flex overflow-hidden rounded border border-[var(--border)]"
+              className="flex shrink-0 rounded border border-[var(--border)]"
             >
               {(['focus', 'compare'] as const).map((m) => (
                 <button
@@ -327,7 +329,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   aria-pressed={mode === m}
                   data-testid={`mode-${m}`}
                   onClick={() => setMode(m)}
-                  className={`px-3 py-1 text-xs font-semibold capitalize transition-colors ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1 text-xs font-semibold capitalize transition-colors ${
                     mode === m
                       ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                       : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
@@ -341,12 +343,12 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
             </div>
           </div>
           {/* Range presets + zoom — always visible so the shared viewport can be adjusted in either mode */}
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             {mode === 'focus' ? (
               <div
                 role="group"
                 aria-label={t('history.desktop.viewSelectorLabel', { defaultValue: 'Card view' })}
-                className="mr-2 flex overflow-hidden rounded border border-[var(--border)]"
+                className="mr-2 flex max-w-full flex-wrap rounded border border-[var(--border)]"
               >
                 {viewOptions.map(({ view, labelKey }) => (
                   <button
@@ -354,7 +356,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     type="button"
                     aria-pressed={selectedViewForCard === view}
                     onClick={() => { setSelectedView(view); setAggregationOverride(null); }}
-                    className={`px-2 py-1 text-xs font-semibold transition-colors ${
+                    className={`shrink-0 whitespace-nowrap px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedViewForCard === view
                         ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                         : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
@@ -371,7 +373,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                 type="button"
                 aria-pressed={activePreset === key}
                 onClick={() => handlePreset(key)}
-                className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold transition-colors ${
                   activePreset === key
                     ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                     : 'border border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'

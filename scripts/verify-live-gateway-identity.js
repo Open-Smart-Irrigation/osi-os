@@ -420,11 +420,13 @@ const protectedNodeHashes = {
   // region replaced by a sentinel so unrelated frozen-node edits still fail.
   'sync-init-fn': 'cad9151ca0763b94ce310d55b20dadd7a21e61b02a1dc2ec03da4d1db2b54519',
 };
+// Re-pinned for queued facade transactions: SQL, identity selection and failure
+// state stay intact; db.transaction owns BEGIN/COMMIT/ROLLBACK.
 const migrationPreflightHashes = {
-  'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '9ae98d1f0fba0086ebc1dbe556a58656f7bd52d74b6ca81d085735df3950fe46'],
-  'sync-outbox-build': ['\nfunction normalizeCloudServerUrl', 'abbebaac2e03f06562d6e6c49ff10fbca800c229d8cf5879a9af3ba0a0558c56'],
-  'sync-pending-build': ['\nfunction normalizeCloudServerUrl', '6f4fbe26fd5954042736f07e05d99c40ffe55ad1bff2a35097c8fec32f49570b'],
-  'sync-force-build': ['\nfunction recordFailure', 'df5cb5ca7dae8dc1bfeba7b8546e1d215ead1f71730f426400bbafb02f07864d'],
+  'sync-bootstrap-build': ['\nfunction normalizeCloudServerUrl', '97c62f029c21df1b39c05dd9f52e0a8faef5501bcce5e1a4008bccd4859a6dd2'],
+  'sync-outbox-build': ['\nfunction normalizeCloudServerUrl', '97c62f029c21df1b39c05dd9f52e0a8faef5501bcce5e1a4008bccd4859a6dd2'],
+  'sync-pending-build': ['\nfunction normalizeCloudServerUrl', 'c6881599c1a111b387884e613cf3c9d07b35e022e5a334f0ff443d6ca0e46bb4'],
+  'sync-force-build': ['\nfunction recordFailure', 'ac99c54116d24d618053a83046e8f425bda12adf42c05afe84025798bb5ab93d'],
 };
 
 function protectedFunctionForHash(nodeId, func) {
@@ -1112,9 +1114,16 @@ if (silentCatchBaseline) {
   // catches visible as warnings, ratcheting the maintained profiles 77 -> 74.
   // NEW-15: DENDRO SIM SETUP opens the farm file through osi-db-helper and its
   // close() catch gains a visible node.warn: 74 -> 73.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 73 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 73,
-    'silent-catch baseline records 73 for both maintained profiles',
-    'silent-catch baseline must be 73 for both maintained profiles');
+  // Queued transaction conversion reports or removes seven catches: 73 -> 66.
+  // The disjoint history manifest close() cleanup lowers the merged count to 65.
+  // Keep this as a ceiling so later cleanup can lower the shared fixture. The
+  // dedicated ratchet verifies that each live flow count equals that fixture.
+  expectCondition(['bcm2712', 'bcm2709'].every(profile => {
+    const count = silentCatchBaseline.profiles?.[profile]?.silentCatchCount;
+    return Number.isInteger(count) && count >= 0 && count <= 65;
+  }),
+    'silent-catch baseline is at most 65 for both maintained profiles',
+    'silent-catch baseline must not exceed 65 for either maintained profile');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

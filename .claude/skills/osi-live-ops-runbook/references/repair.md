@@ -2,6 +2,47 @@
 
 Part of the osi-live-ops-runbook skill; read SKILL.md first.
 
+## ChirpStack helper recovery
+
+When `/opt/chirpstack/backup.sh` or `restore.sh` prints a recovery block, keep
+that complete block and rerun it after fixing the reported fault. It checks
+the maintenance generation before making service calls, preserves the
+original stop-attempt mask. Backup recovery only starts the services that
+run attempted to stop, checks their processes, and releases the lock last.
+Backup never changes live files and does not compare them with pre-start
+hashes: a service start may legitimately checkpoint SQLite and consume WAL.
+Restore recovery verifies the original inventory before restart because
+restore moves live files. Its unfinished hash record can be completed only
+when no live file was moved or replaced; known hashes must still match. If
+restore's original main database or Redis dump was absent, recovery leaves
+services stopped and releases the verified generation for a restore retry.
+
+An interrupted recovery can leave an empty execution-claim directory. The
+printed block acquires the BusyBox `flock` process lock before clearing that
+directory with `rmdir`; a live owner causes refusal. After SIGKILL, the
+kernel releases the process lock once that execution and its children exit,
+so rerunning the same block performs the checked cleanup. A nonempty claim
+is retained for inspection, including any recovery files inside it.
+
+Never delete `/srv/backup/.chirpstack-recovery.guard`: the block keeps this
+inode in place so concurrent executions use the same kernel lock. Do not
+remove the maintenance lock or an execution claim by hand to bypass a
+refusal. These checks do not establish power-loss durability.
+
+The helpers require `flock` and refuse before taking a maintenance lock or
+stopping services if it is missing. Both OSI board configurations select the
+BusyBox FLOCK applet. Stock CGOS 4.10.1 support is unknown: this repository
+has no pinned stock build configuration or matching tag. Check that build's
+applet list or provide util-linux flock before installing these helpers.
+The printed recovery block also refuses a missing flock command.
+
+Both helpers check the ownership token before downtime. Restore also
+preallocates its recovery staging and original-hash manifest; backup has no
+original-set record. A preflight allocation or write failure leaves services
+untouched, releases this run's lock, and instructs the operator to repair
+backup storage and rerun the same helper. No recovery block depends on an
+unallocated record.
+
 ## Pre-repair backup script
 
 The script stops at the first required artifact it cannot secure and prints

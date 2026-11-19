@@ -2,7 +2,7 @@
 const fs=require('fs');const test=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');
 const flows=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'));
 const {encodeFieldTesterReply,classifyUplinkFrame}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester.js');
-const {executeFunction,loadNode,seedTestDb}=require('./lib/flow-node-harness');
+const {executeFunction,loadNode,seedTestDb,facadeDb}=require('./lib/flow-node-harness');
 test('radio capture has an enabled always-loaded input and leaves field testing disabled',()=>{
  const inputs=flows.filter(n=>n.type==='mqtt in'&&n.topic==='application/+/device/+/event/up');
  const capture=flows.find(n=>n.id==='radio-capture-fn');
@@ -16,7 +16,69 @@ test('radio capture has an enabled always-loaded input and leaves field testing 
  assert.equal(inputs.find(n=>n.id==='e382bbf0dde572b1').wires[0].length,2);
 });
 test('disabled capture returns without loading dependencies or touching DB',async()=>{const code=flows.find(n=>n.id==='radio-capture-fn').func;const fn=vm.runInNewContext('(async function(){'+code+'})',{env:{get:()=>''}});assert.equal(await fn(),null);});
-test('all source reads use radio adapter but bookkeeping remains farming based',()=>{const code=flows.find(n=>n.id==='sync-history-build').func;assert.match(code,/sourceQuery\(tableName,helper.snapshotHighQuery/);assert.match(code,/sourceQuery\(tableName,lookup.sql/);assert.match(code,/sourceQuery\(tableName,\s*helper.batchQuery/);assert.match(code,/bridgeDirty\(_db\)/);assert.match(flows.find(n=>n.id==='sync-history-mark').func,/rb.generation=\?/);});
+function historyRouting(profile) {
+ const root=`../conf/${profile}/files/usr/share/`;
+ const nodes=require(root+'flows.json');
+ const history=require(root+'node-red/osi-history-sync-helper');
+ return {
+  build:nodes.find(n=>n.id==='sync-history-build').func,
+  mark:nodes.find(n=>n.id==='sync-history-mark').func,
+  manifest:nodes.find(n=>n.id==='sync-history-manifest-mark').func,
+  dirty:history.loadDirtyRows.toString(),
+  complete:history.completeDirtyBatch.toString(),
+  queue:history.queueManifestRepairs.toString()
+ };
+}
+function assertHistoryRouting({build,mark,manifest,dirty,complete,queue}) {
+ // Trace the node's actual callbacks into each extracted helper. Checking the
+ // whole module for a sourceQuery token could pass with a bypass in this path.
+ for(const code of [build,mark,manifest]) {
+  assert.match(code,/new osiDb\.Database\('\/data\/db\/farming\.db'\)/);
+  assert.match(code,/const q = .*_db\.all\(sql, params,/);
+  assert.match(code,/const run = .*_db\.run\(sql, params,/);
+  assert.match(code,/const loaded = osiLib.require\('radio'\)/);
+  assert.match(code,/getSharedStore\(\{farmingDb:_db,/);
+  assert.match(code,/async function sourceQuery\(table,\s*sql,\s*params\)\s*\{\s*return table === 'radio_uplinks' \? \(await radioSource\(\)\)\.all\(sql,\s*params\) : q\(sql,\s*params\);\s*\}/);
+ }
+ assert.match(build,/sourceQuery\(tableName,\s*helper.snapshotHighQuery/);
+ assert.match(build,/sourceQuery\(tableName,\s*helper.batchQuery/);
+ assert.match(build,/bridgeDirty\(_db\)/);
+ assert.match(build,/helper\.loadDirtyRows\(\{\s*q,\s*run,\s*sourceQuery,\s*tableName,/);
+ assert.match(dirty,/const dirty = await q\(\s*"SELECT \* FROM sync_history_dirty_keys/);
+ assert.match(dirty,/const lookup = rowByHistoryKeyQuery\(tableName, entry.row_key\);\s*const found = await sourceQuery\(tableName,\s*lookup.sql,\s*lookup.params\)/);
+ assert.match(dirty,/await q\(\s*"UPDATE sync_history_dirty_keys/);
+ assert.match(mark,/sourceQuery\(tableName,\s*lookup.sql,\s*lookup.params\)/);
+ assert.match(mark,/helper\.completeDirtyBatch\(\{[^\n]*sourceQuery, db: _db[, }]/);
+ assert.match(complete,/if \(tableName === 'radio_uplinks'\)[\s\S]*radioRows\.set\(submitted, await sourceQuery\(tableName,\s*lookup.sql,\s*lookup.params\)\)/);
+ assert.match(complete,/const rows = tableName === 'radio_uplinks' \? radioRows.get\(submitted\) : await tx.all\(lookup.sql, lookup.params\)/);
+ assert.match(complete,/await db.transaction\(/);
+ assert.match(complete,/const updated = await tx.all\(\s*"UPDATE sync_history_dirty_keys/);
+ assert.match(complete,/RETURNING row_key/);
+ assert.match(complete,/rb.generation=\?/);
+ assert.match(manifest,/helper\.queueManifestRepairs\(\{ comparisons, db: _db, q, sourceQuery,/);
+ assert.match(queue,/const readSql = lookup.sql \+ ' LIMIT \?'/);
+ assert.match(queue,/const rows = await sourceQuery\(table, readSql, lookup.params.concat\(limit\)\)/);
+ assert.doesNotMatch(queue,/await tx.all\(/,'source snapshots must not bypass sourceQuery inside the bookkeeping transaction');
+ assert.match(queue,/await db.transaction\(/);
+ assert.match(queue,/await tx.run\(\s*"INSERT INTO sync_history_dirty_keys/);
+}
+test('all source reads use radio adapter but bookkeeping remains farming based',()=>{
+ for(const profile of ['full_raspberrypi_bcm27xx_bcm2712','full_raspberrypi_bcm27xx_bcm2709']) assertHistoryRouting(historyRouting(profile));
+});
+test('history routing guard rejects source bypasses and misplaced bookkeeping',()=>{
+ const current=historyRouting('full_raspberrypi_bcm27xx_bcm2712');
+ for(const [field,before,after] of [
+  ['build','q, run, sourceQuery, tableName','q, run, sourceQuery: q, tableName'],
+  ['dirty','await sourceQuery(tableName,lookup.sql, lookup.params)','await q(lookup.sql, lookup.params)'],
+  ['complete',"tableName === 'radio_uplinks' ? radioRows.get(submitted) : await tx.all",'false ? radioRows.get(submitted) : await tx.all'],
+  ['queue','await sourceQuery(table, readSql, lookup.params.concat(limit))','await q(readSql, lookup.params.concat(limit))'],
+  ['build',"'/data/db/farming.db'","'/data/db/radio.db'"],
+  ['complete','rb.generation=?','1=1']
+ ]) {
+  assert.ok(current[field].includes(before),`mutation anchor missing: ${field}: ${before}`);
+  assert.throws(()=>assertHistoryRouting({...current,[field]:current[field].replace(before,after)}),assert.AssertionError,`guard missed ${field}: ${before}`);
+ }
+});
 
 // --- Task 3 fix round 1, Finding A: executable coverage for the field-tester fence ---
 // Process Data (81c98fb07344a787), Build Telemetry (8809bb5239dfb3d4) and Process
@@ -208,13 +270,17 @@ function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,
    if(captureImpl)return captureImpl(normalized);
    calls.capture.push(normalized);
   }}),
-  fieldtester:{encodeFieldTesterReply,classifyUplinkFrame}
+  fieldtester:{encodeFieldTesterReply,classifyUplinkFrame,enqueueReplyOnce:require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester').enqueueReplyOnce}
  };
  const osiLib={require:(name)=>{
   if(name==='radio')return{ok:true,value:fakeRadio};
   return{ok:false,error:name+' unavailable in this fixture'};
  }};
+ const receiptDb=seedTestDb();
+ test.after(()=>receiptDb.close());
  const osiDb={Database:function(){return{
+  transaction:fn=>facadeDb(receiptDb).transaction(fn),
+  run:(sql,params)=>facadeDb(receiptDb).run(sql,params),
   // Two different queries reach get(): installation identity and the device-type lookup.
   get:async(sql,params)=>{
    if(String(sql).includes('FROM devices')){
@@ -582,4 +648,18 @@ test('one ChirpStack client serves consecutive replies',async()=>{
  await runNode('radio-capture-fn',testerUplink(2),sandbox);
  assert.equal(calls.clientsCreated,1);
  assert.equal(calls.enqueue.length,2);
+});
+
+
+test('field-tester reply redelivery enqueues once, and a failed enqueue remains retryable',async()=>{
+ const {enqueueReplyOnce}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester');
+ const db=seedTestDb(); let sent=0;
+ const event={deviceInfo:{devEui:'A840410000000001'},deduplicationId:'reply-once',fCnt:1,time:'2026-11-19T10:00:00Z'};
+ try {
+  await assert.rejects(enqueueReplyOnce(facadeDb(db),event,async()=>{throw Error('transport failed');}),/transport failed/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM uplink_effect_receipts').get().n,0);
+  for(let replay=0;replay<3;replay++)await enqueueReplyOnce(facadeDb(db),event,async()=>{sent++;});
+  assert.equal(sent,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM uplink_effect_receipts').get().n,1);
+ }finally{db.close();}
 });

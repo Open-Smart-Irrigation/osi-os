@@ -10,6 +10,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const Module = require('node:module');
+const { DatabaseSync } = require('node:sqlite');
+const { createSqlite3Adapter } = require('./lib/sqlite3-node-adapter');
 
 const ROOT = path.resolve(__dirname, '..');
 const GATEWAY = 'AABBCCDDEEFF0021';
@@ -36,50 +40,82 @@ function loadNode(profile, id) {
   return node;
 }
 
+// The shipped seam now requires the queued helper's get/transaction API.
+// Keep the original scenarios and expectations, but read their peer state from
+// a second connection so they prove committed persistence, not mock mutation.
+const peerFixtures = [];
+test.after(() => {
+  for (const fixture of peerFixtures) {
+    fixture.control.close();
+    for (const handle of fixture.handles) handle.native.close();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 class PeerDb {
   constructor(options = {}) {
-    this.row = {
-      peer_node: 'cloud',
-      linked: 1,
-      ...CONTEXT,
+    this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-peer-convergence-'));
+    this.filename = path.join(this.dir, 'farm.db');
+    this.runs = [];
+    this.handles = [];
+    this.closed = false;
+    const initial = {
+      peer_node: 'cloud', linked: 1, ...CONTEXT,
       peer_capabilities_json: options.capabilities === undefined ? '[]' : JSON.stringify(options.capabilities),
       peer_capabilities_context_json: options.context === false ? null : JSON.stringify(options.context || CONTEXT),
       peer_capabilities_request_id: options.requestId || null,
       identity_installation_uuid: INSTALLATION,
       identity_gateway_device_eui: GATEWAY,
     };
-    this.runs = [];
-    this.closed = false;
+    this.control = new DatabaseSync(this.filename);
+    this.control.exec('PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF;');
+    this.control.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
+    this.control.prepare(`INSERT INTO installation_identity(singleton_id,installation_uuid,current_gateway_device_eui,previous_gateway_device_euis_json,recovery_state,created_at,updated_at)
+      VALUES(1,?,?, '[]','ACTIVE','2026-11-19','2026-11-19')`).run(INSTALLATION, GATEWAY);
+    const columns = Object.keys(initial).filter((key) => !key.startsWith('identity_'));
+    this.control.prepare('INSERT INTO sync_link_state (' + columns.join(',') + ',updated_at) VALUES (' + columns.map(() => '?').join(',') + ',?)')
+      .run(...columns.map((key) => initial[key]), '2026-11-19');
+    // Existing scenario setup remains synchronous. Reads after a mark see only
+    // committed values through this separate observer connection.
+    this.row = new Proxy(initial, {
+      get: (target, key) => {
+        if (!columns.includes(key)) return target[key];
+        return this.control.prepare("SELECT * FROM sync_link_state WHERE peer_node='cloud'").get()[key];
+      },
+      set: (target, key, value) => {
+        assert.ok(columns.includes(key), 'known fixture column');
+        this.control.prepare('UPDATE sync_link_state SET ' + key + "=? WHERE peer_node='cloud'").run(value);
+        return true;
+      },
+    });
+    const helperPath = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js');
+    const adapter = createSqlite3Adapter();
+    const Base = adapter.Database;
+    const fixture = this;
+    adapter.Database = class extends Base {
+      constructor(...args) { super(...args); fixture.handles.push(this); }
+      run(sql, params, callback) {
+        fixture.runs.push({ sql: String(sql), params: Array.isArray(params) ? params.slice() : [] });
+        return super.run(sql, params, callback);
+      }
+    };
+    const original = Module._load;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'sqlite3' && parent && parent.filename === helperPath) return adapter;
+      return original.call(this, request, parent, isMain);
+    };
+    let helper;
+    try { delete require.cache[helperPath]; helper = require(helperPath); }
+    finally { Module._load = original; }
+    this.facade = new helper.Database(this.filename);
+    peerFixtures.push(this);
   }
 
-  all(sql, params, callback) {
-    if (/FROM sync_link_state/.test(sql)) {
-      callback(null, [this.row]);
-      return;
-    }
-    callback(null, []);
-  }
-
-  run(sql, params, callback) {
-    this.runs.push({ sql: String(sql), params: Array.isArray(params) ? params.slice() : [] });
-    if (/SET peer_capabilities_json=NULL, peer_capabilities_context_json=NULL/.test(sql)) {
-      this.row.peer_capabilities_json = null;
-      this.row.peer_capabilities_context_json = null;
-      this.row.peer_capabilities_request_id = null;
-    } else if (/SET peer_capabilities_json=\?, peer_capabilities_context_json=\?/.test(sql)) {
-      this.row.peer_capabilities_json = params[0];
-      this.row.peer_capabilities_context_json = params[1];
-      this.row.peer_capabilities_request_id = params[2];
-    } else if (/SET peer_capabilities_json='\[\]'/ .test(sql)) {
-      this.row.peer_capabilities_json = '[]';
-    }
-    callback.call({ changes: 1 }, null);
-  }
-
-  close(callback) {
-    this.closed = true;
-    callback(null);
-  }
+  all(...args) { return this.facade.all(...args); }
+  get(...args) { return this.facade.get(...args); }
+  run(...args) { return this.facade.run(...args); }
+  transaction(fn) { return this.facade.transaction(fn); }
+  close(callback) { this.closed = true; return this.facade.close(callback); }
 }
 
 function runtime(db) {

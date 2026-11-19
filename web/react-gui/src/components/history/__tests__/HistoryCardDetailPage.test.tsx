@@ -215,7 +215,7 @@ function firstZoneCardDataRequest() {
 }
 
 function calendarFixtureDateForRange(from: string | null | undefined, to: string | null | undefined): string {
-  const parsed = Date.parse(from ?? to ?? '');
+  const parsed = Date.parse(to ?? from ?? '');
   const base = Number.isFinite(parsed) ? new Date(parsed) : new Date('2026-06-01T00:00:00.000Z');
   return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 12)).toISOString().slice(0, 10);
 }
@@ -1082,6 +1082,9 @@ describe('History card detail route', () => {
   });
 
   it('renders tappable calendar dates on the detail route', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-05-31T10:00:00Z'));
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([{ id: 12, name: 'North Block', device_count: 0, created_at: '', updated_at: '', schedule: null, timezone: 'Europe/Zurich' }]);
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -1123,6 +1126,7 @@ describe('History card detail route', () => {
       calendar: {
         timezone: 'Europe/Zurich',
         days: [
+          { date: '2026-06-01', state: 'optimal', coveragePct: 100, coverageConfidence: 'configured', markers: [] },
           {
             date: '2026-05-12',
             state: 'dry_stress',
@@ -1152,12 +1156,18 @@ describe('History card detail route', () => {
     const may12 = await screen.findByRole('gridcell', { name: /May 12/i });
     expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
     expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - May 2026');
+    expect(screen.queryByTestId('calendar-cell-2026-06-01')).not.toBeInTheDocument();
+    expect(firstZoneCardDataRequest()?.range).toEqual({
+      label: 'custom', timezone: 'Europe/Zurich',
+      from: '2026-04-30T22:00:00.000Z', to: '2026-05-31T21:59:59.999Z',
+    });
   });
 
   it('changes the visible calendar month on inner horizontal calendar swipe (backward)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
 
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([{ id: 12, name: 'North Block', device_count: 0, created_at: '', updated_at: '', schedule: null, timezone: 'Europe/Zurich' }]);
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-06-15T12:00:00Z',
@@ -1223,27 +1233,9 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchmove', [{ clientX: 250, clientY: 164 }]);
     dispatchTouch(surface, 'touchend', []);
 
-    const initialFrom = Date.parse(initialRequest?.range.from ?? '');
-    const initialMonth = new Date(initialFrom);
-    const expectedPrevMonthStart = new Date(Date.UTC(
-      initialMonth.getUTCFullYear(),
-      initialMonth.getUTCMonth() - 1,
-      1,
-      0,
-      0,
-      0,
-      0,
-    ));
-    const expectedPrevMonthEnd = new Date(Date.UTC(
-      expectedPrevMonthStart.getUTCFullYear(),
-      expectedPrevMonthStart.getUTCMonth() + 1,
-      1,
-      0,
-      0,
-      0,
-      0,
-    ) - 1);
-    const nextDate = calendarFixtureDateForRange(expectedPrevMonthStart.toISOString(), expectedPrevMonthEnd.toISOString());
+    const expectedPrevMonthStart = new Date('2026-04-30T22:00:00.000Z');
+    const expectedPrevMonthEnd = new Date('2026-05-31T21:59:59.999Z');
+    const nextDate = '2026-05-12';
 
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(
