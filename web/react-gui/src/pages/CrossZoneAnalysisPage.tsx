@@ -178,8 +178,8 @@ export function CrossZoneAnalysisPage() {
   };
 
   return (
-    <div className="analysis-page flex h-screen flex-col bg-[var(--bg)] text-[var(--text)]">
-      {/* Crown pinned above the internal scroll area (decision A). */}
+    <div className="analysis-page flex min-h-screen flex-col lg:h-screen bg-[var(--bg)] text-[var(--text)]">
+      {/* Desktop keeps the header above its workspace; narrow screens scroll as one page. */}
       <div className="shrink-0">
         <AppHeader
           title={t('analysis.title')}
@@ -196,8 +196,8 @@ export function CrossZoneAnalysisPage() {
         </div>
       )}
 
-      <div className="analysis-layout mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-4 overflow-hidden px-4 py-4 lg:flex-row">
-        <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
+      <div className="analysis-layout mx-auto flex min-h-0 w-full max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-1 lg:flex-row lg:overflow-hidden">
+        <aside className="analysis-sidebar min-w-0 lg:overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
           <AnalysisSeriesTray
             channels={displayedCatalog}
             sources={catalog?.sources}
@@ -223,9 +223,9 @@ export function CrossZoneAnalysisPage() {
             />
           </div>
         </aside>
-        <main className="analysis-main flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
+        <main className="analysis-main flex min-h-0 min-w-0 flex-col lg:flex-1 lg:overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div className="flex flex-col gap-2">
+            <div className="min-w-0 flex-1 flex flex-col gap-2">
               <AnalysisControls
                 rangeLabel={activeWorkspace.range.label}
                 range={activeWorkspace.range}
@@ -279,7 +279,7 @@ export function CrossZoneAnalysisPage() {
               {t('analysis.droppedNotice', { count: data.dropped.length, defaultValue: '{{count}} series could not be loaded' })}
             </div>
           )}
-          <div data-testid="analysis-chart-shell" className="mt-4 min-h-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+          <div data-testid="analysis-chart-shell" className="mt-4 min-h-[320px] shrink-0 lg:grow rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
             <AnalysisChartPanel
               series={displayedSeries}
               mode={activeWorkspace.mode}

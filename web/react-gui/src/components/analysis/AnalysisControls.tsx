@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AnalysisRange, AnalysisWorkspaceMode, TimelineLayout } from '../../analysis/types';
 
@@ -57,6 +57,8 @@ export function AnalysisControls({
 }: AnalysisControlsProps) {
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
+  const customButton = useRef<HTMLButtonElement>(null);
+  const customPanelId = useId();
   const [customOpen, setCustomOpen] = useState(rangeLabel === 'custom' || range?.label === 'custom');
   const [customFrom, setCustomFrom] = useState(() => isoToDatetimeLocal(range?.from));
   const [customTo, setCustomTo] = useState(() => isoToDatetimeLocal(range?.to));
@@ -65,9 +67,9 @@ export function AnalysisControls({
   const hasCustomValues = customFrom.length > 0 && customTo.length > 0;
   const customValid = hasCustomValues && Number.isFinite(customFromMs) && Number.isFinite(customToMs) && customFromMs < customToMs;
   const customInvalid = hasCustomValues && !customValid;
-  const showCustom = customOpen || rangeLabel === 'custom';
+  const showCustom = customOpen;
   const segBtn = (active: boolean) => [
-    'px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset',
+    'max-w-full rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-inset',
     active ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-[var(--card)] text-[var(--text-secondary)] hover:bg-[var(--secondary-bg)]',
   ].join(' ');
   const layoutLabelKey = (value: TimelineLayout) => (value === 'small-multiples' ? 'smallMultiples' : value);
@@ -79,6 +81,13 @@ export function AnalysisControls({
     setCustomTo(isoToDatetimeLocal(range?.to));
   }, [rangeLabel, range?.label, range?.from, range?.to]);
 
+  const cancelCustomRange = () => {
+    setCustomOpen(false);
+    setCustomFrom(isoToDatetimeLocal(range?.from));
+    setCustomTo(isoToDatetimeLocal(range?.to));
+    customButton.current?.focus();
+  };
+
   const applyCustomRange = () => {
     if (!customValid) return;
     const from = inputToIso(customFrom);
@@ -88,10 +97,15 @@ export function AnalysisControls({
   };
 
   return (
-    <div className="analysis-controls flex flex-col gap-3">
+    <div className="analysis-controls min-w-0 flex flex-col gap-3" onKeyDown={(event) => {
+      if (event.key === 'Escape' && customOpen) {
+        event.preventDefault();
+        cancelCustomRange();
+      }
+    }}>
       <div className="flex flex-wrap items-center gap-4">
         <div
-          className="analysis-control-group analysis-ranges inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
+          className="analysis-control-group analysis-ranges inline-flex max-w-full flex-wrap gap-1"
           role="group"
           aria-label={t('analysis.range.label')}
         >
@@ -99,7 +113,10 @@ export function AnalysisControls({
             <button
               key={r}
               type="button"
-              aria-pressed={r === rangeLabel || (r === 'custom' && showCustom)}
+              ref={r === 'custom' ? customButton : undefined}
+              aria-expanded={r === 'custom' ? showCustom : undefined}
+              aria-controls={r === 'custom' ? customPanelId : undefined}
+              aria-pressed={r === rangeLabel}
               onClick={() => {
                 if (r === 'custom') {
                   setCustomOpen(true);
@@ -108,14 +125,14 @@ export function AnalysisControls({
                 setCustomOpen(false);
                 onRangeChange(r);
               }}
-              className={segBtn(r === rangeLabel || (r === 'custom' && showCustom))}
+              className={segBtn(r === rangeLabel)}
             >
               {r === 'custom' ? t('analysis.range.custom') : r}
             </button>
           ))}
         </div>
         <div
-          className="analysis-control-group analysis-modes inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
+          className="analysis-control-group analysis-modes inline-flex max-w-full flex-wrap gap-1"
           role="group"
           aria-label={t('analysis.mode.label')}
         >
@@ -134,7 +151,7 @@ export function AnalysisControls({
         {mode === 'timeline' ? (
           <>
             <div
-              className="analysis-control-group analysis-layouts inline-flex overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]"
+              className="analysis-control-group analysis-layouts inline-flex max-w-full flex-wrap gap-1"
               role="group"
               aria-label={t('analysis.layout.label')}
             >
@@ -166,25 +183,25 @@ export function AnalysisControls({
         ) : null}
       </div>
       {showCustom ? (
-        <div className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
-          <label className="flex flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
+        <div id={customPanelId} className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
+          <label className="flex min-w-0 max-w-full flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
             {t('analysis.range.from')}
             <input
               type="datetime-local"
               value={customFrom}
               onChange={(e) => setCustomFrom(e.target.value)}
               aria-label={t('analysis.range.from')}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
+              className="min-w-0 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
+          <label className="flex min-w-0 max-w-full flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
             {t('analysis.range.to')}
             <input
               type="datetime-local"
               value={customTo}
               onChange={(e) => setCustomTo(e.target.value)}
               aria-label={t('analysis.range.to')}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
+              className="min-w-0 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--focus)]"
             />
           </label>
           <button
@@ -194,6 +211,10 @@ export function AnalysisControls({
             className="rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-medium text-[var(--on-primary)] transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:bg-[var(--toggle-off)] disabled:text-[var(--text-disabled)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-1"
           >
             {t('analysis.range.apply')}
+          </button>
+          <button type="button" onClick={cancelCustomRange}
+            className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
+            {t('cancel')}
           </button>
           {customInvalid ? <p className="text-sm text-[var(--warn-text)]">{t('analysis.range.invalid')}</p> : null}
         </div>

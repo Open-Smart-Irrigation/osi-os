@@ -138,13 +138,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         </div>
 
         <nav className="mt-4 pb-3" aria-label="Primary">
-          <div className="inline-flex gap-1 rounded-lg bg-[var(--secondary-bg)] p-1">
+          <div className="inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-[var(--secondary-bg)] p-1">
             {tabs.map((tab) => (
               <Link
                 key={tab.key}
                 to={tab.to}
                 aria-current={tab.active ? 'page' : undefined}
-                className={`rounded-md px-5 py-2 text-[15px] font-semibold transition-colors ${
+                className={`max-w-full break-words rounded-md px-5 py-2 text-[15px] font-semibold transition-colors ${
                   tab.active
                     ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow'
                     : 'text-[var(--text-tertiary)] hover:text-[var(--text)]'
