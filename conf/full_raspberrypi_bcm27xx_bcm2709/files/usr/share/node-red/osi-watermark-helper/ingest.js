@@ -33,7 +33,8 @@ function readingRow(base, frame, result) {
 async function insertRow(tx, row) {
   const cols = Object.keys(row);
   await tx.run(
-    'INSERT INTO watermark_readings (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')',
+    'INSERT INTO watermark_readings (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')'
+      + (row.uplink_key ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : ''),
     cols.map((c) => row[c])
   );
 }
@@ -46,12 +47,17 @@ async function ingestProfile3(db, input, deps) {
   const recordedAt = deps.clampRecordedAt(input.recordedAt).recordedAt;
   const fCnt = Number.isInteger(input.fCnt) ? input.fCnt : null;
   const base = { deveui, recorded_at: recordedAt, f_cnt: fCnt, device_data_id: null, payload_hex: bytes.toString('hex') };
+  const uplinkKey = require('../osi-uplink-dedup-guard/durable').eventKey('watermark', input.uplink);
+  if (uplinkKey) base.uplink_key = uplinkKey;
   const parsed = conversion.parseProfile3(bytes);
   return db.transaction(async (tx) => {
     // device_data has a foreign key to devices: a frame from a DevEUI that is
     // not registered in OSI is skipped, not half-written.
     const device = await tx.get('SELECT 1 AS known FROM devices WHERE UPPER(deveui) = ? AND deleted_at IS NULL', [deveui]);
     if (!device) return { accepted: false, reason: 'unknown_device', recordedAt };
+    if (uplinkKey && await tx.get('SELECT 1 AS present FROM watermark_readings WHERE deveui=? AND uplink_key=?', [deveui,uplinkKey])) {
+      return { accepted: false, reason: 'duplicate', recordedAt };
+    }
     if (!parsed.ok) {
       await insertRow(tx, Object.assign({}, base, {
         frame_status: 'frame_rejected', reject_reason: parsed.reason,
@@ -72,6 +78,7 @@ async function ingestProfile3(db, input, deps) {
       },
       unknown: {}
     });
+    if (written && written.duplicate) return { accepted: false, reason: 'duplicate', recordedAt };
     // Same connection, same transaction, and the writer's INSERT is its last
     // statement: last_insert_rowid() is this observation's device_data id.
     const idRow = written && written.inserted ? await tx.get('SELECT last_insert_rowid() AS id') : null;

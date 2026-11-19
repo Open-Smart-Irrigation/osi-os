@@ -139,6 +139,15 @@ function buildManifestIndex(manifest) {
   return manifestByKey;
 }
 
+function uplinkKey(meta) {
+  return meta && typeof meta.uplinkKey === 'string' && /^[a-f0-9]{64}$/.test(meta.uplinkKey)
+    ? meta.uplinkKey : null;
+}
+
+function duplicateResult(row) {
+  return { inserted: false, duplicate: true, deviceDataId: Number(row.id), deadLettered: [], columns: [] };
+}
+
 function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   const node = (options && options.node) || { warn() {}, error() {} };
   const shadow = !!(options && options.shadow);
@@ -148,6 +157,13 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   if (!deveui) {
     node.error('osi-device-writer: empty deveui');
     return { inserted: false, deadLettered: [], columns: [] };
+  }
+
+  const key = uplinkKey(meta);
+  const findDuplicate = () => db.prepare('SELECT id FROM device_data WHERE deveui=? AND uplink_key=?').get(deveui, key);
+  if (key && !shadow) {
+    const existing = findDuplicate();
+    if (existing) return duplicateResult(existing);
   }
 
   const clamp = clampRecordedAt(
@@ -168,6 +184,7 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   const plan = classifyChannels(node, manifestByKey, dbCols, channels, unknown);
   const cols = ['deveui', 'recorded_at'].concat(plan.cols);
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
+  if (key) { cols.push('uplink_key'); vals.push(key); }
 
   for (const write of plan.quarantineWrites) {
     deadLetterSync(db, deveui, write.channel, write.reason, write.rawValue);
@@ -186,7 +203,8 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
 
   const placeholders = cols.map(() => '?').join(', ');
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
-  const insertedRow = db.prepare(sql + ' RETURNING id').get(...vals);
+  const insertedRow = db.prepare(sql + (key ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : '') + ' RETURNING id').get(...vals);
+  if (!insertedRow) return duplicateResult(findDuplicate());
 
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
@@ -200,6 +218,13 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
   if (!deveui) {
     node.error('osi-device-writer: empty deveui');
     return { inserted: false, deadLettered: [], columns: [] };
+  }
+
+  const key = uplinkKey(meta);
+  const findDuplicate = () => db.get('SELECT id FROM device_data WHERE deveui=? AND uplink_key=?', [deveui, key]);
+  if (key && !shadow) {
+    const existing = await findDuplicate();
+    if (existing) return duplicateResult(existing);
   }
 
   const clamp = clampRecordedAt(
@@ -220,6 +245,7 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
   const plan = classifyChannels(node, manifestByKey, dbCols, channels, unknown);
   const cols = ['deveui', 'recorded_at'].concat(plan.cols);
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
+  if (key) { cols.push('uplink_key'); vals.push(key); }
 
   for (const write of plan.quarantineWrites) {
     await deadLetterAsync(db, deveui, write.channel, write.reason, write.rawValue);
@@ -238,7 +264,8 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
 
   const placeholders = cols.map(() => '?').join(', ');
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
-  const insertedRow = await db.get(sql + ' RETURNING id', vals);
+  const insertedRow = await db.get(sql + (key ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : '') + ' RETURNING id', vals);
+  if (!insertedRow) return duplicateResult(await findDuplicate());
 
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
@@ -269,4 +296,4 @@ function quarantineOnly(db, deveui, channel, rawValue) {
   })();
 }
 
-module.exports = { writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache };
+module.exports = { eventKey: require('../osi-uplink-dedup-guard/durable').eventKey, writeDeviceData, quarantineOnly, clampRecordedAt, resetColumnCache };

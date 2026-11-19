@@ -118,6 +118,7 @@ return (async () => {
   }
   var writerFailed = false;
   var writeResult = null;
+  const uplinkKey = require('../osi-uplink-dedup-guard/durable').sdi12Key(info);
   var writeNow = Date.now();
   var observedAt = result.recordedAt || info.recordedAt || new Date(writeNow).toISOString();
   if (typeof writerRes.value.clampRecordedAt === 'function') {
@@ -126,10 +127,10 @@ return (async () => {
   try {
     if (result.tensiomarkObservation) {
       writeResult = await require('./tensiomark').writeTensiomarkObservation(
-        db, edgeManifest, result, {deveui:info.deveui,payloadBase64:info.payloadBase64}, {node:node,msg:msg,nowMs:writeNow});
+        db, edgeManifest, result, {deveui:info.deveui,payloadBase64:info.payloadBase64,uplinkKey}, {node:node,msg:msg,nowMs:writeNow});
     } else {
       writeResult = await writerRes.value.writeDeviceData(
-      db, edgeManifest, result, { deveui: info.deveui }, { node: node, msg: msg, nowMs: writeNow });
+      db, edgeManifest, result, { deveui: info.deveui, uplinkKey }, { node: node, msg: msg, nowMs: writeNow });
     }
     if (writeResult.deadLettered.length > 0) {
       var warnDevice = String(info.deveui || '').trim().toUpperCase() || 'UNKNOWN';
@@ -149,17 +150,20 @@ return (async () => {
     writerFailed = true;
     reportFailure('writer_run');
   }
-  await observeBestEffort(db, result, {
-    inserted: Boolean(writeResult && writeResult.inserted === true),
-    deadLettered: writeResult ? writeResult.deadLettered : null,
-    quarantined: writeResult ? writeResult.deadLettered.length > 0 : Object.keys(result.unknown || {}).length > 0,
-    writeFailed: writerFailed
-  }, observedAt);
+  if (!writeResult || !writeResult.duplicate) {
+    await observeBestEffort(db, result, {
+      inserted: Boolean(writeResult && writeResult.inserted === true),
+      deadLettered: writeResult ? writeResult.deadLettered : null,
+      quarantined: writeResult ? writeResult.deadLettered.length > 0 : Object.keys(result.unknown || {}).length > 0,
+      writeFailed: writerFailed
+    }, observedAt);
+  }
   try {
     await db.close();
   } catch (closeError) {
     reportFailure('db_close');
   }
+  if (writeResult && writeResult.duplicate) return [null, null];
   var firstJoinMsg = null;
   if (!writerFailed && !row.sdi12_probe_status && !row.sdi12_channel_layout_json && row.sdi12_probe_profile === 'SENTEK_ENVIROSCAN') {
     var firstJoinAppId = String(row.chirpstack_app_id || '').trim();

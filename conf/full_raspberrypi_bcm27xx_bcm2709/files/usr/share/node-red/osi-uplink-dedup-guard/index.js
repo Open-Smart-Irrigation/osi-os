@@ -1,29 +1,10 @@
 'use strict';
-// osi-uplink-dedup-guard -- bounded, in-memory idempotency check for the
-// ChirpStack uplink ingest path (F83, 2026-09-17 overnight stabilization).
-//
-// Problem: republishing the same uplink (same DevEUI + fCnt + ChirpStack
-// deduplicationId) on application/+/device/+/event/up produces a second
-// device_data row. In production this happens on MQTT QoS-1 redelivery after
-// a Node-RED/mosquitto reconnect, and on a ChirpStack retry -- reproduced
-// live on Silvan (T16f harness C1, PR #270 body: "36/37: duplicate delivery
-// is not deduplicated at ingest"). Double rows double-count rain/volumes and
-// downstream rollups.
-//
-// This is deliberately NOT a durable fix: no schema change tonight (a UNIQUE
-// index on device_data would need one, and is a separate, reviewed change).
-// This module is a process-lifetime LRU-ish cache -- it resets on every
-// Node-RED restart, exactly like the rest of in-memory flow state.
-//
-// Two known coverage limits (see also the PR body):
-//   - Process-lifetime only: a Node-RED restart empties the cache, so a
-//     redelivery that happens to straddle a restart is not caught. That is
-//     the same limitation every other in-memory flow cache in this repo has.
-//   - 10-minute TTL (default): a redelivery arriving more than DEFAULT_TTL_MS
-//     after the original is not caught either. Both limits are the reason
-//     this is explicitly NOT a substitute for a durable UNIQUE constraint.
-// The "MQTT IN (Radio Observations)" -> radio-capture-fn ingest path (a
-// separate, non-device_data radio-observations table) is out of scope.
+// Bounded in-memory duplicate hints and durable network identity builders.
+// createGuard() and the default singleton are process-local: restart or TTL
+// expiry forgets them. Canonical writers additionally persist the key from
+// durable.js under a partial unique index (migration 0081). A database row,
+// rather than this pre-write hint, proves an uplink was committed.
+// Radio capture and transactional rain ingest use their own durable identities.
 //
 // Keying:
 //   - Prefer ChirpStack's own `deduplicationId` when present. ChirpStack
@@ -235,6 +216,7 @@ function warnOncePerWindow(node, context, key, nowMs, windowMs, message) {
 const defaultGuard = createGuard();
 
 module.exports = {
+  ...require('./durable'),
   createGuard,
   buildDedupKey,
   isDuplicateUplink: defaultGuard.isDuplicateUplink,

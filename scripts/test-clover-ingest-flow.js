@@ -109,7 +109,7 @@ async function ingest(db, event) {
   const processed = await processData(event);
   assert.deepEqual(processed.errors, [], 'Process Data errors');
   assert.ok(processed.result && processed.result.formattedData, 'Process Data passes the Clover uplink on');
-  const built = await executeFunction(buildSqlInsertNode(), { msg: processed.result, env: ENV });
+  const built = await executeFunction(buildSqlInsertNode(), { msg: processed.result, env: ENV, osiLibModules: {'uplink-dedup':dedupGuard} });
   assert.deepEqual(built.errors, [], 'Build SQL INSERT errors');
   db.exec(built.result.topic);
   return processed.result.formattedData;
@@ -130,6 +130,24 @@ async function deviceList(db) {
 }
 
 const CASES = [];
+
+CASES.push({
+  name: 'Clover replay after a decoder restart keeps one measurement and one outbox event',
+  async run() {
+    const db = freshDb();
+    try {
+      const event = chirpstackEvent({object:decode(CLOVER_FRAME,10).data,time:'2026-11-19T10:00:00Z',fCnt:901});
+      dedupGuard._defaultGuard.reset();
+      await ingest(db,event);
+      dedupGuard._defaultGuard.reset();
+      await ingest(db,event);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'").get().n,1);
+      await ingest(db,{...event,deduplicationId:'after-rejoin'});
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,2);
+    } finally { db.close(); dedupGuard._defaultGuard.reset(); }
+  }
+});
 
 CASES.push({
   name: 'the shipped codec decodes the Clover frame into the fields Process Data reads',

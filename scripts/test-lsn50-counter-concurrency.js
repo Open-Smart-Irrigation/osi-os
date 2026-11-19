@@ -129,11 +129,12 @@ function runtime(dbPath) {
   };
   const apply = compile('Apply Config');
   const write = compile('LSN50 Normalize + Write');
-  async function deliver(rainCount, offsetSeconds) {
+  async function deliver(rainCount, offsetSeconds, deduplicationId) {
     const msg = {
       payload: [{ dendro_enabled: 0, temp_enabled: 0, device_mode: 9, chameleon_enabled: 0, dendro_force_legacy: 0, dendro_invert_direction: 0 }],
       formattedData: { devEui: EUI, timestamp: new Date(T0 + offsetSeconds * 1000).toISOString(), observedModeCode: 9 },
       _rawPayload: mod9Payload(rainCount),
+      uplinkIdentity: deduplicationId ? {deduplicationId} : null,
     };
     const applied = await apply(msg);
     return write(applied);
@@ -147,6 +148,16 @@ function snapshot(dbPath, sql) {
 }
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+test('MOD9 replay after reopening the runtime stores one canonical and rain observation', async () => {
+  const dbPath = seedFile();
+  await runtime(dbPath).deliver(100,0,'mod9-replay');
+  const restarted = runtime(dbPath);
+  assert.equal(await restarted.deliver(100,0,'mod9-replay'),null);
+  assert.deepEqual(restarted.errors,[]);
+  assert.equal(snapshot(dbPath,'SELECT id FROM device_data').length,1);
+  assert.equal(snapshot(dbPath,'SELECT id FROM rain_observations').length,1);
+});
 
 for (const order of ['101 first', '102 first']) {
   test(`MOD9 rain counter: 100, then 101 and 102 in flight together (${order}) store 2 x 0.2 mm`, async () => {
