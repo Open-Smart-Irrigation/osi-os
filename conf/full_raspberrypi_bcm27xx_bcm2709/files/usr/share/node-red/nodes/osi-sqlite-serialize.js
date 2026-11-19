@@ -1,35 +1,23 @@
 'use strict';
 // One statement at a time on the flows' shared SQLite connection (F-7).
 //
-// Every `sqlite` node of the flows uses the one database handle that its
-// `sqlitedb` configuration node keeps. node-red-node-sqlite 1.1.x runs that
-// handle in sqlite3's parallel mode, so two statements of the flows can be in
-// flight on it at once. When one of them waits for the write lock, it sleeps
-// in SQLite's busy handler holding the connection's mutex, and the other one's
-// finalisation, which sqlite3 runs on the main thread, blocks on that mutex:
-// the event loop stops for the whole wait, a helper transaction that needs the
-// main thread to reach COMMIT cannot finish, and the waiting write runs out
-// its wait and is lost. In serialized mode sqlite3 starts a statement of that
-// handle only after the previous one has finished, so this cannot happen.
+// Keep other database handles serialized. For farming.db, forward the stock
+// SQLite node's all/run/exec methods to osi-db-helper's FIFO instead. This
+// covers msg.topic, fixed and prepared queries (all), and batch SQL (exec),
+// including reads that depend on the connection's last_insert_rowid(). The
+// package still owns its native handle's open/close lifecycle; that handle no
+// longer executes farm queries. No node types, SQL bindings or wires change.
 //
-// Node-RED loads this file from <userDir>/nodes (Node-RED 3.1 and 4.0; the
-// empty .html beside it is required). It registers no node type and does not
-// load sqlite3 itself: it reaches the handle through the configuration node.
-//
-// It relies on a private property of another package: the `db` property of
-// the `sqlitedb` configuration node (node-red-node-sqlite 1.1.0 and 1.1.1).
-// The handle is created by the first `sqlite` node's constructor
-// (doConnect()), before `flows:started`; a redeploy or a restart of the flows
-// creates new configuration nodes with new handles and fires `flows:started`
-// again; a reconnect after an open error keeps the same handle. No timer, I/O
-// callback or message delivery runs between `flows:starting` and
-// `flows:started`, so no statement can reach a handle before it is serialised.
-//
-// It never stops the flows from starting. If a handle that a `sqlite` node uses
-// cannot be found or serialised, it logs one error line and raises the error
-// count the heartbeat reports, which puts the health state at `degraded`.
+// Node-RED loads this file from <userDir>/nodes. In node-red-node-sqlite 1.1.x
+// the configuration owns `db` and `dbname`; the handle exists before
+// flows:started and no messages run before this hook. Each redeploy gets a new
+// handle. Helper loading is lazy so standalone non-farm SQLite users do not
+// open farming.db or select its driver. A failed binding refuses all queries
+// on the handle and reports degraded health; it must never leave a writer on
+// the second connection.
 module.exports = function (RED) {
   const MARK = Symbol.for('osi.flowsDbSerialized');
+  const SHARED = Symbol.for('osi.flowsDbShared');
 
   function report(contextNode, text) {
     RED.log.error('[osi-sqlite-serialize] ' + text);
@@ -42,6 +30,40 @@ module.exports = function (RED) {
     } catch (e) {
       RED.log.error('[osi-sqlite-serialize] could not count the error: ' + (e && e.message ? e.message : e));
     }
+  }
+
+  function shareFarmHandle(db, contextNode) {
+    if (db[SHARED]) return;
+    let facade;
+    try {
+      const helper = require('osi-db-helper');
+      facade = new helper.Database('/data/db/farming.db');
+    } catch (error) {
+      const text = 'farming.db helper binding failed: ' + String(error && error.message ? error.message : error);
+      report(contextNode, text);
+      // Never resume native writes when the helper is unavailable.
+      for (const method of ['all', 'run', 'exec']) {
+        db[method] = function(...args) {
+          const callback = args[args.length - 1];
+          if (typeof callback === 'function') process.nextTick(() => callback.call(db, error));
+          else report(contextNode, text);
+          return db;
+        };
+      }
+      return;
+    }
+    for (const method of ['all', 'run', 'exec']) {
+      db[method] = function(...args) {
+        const callback = args[args.length - 1];
+        // The facade delivers callback errors. Observe the exec promise too,
+        // since sqlite3 callers use callbacks and ignore its returned promise.
+        facade[method](...args).catch((error) => {
+          if (typeof callback !== 'function') report(contextNode, String(error && error.message ? error.message : error));
+        });
+        return db;
+      };
+    }
+    db[SHARED] = true;
   }
 
   function serializeAll() {
@@ -61,6 +83,7 @@ module.exports = function (RED) {
         report(contextNode, 'sqlitedb ' + id + ': no database handle found; the flows\' database connection is not serialized');
         continue;
       }
+      if (config.dbname === '/data/db/farming.db' && config.mod !== 'RO') shareFarmHandle(db, contextNode);
       if (db[MARK]) continue;
       try {
         db.serialize();

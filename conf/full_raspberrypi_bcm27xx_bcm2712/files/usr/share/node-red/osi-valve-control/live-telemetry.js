@@ -18,6 +18,9 @@ return (async () => {
   const ambientTemperature = d.ambientTemperature ?? null;
   const relativeHumidity = d.relativeHumidity ?? null;
   const batPct = d.batPct ?? null;
+  const uplinkKey = require('../osi-uplink-dedup-guard/durable').eventKey('strega', {
+    ...eventIdentity, time: d.rawTimestamp || d.timestamp || null
+  });
   const observedState = d.currentState == null ? null : String(d.currentState).trim().toUpperCase();
   const db = new osiDb.Database('/data/db/farming.db');
   const valveLoad = osiLib.require('osi-valve-control');
@@ -31,21 +34,32 @@ return (async () => {
 
   try {
     const persistRawTx = async (tx) => {
+      if (uplinkKey && await tx.get('SELECT id FROM device_data WHERE deveui=? AND uplink_key=?', [devEui,uplinkKey])) {
+        // Abort this transaction before recordValveObservation can apply the
+        // old report again, including when its timestamp is untrusted.
+        throw Object.assign(new Error('duplicate STREGA uplink'), {code:'OSI_DUPLICATE_UPLINK'});
+      }
       await tx.run(
-        'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct) VALUES (?, ?, ?, ?, ?)',
-        [devEui, recordedAt, ambientTemperature, relativeHumidity, batPct]
+        'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct, uplink_key) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING',
+        [devEui, recordedAt, ambientTemperature, relativeHumidity, batPct, uplinkKey]
       );
     };
-    if (observedState) {
-      msg.observation = await valveLoad.value.recordValveObservation({
-        db, deviceEui: devEui, observedState, observedAt,
-        event_identity: eventIdentity,
-        runtimeContext: msg.runtimeContext || d.runtimeContext || null,
-        persistRawTx,
-        warn: (message) => node.warn(message),
-      });
-    } else {
-      await db.transaction(persistRawTx);
+    let duplicate = false;
+    try {
+      if (observedState) {
+        msg.observation = await valveLoad.value.recordValveObservation({
+          db, deviceEui: devEui, observedState, observedAt,
+          event_identity: eventIdentity,
+          runtimeContext: msg.runtimeContext || d.runtimeContext || null,
+          persistRawTx,
+          warn: (message) => node.warn(message),
+        });
+      } else {
+        await db.transaction(persistRawTx);
+      }
+    } catch (error) {
+      if (!error || error.code !== 'OSI_DUPLICATE_UPLINK') throw error;
+      duplicate = true;
     }
 
     // The telemetry transaction is closed before the writer wait. CLOSED is explicit
@@ -61,6 +75,10 @@ return (async () => {
         node.warn('STREGA CLOSED evidence not quiesced: ' + String(evidenceError && evidenceError.message ? evidenceError.message : evidenceError));
       }
     }
+
+    // A repeated CLOSED report may retry the existing post-commit quiescence
+    // above, but must never reapply observed state or emit another stored row.
+    if (duplicate) return null;
 
     msg.payload = {
       source: 'strega-local-persistence',

@@ -1100,7 +1100,7 @@ async function claimObservationIdentity(t, id) {
     const existing = await t.get('SELECT id, payload_digest FROM rain_observations WHERE deveui = ? AND event_id = ?', [id.deveui, id.eventId]);
     if (existing) {
       if (existing.payload_digest === id.digest) return { outcome: 'duplicate', observationId: existing.id };
-      await quarantineConflict(t, id);
+      await quarantineConflict(t, id, existing.id);
       return { outcome: 'conflict', observationId: existing.id };
     }
   }
@@ -1111,14 +1111,20 @@ async function claimObservationIdentity(t, id) {
     const same = slot.find((r) => r.payload_digest === id.digest);
     if (same) return { outcome: 'duplicate', observationId: same.id };
     if (slot.length) {
-      await quarantineConflict(t, id);
+      await quarantineConflict(t, id, slot[0].id);
       return { outcome: 'conflict', observationId: slot[0].id };
     }
   }
   return null;
 }
 
-async function quarantineConflict(t, id) {
+async function quarantineConflict(t, id, observationId) {
+  const { eventKey, claimEffect } = require('../osi-uplink-dedup-guard/durable');
+  // The canonical one-hour match chooses the episode. A reused frame
+  // counter in a later episode must not inherit the earlier receipt.
+  const identity = id.eventId || (Number.isSafeInteger(observationId) && observationId > 0
+    ? JSON.stringify(['observation',observationId,id.digest]) : null);
+  if (!await claimEffect(t, id.deveui, eventKey('rain-conflict',{deduplicationId:identity}), 'rain-conflict')) return;
   await t.run("INSERT INTO ingest_quarantine (deveui, channel, reason, raw_value) VALUES (?, 'rain_observation', 'identity_conflict', ?)",
     [id.deveui, JSON.stringify({ eventId: id.eventId, devAddr: id.devAddr, fCnt: id.fCnt, digest: id.digest, receivedAt: id.receivedAt })]);
 }

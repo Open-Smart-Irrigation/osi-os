@@ -463,6 +463,9 @@ test('identity conflict is quarantined, not overwritten', async () => {
   const wet = await h.uplink(at(10), v2(6, 101));
   const raw = v2(6, 150);
   assert.deepEqual(await h.deliver({ ...wet.payload, data: Buffer.from(raw, 'hex').toString('base64'), object: decode(raw) }), []);
+  for (let replay=0;replay<2;replay++) {
+    assert.deepEqual(await h.deliver({ ...wet.payload, data: Buffer.from(raw, 'hex').toString('base64'), object: decode(raw) }), []);
+  }
   assert.deepEqual(rows(db, 'SELECT deveui, channel, reason FROM ingest_quarantine'),
     [{ deveui: DEV_EUI, channel: 'rain_observation', reason: 'identity_conflict' }]);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
@@ -622,4 +625,23 @@ test('the farm day is the zone timezone, never the gateway host day', async () =
   assert.deepEqual(rows(db, 'SELECT date, rain_received_mm FROM zone_daily_environment ORDER BY date'),
     [{ date: '2026-10-08', rain_received_mm: 0.5 }, { date: '2026-10-09', rain_received_mm: 0.5 }]);
   assert.equal(midnight.obs.timezone, 'Europe/Zurich');
+});
+
+
+test('legacy rain conflicts after fCnt reuse retain both episodes and suppress exact redelivery', async () => {
+  const db = createDb();
+  const h = harness(db);
+  for (const hour of [10,12]) {
+    const event = await h.uplink(`2026-11-18T${hour}:00:00Z`,v2(0,100),DEV_EUI,
+      {deduplicationId:undefined,devAddr:'01000001',fCnt:1});
+    const raw = v2(6,150);
+    const conflict = {...event.payload,time:`2026-11-18T${hour}:00:30Z`,
+      data:Buffer.from(raw,'hex').toString('base64'),object:decode(raw)};
+    for (let replay=0;replay<3;replay++) assert.deepEqual(await h.deliver(conflict),[]);
+  }
+  assert.equal(count(db,'SELECT COUNT(*) AS n FROM rain_observations'),2);
+  assert.equal(count(db,'SELECT COUNT(*) AS n FROM device_data'),2);
+  assert.equal(count(db,'SELECT COUNT(*) AS n FROM ingest_quarantine'),2);
+  assert.deepEqual(rows(db,'SELECT received_at FROM rain_observations ORDER BY received_at'),
+    [{received_at:'2026-11-18T10:00:00.000Z'},{received_at:'2026-11-18T12:00:00.000Z'}]);
 });

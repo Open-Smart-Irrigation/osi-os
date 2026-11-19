@@ -114,13 +114,15 @@ async function record(db, info, row, nowMs, loadNormalizer, warn, options) {
   const clockMs = Number.isFinite(nowMs) ? nowMs : Date.now();
   if (!hasFreeSpace(options, warn, clockMs)) return { archived: false, reason: 'low_disk' };
   const receivedAt = new Date(clockMs).toISOString();
+  const uplinkKey = require('../osi-uplink-dedup-guard/durable').sdi12Key(info);
   await db.run(
     'INSERT INTO sdi12_transmissions ' +
-    '(deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    '(deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json' + (uplinkKey ? ', uplink_key' : '') + ') ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?' + (uplinkKey ? ', ?' : '') + ')'
+      + (uplinkKey ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : ''),
     [deveui, typeof info.recordedAt === 'string' ? info.recordedAt : null, receivedAt,
       Number.isInteger(info.decoded.Payver) ? info.decoded.Payver : null,
-      raw, framesJson, contextJson]
+      raw, framesJson, contextJson].concat(uplinkKey ? [uplinkKey] : [])
   );
   return true;
 }
