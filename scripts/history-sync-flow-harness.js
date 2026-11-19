@@ -182,6 +182,7 @@ function createHarness(options) {
   }
   class Database {
     all(sql, params, cb) {
+      if (typeof params === 'function') { cb = params; params = []; }
       let rows;
       try { rows = db.prepare(sql).all(...params); } catch (e) { cb(e); return; }
       // Test hook: a concurrent writer acting between a read and the next statement.
@@ -247,6 +248,9 @@ function createHarness(options) {
       msg,
       env,
       Date: FakeDate,
+      Buffer,
+      crypto,
+      global: { get: name => name === 'fs' ? options.fs : undefined },
       osiDb: { Database },
       osiLib: { require: libraryFor },
       osiCloudHttp,

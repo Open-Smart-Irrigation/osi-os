@@ -660,6 +660,10 @@ for (const profile of PROFILES) {
     const finalPrepared = helper.prepareRow('valve_actuation_expectations', GATEWAY, finalSource);
     assert.notEqual(finalPrepared.payloadHash, preAdoptionHash);
     assert.equal(h.cloud.index.get(`valve_actuation_expectations\0${historyKeyValue}`), finalPrepared.payloadHash);
+    // Establish segment parity before simulating cloud-side content loss. An
+    // unchanged partial mismatch must not requeue already completed rows (#668).
+    await h.manifest();
+    assert.deepEqual(h.cloud.manifests.at(-1), []);
     h.cloud.seed('valve_actuation_expectations', historyKeyValue, segment, 'forced-grandfathered-mismatch');
     const mismatchManifest = await h.invoke('sync-history-manifest-build', {});
     const mismatchAnswer = await h.invoke('sync-history-manifest-http', mismatchManifest);

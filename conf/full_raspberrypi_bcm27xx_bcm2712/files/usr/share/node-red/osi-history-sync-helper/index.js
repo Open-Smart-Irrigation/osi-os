@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { performance } = require('node:perf_hooks');
 
 const TABLE_COLUMNS = {
   tensiomark_observations: [
@@ -722,6 +723,181 @@ function compareHistoryKeys(tableName, left, right) {
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
 
+
+
+// Cooperative row-loading budget; a slow SQLite read may finish after the deadline.
+async function loadDirtyRows({ q, sourceQuery, tableName, now, skipRepair, valveControl, node, setSyncState, run, clock = () => performance.now() }) {
+  const started = clock();
+  const dirty = await q(
+    "SELECT * FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND status='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (? = 0 OR change_kind <> 'repair') ORDER BY changed_at, row_key LIMIT ?",
+    [tableName, now, skipRepair ? 1 : 0, 250]
+  );
+  if (dirty.length) {
+    const changeKind = String(dirty[0].change_kind || 'correction');
+    const selected = dirty.slice(0, changeKind === 'repair' ? 250 : 50).filter((entry) => String(entry.change_kind || 'correction') === changeKind).sort((left, right) => compareHistoryKeys(tableName, left.row_key, right.row_key));
+    const rows = [];
+    const dirtyKeys = [];
+    const dirtyVersions = {};
+    let dropped = 0;
+    let visited = 0;
+    try {
+      for (const entry of selected) {
+        if (visited++ > 0 && clock() - started >= 200) break;
+        const lookup = rowByHistoryKeyQuery(tableName, entry.row_key);
+        const found = await sourceQuery(tableName,lookup.sql, lookup.params);
+        if (!found.length) {
+          const gone = await q(
+            "UPDATE sync_history_dirty_keys SET status='dropped', attempts=attempts+1, last_error='source row missing', next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=? AND status='pending' AND changed_at=? RETURNING row_key",
+            [tableName, entry.row_key, entry.changed_at]
+          );
+          dropped += gone.length;
+          continue;
+        }
+        const sourceRow = found[0];
+        if (tableName === 'valve_actuation_expectations' && valveControl.isV1LocalOnlyExpectation(sourceRow)) {
+          const localOnlyPredicate = v1LocalOnlyPredicate('vae');
+          await run(
+            "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=? AND status='pending' AND changed_at=? AND EXISTS(SELECT 1 FROM valve_actuation_expectations vae WHERE vae.expectation_id=? AND " + localOnlyPredicate + ")",
+            [tableName, entry.row_key, entry.changed_at, sourceRow.expectation_id]
+          );
+          continue;
+        }
+        rows.push(sourceRow);
+        dirtyKeys.push(entry.row_key);
+        dirtyVersions[entry.row_key] = entry.changed_at;
+      }
+    } finally {
+      // Each drop commits on its own: log them even when a later lookup throws.
+      if (dropped) {
+        node.warn('Build History Batch: dropped ' + dropped + ' queued ' + tableName + ' key(s): source row missing');
+        setSyncState({ lastHistoryDroppedMissing: { at: now, table: tableName, count: dropped }, updatedAt: now });
+      }
+    }
+    return { rows, dirtyKeys, dirtyVersions, changeKind };
+  }
+  return null;
+}
+
+async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sourceQuery, db }) {
+  const accepted = new Set((response.results || [])
+    .filter((result) => ['APPLIED', 'UPDATED', 'DUPLICATE', 'QUARANTINED'].includes(result && result.status))
+    .map((result) => String(result.historyKey || '')));
+  const completed = new Map();
+  for (const [submitted, rowKeys] of Object.entries(batch.dirtyRowKeysByHistoryKey || {})) {
+    if (accepted.has(submitted)) for (const rowKey of rowKeys || []) completed.set(String(rowKey), submitted);
+  }
+  for (const dirtyKey of batch.dirtyKeys || []) {
+    if (accepted.has(String(dirtyKey)) && !completed.has(String(dirtyKey))) completed.set(String(dirtyKey), String(dirtyKey));
+  }
+  if (!completed.size) return;
+  // Radio reads can resolve the installation through farming.db. Do them before
+  // acquiring its queue, avoiding a recursive queued read inside a transaction.
+  const radioRows = new Map();
+  if (tableName === 'radio_uplinks') for (const submitted of new Set(completed.values())) {
+    const lookup = rowByHistoryKeyQuery(tableName, submitted);
+    radioRows.set(submitted, await sourceQuery(tableName, lookup.sql, lookup.params));
+  }
+  await db.transaction(async tx => {
+    for (const [dirtyKey, submitted] of completed) {
+      const version = (batch.dirtyVersions || {})[dirtyKey];
+      const hash = (batch.dirtyPayloadHashes || {})[submitted];
+      // Batches built before this version lack a fence; leave them pending for replay.
+      if (version == null || !hash) continue;
+      const lookup = rowByHistoryKeyQuery(tableName, submitted);
+      const rows = tableName === 'radio_uplinks' ? radioRows.get(submitted) : await tx.all(lookup.sql, lookup.params);
+      if (!rows.length || prepareRow(tableName, gatewayEui, rows[0]).payloadHash !== hash) continue;
+      await tx.run(
+        "UPDATE sync_history_dirty_keys SET status='done', last_error=NULL, next_attempt_at=NULL WHERE peer_node='cloud' AND table_name=? AND row_key=? AND status='pending' AND changed_at=?" + (tableName === 'radio_uplinks' ? " AND EXISTS(SELECT 1 FROM radio_history_bridge rb WHERE rb.history_key=sync_history_dirty_keys.row_key AND rb.generation=?)" : ''),
+        [tableName, dirtyKey, version].concat(tableName === 'radio_uplinks' ? [(batch.dirtyGenerations || {})[submitted] ?? -1] : [])
+      );
+    }
+  });
+}
+
+function summarizeQuickCheck(rows) {
+  const detail = (rows || []).map((row) => {
+    if (!row || typeof row !== 'object') return String(row || '');
+    if (Object.prototype.hasOwnProperty.call(row, 'quick_check')) return String(row.quick_check || '');
+    if (Object.prototype.hasOwnProperty.call(row, 'integrity_check')) return String(row.integrity_check || '');
+    const firstKey = Object.keys(row)[0];
+    return firstKey ? String(row[firstKey] || '') : '';
+  }).filter(Boolean);
+  if (!detail.length) return { status: 'ok', detail: [] };
+  if (detail.length === 1 && detail[0].toLowerCase() === 'ok') return { status: 'ok', detail: [] };
+  return { status: 'issues', detail };
+}
+
+async function pendingRepairCounts(q) {
+  const counts = Object.fromEntries(TABLE_NAMES.map(table => [table, 0]));
+  const rows = await q("SELECT table_name,COUNT(*) AS n FROM sync_history_dirty_keys WHERE peer_node='cloud' AND change_kind='repair' AND status='pending' GROUP BY table_name");
+  for (const row of rows) if (TABLE_NAMES.includes(row.table_name)) counts[row.table_name] = Number(row.n);
+  return counts;
+}
+
+// The checkpoint identifies the segment generation whose repairs were queued.
+// Keep it separate from sync_history_segments: ACKs recompute that local cache,
+// which is not evidence that a partial segment was delivered to the cloud.
+async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui }) {
+  const REPAIR_CAP = 2000;
+  const pendingRepair = {};
+  const closed = {};
+  let repairCount = 0;
+  let repairSkipped = 0;
+  const matched = comparisons.filter(c => c && c.repairRequested === false && Array.isArray(c.mismatchFields) && c.mismatchFields.length === 0);
+  if (matched.length) await db.transaction(async tx => {
+    for (const comparison of matched) {
+      definition(comparison.tableName);
+      const checkpoint = 'history_repair_segment:' + JSON.stringify([comparison.tableName, comparison.segmentKey]);
+      // A later mismatch after confirmed parity is a new repair generation,
+      // including cloud-side loss. Partial mismatches never set this marker.
+      await tx.run("INSERT INTO app_settings(key,value,updated_at) VALUES(?,'matched',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE app_settings.value IS NOT excluded.value", [checkpoint, now]);
+    }
+  });
+  for (const comparison of comparisons) {
+    if (!comparison || comparison.repairRequested !== true) continue;
+    const table = comparison.tableName;
+    definition(table); // Reject unsupported cloud-provided table names before SQL.
+    if (pendingRepair[table] == null) pendingRepair[table] = Number(((await q("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND status='pending'", [table]))[0] || {}).n || 0);
+    if (closed['*'] || closed[table] || repairCount >= REPAIR_CAP || pendingRepair[table] >= REPAIR_CAP) { repairSkipped++; continue; }
+    const lookup = segmentQuery(table, comparison.segmentKey);
+    // Radio lives in a separate SQLite store. Read its snapshot outside the
+    // farming transaction; its bridge generation additionally fences every ACK.
+    const radioRows = table === 'radio_uplinks' ? await sourceQuery(table, lookup.sql, lookup.params) : null;
+    const queued = await db.transaction(async tx => {
+      const rows = radioRows || await tx.all(lookup.sql, lookup.params);
+      if (repairCount > 0 && repairCount + rows.length > REPAIR_CAP) closed['*'] = true;
+      else if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) closed[table] = true;
+      if (closed['*'] || closed[table]) return null;
+      const manifest = buildSegment(table, gatewayEui, comparison.segmentKey, rows).manifest;
+      const fingerprint = JSON.stringify([manifest.hashVersion, manifest.canonicalRowCount, manifest.syncablePayloadHash, manifest.quarantinedCount, manifest.tombstoneCount]);
+      const checkpoint = 'history_repair_segment:' + JSON.stringify([table, comparison.segmentKey]);
+      const prior = await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]);
+      // On upgrade, trust existing done keys; absence of a checkpoint is not
+      // evidence of changed content. Real UPDATEs already enter via dirty triggers.
+      const changed = !!prior && prior.value !== fingerprint;
+      let added = 0;
+      for (const row of rows) {
+        const prepared = prepareRow(table, gatewayEui, row);
+        const existing = await tx.get("SELECT status FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND row_key=?", [table, prepared.historyKey]);
+        // A manifest never rewrites an outstanding correction, retry or rejection.
+        // Missing keys always queue, including after unlink clears the dirty ledger.
+        if (existing && (existing.status === 'pending' || existing.status === 'rejected' || (existing.status === 'done' && !changed))) continue;
+        await tx.run(
+          "INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,source_row_id,changed_at,status,attempts,next_attempt_at,last_error) VALUES('cloud',?,?,'repair',?,?,'pending',0,NULL,NULL) ON CONFLICT(peer_node,table_name,row_key) DO UPDATE SET change_kind='repair',source_row_id=excluded.source_row_id,changed_at=excluded.changed_at,status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL",
+          [table, prepared.historyKey, row.id == null ? null : row.id, now]
+        );
+        added++;
+      }
+      await tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE app_settings.value IS NOT excluded.value', [checkpoint, fingerprint, now]);
+      return added;
+    });
+    if (queued == null) { repairSkipped++; continue; }
+    repairCount += queued;
+    pendingRepair[table] += queued;
+  }
+  return { repairCount, repairSkipped };
+}
+
 module.exports = {
   tableNames,
   nextTable,
@@ -756,5 +932,10 @@ module.exports = {
   buildSegment,
   segmentQuery,
   rowByHistoryKeyQuery,
-  compareHistoryKeys
+  compareHistoryKeys,
+  loadDirtyRows,
+  queueManifestRepairs,
+  completeDirtyBatch,
+  summarizeQuickCheck,
+  pendingRepairCounts
 };

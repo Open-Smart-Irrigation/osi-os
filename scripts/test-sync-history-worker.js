@@ -287,11 +287,17 @@ const historyMarkSource = canonicalFlows.find((node) => node.id === 'sync-histor
 
 async function applyDirtyAck(dirtyRowKeys) {
   const submittedHistoryKey = 'VALVE_ACTUATION|NEW_EUI|exp-1';
+  const actualHelper = require(helperPaths[0]);
+  const sourceRow = { expectation_id: 'exp-1', command_id: 'fixture-command', device_eui: 'fixture-device' };
   const completed = [];
   const database = {
     all(sql, params, callback) {
       if (sql.includes('FROM sync_history_cursors')) {
         callback(null, [{ state: 'tail', last_acked_id: null }]);
+        return;
+      }
+      if (sql.includes('FROM valve_actuation_expectations')) {
+        callback(null, [sourceRow]);
         return;
       }
       callback(null, []);
@@ -304,6 +310,12 @@ async function applyDirtyAck(dirtyRowKeys) {
     },
     close(callback) {
       callback();
+    },
+    async transaction(executor) {
+      return executor({
+        all: (sql, params) => new Promise((resolve, reject) => database.all(sql, params, (e, rows) => e ? reject(e) : resolve(rows))),
+        run: (sql, params) => new Promise((resolve, reject) => database.run(sql, params, e => e ? reject(e) : resolve()))
+      });
     }
   };
   const flowState = new Map();
@@ -316,6 +328,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     }
   };
   const helper = {
+    completeDirtyBatch: actualHelper.completeDirtyBatch,
     serverConfirmsDurable: () => true,
     cursorPatchFromResponse: () => ({
       last_acked_id: '1',
@@ -349,12 +362,15 @@ async function applyDirtyAck(dirtyRowKeys) {
         batchId: 'batch-1',
         phase: 'correction',
         dirtyKeys: dirtyRowKeys,
+        dirtyVersions: Object.fromEntries(dirtyRowKeys.map(rowKey => [rowKey, 'fixture-version'])),
+        dirtyPayloadHashes: { [submittedHistoryKey]: actualHelper.prepareRow('valve_actuation_expectations', 'NEW_EUI', sourceRow).payloadHash },
         dirtyRowKeysByHistoryKey: {
           [submittedHistoryKey]: dirtyRowKeys
         },
         segmentKeys: []
       },
       payload: {
+        gatewayDeviceEui: 'NEW_EUI',
         phase: 'correction',
         durableMirrorConfirmed: true,
         ackedThroughId: 1,
