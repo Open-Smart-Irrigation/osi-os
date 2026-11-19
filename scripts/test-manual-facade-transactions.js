@@ -245,3 +245,95 @@ for (const id of ['scoped-zone-create-router', 'scoped-weather-zone-assign-route
     assert.equal(msg.statusCode, 500);
   });
 }
+
+async function sharedWeatherFixture(f) {
+  await f.other.exec(`
+    INSERT INTO users(id,username,password_hash,user_uuid,role,created_at)
+      VALUES(102,'other','hash','weather-other','researcher','2026-11-19');
+    INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,created_at,updated_at)
+      VALUES(102,'Other zone',102,'weather-other-zone','2026-11-19','2026-11-19');
+    UPDATE devices SET type_id='SENSECAP_S2120' WHERE deveui='${EUI}';
+    INSERT INTO weather_station_zones(deveui,zone_id) VALUES('${EUI}',101),('${EUI}',102);
+    INSERT INTO weather_station_zone_state(deveui,sync_version,updated_at)
+      VALUES('${EUI}',1,'2026-11-19');
+  `);
+}
+
+function realWeatherScope(f) {
+  const scope = require(path.join(MODS, 'osi-scope-helper'));
+  scope._resetForTests();
+  const secret = 'weather-scope-transaction-test';
+  const tokenBody = Buffer.from(JSON.stringify({ userId: 101, username: 'owner', exp: Date.now() + 60000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(tokenBody).digest('base64url');
+  const get = f.env.get;
+  f.env.get = (key) => key === 'AUTH_TOKEN_SECRET' ? secret : get(key);
+  const load = f.osiLib.require;
+  let activeTx = null;
+  const checked = [];
+  const observedScope = { ...scope };
+  for (const method of ['assertFreshRole', 'assertFreshDeviceAccess', 'resolveZoneUuidById', 'assertFreshZoneAccess']) {
+    observedScope[method] = async (db, ...args) => {
+      assert.ok(activeTx, method + ' executes inside the writer transaction');
+      assert.strictEqual(db, activeTx, method + ' reads the same transaction used by DELETE');
+      checked.push(method);
+      return scope[method](db, ...args);
+    };
+  }
+  f.osiLib.require = (name) => name === 'scope' ? { ok: true, value: observedScope } : load(name);
+  const transaction = f.owner.transaction.bind(f.owner);
+  f.owner.transaction = (fn) => transaction(async (tx) => {
+    activeTx = tx;
+    const run = tx.run.bind(tx);
+    tx.run = async (sql, params) => {
+      if (/^DELETE FROM weather_station_zones/.test(sql)) {
+        assert.ok(checked.includes('assertFreshRole'), 'fresh scope was resolved before DELETE');
+        assert.ok(checked.includes('assertFreshDeviceAccess'), 'device authorization preceded DELETE');
+        assert.strictEqual(activeTx, tx);
+      }
+      return run(sql, params);
+    };
+    try { return await fn(tx); } finally { activeTx = null; }
+  });
+  return {
+    scope, checked,
+    message: (zoneIds) => ({
+      req: { params: { deveui: EUI }, headers: { authorization: `Bearer ${tokenBody}.${signature}` } },
+      payload: { zone_ids: zoneIds },
+    }),
+  };
+}
+
+for (const deleted of [false, true]) {
+  test(`weather zone set keeps a ${deleted ? 'deleted' : 'live'} outside-scope assignment and checks access in its writer transaction`, async (t) => {
+    const f = fixture(t, false);
+    await sharedWeatherFixture(f);
+    if (deleted) await f.other.run("UPDATE irrigation_zones SET deleted_at='2026-11-19' WHERE id=102");
+    const runtime = realWeatherScope(f);
+    const msg = runtime.message([101]);
+    await execute('scoped-weather-zone-assign-router', f, msg);
+    assert.equal(msg.statusCode, 200, JSON.stringify({ payload: msg.payload, warnings: f.warnings }));
+    assert.deepEqual(runtime.checked, ['assertFreshRole', 'assertFreshDeviceAccess', 'resolveZoneUuidById', 'assertFreshZoneAccess']);
+    assert.deepEqual((await f.other.all('SELECT zone_id FROM weather_station_zones WHERE deveui=? ORDER BY zone_id', [EUI])).map((r) => r.zone_id), [101, 102]);
+    await f.verify();
+  });
+}
+
+test('weather zone set rechecks a grant revoked before BEGIN and preserves both assignments', async (t) => {
+  const f = fixture(t, false);
+  await sharedWeatherFixture(f);
+  await f.other.run('UPDATE irrigation_zones SET user_id=102 WHERE id=101');
+  await f.other.run('INSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES(?,?,?,?)', ['weather-grant', USER, ZONE, '2026-11-19']);
+  const runtime = realWeatherScope(f);
+  // A cached pre-request scope must not authorize the later DELETE.
+  assert.ok((await runtime.scope.resolveScope(f.other, USER, { scopedMode: true })).zoneUuids.has(ZONE));
+  const transaction = f.owner.transaction.bind(f.owner);
+  f.owner.transaction = async (fn) => {
+    await f.other.run("UPDATE user_zone_assignments SET deleted_at='2026-11-19' WHERE assignment_uuid='weather-grant'");
+    return transaction(fn);
+  };
+  const msg = runtime.message([]);
+  await execute('scoped-weather-zone-assign-router', f, msg);
+  assert.equal(msg.statusCode, 200, JSON.stringify({ payload: msg.payload, warnings: f.warnings }));
+  assert.deepEqual((await f.other.all('SELECT zone_id FROM weather_station_zones WHERE deveui=? ORDER BY zone_id', [EUI])).map((r) => r.zone_id), [101, 102]);
+  await f.verify();
+});
