@@ -40,7 +40,7 @@ describe('buildWindRoseOption', () => {
   const option = buildWindRoseOption(rose, THEME) as any;
 
   it('produces a polar coordinate system', () => {
-    expect(option.polar).toEqual({});
+    expect(option.polar).toEqual({ center: ['50%', '43%'], radius: '62%' });
   });
 
   it('uses the 16 compass directions as the angle axis, N first, clockwise from top', () => {

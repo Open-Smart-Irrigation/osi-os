@@ -3,6 +3,8 @@ import {
   AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
+import { useTranslation } from 'react-i18next';
+import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import { dendroAPI, type DendroHistoryPoint } from '../../services/api';
 
 interface Props {
@@ -20,20 +22,19 @@ const TIME_WINDOWS = [
   { label: '90 d', hours: 2160 },
 ];
 
-function fmtTickShort(iso: string, hours: number): string {
-  const d = new Date(iso);
+function fmtTickShort(iso: string, hours: number, format: DateFormatter): string {
   if (hours <= 24) {
-    return d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return format.time(iso) ?? '—';
   }
   if (hours <= 168) {
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return format.date(iso, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) ?? '—';
   }
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric' });
+  return format.date(iso) ?? '—';
 }
 
-function formatDendroModeUsed(value: unknown): string | null {
-  if (value === 'ratio_mod3') return 'Ratio MOD3';
-  if (value === 'legacy_single_adc') return 'Legacy ADC';
+function formatDendroModeUsed(value: unknown): 'dendroCalibration.modeRatio' | 'dendroCalibration.modeLegacy' | null {
+  if (value === 'ratio_mod3') return 'dendroCalibration.modeRatio';
+  if (value === 'legacy_single_adc') return 'dendroCalibration.modeLegacy';
   return null;
 }
 
@@ -61,26 +62,27 @@ function hasRawDendroSignals(point: DendroHistoryPoint): boolean {
   return point.adc_ch0v != null || point.adc_ch1v != null || point.dendro_ratio != null;
 }
 
-const TooltipStemChange = ({ active, payload, label, hours }: any) => {
+const TooltipStemChange = ({ active, payload, label, hours, format }: any) => {
+  const { t } = useTranslation('devices');
   if (!active || !payload?.length) return null;
   const point = payload[0].payload as DendroHistoryPoint;
   const sourceLabel = formatDendroModeUsed(point.dendro_mode_used);
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
-      <p className="mb-1 text-[var(--text-tertiary)]">{fmtTickShort(label, hours)}</p>
+      <p className="mb-1 text-[var(--text-tertiary)]">{fmtTickShort(label, hours, format)}</p>
       {point.stem_change_um != null && (
         <p className="font-bold text-[var(--text)]">{formatStemChangeUm(point.stem_change_um)}</p>
       )}
       {getMechanicalPositionMm(point) != null && (
-        <p className="text-xs text-[var(--text-tertiary)]">Position: {getMechanicalPositionMm(point)?.toFixed(2)} mm</p>
+        <p className="text-xs text-[var(--text-tertiary)]">{t('dendrometerMonitor.position')}: {getMechanicalPositionMm(point)?.toFixed(2)} mm</p>
       )}
       {point.saturated === 1 && (
         <p className="text-xs text-[var(--warn-text)]">
-          {point.saturation_side === 'high' ? 'Above extended range' : 'Below retracted range'}
+          {point.saturation_side === 'high' ? t('dendrometerMonitor.aboveRange') : t('dendrometerMonitor.belowRange')}
         </p>
       )}
       {sourceLabel && (
-        <p className="text-xs text-[var(--text-tertiary)]">Source: {sourceLabel}</p>
+        <p className="text-xs text-[var(--text-tertiary)]">{t('dendrometerMonitor.source')}: {t(sourceLabel)}</p>
       )}
     </div>
   );
@@ -94,15 +96,17 @@ const MechanicalStat = ({ label, value }: { label: string; value: string }) => (
 );
 
 export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, strokeMm, onClose }) => {
+  const { t } = useTranslation('devices');
+  const format = useDateFormat();
   const [hours, setHours] = useState(24);
   const [data, setData] = useState<DendroHistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(null);
+    setError(false);
     dendroAPI.getHistory(deveui, hours)
       .then((rows) => {
         if (!cancelled) {
@@ -110,9 +114,9 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
           setLoading(false);
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!cancelled) {
-          setError(err.message || 'Failed to load');
+          setError(true);
           setLoading(false);
         }
       });
@@ -150,8 +154,8 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
   const hasMechanicalOnlySamples = mechanicalData.length > 0 && plottedData.length === 0;
   const latestSaturationLabel = latestMechanicalPoint?.saturated === 1
     ? latestMechanicalPoint.saturation_side === 'high'
-      ? 'Above extended range'
-      : 'Below retracted range'
+      ? t('dendrometerMonitor.aboveRange')
+      : t('dendrometerMonitor.belowRange')
     : null;
 
   return (
@@ -162,14 +166,15 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
     >
       <div className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-[var(--bg)] shadow-2xl">
         <div className="shrink-0 bg-[var(--header-bg)] px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="high-contrast-text text-2xl font-bold text-[var(--header-text)]">Dendrometer Monitor</h2>
-              <p className="mt-0.5 text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="high-contrast-text break-words text-2xl font-bold text-[var(--header-text)]">{t('dendrometerMonitor.title')}</h2>
+              <p className="mt-0.5 truncate text-sm text-[var(--header-subtext)]">{deviceName} · {deveui}</p>
             </div>
             <button
               onClick={onClose}
-              className="touch-target px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]"
+              aria-label={t('monitor.close')}
+              className="touch-target shrink-0 px-2 text-3xl font-light leading-none text-[var(--header-text)] hover:text-[var(--text-secondary)]"
             >
               ×
             </button>
@@ -188,24 +193,24 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
                     : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)]'
                 }`}
               >
-                {window.label}
+                {t(window.hours <= 24 ? 'monitor.hours' : 'monitor.days', { count: window.hours <= 24 ? window.hours : window.hours / 24 })}
               </button>
             ))}
           </div>
         </div>
 
         {!loading && !error && plottedData.length > 0 && (
-          <div className="grid shrink-0 grid-cols-3 gap-3 px-6 pt-4">
+          <div className="grid shrink-0 grid-cols-1 sm:grid-cols-3 gap-3 px-6 pt-4">
             <MechanicalStat
-              label="Current"
+              label={t('monitor.current')}
               value={latestStemPoint ? formatStemChangeUm(latestStemPoint.stem_change_um) : '—'}
             />
             <MechanicalStat
-              label="Min"
+              label={t('monitor.minimum')}
               value={minStem !== null ? formatStemChangeUm(minStem) : '—'}
             />
             <MechanicalStat
-              label="Max"
+              label={t('monitor.maximum')}
               value={maxStem !== null ? formatStemChangeUm(maxStem) : '—'}
             />
           </div>
@@ -220,14 +225,14 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
 
           {error && (
             <div className="rounded-lg bg-[var(--error-bg)] p-4 text-center text-[var(--error-text)]">
-              {error}
+              {t('monitor.failedToLoad')}
             </div>
           )}
 
           {!loading && !error && data.length === 0 && (
             <div className="flex flex-1 items-center justify-center">
               <p className="text-lg text-[var(--text-tertiary)]">
-                No dendrometer data in the last {hours} hours.
+                {t('dendrometerMonitor.noData', { hours })}
               </p>
             </div>
           )}
@@ -236,10 +241,10 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
             <div className="rounded-lg bg-[var(--card)] p-5 text-center">
               <p className="text-lg text-[var(--text-tertiary)]">
                 {hasRawOnlySamples
-                  ? 'Raw samples are available in this window, but calibrated displacement is not yet available.'
+                  ? t('dendrometerMonitor.rawOnly')
                   : hasMechanicalOnlySamples
-                    ? 'Awaiting baseline. Mechanical position is available in this window, and the next valid calibrated uplink will establish the new stem-change zero point.'
-                    : `No calibrated stem change is available in the last ${hours} hours.`}
+                    ? t('dendrometerMonitor.awaitingBaseline')
+                    : t('dendrometerMonitor.noCalibratedData', { hours })}
               </p>
             </div>
           )}
@@ -247,9 +252,9 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
           {!loading && !error && plottedData.length > 0 && (
             <div>
               <div className="mb-3">
-                <h3 className="font-bold text-[var(--text)]">Stem change over time</h3>
+                <h3 className="font-bold text-[var(--text)]">{t('dendrometerMonitor.stemTitle')}</h3>
                 <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                  Stem change is the comparable signal used on the device card and is tracked relative to this device&apos;s edge baseline.
+                  {t('dendrometerMonitor.stemDescription')}
                 </p>
               </div>
               <ResponsiveContainer width="100%" height={260}>
@@ -264,7 +269,7 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
                   <XAxis
                     dataKey="t"
                     ticks={posTicks}
-                    tickFormatter={(value) => fmtTickShort(value, hours)}
+                    tickFormatter={(value) => fmtTickShort(value, hours, format)}
                     tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                     axisLine={{ stroke: 'var(--border)' }}
                     tickLine={false}
@@ -277,7 +282,7 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
                     tickLine={false}
                     width={52}
                   />
-                  <Tooltip content={<TooltipStemChange hours={hours} />} />
+                  <Tooltip content={<TooltipStemChange format={format} hours={hours} />} />
                   <Area
                     type="monotone"
                     dataKey="stem_change_um"
@@ -297,40 +302,40 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-bold text-[var(--text)]">Mechanical layer</h3>
+                  <h3 className="font-bold text-[var(--text)]">{t('dendrometerMonitor.mechanicalTitle')}</h3>
                   <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    Engineering interpretation only. Absolute position stays here instead of on the main device card.
+                    {t('dendrometerMonitor.mechanicalDescription')}
                   </p>
                 </div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Debug / engineering</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('dendrometerMonitor.engineering')}</p>
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <MechanicalStat
-                  label="Current position"
+                  label={t('dendrometerMonitor.currentPosition')}
                   value={latestMechanicalPoint ? `${latestMechanicalPoint.mechanical_position_mm.toFixed(2)} mm` : '—'}
                 />
                 <MechanicalStat
-                  label="Window range"
+                  label={t('dendrometerMonitor.windowRange')}
                   value={mechanicalMin !== null && mechanicalMax !== null
                     ? `${mechanicalMin.toFixed(2)} → ${mechanicalMax.toFixed(2)} mm`
                     : '—'}
                 />
                 {strokePercent != null && (
                   <MechanicalStat
-                    label="Stroke used"
-                    value={`${strokePercent.toFixed(0)} %${strokeMm != null ? ` of ${strokeMm.toFixed(1)} mm` : ''}`}
+                    label={t('dendrometerMonitor.strokeUsed')}
+                    value={t('dendrometerMonitor.strokeValue', { percent: strokePercent.toFixed(0), stroke: strokeMm?.toFixed(1) })}
                   />
                 )}
                 {latestSourceLabel && (
                   <MechanicalStat
-                    label="Source"
-                    value={latestSourceLabel}
+                    label={t('dendrometerMonitor.source')}
+                    value={t(latestSourceLabel)}
                   />
                 )}
                 {latestSaturationLabel && (
                   <MechanicalStat
-                    label="Range state"
+                    label={t('dendrometerMonitor.rangeState')}
                     value={latestSaturationLabel}
                   />
                 )}
@@ -338,18 +343,18 @@ export const DendrometerMonitor: React.FC<Props> = ({ deveui, deviceName, stroke
 
               {latestSaturationLabel && (
                 <p className="mt-4 text-xs text-[var(--warn-text)]">
-                  This latest mechanical reading is outside the stored calibration range. Stem change on the main card is suppressed until the calibration range is reviewed.
+                  {t('dendrometerMonitor.outsideRange')}
                 </p>
               )}
               <p className="mt-4 text-xs text-[var(--text-tertiary)]">
-                Ratio and ADC calibration details are available in the LSN50 card&apos;s Advanced device settings.
+                {t('dendrometerMonitor.calibrationDetails')}
               </p>
             </div>
           )}
 
           {!loading && !error && data.length > 0 && (
             <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
-              {data.length} readings · last {hours} h
+              {t('monitor.readings', { count: data.length, hours })}
             </p>
           )}
         </div>

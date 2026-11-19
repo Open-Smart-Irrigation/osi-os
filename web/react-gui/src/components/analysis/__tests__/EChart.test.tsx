@@ -14,8 +14,8 @@ vi.mock('echarts/core', () => ({
   init: vi.fn(() => ({ setOption, resize, dispose, getDataURL, on })),
   use: vi.fn(),
 }));
-vi.mock('echarts/charts', () => ({ LineChart: {}, ScatterChart: {} }));
-vi.mock('echarts/components', () => ({ GridComponent: {}, LegendComponent: {}, TooltipComponent: {} }));
+vi.mock('echarts/charts', () => ({ BarChart: {}, LineChart: {}, ScatterChart: {} }));
+vi.mock('echarts/components', () => ({ GridComponent: {}, LegendComponent: {}, PolarComponent: {}, TooltipComponent: {} }));
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }));
 
 import * as echarts from 'echarts/core';

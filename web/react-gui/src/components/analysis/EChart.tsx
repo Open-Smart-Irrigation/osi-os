@@ -1,10 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { LineChart, ScatterChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { BarChart, LineChart, ScatterChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, PolarComponent, TooltipComponent } from 'echarts/components';
 import { init, use, type EChartsType } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 
-use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+use([BarChart, LineChart, ScatterChart, PolarComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 function withLegendSelection(option: Record<string, unknown>, selected: Record<string, boolean> | null): Record<string, unknown> {
   const legend = option.legend;

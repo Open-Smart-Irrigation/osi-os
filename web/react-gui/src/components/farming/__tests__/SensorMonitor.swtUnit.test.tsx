@@ -35,7 +35,7 @@ describe('SensorMonitor SWT display units', () => {
 
     expect(screen.getByText(stat('1.29 pF'))).toBeInTheDocument();
     expect(screen.getAllByText(stat('0.00 pF'))).toHaveLength(2);
-    expect(screen.getByText('SWT (pF)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'SWT (pF)' })).toBeInTheDocument();
     expect(getHistory).toHaveBeenCalledTimes(1);
   });
 });

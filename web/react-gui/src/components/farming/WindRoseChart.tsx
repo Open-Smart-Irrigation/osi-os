@@ -56,7 +56,8 @@ export function buildWindRoseOption(rose: WindRose, theme: WindRoseTheme): Recor
       bottom: 0,
       textStyle: { color: theme.legendText },
     },
-    polar: {},
+    // Reserve room below the compass labels for a wrapped phone-width legend.
+    polar: { center: ['50%', '43%'], radius: '62%' },
     angleAxis: {
       type: 'category',
       data: directions,
