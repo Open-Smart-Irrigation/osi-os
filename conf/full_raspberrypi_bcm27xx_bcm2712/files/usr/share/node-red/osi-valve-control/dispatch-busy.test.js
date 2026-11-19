@@ -246,6 +246,32 @@ test('post-enqueue persistent busy warns, stays claimed for recovery, and still 
   assert.equal(h.enqueueCalls, 1);
 });
 
+test('accepted bookkeeping recovery gives up after five permanent failures', async (t) => {
+  const h = await harness(t, { failures: Infinity });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.equal(result.accepted, true);
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
+  h.stopFailing();
+  await h.fixture.db.run("UPDATE valve_actuation_expectations SET transport_json='{not json' WHERE command_id=?", ['busy-command']);
+  let runs = 0;
+  while (h.recoveryJobs.length && runs < 1000) { await h.recover(); runs += 1; }
+  assert.equal(runs, 5);
+  assert.ok(h.warnings.some((message) => /recovery gave up after 5 attempts.*recovery required/.test(message)));
+  assert.equal(h.enqueueCalls, 1);
+});
+
+test('accepted bookkeeping recovery under a lasting busy stops after its attempt budget', async (t) => {
+  const h = await harness(t, { failures: Infinity });
+  const result = await dispatch.executeValveAttempt(h.args);
+  assert.equal(result.accepted, true);
+  let runs = 0;
+  while (h.recoveryJobs.length && runs < 1000) { await h.recover(); runs += 1; }
+  assert.equal(runs, 150);
+  assert.ok(h.warnings.some((message) => /recovery gave up after 150 attempts.*recovery required/.test(message)));
+  assert.equal((await h.state()).phase, 'ATTEMPTED');
+  assert.equal(h.enqueueCalls, 1);
+});
+
 test('busy message without a SQLite code is retried', async (t) => {
   const h = await harness(t, { transaction: 1, failures: 1, error: new Error('SQLITE_BUSY: database is locked') });
   assert.equal((await dispatch.executeValveAttempt(h.args)).accepted, true);

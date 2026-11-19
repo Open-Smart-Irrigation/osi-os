@@ -865,6 +865,10 @@ async function persistAttempt(db, owner, phase, patch, retry) {
 // Option A: retain the receipt until bookkeeping commits or later evidence
 // supersedes this attempt. DatabaseFacade.close() leaves the shared connection
 // alive. No transport is retained here, so recovery cannot send another frame.
+// About an hour of retries at the 30 s backoff cap, and five non-busy failures.
+const RECOVERY_MAX_ATTEMPTS = 150;
+const RECOVERY_MAX_PERMANENT_FAILURES = 5;
+
 function recoverAcceptedBookkeeping({ db, device, owner, commandId, attemptedAt, queueId, acceptedAt, warn, schedule }) {
   if (owner.type !== 'expectation') return;
   const exactOwner = { type: owner.type, id: owner.id };
@@ -873,11 +877,23 @@ function recoverAcceptedBookkeeping({ db, device, owner, commandId, attemptedAt,
     try { warn(message); }
     catch (error) { console.warn(message, error); }
   };
+  // Bounded: a busy database is transient and keeps its own budget; any other
+  // error is treated as permanent after a few tries. Giving up leaves the
+  // record ATTEMPTED (as before this recovery existed) and says so in the log.
   let delay = 1000;
-  const retryLater = () => writerContext.exit(() => schedule(run, delay));
+  let attempts = 0;
+  let permanentFailures = 0;
+  const retryLater = () => {
+    if (attempts >= RECOVERY_MAX_ATTEMPTS || permanentFailures >= RECOVERY_MAX_PERMANENT_FAILURES) {
+      log('[valve-control] accepted enqueue bookkeeping recovery gave up after ' + attempts + ' attempts for ' + identity + '; recovery required');
+      return;
+    }
+    writerContext.exit(() => schedule(run, delay));
+  };
   // Clear the claim's AsyncLocalStorage context both when scheduling and when
   // running: this retry must join the writer queue after the request releases it.
   const run = () => writerContext.exit(async () => {
+    attempts += 1;
     try {
       const changed = await withValveWriter(device, () => db.transaction(async (tx) => {
         const row = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [exactOwner.id]);
@@ -902,7 +918,10 @@ function recoverAcceptedBookkeeping({ db, device, owner, commandId, attemptedAt,
       }));
       if (changed) log('[valve-control] accepted enqueue bookkeeping recovered for ' + identity);
     } catch (error) {
-      if (!isSqliteBusy(error)) log('[valve-control] accepted enqueue bookkeeping recovery failed for ' + identity + ': ' + String(error && error.message || error));
+      if (!isSqliteBusy(error)) {
+        permanentFailures += 1;
+        log('[valve-control] accepted enqueue bookkeeping recovery failed for ' + identity + ': ' + String(error && error.message || error));
+      }
       delay = Math.min(delay * 2, 30000);
       retryLater();
     }
