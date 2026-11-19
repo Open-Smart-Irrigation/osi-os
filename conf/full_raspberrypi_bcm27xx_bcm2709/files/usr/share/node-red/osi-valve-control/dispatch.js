@@ -707,8 +707,13 @@ function isSqliteBusy(error) {
   return Boolean(error && (error.code === 'SQLITE_BUSY' || /database is locked/i.test(String(error.message || error))));
 }
 
-function busyRetryContext({ retryClock = () => performance.now(), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
-  return { clock: retryClock, sleep, deadline: retryClock() + 9000 };
+function scheduleAcceptedRecovery(callback, delay) {
+  setTimeout(callback, delay).unref();
+}
+
+function busyRetryContext({ retryClock = () => performance.now(), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  scheduleRecovery = scheduleAcceptedRecovery } = {}) {
+  return { clock: retryClock, sleep, scheduleRecovery, deadline: retryClock() + 9000 };
 }
 
 async function transaction(db, callback, retry) {
@@ -855,6 +860,73 @@ function classifyEnqueueError(error) {
 
 async function persistAttempt(db, owner, phase, patch, retry) {
   return transaction(db, (tx) => updateOwnerTransportTx(tx, owner, { phase, ...patch }), retry);
+}
+
+// Option A: retain the receipt until bookkeeping commits or later evidence
+// supersedes this attempt. DatabaseFacade.close() leaves the shared connection
+// alive. No transport is retained here, so recovery cannot send another frame.
+// About an hour of retries at the 30 s backoff cap, and five non-busy failures.
+const RECOVERY_MAX_ATTEMPTS = 150;
+const RECOVERY_MAX_PERMANENT_FAILURES = 5;
+
+function recoverAcceptedBookkeeping({ db, device, owner, commandId, attemptedAt, queueId, acceptedAt, warn, schedule }) {
+  if (owner.type !== 'expectation') return;
+  const exactOwner = { type: owner.type, id: owner.id };
+  const identity = 'device ' + device + ' owner expectation:' + exactOwner.id + ' queue ' + queueId;
+  const log = (message) => {
+    try { warn(message); }
+    catch (error) { console.warn(message, error); }
+  };
+  // Bounded: a busy database is transient and keeps its own budget; any other
+  // error is treated as permanent after a few tries. Giving up leaves the
+  // record ATTEMPTED (as before this recovery existed) and says so in the log.
+  let delay = 1000;
+  let attempts = 0;
+  let permanentFailures = 0;
+  const retryLater = () => {
+    if (attempts >= RECOVERY_MAX_ATTEMPTS || permanentFailures >= RECOVERY_MAX_PERMANENT_FAILURES) {
+      log('[valve-control] accepted enqueue bookkeeping recovery gave up after ' + attempts + ' attempts for ' + identity + '; recovery required');
+      return;
+    }
+    writerContext.exit(() => schedule(run, delay));
+  };
+  // Clear the claim's AsyncLocalStorage context both when scheduling and when
+  // running: this retry must join the writer queue after the request releases it.
+  const run = () => writerContext.exit(async () => {
+    attempts += 1;
+    try {
+      const changed = await withValveWriter(device, () => db.transaction(async (tx) => {
+        const row = await tx.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [exactOwner.id]);
+        if (!row || normalizeDevice(row.device_eui) !== device || row.command_id !== commandId) return false;
+        const state = parsePersistedJson(row.transport_json, 'transport_state_malformed', {});
+        if (state.attempted_at !== attemptedAt || row.reconciliation_state === 'CANCELLED'
+            || row.observed_open_at || row.observed_close_at || state.invalidated_by_flush
+            || (state.queue_id && state.queue_id !== queueId)) return false;
+        let updated = false;
+        if (state.phase === 'ATTEMPTED') {
+          await updateOwnerTransportTx(tx, exactOwner, { phase: 'ACCEPTED', queue_id: queueId, accepted_at: acceptedAt });
+          updated = true;
+        } else if (state.phase !== 'ACCEPTED' || state.queue_id !== queueId) return false;
+        // A SENT write can fail after ACCEPTED committed. Finish both records
+        // atomically here, without resurrecting a cancelled/expired occurrence.
+        const occurrence = commandId && await tx.get('SELECT * FROM irrigation_occurrences WHERE command_id=?', [commandId]);
+        if (occurrence && occurrence.device_eui === device && occurrence.state === 'ATTEMPTED') {
+          await policyStore.transitionOccurrenceTx(tx, occurrence, { state: 'SENT', queue_id: queueId, sent_at: acceptedAt }, { now: acceptedAt });
+          updated = true;
+        }
+        return updated;
+      }));
+      if (changed) log('[valve-control] accepted enqueue bookkeeping recovered for ' + identity);
+    } catch (error) {
+      if (!isSqliteBusy(error)) {
+        permanentFailures += 1;
+        log('[valve-control] accepted enqueue bookkeeping recovery failed for ' + identity + ': ' + String(error && error.message || error));
+      }
+      delay = Math.min(delay * 2, 30000);
+      retryLater();
+    }
+  });
+  retryLater();
 }
 
 async function ownerStateTx(tx, owner, deviceEui) {
@@ -1114,14 +1186,18 @@ async function enqueueValveCommandWithRetry({ db, deviceEui, owner, item, transp
     }
     // A queue ID proves acceptance. Local bookkeeping can never turn that
     // physical handoff into an enqueue failure or authorize another frame.
+    let acceptedAt;
     try {
-      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: nowIso(enqueueNow()) }, retry);
+      acceptedAt = nowIso(enqueueNow());
+      await persistAttempt(db, owner, 'ACCEPTED', { queue_id: queueId, accepted_at: acceptedAt }, retry);
       await markOccurrenceSent(db, owner, queueId, claimContext.now, retry);
     } catch (error) {
       const message = '[valve-control] accepted enqueue bookkeeping failed; recovery required for device ' + device
         + ' owner ' + owner.type + ':' + owner.id + ' queue ' + queueId + ': ' + String(error && error.message || error);
       try { warn(message); }
       catch (warningError) { console.warn(message, warningError); }
+      if (acceptedAt) recoverAcceptedBookkeeping({ db, device, owner, commandId: attempt.row.command_id,
+        attemptedAt: attempt.transport.attempted_at, queueId, acceptedAt, warn, schedule: retry.scheduleRecovery });
     }
     return { accepted: true, phase: 'ACCEPTED', queue_id: queueId };
   });
@@ -1155,8 +1231,8 @@ function compositionCommand(command, device, effectClass) {
 // and one enqueue share one reentrant per-device writer owner.
 async function executeValveAttempt({ db, deviceEui, command, frame, transport, now, trustedContext, policy, delivery_settings,
   interval_source, interval_minutes, minimum_gap_minutes, qualificationProvider, qualificationContext, current_state, current_state_at,
-  onceScheduleUuid, retryClock, sleep, warn, enqueueNow } = {}) {
-  const retry = busyRetryContext({ retryClock, sleep });
+  onceScheduleUuid, retryClock, sleep, scheduleRecovery, warn, enqueueNow } = {}) {
+  const retry = busyRetryContext({ retryClock, sleep, scheduleRecovery });
   const device = normalizeDevice(deviceEui || (command && (command.device_eui || command.deviceEui)));
   if (!db || !transport || !frame) throw new TypeError('executeValveAttempt requires db, frame and transport');
   const classified = effects.classifyEffect(frame);
