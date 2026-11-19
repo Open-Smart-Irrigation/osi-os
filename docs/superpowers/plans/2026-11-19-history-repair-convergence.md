@@ -52,6 +52,11 @@ three unsuccessful attempts become an unresolved repair quarantine. Each page
 keeps its own continuation so pages of 500 do not continually restart at row one.
 Source reads are capped with SQL LIMIT; hashing happens before the write
 transaction. Individual SQL operations may finish after the deadline.
+A segment blocked by its own table's pending-key capacity advances the page
+continuation while preserving its retry eligibility on the next page wrap. Other
+tables can proceed within the same work limits. A regression holds a 3,000-row
+dendrometer segment behind one backed-off repair or correction, checks delivery
+of following device history, then drains the blocked key and checks its retry.
 
 Review regressions cover cloud divergence before first parity and on upgrade,
 stale answers across ACKs, persistent mismatch exhaustion, a 100,000-completed-key
@@ -81,3 +86,12 @@ For this correction, run every command in the workflow's standalone inventory
 verbatim and record each exit code. The lead requested individual scripts instead
 of rerunning the full sync verifier on the home disk; hosted CI runs that gate.
 Add the schema verifier set and seed ledger check after the approved rebuild.
+
+CI follow-up verification runs all eight `run-module-tests.js` commands from
+`migrations.yml` with their exact file lists and the workflow
+`OSI_BASELINE_RUNNER=node-sqlite` setting. Reconciliation and cutover suites derive
+their expected pending lists from the ordered corpus, preserving the fixture's
+fixed historical mappings. Run the interrupted-deploy suite and the slow cutover
+rehearsal too. The live-identity verifier treats the silent-catch fixture count as
+a ceiling of 72, allowing later cleanup; the dedicated ratchet still requires
+the actual flow count to equal the fixture.

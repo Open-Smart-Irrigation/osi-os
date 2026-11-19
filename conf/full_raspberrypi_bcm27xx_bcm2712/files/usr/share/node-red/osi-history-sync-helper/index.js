@@ -963,8 +963,10 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       });
       quarantinedSegments++; index++; break;
     }
-    if ((rows.length > remaining && examinedRows !== rows.length) || (repairCount > 0 && repairCount + rows.length > REPAIR_CAP)
-      || (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP)) break;
+    // Table capacity defers only this segment. Advancing the page lets other
+    // tables proceed; the page wraps back to retry it after its pending work drains.
+    if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) { repairSkipped++; index++; continue; }
+    if ((rows.length > remaining && examinedRows !== rows.length) || (repairCount > 0 && repairCount + rows.length > REPAIR_CAP)) break;
     try {
       const prepared = [];
       for (const row of rows) { deadline(); prepared.push(prepareRow(table, gatewayEui, row)); }

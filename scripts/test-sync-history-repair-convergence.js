@@ -212,6 +212,38 @@ for (const profile of PROFILES) {
     assert.equal(loaded.rows.length, 3, 'stops after the first read crossing 200 ms');
     assert.equal(pending(db), 300, 'building never completes unsent keys');
   });
+  for (const kind of ['repair', 'correction']) {
+    test(`${profile}: a capacity-blocked ${kind} cannot starve following tables and is retried later`, async t => {
+      // Round-two review probe: one backed-off key prevents atomic enqueue of
+      // a 3,000-row segment, before unrelated device history on the same page.
+      const { db, h } = fixture(t, profile, 1);
+      const blockedKey = `DENDROMETER_READINGS|${GATEWAY}|1`;
+      const insert = db.prepare('INSERT INTO dendrometer_readings(id,deveui,position_um,recorded_at) VALUES(?,?,20,?)');
+      db.exec('BEGIN');
+      for (let id = 1; id <= 3000; id++) insert.run(id, SENSOR, '2026-07-01T00:00:00.000Z');
+      db.exec('COMMIT');
+      db.prepare("UPDATE sync_history_cursors SET snapshot_high_id=3000,last_acked_id=3000 WHERE table_name='dendrometer_readings'").run();
+      const rows = db.prepare('SELECT * FROM dendrometer_readings').all();
+      const segment = h.helper.segmentKey('dendrometer_readings', rows[0]);
+      const m = h.helper.buildSegment('dendrometer_readings', GATEWAY, segment, rows).manifest;
+      db.prepare("INSERT INTO sync_history_segments(peer_node,table_name,segment_key,hash_version,canonical_row_count,syncable_row_count,syncable_payload_hash,computed_at) VALUES('cloud','dendrometer_readings',?,1,?,?,?,'2026-11-01')").run(segment,m.canonicalRowCount,m.syncableRowCount,m.syncablePayloadHash);
+      db.prepare("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,changed_at,status,attempts,next_attempt_at,last_error) VALUES('cloud','dendrometer_readings',?,?,'2026-01-01','pending',2,'2099-01-01','retry')").run(blockedKey, kind);
+      const waiting = db.prepare('SELECT * FROM sync_history_dirty_keys WHERE row_key=?').get(blockedKey);
+      for (let cycle = 0; cycle < 8; cycle++) {
+        await h.manifest();
+        for (let tick = 0; tick < 10; tick++) await h.tick();
+        h.advance(300000);
+      }
+      assert.ok(h.cloud.index.has('device_data\0' + key(1)), 'independent device history reaches the cloud while dendrometer waits for capacity');
+      assert.deepEqual(db.prepare('SELECT * FROM sync_history_dirty_keys WHERE row_key=?').get(blockedKey), waiting, 'deferral preserves the pending correction or retry');
+      assert.deepEqual(h.warnings, []);
+      // Simulate the outstanding key finishing, then prove the deferred segment
+      // remains eligible when a later manifest page wraps back to it.
+      db.prepare("UPDATE sync_history_dirty_keys SET status='done',next_attempt_at=NULL WHERE row_key=?").run(blockedKey);
+      for (let cycle = 0; cycle < 2; cycle++) { await h.manifest(); h.advance(300000); }
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM sync_history_dirty_keys WHERE table_name='dendrometer_readings' AND status='pending'").get().n, 3000);
+    });
+  }
   test(`${profile}: progress reads use partial indexes with 100,000 completed keys`, async t => {
     const { db, h } = fixture(t, profile, 1);
     db.exec("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<100000) INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,changed_at,status) SELECT 'cloud','device_data','synthetic-'||i,'repair','2026-01-01','done' FROM n");
