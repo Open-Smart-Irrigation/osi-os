@@ -65,6 +65,17 @@ const realSqlProbe = spawnSync(process.execPath, ['-'], { cwd: ROOT, encoding: '
     return {
       all(sql, params, callback) { try { callback(null, raw.prepare(sql).all(...(params || []))); } catch (error) { callback(error); } },
       run(sql, params, callback) { try { raw.prepare(sql).run(...(params || [])); callback(null); } catch (error) { callback(error); } },
+      get(sql, params = []) { return Promise.resolve(raw.prepare(sql).get(...params)); },
+      async transaction(fn) {
+        raw.exec('BEGIN IMMEDIATE');
+        const tx = {
+          get: async (sql, params = []) => raw.prepare(sql).get(...params),
+          all: async (sql, params = []) => raw.prepare(sql).all(...params),
+          run: async (sql, params = []) => { raw.prepare(sql).run(...params); },
+        };
+        try { const result = await fn(tx); raw.exec('COMMIT'); return result; }
+        catch (error) { raw.exec('ROLLBACK'); throw error; }
+      },
       close(callback) { callback(); }
     };
   }

@@ -394,6 +394,29 @@ class JournalFixtureDb {
     callback.call({ changes: 0 }, null);
   }
 
+  get(sql, params = []) {
+    return new Promise((resolve, reject) => this.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows[0])));
+  }
+
+  async transaction(fn) {
+    const peerBefore = this.peerRow && { ...this.peerRow };
+    const tx = {
+      get: (sql, params) => this.get(sql, params),
+      all: (sql, params = []) => new Promise((resolve, reject) => this.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows))),
+      run: (sql, params = []) => new Promise((resolve, reject) => this.run(sql, params, (error) => error ? reject(error) : resolve())),
+    };
+    this.native.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await fn(tx);
+      this.native.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.native.exec('ROLLBACK');
+      this.peerRow = peerBefore;
+      throw error;
+    }
+  }
+
   close(callback) {
     this.closed = true;
     setImmediate(() => callback(this.closeError));

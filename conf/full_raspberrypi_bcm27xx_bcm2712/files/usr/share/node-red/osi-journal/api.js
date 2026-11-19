@@ -904,7 +904,7 @@ async function assertEntryWrite(db, principal, entryUuid) {
 
 async function writeTransaction(db, executor) {
   if (db && typeof db.transaction === 'function') return db.transaction(executor);
-  if (!db || typeof db.exec !== 'function') throw new TypeError('Database must provide transaction()');
+  if (!db || typeof db.prepare !== 'function' || typeof db.exec !== 'function') throw new TypeError('Database must provide transaction()');
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = await executor(db);

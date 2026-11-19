@@ -98,7 +98,8 @@ function assertGatewayRewriteRollsBack(source, nodeId) {
     source.indexOf('  } catch (error) {', loopStart),
     source.indexOf('\n}\nfunction normalizeCloudServerUrl', loopStart)
   );
-  assert.match(migrationCatch, /await run\('ROLLBACK'\)/, nodeId + ' migration catch must roll back');
+  assert.match(source.slice(0, loopStart), /await _db\.transaction\(async \(tx\) => \{/, nodeId + ' gateway rewrite uses queued rollback');
+  assert.doesNotMatch(migrationCatch, /await run\('ROLLBACK'\)/, nodeId + ' leaves rollback to the transaction owner');
   assert.match(migrationCatch, /throw error;/, nodeId + ' migration catch must propagate the parser failure');
 }
 
