@@ -3431,6 +3431,10 @@ fetch_required "osi-uplink-dedup-guard index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/index.js" \
     "$MODULE_STAGE/osi-uplink-dedup-guard/index.js"
 
+fetch_required "osi-uplink-dedup-guard durable.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/durable.js" \
+    "$MODULE_STAGE/osi-uplink-dedup-guard/durable.js"
+
 fetch_required "osi-sdi12-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json" \
     "$MODULE_STAGE/osi-sdi12-normalize/package.json"

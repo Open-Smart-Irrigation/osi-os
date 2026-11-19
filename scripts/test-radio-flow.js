@@ -2,7 +2,7 @@
 const fs=require('fs');const test=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');
 const flows=JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'));
 const {encodeFieldTesterReply,classifyUplinkFrame}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester.js');
-const {executeFunction,loadNode,seedTestDb}=require('./lib/flow-node-harness');
+const {executeFunction,loadNode,seedTestDb,facadeDb}=require('./lib/flow-node-harness');
 test('radio capture has an enabled always-loaded input and leaves field testing disabled',()=>{
  const inputs=flows.filter(n=>n.type==='mqtt in'&&n.topic==='application/+/device/+/event/up');
  const capture=flows.find(n=>n.id==='radio-capture-fn');
@@ -208,13 +208,17 @@ function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,
    if(captureImpl)return captureImpl(normalized);
    calls.capture.push(normalized);
   }}),
-  fieldtester:{encodeFieldTesterReply,classifyUplinkFrame}
+  fieldtester:{encodeFieldTesterReply,classifyUplinkFrame,enqueueReplyOnce:require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester').enqueueReplyOnce}
  };
  const osiLib={require:(name)=>{
   if(name==='radio')return{ok:true,value:fakeRadio};
   return{ok:false,error:name+' unavailable in this fixture'};
  }};
+ const receiptDb=seedTestDb();
+ test.after(()=>receiptDb.close());
  const osiDb={Database:function(){return{
+  transaction:fn=>facadeDb(receiptDb).transaction(fn),
+  run:(sql,params)=>facadeDb(receiptDb).run(sql,params),
   // Two different queries reach get(): installation identity and the device-type lookup.
   get:async(sql,params)=>{
    if(String(sql).includes('FROM devices')){
@@ -582,4 +586,18 @@ test('one ChirpStack client serves consecutive replies',async()=>{
  await runNode('radio-capture-fn',testerUplink(2),sandbox);
  assert.equal(calls.clientsCreated,1);
  assert.equal(calls.enqueue.length,2);
+});
+
+
+test('field-tester reply redelivery enqueues once, and a failed enqueue remains retryable',async()=>{
+ const {enqueueReplyOnce}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/fieldtester');
+ const db=seedTestDb(); let sent=0;
+ const event={deviceInfo:{devEui:'A840410000000001'},deduplicationId:'reply-once',fCnt:1,time:'2026-11-19T10:00:00Z'};
+ try {
+  await assert.rejects(enqueueReplyOnce(facadeDb(db),event,async()=>{throw Error('transport failed');}),/transport failed/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM uplink_effect_receipts').get().n,0);
+  for(let replay=0;replay<3;replay++)await enqueueReplyOnce(facadeDb(db),event,async()=>{sent++;});
+  assert.equal(sent,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM uplink_effect_receipts').get().n,1);
+ }finally{db.close();}
 });

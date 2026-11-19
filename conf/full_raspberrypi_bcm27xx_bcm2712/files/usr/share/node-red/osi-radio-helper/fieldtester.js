@@ -85,4 +85,20 @@ function encodeFieldTesterReply({ fCnt, receivers, devicePosition }) {
   return buf;
 }
 
-module.exports = { encodeFieldTesterReply, haversineMetres, classifyUplinkFrame, STANDARD_PORT, STANDARD_LEN, EXTENDED_PORT };
+async function enqueueReplyOnce(db, uplink, enqueue) {
+  const { eventKey, claimEffect } = require('../osi-uplink-dedup-guard/durable');
+  const key = eventKey('radio-reply', uplink);
+  if (!key) return enqueue();
+  const deveui = String(uplink.deviceInfo.devEui).trim().toUpperCase();
+  const claimed = await db.transaction(tx => claimEffect(tx, deveui, key, 'radio-reply'));
+  if (!claimed) return null;
+  // Never hold the farming write lock across a network call. A failed enqueue
+  // releases its receipt for retry; the short-lived reply is best effort.
+  try { return await enqueue(); }
+  catch (error) {
+    await db.run("DELETE FROM uplink_effect_receipts WHERE deveui=? AND uplink_key=? AND effect='radio-reply'", [deveui,key]);
+    throw error;
+  }
+}
+
+module.exports = { enqueueReplyOnce, encodeFieldTesterReply, haversineMetres, classifyUplinkFrame, STANDARD_PORT, STANDARD_LEN, EXTENDED_PORT };
