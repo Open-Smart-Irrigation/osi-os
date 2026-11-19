@@ -929,6 +929,8 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
   const COMPARISON_CAP = 500;
   request = request || { generatedAt: now };
   if (comparisons.length > COMPARISON_CAP) throw new Error('history manifest answer exceeds 500 segments');
+  // A request from another link/epoch must not inspect or age its successor.
+  if (obsoleteManifest(request, {}, currentClock)) return { repairCount: 0, repairSkipped: 0, examinedRows: 0, examinedSegments: 0, quarantinedSegments: 0 };
   const sentSegments = new Map((request.segments || []).map(segment => [JSON.stringify([segment.tableName,segment.segmentKey]),segment]));
   const started = clock();
   const deadline = () => {
@@ -951,11 +953,12 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     compareRepairPositions(repairPosition(left.comparison), repairPosition(right.comparison))).map(entry => entry.comparison);
   const saveExaminedState = (tx, key, state) => saveRepairState(tx, key, { ...state, lastExamined: examination }, now);
   const skippedCheckpoints = new Set();
+  const obsoleteCheckpoints = new Set();
   let index = 0, inspectedComparisons = 0;
   let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
   const pendingRepair = {};
   // Obsolete candidates cost bounded inspection, not one of the 32 work slots.
-  // Their rank and fenced repair state remain untouched.
+  // Their traversal ranks are aged on exit, including a deadline exit.
   while (index < comparisons.length && inspectedComparisons < COMPARISON_CAP && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
     if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds || examinedRows >= MANIFEST_REPAIR_LIMITS.rows || repairCount >= REPAIR_CAP) break;
     const comparison = comparisons[index];
@@ -967,14 +970,14 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     const sent = sentSegments.get(JSON.stringify([table, segment]));
     const reportedFingerprint = sent ? manifestFingerprint(sent) : null;
     const prior = repairState(((await q('SELECT value FROM app_settings WHERE key=?', [checkpoint]))[0] || {}).value);
-    if (obsoleteManifest(request, prior, currentClock)) { index++; continue; }
+    if (obsoleteManifest(request, prior, currentClock)) { obsoleteCheckpoints.add(checkpoint); index++; continue; }
     if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) break;
     examinedSegments++;
     const matched = comparison.repairRequested === false && Array.isArray(comparison.mismatchFields) && comparison.mismatchFields.length === 0;
     if (matched) {
       await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return; }
         await clearRepairQuarantine(tx, table, segment);
         await saveExaminedState(tx, checkpoint, { version: 2, round: 0, scope: request.scope, lastRequest: request.clock, matchedAt: now });
       });
@@ -1013,7 +1016,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       deadline();
       const added = await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return 0;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return 0; }
         const existing = [];
         for (const row of prepared) {
           deadline();
@@ -1054,7 +1057,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       // repeatedly unserviceable segment becomes explicit unresolved work.
       await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return; }
         // A failed attempt belongs to its link and content, even if preparation
         // expired before the normal generation check. In that case the request
         // manifest is the available content fingerprint.
@@ -1082,8 +1085,15 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     // the first 32 slots, and keep obsolete requests behind the existing fence.
     for (const checkpoint of skippedCheckpoints) {
       const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-      if (!obsoleteManifest(request, state, currentClock)) await saveExaminedState(tx, checkpoint, state);
+      if (obsoleteManifest(request, state, currentClock)) obsoleteCheckpoints.add(checkpoint);
+      else await saveExaminedState(tx, checkpoint, state);
     }
+    // Flush the inspection trace even after expiry. One indexed UPDATE ages at
+    // most 500 keys, touching only lastExamined: no fenced fields or timestamp.
+    // The request's link/epoch was checked before inspection; MAX prevents
+    // rank rewind if another examination already advanced a checkpoint.
+    const obsoleteKeys = [...obsoleteCheckpoints];
+    if (obsoleteKeys.length) await tx.run("UPDATE app_settings SET value=json_set(value,'$.lastExamined',json_object('scope',?,'order',MAX(?,COALESCE(json_extract(value,'$.lastExamined.order'),0)+1))) WHERE key IN (" + obsoleteKeys.map(() => '?').join(',') + ") AND json_valid(value) AND json_extract(value,'$.version')=2", [scope, examination.order, ...obsoleteKeys]);
     // No page cursor is retained. Remove old hashes and v2/v3 range state in
     // indexed batches without parsing their potentially unbounded JSON.
     await tx.run("DELETE FROM app_settings WHERE key IN (SELECT key FROM app_settings WHERE key>='history_repair_cursor:' AND key<'history_repair_cursor;' ORDER BY key LIMIT 32)");
