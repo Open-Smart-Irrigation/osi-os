@@ -267,6 +267,7 @@ jobs:
       - run: node --test scripts/sync-protocol-capability-cli.test.js scripts/installation-recovery-adapter.test.js
       - run: node scripts/capture-zone-env-vectors.js --verify
       - run: node --test scripts/rehearse-devices-rebuild.test.js
+      - run: node --test scripts/rehearse-legacy-catalog.test.js
       # The boot-node rehearsal above covers sync-init-fn's rebuild of devices; this
       # one covers the migration runner's, against POPULATED databases at the fleet's
       # real schema heads. Nothing else exercises the eleven ON DELETE CASCADE children
