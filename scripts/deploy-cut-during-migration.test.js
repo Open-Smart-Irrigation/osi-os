@@ -12,7 +12,7 @@
 // - c3 (commit 73, no stamp): starts unverified; after the old boot rewrites
 //   its triggers, the retry completes;
 // - s3 (stamp of 73) and c6 (commit 76): held; the retry completes;
-// - c10 (commit 80): the boot switches forward;
+// - after the final pending commit: the boot switches forward;
 // - a missing record with the database ahead of the active payload: held;
 // - before the first commit: the old payload fits and starts.
 // The matrix with the real v0.8.0 payload booting under Node-RED is in the
@@ -35,6 +35,8 @@ const INSTALLED_FLOWS = JSON.parse(fs.readFileSync(path.join(REPO, 'conf/full_ra
 const INIT = fs.readFileSync(path.join(REPO, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'), 'utf8');
 const LEDGER_SQL = "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')";
 const FROM = 70;
+const VERSIONS = readMigrationManifest(MIGRATIONS).map(m => m.version).sort((a,b) => a-b);
+const PENDING = VERSIONS.filter(version => version > FROM);
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-cut-migration-'));
 process.on('exit', () => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -184,7 +186,7 @@ function retryCompletes(g, k) {
   const retry = migrate(g.db);
   assert.equal(retry.status, 0, retry.stdout + retry.stderr);
   const applied = JSON.parse(/\[migrate\] applied: (\[[^\]]*\])/.exec(retry.stdout + retry.stderr)[1]);
-  assert.deepEqual(applied, Array.from({ length: 10 - k }, (_, i) => FROM + k + 1 + i));
+  assert.deepEqual(applied, PENDING.slice(k));
   completeDeploy(g, 'retry');
   fs.rmSync(path.join(g.root, 'DEPLOY-HELD'), { force: true });
   const after = boot(g);
@@ -247,7 +249,7 @@ test('(g) a missing pending-switch record with the database ahead of the active 
 test('(a) a cut after the last commit: the boot switches forward to the payload the database was migrated for', async () => {
   const g = await gateway();
   assert.equal(g.record.format, 2, 'the record carries rule (g)\'s fingerprints');
-  const cut = migrate(g.db, { commit: 10 });
+  const cut = migrate(g.db, { commit: PENDING.length });
   assert.equal(cut.signal, 'SIGKILL');
   assert.equal(schema(g.db).ledger, g.to.ledger);
   const first = boot(g);
@@ -269,8 +271,9 @@ test('(a) a cut after the last commit: the boot switches forward to the payload 
 // nothing about the database: Node-RED is not started (CodeRabbit, #636).
 test('a boot schema decision that throws holds, with the error in the log', async () => {
   const g = await gateway();
-  const cut = migrate(g.db, { commit: 10 });
+  const cut = migrate(g.db, { commit: PENDING.length });
   assert.equal(cut.signal, 'SIGKILL');
+  assert.deepEqual(schema(g.db), g.to, 'the final commit must reach the target ledger before injecting the metadata conflict');
   fs.writeFileSync(path.join(g.root, 'payloads', 'new', 'compatibility.json'), `${JSON.stringify({ format: 1, payload_stamp: 'new', schema_head: '1', schema_ledger: 'conflict' })}\n`);
   const first = boot(g);
   assert.equal(first.started, false, first.log);

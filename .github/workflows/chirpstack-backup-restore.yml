@@ -25,3 +25,5 @@ jobs:
           dash -c 'exit 0'
       - name: Exercise every case under both shells
         run: node --test scripts/test-chirpstack-backup-restore.js scripts/test-chirpstack-helper-tools.js
+      - name: Check ChirpStack log capture and render its configuration
+        run: node --test scripts/test-chirpstack-log-capture.js

@@ -113,6 +113,7 @@ async function writeTensiomarkObservation(db, manifest, result, meta, options = 
   return db.transaction(async (tx) => {
     const before = await tx.get('SELECT COALESCE(MAX(rowid),0) AS high FROM sync_outbox');
     const written = await writer.writeDeviceData(tx, manifest, {...result, recordedAt}, meta, {...options, nowMs});
+    if (written.duplicate) return written;
     if (!written.inserted || !Number.isSafeInteger(written.deviceDataId) || written.deadLettered.length) {
       throw fail(500, 'canonical_observation_write_failed');
     }

@@ -565,65 +565,86 @@ function observationMatches(input, device, deployment) {
     && exactFiniteChannels(channels, 'soil_vic', expectedVic);
 }
 
-async function observeAcquisition(db, input) {
+async function observeAcquisitionTx(tx, input) {
   const deveui = normalizeDevEui(input && input.deveui);
   const observedAt = normalizeIso(input && input.observedAt);
-  return db.transaction(async (tx) => {
-    const device = await tx.get(
-      'SELECT sdi12_probe_profile, sdi12_channel_layout_json FROM devices WHERE deveui = ?',
-      [deveui]
-    );
-    if (!device) throw commissioningError(404, 'device_not_found');
-    const deployment = await tx.get('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?', [deveui]);
-    if (!deployment || !deployment.queue_drained_at
-      || (deployment.status !== 'queued' && deployment.status !== 'observed_once')) return null;
-    if (!strictlyAfter(observedAt, deployment.queue_drained_at)
-      || (deployment.last_observed_at
-        && !strictlyAfter(observedAt, deployment.last_observed_at))) return null;
+  const { claimEffect } = require('../osi-uplink-dedup-guard/durable');
+  if (!await claimEffect(tx, deveui, input && input.uplinkKey, 'sdi12-observation')) return null;
+  const device = await tx.get(
+    'SELECT sdi12_probe_profile, sdi12_channel_layout_json FROM devices WHERE deveui = ?',
+    [deveui]
+  );
+  if (!device) throw commissioningError(404, 'device_not_found');
+  const deployment = await tx.get('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?', [deveui]);
+  if (!deployment || !deployment.queue_drained_at
+    || (deployment.status !== 'queued' && deployment.status !== 'observed_once')) return null;
+  if (!strictlyAfter(observedAt, deployment.queue_drained_at)
+    || (deployment.last_observed_at
+      && !strictlyAfter(observedAt, deployment.last_observed_at))) return null;
 
-    if (observationMatches(input, device, deployment)) {
-      const observedCount = Number(deployment.observed_count || 0) + 1;
-      const compatible = observedCount >= 2;
-      if (compatible) {
-        const current = canonicalFromLayout(parseJson(device.sdi12_channel_layout_json));
-        await tx.run(
-          'UPDATE sdi12_recipe_deployments SET status = ?, observed_count = ?, ' +
-            'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
-            'compatible_recipe_json = desired_recipe_json, compatible_layout_json = ?, ' +
-            'compatible_at = ?, updated_at = ? WHERE deveui = ? AND desired_version = ? ' +
-            'AND status IN (?, ?) AND queue_drained_at = ?',
-          ['observed_compatible', observedCount, 0, observedAt, null,
-            JSON.stringify(current.layout), observedAt, observedAt, deveui,
-            deployment.desired_version, 'queued', 'observed_once', deployment.queue_drained_at]
-        );
-      } else {
-        await tx.run(
-          'UPDATE sdi12_recipe_deployments SET status = ?, observed_count = ?, ' +
-            'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
-            'updated_at = ? WHERE deveui = ? AND desired_version = ? AND status IN (?, ?) ' +
-            'AND queue_drained_at = ?',
-          ['observed_once', observedCount, 0, observedAt, null, observedAt, deveui,
-            deployment.desired_version, 'queued', 'observed_once', deployment.queue_drained_at]
-        );
-      }
+  if (observationMatches(input, device, deployment)) {
+    const observedCount = Number(deployment.observed_count || 0) + 1;
+    const compatible = observedCount >= 2;
+    if (compatible) {
+      const current = canonicalFromLayout(parseJson(device.sdi12_channel_layout_json));
+      await tx.run(
+        'UPDATE sdi12_recipe_deployments SET status = ?, observed_count = ?, ' +
+          'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
+          'compatible_recipe_json = desired_recipe_json, compatible_layout_json = ?, ' +
+          'compatible_at = ?, updated_at = ? WHERE deveui = ? AND desired_version = ? ' +
+          'AND status IN (?, ?) AND queue_drained_at = ?',
+        ['observed_compatible', observedCount, 0, observedAt, null,
+          JSON.stringify(current.layout), observedAt, observedAt, deveui,
+          deployment.desired_version, 'queued', 'observed_once', deployment.queue_drained_at]
+      );
     } else {
-      const failedCount = Number(deployment.failed_observation_count || 0) + 1;
-      const degraded = failedCount >= 3;
       await tx.run(
         'UPDATE sdi12_recipe_deployments SET status = ?, observed_count = ?, ' +
           'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
           'updated_at = ? WHERE deveui = ? AND desired_version = ? AND status IN (?, ?) ' +
           'AND queue_drained_at = ?',
-        [degraded ? 'degraded' : 'queued', 0, failedCount, observedAt,
-          degraded ? 'acquisition_observation_failed' : null, observedAt, deveui,
+        ['observed_once', observedCount, 0, observedAt, null, observedAt, deveui,
           deployment.desired_version, 'queued', 'observed_once', deployment.queue_drained_at]
       );
     }
-    if (await changes(tx) !== 1) return null;
-    return projectDeployment(await tx.get(
-      'SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?',
-      [deveui]
-    ));
+  } else {
+    const failedCount = Number(deployment.failed_observation_count || 0) + 1;
+    const degraded = failedCount >= 3;
+    await tx.run(
+      'UPDATE sdi12_recipe_deployments SET status = ?, observed_count = ?, ' +
+        'failed_observation_count = ?, last_observed_at = ?, last_error_code = ?, ' +
+        'updated_at = ? WHERE deveui = ? AND desired_version = ? AND status IN (?, ?) ' +
+        'AND queue_drained_at = ?',
+      [degraded ? 'degraded' : 'queued', 0, failedCount, observedAt,
+        degraded ? 'acquisition_observation_failed' : null, observedAt, deveui,
+        deployment.desired_version, 'queued', 'observed_once', deployment.queue_drained_at]
+    );
+  }
+  if (await changes(tx) !== 1) return null;
+  return projectDeployment(await tx.get(
+    'SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?',
+    [deveui]
+  ));
+
+}
+
+async function observeAcquisition(db, input) {
+  return db.transaction(tx => observeAcquisitionTx(tx, input));
+}
+
+async function recordRejectedAcquisition(db, input, effects = {}) {
+  return db.transaction(async tx => {
+    const { claimEffect } = require('../osi-uplink-dedup-guard/durable');
+    if (!await claimEffect(tx, input.deveui, input.uplinkKey, 'sdi12-rejection')) return { duplicate: true };
+    if (effects.quarantine) await effects.quarantine(tx);
+    else await require('../osi-device-writer').quarantineOnly(tx, input.deveui, input.quarantine.channel, input.quarantine.raw);
+    if (input.observe) {
+      // Database transaction scopes already nest without a new BEGIN. Keep
+      // that contract explicit for callback-backed facades too.
+      if (effects.observe) await effects.observe({ ...tx, transaction: fn => fn(tx) });
+      else await observeAcquisitionTx(tx, input);
+    }
+    return { duplicate: false };
   });
 }
 
@@ -638,5 +659,6 @@ module.exports = {
   rollbackCompatibleRecipe,
   pollDeployments,
   observeAcquisition,
+  recordRejectedAcquisition,
   projectDeployment,
 };

@@ -3855,13 +3855,16 @@ test('#404: the full current list from the zone picker saves for a partial-scope
   }
 });
 
-test('#404: an assignment to a deleted zone is cleared, and naming it does not block a save', async () => {
+test('#404: an assignment to a deleted outside-scope zone is preserved', async () => {
   const db = seedSharedStation();
   try {
     db.exec("UPDATE irrigation_zones SET deleted_at = '2026-07-01' WHERE id = 2");
     const response = await setStationZones(db, 2, 'res1', [1, 2]);
     assert.equal(response.result[1].statusCode, 200);
-    assert.deepEqual(stationZones(db), [1]);
+    assert.deepEqual(stationZones(db), [1, 2]);
+    // The outbox's canonical zone list omits deleted zones independently of
+    // the preserved local assignment.
+    assert.deepEqual(stationZoneEvents(db), [['z-1']]);
   } finally {
     db.close();
   }

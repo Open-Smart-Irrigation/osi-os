@@ -65,19 +65,9 @@ function insertRow(db, uuid, opts = {}) {
     );
 }
 
-// A promise-shaped stand-in for osi-db-helper's Database facade, backed by the
-// real seed schema: run(sql, cb) / all(sql, cb) / close(cb), exactly the shapes
-// the shipped nodes call.
+// Exercise the shipped helper contract over the seeded fixture connection.
 function osiDbStub(db) {
-  return {
-    Database: function () {
-      return {
-        run(sql, cb) { try { db.exec(sql); cb(null); } catch (e) { cb(e); } },
-        all(sql, cb) { try { cb(null, db.prepare(sql).all()); } catch (e) { cb(e); } },
-        close(cb) { cb(); },
-      };
-    },
-  };
+  return require('./lib/queued-db-fixture').osiDbFor(db);
 }
 
 // Run the SHIPPED sync-outbox-mark body verbatim.

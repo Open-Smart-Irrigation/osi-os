@@ -42,6 +42,8 @@ function normalizeDbArgs(params, callback) {
 
 // Mirrors the production osiDb.Database facade: node-style callbacks when a
 // callback is supplied, promises otherwise, over one shared DatabaseSync.
+const transactionQueues = new WeakMap();
+
 function facadeDb(db) {
   const settle = (run) => (sql, params, callback) => {
     const args = normalizeDbArgs(params, callback);
@@ -71,16 +73,24 @@ function facadeDb(db) {
       if (callback) callback();
       return Promise.resolve();
     },
-    async transaction(fn) {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const result = await fn(facade);
-        db.exec('COMMIT');
-        return result;
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
+    transaction(fn) {
+      const execute = async () => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          // Production scopes expose operations, not a nested transaction API.
+          const scope = {get:facade.get,all:facade.all,run:facade.run,
+            exec:async sql => db.exec(sql)};
+          const result = await fn(scope);
+          db.exec('COMMIT');
+          return result;
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      };
+      const result = (transactionQueues.get(db) || Promise.resolve()).then(execute);
+      transactionQueues.set(db,result.then(() => undefined,() => undefined));
+      return result;
     },
   };
   return facade;
