@@ -1,7 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdvancedViewPanel } from './AdvancedViewPanel';
-import { CalendarView } from './CalendarView';
+import { HistoryMonthCalendarView } from './visualizations/HistoryMonthCalendarView';
+import type { CalendarMonth } from '../../history/calendarMonth';
 import { InterpretationList } from './InterpretationList';
 import { DendroGrowthTimelineView } from './visualizations/DendroGrowthTimelineView';
 import { DendroLineChartView } from './visualizations/DendroLineChartView';
@@ -36,6 +37,7 @@ interface HistoryCardVisualizationProps {
   window?: HistoryVisualWindow;
   onInspectDate?: (selection: HistoryCalendarDateSelection) => void;
   selectedCalendarDate?: string | null;
+  requestedCalendarMonth?: CalendarMonth;
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
@@ -72,6 +74,7 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   window: chartWindow,
   onInspectDate,
   selectedCalendarDate = null,
+  requestedCalendarMonth,
 }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
@@ -200,11 +203,12 @@ export const HistoryCardVisualization: React.FC<HistoryCardVisualizationProps> =
   if (shouldRenderCalendar) {
     return (
       <>
-        <CalendarView
+        <HistoryMonthCalendarView
           cardType={card.cardType}
           calendar={currentData?.calendar}
           onInspectDate={onInspectDate}
           selectedDate={selectedCalendarDate}
+          requestedMonth={requestedCalendarMonth}
         />
         <InterpretationList interpretations={currentData?.interpretations ?? []} />
       </>
