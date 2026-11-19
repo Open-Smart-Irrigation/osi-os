@@ -11,8 +11,8 @@ import pt from '../../../public/locales/pt/settings.json';
 
 const LEGACY_KEYS = ['linkedSignIn', 'linkedResetGuidance', 'signInUnknown', 'linkedResetRefused', 'resetError', 'resetRefreshFailed'];
 const TRANSLATED: Record<string, unknown> = { 'de-CH': deCH, es, fr, it: itLocale, pt };
-// B24 owns the human Luganda pass. The handoff records the new B3 keys
-// needing rows in docs/i18n/pending-luganda-translations.md (outside B3 ownership).
+// B24 owns the human Luganda pass. Pending Users keys are recorded in
+// docs/i18n/pending-luganda-translations.md, including UI FIX-LIST B3.
 // Remove the allowlist entry and ledger row together after human translation.
 const PENDING_HUMAN_LUGANDA = new Set(Object.keys(en.users));
 
