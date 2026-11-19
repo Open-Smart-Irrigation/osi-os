@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from 'react';
 import type { AnalysisRange } from '../../../analysis/types';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 
@@ -48,6 +49,30 @@ function toDatetimeLocalValue(iso: string): string {
 }
 
 describe('AnalysisControls', () => {
+  it.each(['7d', 'custom'])('cancels Custom with Escape from its keyboard-focused trigger, keeping %s committed', async (rangeLabel) => {
+    const user = userEvent.setup();
+    const props = renderControls({
+      rangeLabel,
+      range: rangeLabel === 'custom'
+        ? { mode: 'custom', label: 'custom', from: '2026-06-01T00:00:00Z', to: '2026-06-02T00:00:00Z' }
+        : { mode: 'relative', label: '7d', from: null, to: null },
+    });
+    const custom = screen.getByRole('button', { name: 'analysis.range.custom' });
+    custom.focus();
+    await user.keyboard('{Enter}');
+    expect(custom).toHaveFocus();
+    expect(custom).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+
+    expect(custom).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('analysis.range.from')).not.toBeInTheDocument();
+    expect(custom).toHaveFocus();
+    expect(props.onRangeChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: rangeLabel === 'custom' ? 'analysis.range.custom' : '7d' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('group', { name: 'analysis.range.label' }).querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
+  });
+
   it('keeps only the committed range pressed while editing and cancelling Custom', () => {
     const props = renderControls();
     const custom = screen.getByRole('button', { name: 'analysis.range.custom' });

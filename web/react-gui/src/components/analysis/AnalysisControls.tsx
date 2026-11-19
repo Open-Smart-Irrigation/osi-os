@@ -97,7 +97,12 @@ export function AnalysisControls({
   };
 
   return (
-    <div className="analysis-controls min-w-0 flex flex-col gap-3">
+    <div className="analysis-controls min-w-0 flex flex-col gap-3" onKeyDown={(event) => {
+      if (event.key === 'Escape' && customOpen) {
+        event.preventDefault();
+        cancelCustomRange();
+      }
+    }}>
       <div className="flex flex-wrap items-center gap-4">
         <div
           className="analysis-control-group analysis-ranges inline-flex max-w-full flex-wrap gap-1"
@@ -178,12 +183,7 @@ export function AnalysisControls({
         ) : null}
       </div>
       {showCustom ? (
-        <div id={customPanelId} onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            cancelCustomRange();
-          }
-        }} className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
+        <div id={customPanelId} className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
           <label className="flex min-w-0 max-w-full flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
             {t('analysis.range.from')}
             <input
