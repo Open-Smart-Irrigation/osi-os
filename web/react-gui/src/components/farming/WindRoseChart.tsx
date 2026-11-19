@@ -45,7 +45,7 @@ function useWindRoseTheme(): WindRoseTheme {
   return theme;
 }
 
-// Orientation: N at top (startAngle 90), sectors clockwise NNE -> E -> S -> W.
+// Without a category boundary gap, N is centered at 90 degrees (top); sectors run clockwise.
 export function buildWindRoseOption(rose: WindRose, theme: WindRoseTheme): Record<string, unknown> {
   const directions = rose.sectors.map((sector) => sector.direction);
 
@@ -63,7 +63,7 @@ export function buildWindRoseOption(rose: WindRose, theme: WindRoseTheme): Recor
       data: directions,
       startAngle: 90,
       clockwise: true,
-      boundaryGap: true,
+      boundaryGap: false,
       axisLine: { lineStyle: { color: theme.axisLine } },
       axisLabel: { color: theme.axisLabel },
     },
