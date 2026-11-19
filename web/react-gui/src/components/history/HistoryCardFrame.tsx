@@ -198,16 +198,21 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        <HistoryCardVisualization
-          card={card}
-          data={cardData.data}
-          selectedView={selectedView}
-          isLoading={cardData.isLoading}
-          error={cardData.error}
-          advancedData={advancedData.data}
-          advancedIsLoading={advancedData.isLoading}
-          advancedError={advancedData.error}
-        />
+        <div
+          data-testid="history-card-plot"
+          className={selectedView === 'line-chart' ? 'flex h-[28rem] min-w-0 flex-col' : undefined}
+        >
+          <HistoryCardVisualization
+            card={card}
+            data={cardData.data}
+            selectedView={selectedView}
+            isLoading={cardData.isLoading}
+            error={cardData.error}
+            advancedData={advancedData.data}
+            advancedIsLoading={advancedData.isLoading}
+            advancedError={advancedData.error}
+          />
+        </div>
       </div>
     </section>
   );

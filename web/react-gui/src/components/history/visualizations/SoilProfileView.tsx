@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { soilStatusVisual } from '../../../history/soilStatus';
 import { displayHistorySeriesLabel } from '../../../history/sourceIdentity';
 import type { HistoryProfilePoint } from '../../../history/types';
+import { useFormatNumber } from '../../../utils/number';
+import { useDisplayPreferences } from '../../../utils/displayPreferences';
+import { kpaToPf, type SwtUnit } from '../../../utils/swt';
 
 interface SoilProfileViewProps {
   profiles: HistoryProfilePoint[];
@@ -64,9 +67,14 @@ function compareProfileDepth(a: RenderableProfilePoint, b: RenderableProfilePoin
   return (a.label ?? '').localeCompare(b.label ?? '');
 }
 
-function formatValue(t: HistoryTranslate, point: RenderableProfilePoint): string {
+function formatValue(t: HistoryTranslate, point: RenderableProfilePoint, formatNumber: ReturnType<typeof useFormatNumber>, swtUnit: SwtUnit): string {
   if (point.value === null) return t('history.soilProfile.valueMissing');
-  return point.unit ? `${point.value} ${point.unit}` : String(point.value);
+  if (point.unit === 'kPa' && swtUnit === 'pF' && point.value > 0) {
+    return `${formatNumber(kpaToPf(point.value), 2)} pF`;
+  }
+  const digits = point.unit === 'pF' ? 2 : 1;
+  const value = formatNumber(point.value, digits);
+  return point.unit ? `${value} ${point.unit}` : value;
 }
 
 function formatDepth(t: HistoryTranslate, depthCm: number | null | undefined): string {
@@ -91,6 +99,8 @@ function formatStatus(t: HistoryTranslate, status: string): string {
 export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) => {
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
+  const formatNumber = useFormatNumber();
+  const { swtUnit } = useDisplayPreferences();
   const sortedProfiles = profiles
     .map((point, index) => normalizeProfilePoint(point, index))
     .sort(compareProfileDepth);
@@ -150,7 +160,7 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
                 )}
               </div>
               <div className="col-span-2 flex items-center text-base font-bold text-[var(--text)] sm:col-span-1 sm:justify-end">
-                {formatValue(t, point)}
+                {formatValue(t, point, formatNumber, swtUnit)}
               </div>
             </div>
           );
