@@ -935,29 +935,24 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       const error = new Error('manifest work deadline'); error.code = 'MANIFEST_BUDGET'; throw error;
     }
   };
-  // A page's membership can change on every refresh. Resume by ordered segment
-  // identity within the link, including when the previous segment was removed.
-  // Keep disjoint manifest pages independent; match refreshed ranges by their
-  // largest overlap so shifted page boundaries do not restart every batch.
-  // The versioned key leaves old page-hash offsets unused without a migration.
+  // Resume only a range whose unfinished position lies inside this answer's bounds.
+  // A shorter overlapping page must not rewind another range when it wraps.
   comparisons = comparisons.filter(Boolean).sort((left, right) => compareRepairPositions(repairPosition(left), repairPosition(right)));
-  const pageKey = 'history_repair_cursor:v2';
+  const pageKey = 'history_repair_cursor:v3';
   const scope = request.scope || null;
-  const saved = (await q('SELECT value FROM app_settings WHERE key=?', [pageKey]))[0];
+  const saved = (await q('SELECT value FROM app_settings WHERE key=? AND length(CAST(value AS BLOB))<=32768', [pageKey]))[0];
   const cursor = saved ? JSON.parse(saved.value) : null;
-  const pages = cursor && cursor.scope === scope && Array.isArray(cursor.pages) ? cursor.pages : [];
-  let page = null, largestOverlap = 0;
+  const pages = cursor && cursor.scope === scope && Array.isArray(cursor.pages) ? cursor.pages.filter(page => page.after).slice(0, 32) : [];
+  const first = comparisons.length ? repairPosition(comparisons[0]) : null;
+  const last = comparisons.length ? repairPosition(comparisons[comparisons.length - 1]) : null;
+  let page = null;
   for (const candidate of pages) {
-    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) return {
-      repairCount: 0, repairSkipped: comparisons.filter(c => c.repairRequested === true).length,
-      examinedRows: 0, examinedSegments: 0, quarantinedSegments: 0
-    };
-    const overlap = comparisons.filter(comparison => compareRepairPositions(repairPosition(comparison), candidate.first) >= 0 && compareRepairPositions(repairPosition(comparison), candidate.last) <= 0).length;
-    if (overlap > largestOverlap) { page = candidate; largestOverlap = overlap; }
+    if (first && compareRepairPositions(candidate.after, first) >= 0 && compareRepairPositions(candidate.after, last) < 0 &&
+        (!page || compareRepairPositions(candidate.after, page.after) > 0)) page = candidate;
   }
   const after = page ? page.after : null;
   let index = after ? comparisons.findIndex(comparison => compareRepairPositions(repairPosition(comparison), after) > 0) : 0;
-  if (index < 0) index = 0; // Wrap to revisit deferred work and earlier insertions.
+  if (index < 0) index = 0;
   let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
   const pendingRepair = {};
   while (index < comparisons.length && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
@@ -1078,15 +1073,33 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     }
   }
   repairSkipped += comparisons.slice(index).filter(c => c && c.repairRequested === true).length;
-  // index advances only after a segment is handled. A rolled-back deadline or
-  // row-budget deferral retains the position before that segment for retry.
-  // A completed page starts a fresh pass even if more tail segments arrive.
-  if (comparisons.length) {
-    if (!page) { page = {}; pages.push(page); }
-    Object.assign(page, { first: repairPosition(comparisons[0]), last: repairPosition(comparisons[comparisons.length - 1]),
-      after: index >= comparisons.length ? null : index > 0 ? repairPosition(comparisons[index - 1]) : after });
+  // Advance only after handling a segment. Preserve a selected range's tail
+  // when this answer ends earlier, and prune ranges only after their full tail.
+  if (comparisons.length && index > 0) {
+    if (!page) { page = { first, last }; pages.push(page); }
+    if (compareRepairPositions(first, page.first) < 0) page.first = first;
+    if (compareRepairPositions(last, page.last) > 0) page.last = last;
+    page.after = repairPosition(comparisons[index - 1]);
+    if (compareRepairPositions(page.after, page.last) >= 0) pages.splice(pages.indexOf(page), 1);
   }
-  await db.transaction(async tx => saveRepairState(tx, pageKey, { scope, pages }, now));
+  // Bound lookup to 32 unfinished ranges and JSON to 32 KiB. Overflow combines
+  // the oldest ranges from the earlier resume position: replay is safe, whereas
+  // dropping an unfinished tail would lose its continuation. Usually completion
+  // pruning alone suffices, so completed answers never displace active work.
+  let value = JSON.stringify({ scope, pages });
+  while (pages.length > 32 || Buffer.byteLength(value) > 32768) {
+    if (pages.length < 2) throw new Error('history repair cursor exceeds storage budget');
+    const left = pages.shift(), right = pages.shift();
+    pages.push({ first: compareRepairPositions(left.first, right.first) < 0 ? left.first : right.first,
+      last: compareRepairPositions(left.last, right.last) > 0 ? left.last : right.last,
+      after: compareRepairPositions(left.after, right.after) < 0 ? left.after : right.after });
+    value = JSON.stringify({ scope, pages });
+  }
+  await db.transaction(async tx => {
+    await saveRepairState(tx, pageKey, { scope, pages }, now);
+    // Indexed, bounded cleanup also removes the obsolete unbounded v2 value.
+    await tx.run("DELETE FROM app_settings WHERE key IN (SELECT key FROM app_settings WHERE key>='history_repair_cursor:' AND key<'history_repair_cursor;' AND key<>? ORDER BY key LIMIT 32)", [pageKey]);
+  });
   return { repairCount, repairSkipped, examinedRows, examinedSegments, quarantinedSegments };
 }
 
