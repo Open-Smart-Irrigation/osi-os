@@ -463,6 +463,9 @@ test('identity conflict is quarantined, not overwritten', async () => {
   const wet = await h.uplink(at(10), v2(6, 101));
   const raw = v2(6, 150);
   assert.deepEqual(await h.deliver({ ...wet.payload, data: Buffer.from(raw, 'hex').toString('base64'), object: decode(raw) }), []);
+  for (let replay=0;replay<2;replay++) {
+    assert.deepEqual(await h.deliver({ ...wet.payload, data: Buffer.from(raw, 'hex').toString('base64'), object: decode(raw) }), []);
+  }
   assert.deepEqual(rows(db, 'SELECT deveui, channel, reason FROM ingest_quarantine'),
     [{ deveui: DEV_EUI, channel: 'rain_observation', reason: 'identity_conflict' }]);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);

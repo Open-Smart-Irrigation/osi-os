@@ -31,4 +31,13 @@ function sdi12Key(info) {
   return createHash('sha256').update(JSON.stringify([...new Set(keys)].sort())).digest('hex');
 }
 
-module.exports = { eventKey, sdi12Key };
+// The caller owns a transaction containing both the receipt and its effect.
+// No usable identity means fail open; no receipt may suppress such an event.
+async function claimEffect(tx, deveui, key, effect) {
+  if (!key) return true;
+  return Boolean(await tx.get('INSERT INTO uplink_effect_receipts(deveui,uplink_key,effect) '
+    + 'VALUES(?,?,?) ON CONFLICT(deveui,uplink_key,effect) DO NOTHING RETURNING uplink_key',
+  [String(deveui).trim().toUpperCase(), key, effect]));
+}
+
+module.exports = { eventKey, sdi12Key, claimEffect };

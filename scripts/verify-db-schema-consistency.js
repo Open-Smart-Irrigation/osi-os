@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const { SEED_DB_PATHS: seedDatabasePaths } = require('./seed-db-paths');
 
 const schemaContract = {
+  uplink_effect_receipts: ['deveui', 'uplink_key', 'effect'],
   chameleon_reading_links: ["chameleon_reading_id", "device_data_id", "linked_at"],
   tensiomark_observations: ["id", "device_data_id", "deveui", "recorded_at", "received_at", "raw_response", "payload_base64", "configuration_hash", "configuration_json", "disposition", "normalized_json"],
   radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],

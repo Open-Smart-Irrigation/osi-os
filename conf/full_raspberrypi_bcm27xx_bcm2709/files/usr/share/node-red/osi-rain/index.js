@@ -1119,6 +1119,9 @@ async function claimObservationIdentity(t, id) {
 }
 
 async function quarantineConflict(t, id) {
+  const { eventKey, claimEffect } = require('../osi-uplink-dedup-guard/durable');
+  const identity = id.eventId || (id.fCnt !== null ? JSON.stringify([id.devAddr,id.fCnt,id.digest]) : null);
+  if (!await claimEffect(t, id.deveui, eventKey('rain-conflict',{deduplicationId:identity}), 'rain-conflict')) return;
   await t.run("INSERT INTO ingest_quarantine (deveui, channel, reason, raw_value) VALUES (?, 'rain_observation', 'identity_conflict', ?)",
     [id.deveui, JSON.stringify({ eventId: id.eventId, devAddr: id.devAddr, fCnt: id.fCnt, digest: id.digest, receivedAt: id.receivedAt })]);
 }

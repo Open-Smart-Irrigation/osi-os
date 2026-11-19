@@ -253,6 +253,25 @@ CASES.push({
   },
 });
 
+CASES.push({
+  name:'legacy rejoin with reused fCnt and a distinct network time stores both readings',
+  async run() {
+    const db=freshDb(); const realNow=Date.now;
+    Date.now=()=>1800000000000;
+    dedupGuard._defaultGuard.reset();
+    try {
+      const first=chirpstackEvent({object:decode(CLOVER_FRAME,10).data,time:'2026-11-19T10:00:00Z',fCnt:1});
+      delete first.deduplicationId;
+      await ingest(db,first);
+      const next={...first,time:'2026-11-19T10:00:30Z',object:{...first.object,ambient_temperature:19}};
+      await ingest(db,next);
+      const rows=db.prepare('SELECT ambient_temperature FROM device_data ORDER BY id').all();
+      assert.equal(rows.length,2);
+      assert.equal(rows[1].ambient_temperature,19);
+      assert.notEqual(rows[0].ambient_temperature,rows[1].ambient_temperature);
+    } finally {db.close();dedupGuard._defaultGuard.reset();Date.now=realNow;}
+  }
+});
 (async () => {
   let failed = 0;
   for (const testCase of CASES) {

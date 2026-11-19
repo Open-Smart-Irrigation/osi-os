@@ -186,14 +186,14 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
   if (key) { cols.push('uplink_key'); vals.push(key); }
 
-  for (const write of plan.quarantineWrites) {
-    deadLetterSync(db, deveui, write.channel, write.reason, write.rawValue);
-  }
-  if (plan.quarantineWrites.length > 0) {
-    evictQuarantineSync(db);
-  }
 
   if (shadow) {
+    for (const write of plan.quarantineWrites) {
+      deadLetterSync(db, deveui, write.channel, write.reason, write.rawValue);
+    }
+    if (plan.quarantineWrites.length > 0) {
+      evictQuarantineSync(db);
+    }
     const shadowRow = {};
     for (let i = 0; i < cols.length; i++) {
       shadowRow[cols[i]] = vals[i];
@@ -205,6 +205,13 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
   const insertedRow = db.prepare(sql + (key ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : '') + ' RETURNING id').get(...vals);
   if (!insertedRow) return duplicateResult(findDuplicate());
+  for (const write of plan.quarantineWrites) {
+    deadLetterSync(db, deveui, write.channel, write.reason, write.rawValue);
+  }
+  if (plan.quarantineWrites.length > 0) {
+    evictQuarantineSync(db);
+  }
+
 
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
@@ -247,14 +254,14 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
   const vals = [deveui, clamp.recordedAt].concat(plan.vals);
   if (key) { cols.push('uplink_key'); vals.push(key); }
 
-  for (const write of plan.quarantineWrites) {
-    await deadLetterAsync(db, deveui, write.channel, write.reason, write.rawValue);
-  }
-  if (plan.quarantineWrites.length > 0) {
-    await evictQuarantineAsync(db);
-  }
 
   if (shadow) {
+    for (const write of plan.quarantineWrites) {
+      await deadLetterAsync(db, deveui, write.channel, write.reason, write.rawValue);
+    }
+    if (plan.quarantineWrites.length > 0) {
+      await evictQuarantineAsync(db);
+    }
     const shadowRow = {};
     for (let i = 0; i < cols.length; i++) {
       shadowRow[cols[i]] = vals[i];
@@ -266,6 +273,13 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
   const insertedRow = await db.get(sql + (key ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : '') + ' RETURNING id', vals);
   if (!insertedRow) return duplicateResult(await findDuplicate());
+  for (const write of plan.quarantineWrites) {
+    await deadLetterAsync(db, deveui, write.channel, write.reason, write.rawValue);
+  }
+  if (plan.quarantineWrites.length > 0) {
+    await evictQuarantineAsync(db);
+  }
+
 
   return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }

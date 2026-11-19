@@ -39,7 +39,8 @@ conflicting insert. LSN50 skips downstream Chameleon/dendrometer writes when
 its canonical row already exists. WATERMARK's raw receipt and measurement share
 one transaction, including rejected-frame receipts. Tensiomark skips its evidence
 insert on a duplicate canonical row. The SDI12 archive also suppresses retries.
-The existing in-memory guards remain an additional short-lived filter.
+The in-memory guard uses the same network identity builder as the durable
+key. Local receipt time controls cache expiry only; it never proves a duplicate.
 
 STREGA checks its receipt inside the existing observation transaction, before
 applying the report to observed state. This also stops an old report with an
@@ -47,10 +48,23 @@ untrusted timestamp from replacing a newer observed state after redelivery.
 Repeated CLOSED reports retain the existing post-commit close-evidence retry.
 SDI12 duplicates skip acquisition bookkeeping and first-join work, so timestamp
 clamping cannot turn repeated delivery into several commissioning failures.
+Unsupported payloads retain their original frames before the gate returns.
+The edge-local `uplink_effect_receipts` table in migration 0081 covers effects
+without a canonical measurement: rejection quarantine and commissioning updates
+commit with their receipts in one transaction. Observation failures roll them
+back for retry. Identify replies and STREGA ACKs also use transactional receipts,
+so an old reply cannot advance a later attempt or consume a successor push.
+The shared writer inserts unknown-channel quarantine only for the winning
+canonical insert, including concurrent deliveries.
 
 S2120 and LoRain already claim a durable `rain_observations` event identity.
+Identity-conflict quarantine also has a transactional receipt, so a repeated
+conflict adds no further evidence rows.
 Radio capture already merges observations by installation and deduplication id;
-field-tester uplinks use a unique deduplication id. The new keys are edge-local:
+missing network ids use the same original timestamp/frame fallback. Field-tester
+reply enqueueing has a separate receipt; a failed enqueue rolls it back. MQTT
+relay outputs still carry at-least-once transport semantics; their receivers
+must handle repeated envelopes. The new keys are edge-local:
 sync event fields and canonical history hashes keep their existing contracts.
 
 ## Script-upgraded gateways

@@ -109,3 +109,40 @@ test('additive migration preserves old rows and leaves them outside the partial 
     }
   } finally {db.close();}
 });
+
+
+test('review identity probe: device separation, rejoin, exact replay and original timestamp precision', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE device_data(id INTEGER PRIMARY KEY,deveui TEXT,recorded_at TEXT,ambient_temperature REAL,uplink_key TEXT); CREATE UNIQUE INDEX uq_device_data_uplink ON device_data(deveui,uplink_key) WHERE uplink_key IS NOT NULL');
+  try {
+    const manifest = [{key:'ambient_temperature',edgeField:'ambient_temperature'}];
+    const normalized = {recordedAt:envelope.time,channels:{ambient_temperature:20}};
+    const write = (deveui,event) => writer.writeDeviceData(db,manifest,normalized,{deveui,uplinkKey:eventKey('kiwi',event)});
+    assert.equal(write('A840410000000001',envelope).inserted,true);
+    assert.equal(write('A840410000000002',envelope).inserted,true);
+    assert.equal(write('A840410000000001',{...envelope,deduplicationId:'rejoin'}).inserted,true);
+    assert.equal(write('A840410000000001',envelope).duplicate,true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,3);
+    assert.notEqual(eventKey('kiwi',{fCnt:1,time:'2026-11-19T10:00:00.000001Z'}),
+      eventKey('kiwi',{fCnt:1,time:'2026-11-19T10:00:00.000002Z'}));
+    const guard = require('./index').createGuard();
+    const identity = {source:'kiwi',devEui:'A840410000000001',event:{fCnt:1,time:envelope.time},receivedAtMs:1};
+    assert.equal(guard.isDuplicateUplink(identity),false);
+    assert.equal(guard.isDuplicateUplink({...identity,receivedAtMs:2}),true);
+    assert.equal(guard.isDuplicateUplink({...identity,event:{fCnt:1,time:'2026-11-19T10:00:30Z'}}),false);
+    assert.equal(require('./index').buildDedupKey(identity),identity.devEui+':'+eventKey('kiwi',identity.event));
+  } finally {db.close();}
+});
+
+test('concurrent canonical redeliveries write unknown-channel quarantine once', async () => {
+  const { facadeDb, seedTestDb } = require('../../../../../../../scripts/lib/flow-node-harness');
+  const db = seedTestDb();
+  try {
+    const normalized = {recordedAt:envelope.time,channels:{},unknown:{unsupported_sensor:23}};
+    const meta = {deveui:'WX1',uplinkKey:eventKey('uc512',envelope)};
+    const results = await Promise.all([writer.writeDeviceData(facadeDb(db),[],normalized,meta),writer.writeDeviceData(facadeDb(db),[],normalized,meta)]);
+    assert.equal(results.filter(r=>r.inserted).length,1);
+    assert.equal(results.filter(r=>r.duplicate).length,1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n,1);
+  } finally {db.close();}
+});

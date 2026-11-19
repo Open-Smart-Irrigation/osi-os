@@ -13,13 +13,9 @@
 //     two different deduplicationIds are never collapsed, regardless of
 //     devEui/fCnt, and a redelivery (same physical event, republished)
 //     always carries the SAME deduplicationId.
-//   - Fall back to (devEui, fCnt, time-bucket) only when deduplicationId is
-//     absent. fCnt ALONE is not safe across a rejoin (LoRaWAN resets a
-//     device's own frame counter on rejoin), so the fallback also buckets
-//     the local receipt time into fixed windows (default: the same size as
-//     the cache's own TTL) -- two uplinks sharing a devEui+fCnt but more
-//     than one bucket apart in wall-clock receipt time are never treated as
-//     the same event.
+//   - Fall back to the same original network timestamp/frame identity used
+//     by durable.js. Receipt time controls cache expiry only. Without a usable
+//     network identity, fail open instead of suppressing a new reading.
 //   - Every key is namespaced by an optional `source` (e.g. 'kiwi', 'strega',
 //     's2120', 'lorain', 'lsn50', 'uc512', 'sdi12'). All 10 `mqtt in` nodes
 //     in flows.json share the identical wildcard topic
@@ -71,40 +67,18 @@ function safeIdentityString(value) {
   return null;
 }
 
-function safeFiniteNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value === 'string') {
-    const n = Number(value); // Number() on a string never throws, unlike on an object
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-// Pure function: given uplink identity fields, decide the cache key. Never
-// touches any cache state, so it is trivially unit-testable on its own, and
-// never throws regardless of input shape (see the fail-open note above).
-function buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = {}) {
-  const prefix = (typeof source === 'string' && source) ? source + ':' : '';
-
-  const dedupIdRaw = safeIdentityString(deduplicationId);
-  const dedupId = dedupIdRaw != null ? dedupIdRaw.trim() : '';
-  if (dedupId) return prefix + 'D:' + dedupId;
-
-  const euiRaw = safeIdentityString(devEui);
-  const eui = euiRaw != null ? euiRaw.trim().toUpperCase() : '';
-  const fCntNumber = safeFiniteNumber(fCnt);
-  if (!eui || fCntNumber === null) {
-    // Not enough identity to dedup safely. Returning null tells the caller
-    // to treat this as never-a-duplicate -- an occasional extra row is far
-    // safer than silently dropping telemetry we cannot positively identify.
-    return null;
-  }
-  const bucketSize = (typeof bucketMs === 'number' && Number.isFinite(bucketMs) && bucketMs > 0)
-    ? bucketMs
-    : DEFAULT_TTL_MS;
-  const now = (typeof receivedAtMs === 'number' && Number.isFinite(receivedAtMs)) ? receivedAtMs : Date.now();
-  const bucket = Math.floor(now / bucketSize);
-  return prefix + 'F:' + eui + ':' + fCntNumber + ':' + bucket;
+// Both guards use eventKey; the memory map additionally scopes by device,
+// just as the database's (deveui,uplink_key) unique index does.
+function buildDedupKey(identity = {}) {
+  try {
+    const event = identity.event || identity;
+    const source = typeof identity.source === 'string' && identity.source ? identity.source : 'uplink';
+    const euiRaw = safeIdentityString(identity.devEui ?? event.deviceInfo?.devEui);
+    const eui = euiRaw == null ? '' : euiRaw.trim().toUpperCase();
+    if (!eui && !(typeof event.deduplicationId === 'string' && event.deduplicationId.trim())) return null;
+    const key = require('./durable').eventKey(source, event);
+    return key ? eui + ':' + key : null;
+  } catch (_error) { return null; }
 }
 
 // A bounded, TTL-evicting cache of "keys already seen". Insertion order in a
@@ -164,9 +138,8 @@ function createGuard(options) {
   // input.
   function isDuplicateUplink(identity) {
     try {
-      const { source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs } = identity || {};
-      const key = buildDedupKey({ source, deduplicationId, devEui, fCnt, receivedAtMs, bucketMs });
-      return checkAndRecord(key, receivedAtMs);
+      const key = buildDedupKey(identity);
+      return checkAndRecord(key, identity && identity.receivedAtMs);
     } catch (_e) {
       return false;
     }
