@@ -372,6 +372,20 @@ regardless of payload. To inspect or change ChirpStack config on a live Pi:
   /etc/init.d/chirpstack start
   ```
 
+### ChirpStack backup and restore helpers (LuCI buttons)
+
+`/opt/chirpstack/backup.sh` and `restore.sh` run from the LuCI backup and restore
+buttons. Their last line says what happened: `OK: ...`, `ERROR: ...`,
+`ROLLED BACK: ...` or `ERROR: ROLLBACK INCOMPLETE`.
+
+- **If `restore.sh` reports a failure, the restore did not happen.** Check the
+  services' data before relying on it.
+- **v0.8.3 limit:** a restore that fails before it moves the first live file
+  restarts ChirpStack and Redis on the files they had before the attempt,
+  without first verifying them.
+- **After `ROLLBACK INCOMPLETE`,** the services stay stopped. Follow the printed
+  recovery steps exactly before you start anything.
+
 ### Flows fail to load / all routes 404
 
 `functionExternalModules: true` is set in `settings.js` (confirmed at
