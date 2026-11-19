@@ -174,6 +174,19 @@ for (const profile of PROFILES) {
     const result = await call([{ tableName: 'device_data', segmentKey: SENSOR + '|2040-01-01', repairRequested: true }], () => (elapsed += 3));
     assert.equal(result.examinedSegments, 1, 'even a full cursor set leaves work budget under the charged clock');
   });
+  test(`${profile}: more recurring pages than cursor slots still visit every unfinished tail`, async t => {
+    const { db, h } = fixture(t, profile, 0);
+    const adapter = sqliteAdapter(db);
+    const pages = Array.from({ length: 40 }, (_, range) => Array.from({ length: 40 }, (_, i) => ({ tableName: 'device_data',
+      segmentKey: SENSOR + '|' + new Date(Date.UTC(2020, 0, range * 100 + i + 1)).toISOString().slice(0, 10), repairRequested: true })));
+    for (let round = 0; round < 20; round++) for (const comparisons of pages) {
+      const result = await h.helper.queueManifestRepairs({ comparisons, db: adapter, q: adapter.q, sourceQuery: async () => [],
+        now: '2026-11-19', gatewayEui: GATEWAY, request: { scope: 'same-link' }, clock: () => 0 });
+      assert.ok(result.examinedSegments <= 32);
+    }
+    for (const page of pages) assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(
+      'history_repair_segment:' + JSON.stringify(['device_data', page[39].segmentKey])), 'compaction must allow every recurring tail to advance');
+  });
   test(`${profile}: completed answers preserve active progress and remove legacy offsets in bounded batches`, async t => {
     const { db, h } = fixture(t, profile, 0);
     const adapter = sqliteAdapter(db);

@@ -935,7 +935,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       const error = new Error('manifest work deadline'); error.code = 'MANIFEST_BUDGET'; throw error;
     }
   };
-  // Resume only a range whose unfinished position lies inside this answer's bounds.
+  // Resume an unfinished range that intersects this answer's ordered bounds.
   // A shorter overlapping page must not rewind another range when it wraps.
   comparisons = comparisons.filter(Boolean).sort((left, right) => compareRepairPositions(repairPosition(left), repairPosition(right)));
   const pageKey = 'history_repair_cursor:v3';
@@ -947,7 +947,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
   const last = comparisons.length ? repairPosition(comparisons[comparisons.length - 1]) : null;
   let page = null;
   for (const candidate of pages) {
-    if (first && compareRepairPositions(candidate.after, first) >= 0 && compareRepairPositions(candidate.after, last) < 0 &&
+    if (first && compareRepairPositions(candidate.last, first) >= 0 && compareRepairPositions(candidate.after, last) < 0 &&
         (!page || compareRepairPositions(candidate.after, page.after) > 0)) page = candidate;
   }
   const after = page ? page.after : null;
