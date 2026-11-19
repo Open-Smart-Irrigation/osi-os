@@ -3,6 +3,7 @@
 function handleWrite({msg,node,osiLib,osiDb,global,context}) {
 var info = msg.sdi12;
 if (!info) return null;
+const uplinkKey = require('../osi-uplink-dedup-guard/durable').sdi12Key(info);
 var row = Array.isArray(msg.payload) && msg.payload.length ? msg.payload[0] : {};
 
 function reportFailure(stage) {
@@ -48,7 +49,7 @@ return (async () => {
   var tensiomarkLayout = row.sdi12_probe_profile === 'TENSIOMARK'
     ? normRes.value.validateTensiomarkLayout(row.sdi12_channel_layout_json) : null;
   var configuredTensiomark = tensiomarkLayout && tensiomarkLayout.ok;
-  async function observeBestEffort(db, normalization, outcome, observedAt) {
+  async function observeBestEffort(db, normalization, outcome, observedAt, strict = false) {
     if (!shouldObserve()) return;
     if (!commissioningRes.ok) {
       node.warn('SDI12 recipe observation failed code=helper_unavailable');
@@ -56,16 +57,16 @@ return (async () => {
     }
     try {
       await commissioningRes.value.observeAcquisition(db, {
-        deveui: info.deveui, observedAt: observedAt, profileId: row.sdi12_probe_profile || null,
+        deveui: info.deveui, ...(uplinkKey ? {uplinkKey:uplinkKey} : {}), observedAt: observedAt, profileId: row.sdi12_probe_profile || null,
         layout: row.sdi12_channel_layout_json, normalization: normalization, outcome: outcome
       });
     } catch (error) {
+      if (strict) throw error;
       node.warn('SDI12 recipe observation failed code=' + boundedObservationCode(error));
     }
   }
   if (info.quarantineOnly && !configuredTensiomark) {
     var qdb = null;
-    var quarantineWritten = false;
     var quarantineNow = Date.now();
     var quarantineObservedAt = info.recordedAt || new Date(quarantineNow).toISOString();
     if (typeof writerRes.value.clampRecordedAt === 'function') {
@@ -73,18 +74,25 @@ return (async () => {
     }
     try {
       qdb = new osiDb.Database('/data/db/farming.db');
-      await writerRes.value.quarantineOnly(qdb, info.deveui, info.quarantineOnly.channel, info.quarantineOnly.raw);
-      quarantineWritten = true;
+      if (!commissioningRes.ok) throw new Error('commissioning helper unavailable');
+      await commissioningRes.value.recordRejectedAcquisition(qdb, {
+        deveui: info.deveui, uplinkKey: uplinkKey, quarantine: info.quarantineOnly,
+        observe: shouldObserve(), observedAt: quarantineObservedAt,
+        profileId: row.sdi12_probe_profile || null, layout: row.sdi12_channel_layout_json,
+        normalization: null, outcome: { inserted: false,
+          deadLettered: [{ channel: info.quarantineOnly.channel, reason: 'unknown_channel' }],
+          quarantined: true, writeFailed: false }
+      }, {
+        quarantine: tx => writerRes.value.quarantineOnly(tx, info.deveui, info.quarantineOnly.channel, info.quarantineOnly.raw),
+        observe: tx => observeBestEffort(tx, null, { inserted: false,
+          deadLettered: [{ channel: info.quarantineOnly.channel, reason: 'unknown_channel' }],
+          quarantined: true, writeFailed: false }, quarantineObservedAt, true)
+      });
       node.status({ fill: 'yellow', shape: 'ring', text: 'SDI12 segments incomplete ' + info.deveui });
     } catch (error) {
       reportFailure(qdb ? 'writer_run' : 'db_open');
     } finally {
       if (qdb) {
-        await observeBestEffort(qdb, null, {
-          inserted: false,
-          deadLettered: quarantineWritten ? [{ channel: info.quarantineOnly.channel, reason: 'unknown_channel' }] : null,
-          quarantined: true, writeFailed: !quarantineWritten
-        }, quarantineObservedAt);
         try { await qdb.close(); } catch (closeError) { reportFailure('db_close'); }
       }
     }
@@ -126,10 +134,10 @@ return (async () => {
   try {
     if (result.tensiomarkObservation) {
       writeResult = await require('./tensiomark').writeTensiomarkObservation(
-        db, edgeManifest, result, {deveui:info.deveui,payloadBase64:info.payloadBase64}, {node:node,msg:msg,nowMs:writeNow});
+        db, edgeManifest, result, {deveui:info.deveui,payloadBase64:info.payloadBase64,uplinkKey}, {node:node,msg:msg,nowMs:writeNow});
     } else {
       writeResult = await writerRes.value.writeDeviceData(
-      db, edgeManifest, result, { deveui: info.deveui }, { node: node, msg: msg, nowMs: writeNow });
+      db, edgeManifest, result, { deveui: info.deveui, uplinkKey }, { node: node, msg: msg, nowMs: writeNow });
     }
     if (writeResult.deadLettered.length > 0) {
       var warnDevice = String(info.deveui || '').trim().toUpperCase() || 'UNKNOWN';
@@ -149,17 +157,20 @@ return (async () => {
     writerFailed = true;
     reportFailure('writer_run');
   }
-  await observeBestEffort(db, result, {
-    inserted: Boolean(writeResult && writeResult.inserted === true),
-    deadLettered: writeResult ? writeResult.deadLettered : null,
-    quarantined: writeResult ? writeResult.deadLettered.length > 0 : Object.keys(result.unknown || {}).length > 0,
-    writeFailed: writerFailed
-  }, observedAt);
+  if (!writeResult || !writeResult.duplicate) {
+    await observeBestEffort(db, result, {
+      inserted: Boolean(writeResult && writeResult.inserted === true),
+      deadLettered: writeResult ? writeResult.deadLettered : null,
+      quarantined: writeResult ? writeResult.deadLettered.length > 0 : Object.keys(result.unknown || {}).length > 0,
+      writeFailed: writerFailed
+    }, observedAt);
+  }
   try {
     await db.close();
   } catch (closeError) {
     reportFailure('db_close');
   }
+  if (writeResult && writeResult.duplicate) return [null, null];
   var firstJoinMsg = null;
   if (!writerFailed && !row.sdi12_probe_status && !row.sdi12_channel_layout_json && row.sdi12_probe_profile === 'SENTEK_ENVIROSCAN') {
     var firstJoinAppId = String(row.chirpstack_app_id || '').trim();

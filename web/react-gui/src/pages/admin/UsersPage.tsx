@@ -12,14 +12,24 @@ import {
   setUserRole,
 } from '../../services/api';
 
-const INPUT = 'rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]';
-const BUTTON = 'btn-liquid rounded-lg px-4 py-2 font-semibold text-[var(--text)]';
+const INPUT = 'min-w-0 w-full rounded-lg border border-[var(--field-border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]';
+const BUTTON = 'min-w-0 whitespace-normal break-words btn-liquid rounded-lg px-4 py-2 font-semibold text-[var(--text)]';
+
+const ERROR_MESSAGES = {
+  loadError: 'Unable to load users.',
+  saveError: 'The account change could not be saved.',
+  passwordMismatch: 'The passwords do not match.',
+  linkedResetRefused: 'This account uses linked sign-in, so its password cannot be reset on this gateway. Ask the linked-identity administrator for the approved recovery process.',
+  resetError: 'The password could not be reset.',
+  resetRefreshFailed: 'The password reset was sent, but the user list could not be reloaded. The reset may already have been applied; reload the page before trying again.',
+};
+type UserError = { key: keyof typeof ERROR_MESSAGES; cause?: unknown };
 
 export function UsersPage() {
-  const { t } = useTranslation('settings');
+  const { t, i18n } = useTranslation('settings');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<UserError | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<AdminUser['role']>('researcher');
@@ -33,10 +43,10 @@ export function UsersPage() {
     setLoading(true);
     try {
       setUsers(await listUsers());
-      setError('');
+      setError(null);
       return true;
     } catch (cause) {
-      setError(getApiErrorMessage(cause, 'Unable to load users.'));
+      setError({ key: 'loadError', cause });
       return false;
     } finally {
       setLoading(false);
@@ -49,11 +59,11 @@ export function UsersPage() {
 
   async function run(action: () => Promise<unknown>) {
     try {
-      setError('');
+      setError(null);
       await action();
       await refresh();
     } catch (cause) {
-      setError(getApiErrorMessage(cause, 'The account change could not be saved.'));
+      setError({ key: 'saveError', cause });
     }
   }
 
@@ -70,20 +80,20 @@ export function UsersPage() {
     event.preventDefault();
     if (!resetFor) return;
     if (resetValue !== resetConfirmation) {
-      setError('The passwords do not match.');
+      setError({ key: 'passwordMismatch' });
       return;
     }
-    setError('');
+    setError(null);
     try {
       await resetPassword(resetFor.user_uuid, resetValue);
     } catch (cause) {
       setError(isLinkedPasswordResetError(cause)
-        ? t('users.linkedResetRefused', 'This account uses linked sign-in, so its password cannot be reset on this gateway. Ask the linked-identity administrator for the approved recovery process.')
-        : getApiErrorMessage(cause, t('users.resetError', 'The password could not be reset.')));
+        ? { key: 'linkedResetRefused' }
+        : { key: 'resetError', cause });
       return;
     }
     if (!(await refresh())) {
-      setError(t('users.resetRefreshFailed', 'The password reset was sent, but the user list could not be reloaded. The reset may already have been applied; reload the page before trying again.'));
+      setError({ key: 'resetRefreshFailed' });
       return;
     }
     setResetFor(null);
@@ -93,7 +103,7 @@ export function UsersPage() {
 
   function resetAction(user: AdminUser) {
     if (user.auth_mode === 'local') {
-      return <button className={BUTTON} type="button" onClick={() => setResetFor(user)}>Reset password</button>;
+      return <button className={BUTTON} type="button" onClick={() => setResetFor(user)}>{t('users.resetPassword', 'Reset password')}</button>;
     }
     if (user.auth_mode === 'server') {
       return (
@@ -113,82 +123,90 @@ export function UsersPage() {
 
   return (
     <main className="min-h-screen bg-[var(--bg)] p-4 text-[var(--text)] sm:p-8">
-      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="mx-auto min-w-0 max-w-6xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-[var(--text-secondary)]">Administration</p>
-            <h1 className="text-3xl font-bold">Users</h1>
+            <p className="text-sm text-[var(--text-secondary)]">{t('users.administration', 'Administration')}</p>
+            <h1 className="text-3xl font-bold">{t('users.title', 'Users')}</h1>
           </div>
-          <nav className="flex gap-3" aria-label="Administration">
-            <Link className={BUTTON} to="/admin/grants">Access grants</Link>
-            <Link className={BUTTON} to="/dashboard">Dashboard</Link>
+          <nav className="flex min-w-0 flex-wrap gap-3" aria-label={t('users.administration', 'Administration')}>
+            <Link className={BUTTON} to="/admin/grants">{t('users.accessGrants', 'Access grants')}</Link>
+            <Link className={BUTTON} to="/dashboard">{t('users.dashboard', 'Dashboard')}</Link>
           </nav>
         </header>
 
-        {error && <p role="alert" className="rounded-lg border border-red-400 bg-red-50 p-3 text-red-800">{error}</p>}
+        {error && <p role="alert" className="break-words rounded-lg border border-red-400 bg-red-50 p-3 text-red-800">{getApiErrorMessage(error.cause, t(`users.${error.key}`, ERROR_MESSAGES[error.key]))}</p>}
 
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-          <h2 className="mb-4 text-xl font-semibold">Create user</h2>
-          <form className="grid gap-3 sm:grid-cols-4" onSubmit={submitCreate}>
-            <label className="grid gap-1 text-sm">Username
+          <h2 className="mb-4 text-xl font-semibold">{t('users.createUser', 'Create user')}</h2>
+          <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={submitCreate}>
+            <label className="grid min-w-0 gap-1 text-sm">{t('users.username', 'Username')}
               <input className={INPUT} required value={username} onChange={(event) => setUsername(event.target.value)} />
             </label>
-            <label className="grid gap-1 text-sm">Temporary password
+            <label className="grid min-w-0 gap-1 text-sm">{t('users.temporaryPassword', 'Temporary password')}
               <input className={INPUT} required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
             </label>
-            <label className="grid gap-1 text-sm">Role
+            <label className="grid min-w-0 gap-1 text-sm">{t('users.role', 'Role')}
               <select className={INPUT} value={role} onChange={(event) => setRole(event.target.value as AdminUser['role'])}>
-                <option value="researcher">Researcher</option>
-                <option value="viewer">Viewer</option>
-                <option value="admin">Administrator</option>
+                <option value="researcher">{t('users.roles.researcher', 'Researcher')}</option>
+                <option value="viewer">{t('users.roles.viewer', 'Viewer')}</option>
+                <option value="admin">{t('users.roles.admin', 'Administrator')}</option>
               </select>
             </label>
-            <button className={`${BUTTON} self-end`} type="submit">Create user</button>
+            <button className={`${BUTTON} self-end`} type="submit">{t('users.createUser', 'Create user')}</button>
           </form>
         </section>
 
-        {/* A scroll container that keyboard focus can never enter cannot be
-            scrolled without a pointer (2.1.1). */}
-        <section
-          tabIndex={0}
-          className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm"
-        >
-          {loading ? <p className="p-5">Loading users…</p> : (
-            <table className="w-full text-left">
-              <thead className="border-b border-[var(--border)] text-sm text-[var(--text-secondary)]">
-                <tr><th className="p-4">Username</th><th className="p-4">Role</th><th className="p-4">Status</th><th className="p-4">Created</th><th className="p-4">Actions</th></tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.user_uuid} className="border-b border-[var(--border)] last:border-0">
-                    <td className="p-4 font-semibold">{user.username}</td>
-                    <td className="p-4">
-                      <select aria-label={`Role for ${user.username}`} className={INPUT} value={user.role} onChange={(event) => void run(() => setUserRole(user.user_uuid, event.target.value as AdminUser['role']))}>
-                        <option value="admin">Administrator</option><option value="researcher">Researcher</option><option value="viewer">Viewer</option>
-                      </select>
-                    </td>
-                    <td className="p-4">{user.disabled_at ? 'Disabled' : 'Enabled'}</td>
-                    <td className="p-4">{new Date(user.created_at).toLocaleDateString()}</td>
-                    <td className="p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button className={BUTTON} type="button" onClick={() => void run(() => setUserDisabled(user.user_uuid, !user.disabled_at))}>{user.disabled_at ? 'Enable' : 'Disable'}</button>
-                        {resetAction(user)}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <section className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <p id="users-scroll-hint" className="p-4 text-sm text-[var(--text-secondary)] xl:hidden">
+            {t('users.scrollHint', 'Scroll horizontally to see all user details and actions.')}
+          </p>
+          <div className="relative overflow-hidden rounded-2xl">
+            {/* Keep the scroll region keyboard reachable, including on phones. */}
+            <div role="region" aria-label={t('users.title', 'Users')} aria-describedby="users-scroll-hint" tabIndex={0} className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--field-border)]">
+              {loading ? <p className="p-5">{t('users.loading', 'Loading users…')}</p> : (
+                <table className="w-full min-w-[64rem] table-fixed text-left">
+                  <thead className="border-b border-[var(--border)] text-sm text-[var(--text-secondary)]">
+                    <tr><th scope="col" className="p-4">{t('users.username', 'Username')}</th><th scope="col" className="p-4">{t('users.role', 'Role')}</th><th scope="col" className="p-4">{t('users.status', 'Status')}</th><th scope="col" className="p-4">{t('users.created', 'Created')}</th><th scope="col" className="p-4">{t('users.actions', 'Actions')}</th></tr>
+                  </thead>
+                  <tbody>
+                    {users.map((user) => (
+                      <tr key={user.user_uuid} className="border-b border-[var(--border)] last:border-0">
+                        <td className="break-words p-4 font-semibold [overflow-wrap:anywhere]">{user.username}</td>
+                        <td className="p-4">
+                          <select aria-label={t('users.roleFor', `Role for ${user.username}`, { username: user.username })} className={INPUT} value={user.role} onChange={(event) => void run(() => setUserRole(user.user_uuid, event.target.value as AdminUser['role']))}>
+                            <option value="admin">{t('users.roles.admin', 'Administrator')}</option><option value="researcher">{t('users.roles.researcher', 'Researcher')}</option><option value="viewer">{t('users.roles.viewer', 'Viewer')}</option>
+                          </select>
+                        </td>
+                        <td className="p-4">{user.disabled_at ? t('users.disabled', 'Disabled') : t('users.enabled', 'Enabled')}</td>
+                        <td className="p-4">{new Date(user.created_at).toLocaleDateString(i18n?.resolvedLanguage)}</td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button className={BUTTON} type="button" onClick={() => void run(() => setUserDisabled(user.user_uuid, !user.disabled_at))}>{user.disabled_at ? t('users.enable', 'Enable') : t('users.disable', 'Disable')}</button>
+                            {resetAction(user)}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-[var(--surface)] to-transparent xl:hidden" />
+          </div>
         </section>
 
         {resetFor && (
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
-            <h2 className="mb-3 text-xl font-semibold">Reset password for {resetFor.username}</h2>
-            <form className="grid gap-3 sm:grid-cols-3" onSubmit={submitReset}>
-              <input aria-label="New temporary password" className={INPUT} minLength={6} required type="password" value={resetValue} onChange={(event) => setResetValue(event.target.value)} />
-              <input aria-label="Confirm temporary password" className={INPUT} minLength={6} required type="password" value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} />
-              <div className="flex gap-2"><button className={BUTTON} type="submit">Save password</button><button className={BUTTON} type="button" onClick={() => setResetFor(null)}>Cancel</button></div>
+            <h2 className="mb-3 break-words text-xl font-semibold [overflow-wrap:anywhere]">{t('users.resetFor', `Reset password for ${resetFor.username}`, { username: resetFor.username })}</h2>
+            <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" onSubmit={submitReset}>
+              <label className="grid min-w-0 gap-1 text-sm">{t('users.newTemporaryPassword', 'New temporary password')}
+                <input className={INPUT} minLength={6} required type="password" value={resetValue} onChange={(event) => setResetValue(event.target.value)} />
+              </label>
+              <label className="grid min-w-0 gap-1 text-sm">{t('users.confirmTemporaryPassword', 'Confirm temporary password')}
+                <input className={INPUT} minLength={6} required type="password" value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} />
+              </label>
+              <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-1"><button className={BUTTON} type="submit">{t('users.savePassword', 'Save password')}</button><button className={BUTTON} type="button" onClick={() => setResetFor(null)}>{t('users.cancel', 'Cancel')}</button></div>
             </form>
           </section>
         )}

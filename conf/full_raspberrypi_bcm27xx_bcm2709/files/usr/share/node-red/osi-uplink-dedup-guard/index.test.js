@@ -65,15 +65,15 @@ describe('osi-uplink-dedup-guard: buildDedupKey', () => {
     assert.notEqual(a, b);
   });
 
-  it('falls back to (devEui, fCnt, time-bucket) when deduplicationId is absent', () => {
-    const a = buildDedupKey({ devEui: 'aa11', fCnt: 7, receivedAtMs: 1000, bucketMs: 60000 });
-    const b = buildDedupKey({ devEui: 'AA11', fCnt: 7, receivedAtMs: 2000, bucketMs: 60000 });
-    assert.equal(a, b, 'devEui is case-normalized and the two timestamps land in the same bucket');
+  it('falls back to device, frame counter and original network time', () => {
+    const a = buildDedupKey({ devEui: 'aa11', fCnt: 7, time:'2026-11-19T10:00:00Z', receivedAtMs: 1000, bucketMs: 60000 });
+    const b = buildDedupKey({ devEui: 'AA11', fCnt: 7, time:'2026-11-19T10:00:00Z', receivedAtMs: 2000, bucketMs: 60000 });
+    assert.equal(a, b, 'devEui is case-normalized and the network timestamp is identical');
   });
 
-  it('fallback key differs once the fallback bucket boundary is crossed', () => {
-    const a = buildDedupKey({ devEui: 'AA', fCnt: 7, receivedAtMs: 0, bucketMs: 60000 });
-    const b = buildDedupKey({ devEui: 'AA', fCnt: 7, receivedAtMs: 120000, bucketMs: 60000 });
+  it('distinct network times never collide inside the same receipt-time bucket', () => {
+    const a = buildDedupKey({ devEui: 'AA', fCnt: 7, time:'2026-11-19T10:00:00Z', receivedAtMs: 0, bucketMs: 60000 });
+    const b = buildDedupKey({ devEui: 'AA', fCnt: 7, time:'2026-11-19T10:00:30Z', receivedAtMs: 0, bucketMs: 60000 });
     assert.notEqual(a, b);
   });
 
@@ -95,8 +95,8 @@ describe('osi-uplink-dedup-guard: buildDedupKey', () => {
   });
 
   it('namespaces the fallback key by source too: identical devEui/fCnt/bucket under two different sources never collides', () => {
-    const a = buildDedupKey({ source: 'lsn50', devEui: 'AA', fCnt: 5, receivedAtMs: 0, bucketMs: 60000 });
-    const b = buildDedupKey({ source: 'sdi12', devEui: 'AA', fCnt: 5, receivedAtMs: 0, bucketMs: 60000 });
+    const a = buildDedupKey({ source: 'lsn50', devEui: 'AA', fCnt: 5, time:'2026-11-19T10:00:00Z', receivedAtMs: 0, bucketMs: 60000 });
+    const b = buildDedupKey({ source: 'sdi12', devEui: 'AA', fCnt: 5, time:'2026-11-19T10:00:00Z', receivedAtMs: 0, bucketMs: 60000 });
     assert.notEqual(a, b);
   });
 
@@ -157,15 +157,12 @@ describe('osi-uplink-dedup-guard: createGuard / isDuplicateUplink', () => {
       'a different deduplicationId must always win over a coincidentally-matching fCnt, even within the same fallback bucket');
   });
 
-  it('(sanity check on the load-bearing claim above) the same scenario WOULD collide via the fallback path alone '
-    + '-- proving the deduplicationId branch, not the bucket, is what keeps it apart', () => {
+  it('receipt-time proximity without network identity can never prove a duplicate', () => {
     const guard = createGuard({ ttlMs: 60000 });
-    const beforeRejoin = { devEui: 'AA:BB', fCnt: 3, receivedAtMs: 0 }; // no deduplicationId -> fallback path
-    const afterRejoin = { devEui: 'AA:BB', fCnt: 3, receivedAtMs: 100 };
-    assert.equal(guard.isDuplicateUplink(beforeRejoin), false);
-    assert.equal(guard.isDuplicateUplink(afterRejoin), true,
-      'without a deduplicationId, the same devEui+fCnt 100ms apart IS a duplicate under the fallback path -- ' +
-      'confirming the previous test only passes because deduplicationId is actually consulted');
+    for (const receivedAtMs of [0,100,500]) {
+      assert.equal(guard.isDuplicateUplink({devEui:'AA',fCnt:3,receivedAtMs}),false);
+    }
+    assert.equal(guard.size(),0);
   });
 
   it('fallback path: the SAME fCnt with NO deduplicationId, more than one bucket apart, is NOT a duplicate '
@@ -177,10 +174,10 @@ describe('osi-uplink-dedup-guard: createGuard / isDuplicateUplink', () => {
     assert.equal(guard.isDuplicateUplink(afterRejoin), false);
   });
 
-  it('fallback path: the SAME fCnt with NO deduplicationId inside the SAME bucket IS a duplicate', () => {
+  it('the same device, fCnt and network timestamp prove a legacy redelivery', () => {
     const guard = createGuard({ ttlMs: 60000 });
-    const first = { devEui: 'CC:DD', fCnt: 0, receivedAtMs: 0 };
-    const redelivered = { devEui: 'CC:DD', fCnt: 0, receivedAtMs: 500 };
+    const first = { devEui: 'CC:DD', fCnt: 0, time:'2026-11-19T10:00:00Z', receivedAtMs: 0 };
+    const redelivered = { devEui: 'CC:DD', fCnt: 0, time:'2026-11-19T10:00:00Z', receivedAtMs: 500 };
     assert.equal(guard.isDuplicateUplink(first), false);
     assert.equal(guard.isDuplicateUplink(redelivered), true);
   });

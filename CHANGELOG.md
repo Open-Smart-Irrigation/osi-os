@@ -9,7 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.3] — 2026-11-16
+## [0.8.3] — 2026-11-19
 
 ### Upgrade notes
 - **A gateway installed from an OSI OS image takes this release by script.**
@@ -38,6 +38,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   starts `HELD:` keeps Node-RED stopped, after a reboot too, until the deploy
   is run again or the restore command on that line is used; run the deploy
   again first (#636).
+- **ChirpStack version.** The images ship the CGOS 4.7.1-generation set:
+  chirpstack 4.12.1, concentratord 4.4.8 and mqtt-forwarder 4.3.2. Field
+  gateways that run stock CGOS 4.10.1 have chirpstack 4.16.2 instead; a script
+  deploy does not change ChirpStack's version. Images use SQLite in WAL mode
+  with a 5 s busy wait from this release on. Field gateways upgraded by script
+  keep ChirpStack's previous setting until the one-time switch script
+  (`scripts/pi/chirpstack-sqlite-wal.sh`, released separately) is run on them.
+  Moving the images to the 4.10.1 set (4.16.2 or later) is planned for the
+  next patch.
 
 ### Known limits
 - A gateway with foreign-key orphans in its database refuses the upgrade
@@ -51,6 +60,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Do not upgrade a gateway in use by flashing an image: an image erases the
   farm's data. Upgrade it by script (`deploy.sh`, or the bundle path over a
   flaky link). Images are for new gateways and deliberate resets (#646).
+- A magnet or local manual open inside the confirmation window can be
+  mistaken for the delivered one-time open: the valve's report does not say
+  what opened it (#672).
+- A partial close is logged like a partial open, so a one-time watering with
+  a partial close in its window ends as "Not confirmed — check the valve" even
+  if it ran. It never shows a false delivery (#672).
 
 ### Added
 - Edge keeps every complete SDI-12 transmission, with the original LoRaWAN
@@ -256,6 +271,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   They act only when the gateway's `app_settings` key
   `dendro_provider_irrigation_enabled` is exactly `1`. Enable it per gateway
   only with the owner's approval (#643).
+- ChirpStack in new images refuses valve commands and drops radio uplinks
+  with "database is locked" far less often under load. Its SQLite database
+  now runs in WAL mode with a 5 s busy wait; before, a rollback journal and a
+  1 s wait let uplink handling and API calls lock each other out. In a Pi 4
+  test at three uplinks per second, failed uplinks fell from 27.2 % to 2.5 %.
+  Gateways upgraded by script keep the old setting; see the ChirpStack
+  version upgrade note (#670).
+- A sensor reading, valve report or command acknowledgement that arrived
+  while sync was writing could be lost. When such a transaction meets another
+  node's manual transaction, the database helper now releases its queue and
+  retries it, up to 10 attempts over 4.5 s. This is a mitigation: a plain
+  write that lands inside another node's manual transaction can still be
+  rolled back with it. Converting those transactions follows in a later
+  release (#671).
+- A valve command sent while the database was busy no longer stays
+  "attempted" without an error. The writes around sending are retried on a
+  locked database within a 9 s deadline per command. A command that
+  ChirpStack accepted is never reported as failed, and it is never sent
+  twice. When the lock is held longer than 5 s before the frame is queued,
+  the command is still refused with 503; no frame was sent, and pressing
+  again is safe (#669, #675).
+- A scheduled one-time watering whose sending could not be confirmed no
+  longer stays "planned" silently. The gateway GUI shows "Sent, waiting for
+  the valve's confirmation (until …)". The deadline follows the valve's own
+  reporting interval: twice the interval plus 5 min, at least 15 min and at
+  most 3 h. When the valve reports open, the GUI says "Valve reported open".
+  Without proof the watering ends "Not confirmed — check the valve", and it
+  is never resent automatically. Fired one-time schedules no longer cost a
+  database transaction every minute (#672).
+- The ChirpStack backup and restore buttons now verify that ChirpStack has
+  stopped and check every copy. A backup set is published only when it is
+  complete. A restore validates the backup before it touches the live
+  database and never deletes the live database. A failed restore is undone,
+  or it leaves the services stopped and prints the recovery steps (#674).
 - Factory images now carry the current dashboard: the committed feed copy of
   the GUI is rebuilt from `web/react-gui` (it was last refreshed for v0.8.2's
   release commit, so images built since lacked later GUI fixes, including the

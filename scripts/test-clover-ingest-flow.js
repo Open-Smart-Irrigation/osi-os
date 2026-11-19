@@ -109,7 +109,7 @@ async function ingest(db, event) {
   const processed = await processData(event);
   assert.deepEqual(processed.errors, [], 'Process Data errors');
   assert.ok(processed.result && processed.result.formattedData, 'Process Data passes the Clover uplink on');
-  const built = await executeFunction(buildSqlInsertNode(), { msg: processed.result, env: ENV });
+  const built = await executeFunction(buildSqlInsertNode(), { msg: processed.result, env: ENV, osiLibModules: {'uplink-dedup':dedupGuard} });
   assert.deepEqual(built.errors, [], 'Build SQL INSERT errors');
   db.exec(built.result.topic);
   return processed.result.formattedData;
@@ -130,6 +130,24 @@ async function deviceList(db) {
 }
 
 const CASES = [];
+
+CASES.push({
+  name: 'Clover replay after a decoder restart keeps one measurement and one outbox event',
+  async run() {
+    const db = freshDb();
+    try {
+      const event = chirpstackEvent({object:decode(CLOVER_FRAME,10).data,time:'2026-11-19T10:00:00Z',fCnt:901});
+      dedupGuard._defaultGuard.reset();
+      await ingest(db,event);
+      dedupGuard._defaultGuard.reset();
+      await ingest(db,event);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,1);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'").get().n,1);
+      await ingest(db,{...event,deduplicationId:'after-rejoin'});
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM device_data').get().n,2);
+    } finally { db.close(); dedupGuard._defaultGuard.reset(); }
+  }
+});
 
 CASES.push({
   name: 'the shipped codec decodes the Clover frame into the fields Process Data reads',
@@ -235,6 +253,25 @@ CASES.push({
   },
 });
 
+CASES.push({
+  name:'legacy rejoin with reused fCnt and a distinct network time stores both readings',
+  async run() {
+    const db=freshDb(); const realNow=Date.now;
+    Date.now=()=>1800000000000;
+    dedupGuard._defaultGuard.reset();
+    try {
+      const first=chirpstackEvent({object:decode(CLOVER_FRAME,10).data,time:'2026-11-19T10:00:00Z',fCnt:1});
+      delete first.deduplicationId;
+      await ingest(db,first);
+      const next={...first,time:'2026-11-19T10:00:30Z',object:{...first.object,ambient_temperature:19}};
+      await ingest(db,next);
+      const rows=db.prepare('SELECT ambient_temperature FROM device_data ORDER BY id').all();
+      assert.equal(rows.length,2);
+      assert.equal(rows[1].ambient_temperature,19);
+      assert.notEqual(rows[0].ambient_temperature,rows[1].ambient_temperature);
+    } finally {db.close();dedupGuard._defaultGuard.reset();Date.now=realNow;}
+  }
+});
 (async () => {
   let failed = 0;
   for (const testCase of CASES) {

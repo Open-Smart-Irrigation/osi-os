@@ -92,7 +92,7 @@ COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
-OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
+OSI_SQLITE_SERIALIZE_JS_SHA256="89128084cef60fd0f9a1498103a7c36b21fc13a6a391b9316d6987331a5ef570"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
 export SWAP_ROOT
 
@@ -3452,6 +3452,10 @@ fetch_required "osi-uplink-dedup-guard package.json" \
 fetch_required "osi-uplink-dedup-guard index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/index.js" \
     "$MODULE_STAGE/osi-uplink-dedup-guard/index.js"
+
+fetch_required "osi-uplink-dedup-guard durable.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uplink-dedup-guard/durable.js" \
+    "$MODULE_STAGE/osi-uplink-dedup-guard/durable.js"
 
 fetch_required "osi-sdi12-normalize package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json" \

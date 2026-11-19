@@ -11,7 +11,8 @@ function facade(raw) {
     run: (sql, params) => { raw.prepare(sql).run(...(params || [])); return Promise.resolve(undefined); },
     async transaction(executor) {
       raw.exec('BEGIN IMMEDIATE');
-      try { const out = await executor(facade(raw)); raw.exec('COMMIT'); return out; }
+      try { const scope = facade(raw); delete scope.transaction; delete scope.close;
+        const out = await executor(scope); raw.exec('COMMIT'); return out; }
       catch (e) { try { raw.exec('ROLLBACK'); } catch (_) { /* already rolled back */ } throw e; }
     },
     close: (cb) => { try { raw.close(); } catch (_) { /* closed */ } if (cb) cb(); },

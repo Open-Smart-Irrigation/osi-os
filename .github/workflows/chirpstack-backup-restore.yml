@@ -1,0 +1,29 @@
+name: ChirpStack backup and restore
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install BusyBox ash and dash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox dash util-linux shfmt
+          busybox ash -c 'exit 0'
+          dash -c 'exit 0'
+      - name: Exercise every case under both shells
+        run: node --test scripts/test-chirpstack-backup-restore.js scripts/test-chirpstack-helper-tools.js
+      - name: Check ChirpStack log capture and render its configuration
+        run: node --test scripts/test-chirpstack-log-capture.js

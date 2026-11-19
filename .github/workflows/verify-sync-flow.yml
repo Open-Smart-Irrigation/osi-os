@@ -45,6 +45,8 @@ jobs:
       # history schema/worker tests, history API contract, helper tests, and
       # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
+      - name: Shared facade transaction isolation
+        run: node --test scripts/test-manual-facade-transactions.js scripts/test-sqlite-farm-shared-queue.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
       - name: SDI-12 offline profiles and helper regressions
@@ -221,6 +223,8 @@ jobs:
       # manifest keeps a queued key in place so a mismatching segment converges.
       - name: History correction queue drain
         run: node --test scripts/test-sync-history-queue-drain.js
+      - name: History repair convergence and bounded drain
+        run: node --test scripts/test-sync-history-repair-convergence.js
       # The 5-minute history manifest pages through every stored hash v1 segment
       # (500 per request, cursor in app_settings, wraps after a short page), so a
       # segment after the first 500 is compared and repaired too; the repair

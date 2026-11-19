@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,7 +7,7 @@ import type { HistoryCardDataResponse, HistoryCardSummary } from '../../../histo
 
 const useHistoryCardDataMock = vi.fn();
 
-const { translateForTest } = vi.hoisted(() => {
+const { translateForTest, localeState } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.cardFrame.typeHistory': '{{cardType}} history',
     'history.cardFrame.viewModes': '{{title}} view modes',
@@ -44,6 +44,7 @@ const { translateForTest } = vi.hoisted(() => {
   };
 
   return {
+    localeState: { language: 'en' },
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
       const template = translations[key] ?? key;
       return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? ''));
@@ -54,6 +55,7 @@ const { translateForTest } = vi.hoisted(() => {
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: translateForTest,
+    i18n: localeState,
   }),
 }));
 
@@ -123,10 +125,52 @@ function data(overrides: Partial<HistoryCardDataResponse<'soil'>> = {}): History
 
 afterEach(() => {
   cleanup();
+  localeState.language = 'en';
+  window.localStorage.clear();
   vi.clearAllMocks();
 });
 
 describe('HistoryCardFrame soil profile', () => {
+  it('gives percentage-height charts a definite dashboard plot surface', () => {
+    useHistoryCardDataMock.mockReturnValue({ data: data(), isLoading: false });
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Line Chart' }));
+    // jsdom cannot calculate flex geometry; the browser fixture also measures the resulting SVG.
+    expect(screen.getByTestId('history-card-plot')).toHaveClass('h-[28rem]', 'flex', 'flex-col');
+  });
+
+  it('formats fractional profile values in the selected language', () => {
+    localeState.language = 'fr';
+    useHistoryCardDataMock.mockReturnValue({ data: data({ profiles: [{ id: 'swt-1', label: 'SWT 1', value: 15.1568, unit: 'kPa' }] }), isLoading: false });
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+    expect(screen.getByText('15,2 kPa')).toBeInTheDocument();
+  });
+
+  it('honors the pF preference with two decimals and keeps measured zero in kPa', () => {
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
+    useHistoryCardDataMock.mockReturnValue({ data: data({ profiles: [
+      { id: 'swt-1', label: 'SWT 1', value: 15.1568, unit: 'kPa' },
+      { id: 'swt-2', label: 'SWT 2', value: 0, unit: 'kPa' },
+    ] }), isLoading: false });
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+    expect(screen.getByText('2.18 pF')).toBeInTheDocument();
+    expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+  });
+
+  it('rounds display values without mutating canonical profile doubles', () => {
+    const profiles = [
+      { id: 'swt-1', label: 'SWT 1', value: 15.1568, unit: 'kPa' },
+      { id: 'swt-2', label: 'SWT 2', value: 13.080558, unit: 'kPa' },
+      { id: 'swt-3', label: 'SWT 3', value: 0, unit: 'kPa' },
+    ];
+    useHistoryCardDataMock.mockReturnValue({ data: data({ profiles }), isLoading: false });
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+    expect(screen.getByText('15.2 kPa')).toBeInTheDocument();
+    expect(screen.getByText('13.1 kPa')).toBeInTheDocument();
+    expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+    expect(profiles.map((point) => point.value)).toEqual([15.1568, 13.080558, 0]);
+  });
+
   it('renders display-safe source names in the card header', () => {
     useHistoryCardDataMock.mockReturnValue({
       data: data(),
@@ -157,12 +201,12 @@ describe('HistoryCardFrame soil profile', () => {
     expect(screen.getByText('Soil layer 1')).toBeInTheDocument();
     expect(screen.queryByText('Soil 1')).not.toBeInTheDocument();
     expect(screen.getByText('15 cm')).toBeInTheDocument();
-    expect(screen.getByText('10 kPa')).toBeInTheDocument();
+    expect(screen.getByText('10.0 kPa')).toBeInTheDocument();
     expect(screen.getByText('Wet')).toBeInTheDocument();
     expect(screen.getByTestId('soil-profile-row-0')).toHaveStyle('--soil-row-color: var(--soil-wet)');
     expect(screen.getByText('SWT 2')).toBeInTheDocument();
     expect(screen.getByText('45 cm')).toBeInTheDocument();
-    expect(screen.getByText('55 kPa')).toBeInTheDocument();
+    expect(screen.getByText('55.0 kPa')).toBeInTheDocument();
     expect(screen.getByText('Dry')).toBeInTheDocument();
     expect(screen.getByTestId('soil-profile-row-1')).toHaveStyle('--soil-row-color: var(--soil-dry)');
     expect(screen.queryByText('dry_stress')).not.toBeInTheDocument();
