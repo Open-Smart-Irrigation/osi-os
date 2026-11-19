@@ -44,7 +44,8 @@
       "help": "Raw points sit at the reading's time; at 15-minute, hourly, daily and weekly aggregation each point sits at the start of its period, and for weather sources a day is the zone's local day. Rain, ET0 and ETc from a weather provider, a station's hourly record or daily agronomy are totals for that period, and other values are means. Open-Meteo hourly temperature, humidity and wind are values at the time shown. Weather sources show no finer detail than one hour, or one day for daily agronomy."
     },
     "preset": {
-      "metricLabel": "Ekigero mu zone zonna"
+      "metricLabel": "Geraageranya ekigero mu zone zonna",
+      "more": "Ebipimo ebirala"
     },
     "tray": {
       "label": "Ennyiriri z'okwekenneenya",
@@ -92,6 +93,7 @@
       "normalize": "Kiteekemu omutindo"
     },
     "export": {
+      "label": "Gyamu",
       "csv": "Gyamu CSV",
       "png": "Gyamu PNG",
       "allZonesCsv": "Export all zones CSV",
