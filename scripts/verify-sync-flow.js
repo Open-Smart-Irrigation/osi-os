@@ -3039,10 +3039,46 @@ for (const field of [
 for (const field of ['chameleonSwt1DepthCm', 'chameleonSwt2DepthCm', 'chameleonSwt3DepthCm']) {
   expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types setChameleonDepth payload.${field}`);
 }
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Current position', 'shows absolute mechanical position below the graph instead of as the headline graph metric');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Awaiting baseline. Mechanical position is available in this window', 'keeps the basic monitor informative when comparable stem change is not ready yet');
+const dendroMonitorEnglish = JSON.parse(fs.readFileSync(
+  path.resolve(__dirname, '..', 'web', 'react-gui', 'public', 'locales', 'en', 'devices.json'),
+  'utf8',
+)).dendrometerMonitor;
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'export const DendrometerMonitor:',
+  "const { t } = useTranslation('devices');",
+  'const format = useDateFormat();',
+], 'resolves basic-monitor labels from the devices namespace');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'plottedData.length > 0 && (',
+  "{t('dendrometerMonitor.stemTitle')}",
+  '<AreaChart data={plottedData}',
+  'dataKey="stem_change_um"',
+], 'labels the basic monitor around the comparable stem-change signal');
+expectEqual(dendroMonitorEnglish.stemTitle, 'Stem change over time', 'devices.json English basic-monitor stem-change heading');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'dataKey="stem_change_um"',
+  '</AreaChart>',
+  'mechanicalData.length > 0 && (',
+  "{t('dendrometerMonitor.mechanicalTitle')}",
+], 'renders mechanical engineering values beneath the stem-change graph');
+expectEqual(dendroMonitorEnglish.mechanicalTitle, 'Mechanical layer', 'devices.json English basic-monitor mechanical heading');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'dataKey="stem_change_um"',
+  '</AreaChart>',
+  "{t('dendrometerMonitor.mechanicalTitle')}",
+  "label={t('dendrometerMonitor.currentPosition')}",
+  'value={latestMechanicalPoint ? `${latestMechanicalPoint.mechanical_position_mm.toFixed(2)} mm`',
+], 'shows absolute mechanical position below the graph instead of as the headline graph metric');
+expectEqual(dendroMonitorEnglish.currentPosition, 'Current position', 'devices.json English basic-monitor absolute-position label');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'data.length > 0 && plottedData.length === 0 && (',
+  '{hasRawOnlySamples',
+  "? t('dendrometerMonitor.rawOnly')",
+  ': hasMechanicalOnlySamples',
+  "? t('dendrometerMonitor.awaitingBaseline')",
+  ": t('dendrometerMonitor.noCalibratedData', { hours })",
+], 'keeps the basic monitor informative when comparable stem change is not ready yet');
+expectEqual(dendroMonitorEnglish.awaitingBaseline, 'Awaiting baseline. Mechanical position is available in this window, and the next valid calibrated uplink will establish the new stem-change zero point.', 'devices.json English basic-monitor awaiting-baseline explanation');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'Raw samples are available', 'explains raw-only dendrometer rows in the 24h drawer');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);', 'shows CH1 and ratio debug values only for ratio-mode 24h readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Stem change', 'shows stem change as the only primary dendrometer signal on the device card');
