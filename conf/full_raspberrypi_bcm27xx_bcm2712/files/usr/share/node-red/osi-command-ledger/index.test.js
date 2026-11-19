@@ -55,7 +55,18 @@ class TestDb {
   constructor() {
     dbCounter += 1;
     this.native = new DatabaseSync(path.join(tempRoot, 'db-' + dbCounter + '.db'));
-    this.native.exec(seedSql);
+    // Batch fixture DDL so a disk-backed TMPDIR does not fsync hundreds of
+    // schema statements per test. Ledger transactions start after this commit.
+    this.native.exec('PRAGMA foreign_keys=ON; BEGIN IMMEDIATE');
+    try {
+      this.native.exec(seedSql);
+      this.native.exec('COMMIT');
+    } catch (error) {
+      this.native.exec('ROLLBACK');
+      this.native.close();
+      throw error;
+    }
+    assert.equal(this.native.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     openDatabases.push(this);
   }
 

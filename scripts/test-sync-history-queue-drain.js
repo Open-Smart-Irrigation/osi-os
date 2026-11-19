@@ -562,7 +562,7 @@ test('the manifest keeps a pending key in place, with its last error, and does n
   assert.deepEqual({ ...row(first) }, { status: 'pending', changed_at: '2026-08-14T23:45:00.000Z', attempts: 2, next_attempt_at: '2026-10-06T08:04:00.000Z', last_error: 'permanent: hash_mismatch' }, 'a key set aside keeps its reason until it completes or turns rejected');
   assert.equal(row(second).status, 'rejected');
   assert.equal(row(second).attempts, 3);
-  assert.deepEqual([row(third).status, row(third).changed_at], ['done', '2026-08-14T23:45:00.000Z'], 'a mismatch alone does not reset a completed key on upgrade');
+  assert.deepEqual([row(third).status, row(third).changed_at], ['pending', '2026-10-06T08:00:00.000Z'], 'a fresh mismatch rechecks completed keys on upgrade when per-key cloud evidence is absent');
   assert.deepEqual([row(fourth).status, row(fourth).last_error], ['pending', null], 'a revived dropped key starts without the old reason');
 });
 

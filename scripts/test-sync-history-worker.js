@@ -314,6 +314,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     async transaction(executor) {
       return executor({
         all: (sql, params) => new Promise((resolve, reject) => database.all(sql, params, (e, rows) => e ? reject(e) : resolve(rows))),
+        get: (sql, params) => new Promise((resolve, reject) => database.all(sql, params, (e, rows) => e ? reject(e) : resolve(rows[0]))),
         run: (sql, params) => new Promise((resolve, reject) => database.run(sql, params, e => e ? reject(e) : resolve()))
       });
     }

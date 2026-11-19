@@ -602,7 +602,10 @@ function prepareRow(tableName, gatewayEui, row) {
 }
 
 function buildSegment(tableName, gatewayEui, key, rows) {
-  const prepared = rows.map((row) => prepareRow(tableName, gatewayEui, row));
+  return buildPreparedSegment(tableName, key, rows.map((row) => prepareRow(tableName, gatewayEui, row)));
+}
+
+function buildPreparedSegment(tableName, key, prepared) {
   const syncable = prepared.filter((row) => !row.quarantineReason);
   const quarantine = prepared.filter((row) => row.quarantineReason);
   return {
@@ -778,7 +781,7 @@ async function loadDirtyRows({ q, sourceQuery, tableName, now, skipRepair, valve
   return null;
 }
 
-async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sourceQuery, db }) {
+async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sourceQuery, db, now = new Date().toISOString(), manifestClock }) {
   const accepted = new Set((response.results || [])
     .filter((result) => ['APPLIED', 'UPDATED', 'DUPLICATE', 'QUARANTINED'].includes(result && result.status))
     .map((result) => String(result.historyKey || '')));
@@ -811,6 +814,15 @@ async function completeDirtyBatch({ batch, response, tableName, gatewayEui, sour
         [tableName, dirtyKey, version].concat(tableName === 'radio_uplinks' ? [(batch.dirtyGenerations || {})[submitted] ?? -1] : [])
       );
     }
+    for (const segment of batch.segmentKeys || []) {
+      const key = 'history_repair_segment:' + JSON.stringify([tableName, segment]);
+      const value = await tx.get('SELECT value FROM app_settings WHERE key=?', [key]);
+      if (!value) continue;
+      const state = repairState(value.value);
+      state.lastAckAt = now;
+      if (manifestClock) state.ackFence = manifestClock;
+      await saveRepairState(tx, key, state, now);
+    }
   });
 }
 
@@ -829,7 +841,7 @@ function summarizeQuickCheck(rows) {
 
 async function pendingRepairCounts(q) {
   const counts = Object.fromEntries(TABLE_NAMES.map(table => [table, 0]));
-  const rows = await q("SELECT table_name,COUNT(*) AS n FROM sync_history_dirty_keys WHERE peer_node='cloud' AND change_kind='repair' AND status='pending' GROUP BY table_name");
+  const rows = await q("SELECT table_name,COUNT(*) AS n FROM sync_history_dirty_keys INDEXED BY idx_sync_history_pending WHERE peer_node='cloud' AND change_kind='repair' AND status='pending' GROUP BY table_name");
   for (const row of rows) if (TABLE_NAMES.includes(row.table_name)) counts[row.table_name] = Number(row.n);
   return counts;
 }
@@ -837,65 +849,196 @@ async function pendingRepairCounts(q) {
 // The checkpoint identifies the segment generation whose repairs were queued.
 // Keep it separate from sync_history_segments: ACKs recompute that local cache,
 // which is not evidence that a partial segment was delivered to the cloud.
-async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui }) {
+const MANIFEST_REPAIR_LIMITS = Object.freeze({ segments: 32, rows: 2000, oversizedRows: 10000, milliseconds: 2000, rounds: 3 });
+const REPAIR_QUARANTINE_REASON = 'manifest_repair_exhausted';
+
+function manifestFingerprint(manifest) {
+  return JSON.stringify([manifest.hashVersion, manifest.canonicalRowCount, manifest.syncablePayloadHash, manifest.quarantinedCount, manifest.tombstoneCount]);
+}
+
+function captureManifestRequest(flow, payload, target = {}, link = {}) {
+  const scope = crypto.createHash('sha256').update(JSON.stringify([payload.gatewayDeviceEui, link.server_url || target.server_url || null, link.cloud_user_id ?? null, target.id ?? null, target.server_linked_at ?? null])).digest('hex');
+  const previous = flow.get('history_manifest_clock');
+  const clock = previous ? { epoch: previous.epoch, sequence: previous.sequence + 1, scope }
+    : { epoch: crypto.randomUUID(), sequence: 1, scope };
+  flow.set('history_manifest_clock', clock);
+  return { clock, scope, generatedAt: payload.generatedAt, segments: payload.segments };
+}
+
+function repairState(value) {
+  if (!value || value === 'matched') return { version: 2, round: 0 };
+  const parsed = JSON.parse(value);
+  // The original draft's array only identified local content, not cloud parity.
+  return parsed && !Array.isArray(parsed) && parsed.version === 2 ? parsed : { version: 2, round: 0 };
+}
+
+function obsoleteManifest(request, state, currentClock) {
+  const clock = request.clock;
+  if (clock && currentClock && (clock.epoch !== currentClock.epoch || (request.scope && currentClock.scope && request.scope !== currentClock.scope))) return true;
+  if (clock) return [state.lastRequest, state.ackFence].some(fence => fence && fence.epoch === clock.epoch && clock.sequence <= fence.sequence);
+  return !!state.lastAckAt && Date.parse(request.generatedAt) <= Date.parse(state.lastAckAt);
+}
+
+async function saveRepairState(tx, key, state, now) {
+  await tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [key, JSON.stringify(state), now]);
+}
+
+async function quarantineRepair(tx, table, segment, state, now) {
+  const historyKey = 'REPAIR_SEGMENT|' + segment;
+  const hash = state.fingerprint ? crypto.createHash('sha256').update(state.fingerprint).digest('hex') : null;
+  await tx.run("INSERT INTO sync_history_quarantine(peer_node,table_name,history_key,payload_hash,reason,first_seen_at,last_seen_at,attempts) VALUES('cloud',?,?,?,?,?,?,?) ON CONFLICT(peer_node,table_name,history_key) DO UPDATE SET payload_hash=excluded.payload_hash,reason=excluded.reason,last_seen_at=excluded.last_seen_at,attempts=excluded.attempts", [table, historyKey, hash, REPAIR_QUARANTINE_REASON, now, now, Math.max(state.round || 0, state.budgetFailures || 0)]);
+}
+
+async function clearRepairQuarantine(tx, table, segment) {
+  await tx.run("DELETE FROM sync_history_quarantine WHERE peer_node='cloud' AND table_name=? AND history_key=? AND reason=?", [table, 'REPAIR_SEGMENT|' + segment, REPAIR_QUARANTINE_REASON]);
+}
+
+async function unresolvedRepairCounts(q) {
+  const counts = Object.fromEntries(TABLE_NAMES.map(table => [table, 0]));
+  const rows = await q("SELECT table_name,COUNT(*) AS n FROM sync_history_quarantine INDEXED BY idx_sync_history_repair_unresolved WHERE peer_node='cloud' AND reason='manifest_repair_exhausted' GROUP BY table_name");
+  for (const row of rows) if (TABLE_NAMES.includes(row.table_name)) counts[row.table_name] = Number(row.n);
+  return counts;
+}
+
+async function repairProgress(q) {
+  return { historyRepairPendingByTable: await pendingRepairCounts(q), historyRepairUnresolvedByTable: await unresolvedRepairCounts(q) };
+}
+
+async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui, request = null, currentClock = null, clock = () => performance.now() }) {
   const REPAIR_CAP = 2000;
-  const pendingRepair = {};
-  const closed = {};
-  let repairCount = 0;
-  let repairSkipped = 0;
-  const matched = comparisons.filter(c => c && c.repairRequested === false && Array.isArray(c.mismatchFields) && c.mismatchFields.length === 0);
-  if (matched.length) await db.transaction(async tx => {
-    for (const comparison of matched) {
-      definition(comparison.tableName);
-      const checkpoint = 'history_repair_segment:' + JSON.stringify([comparison.tableName, comparison.segmentKey]);
-      // A later mismatch after confirmed parity is a new repair generation,
-      // including cloud-side loss. Partial mismatches never set this marker.
-      await tx.run("INSERT INTO app_settings(key,value,updated_at) VALUES(?,'matched',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE app_settings.value IS NOT excluded.value", [checkpoint, now]);
+  request = request || { generatedAt: now };
+  if (comparisons.length > 500) throw new Error('history manifest answer exceeds 500 segments');
+  const sentSegments = new Map((request.segments || []).map(segment => [JSON.stringify([segment.tableName,segment.segmentKey]),segment]));
+  const started = clock();
+  const deadline = () => {
+    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) {
+      const error = new Error('manifest work deadline'); error.code = 'MANIFEST_BUDGET'; throw error;
     }
-  });
-  for (const comparison of comparisons) {
-    if (!comparison || comparison.repairRequested !== true) continue;
-    const table = comparison.tableName;
-    definition(table); // Reject unsupported cloud-provided table names before SQL.
-    if (pendingRepair[table] == null) pendingRepair[table] = Number(((await q("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND status='pending'", [table]))[0] || {}).n || 0);
-    if (closed['*'] || closed[table] || repairCount >= REPAIR_CAP || pendingRepair[table] >= REPAIR_CAP) { repairSkipped++; continue; }
-    const lookup = segmentQuery(table, comparison.segmentKey);
-    // Radio lives in a separate SQLite store. Read its snapshot outside the
-    // farming transaction; its bridge generation additionally fences every ACK.
-    const radioRows = table === 'radio_uplinks' ? await sourceQuery(table, lookup.sql, lookup.params) : null;
-    const queued = await db.transaction(async tx => {
-      const rows = radioRows || await tx.all(lookup.sql, lookup.params);
-      if (repairCount > 0 && repairCount + rows.length > REPAIR_CAP) closed['*'] = true;
-      else if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) closed[table] = true;
-      if (closed['*'] || closed[table]) return null;
-      const manifest = buildSegment(table, gatewayEui, comparison.segmentKey, rows).manifest;
-      const fingerprint = JSON.stringify([manifest.hashVersion, manifest.canonicalRowCount, manifest.syncablePayloadHash, manifest.quarantinedCount, manifest.tombstoneCount]);
-      const checkpoint = 'history_repair_segment:' + JSON.stringify([table, comparison.segmentKey]);
-      const prior = await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]);
-      // On upgrade, trust existing done keys; absence of a checkpoint is not
-      // evidence of changed content. Real UPDATEs already enter via dirty triggers.
-      const changed = !!prior && prior.value !== fingerprint;
-      let added = 0;
-      for (const row of rows) {
-        const prepared = prepareRow(table, gatewayEui, row);
-        const existing = await tx.get("SELECT status FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND row_key=?", [table, prepared.historyKey]);
-        // A manifest never rewrites an outstanding correction, retry or rejection.
-        // Missing keys always queue, including after unlink clears the dirty ledger.
-        if (existing && (existing.status === 'pending' || existing.status === 'rejected' || (existing.status === 'done' && !changed))) continue;
-        await tx.run(
-          "INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,source_row_id,changed_at,status,attempts,next_attempt_at,last_error) VALUES('cloud',?,?,'repair',?,?,'pending',0,NULL,NULL) ON CONFLICT(peer_node,table_name,row_key) DO UPDATE SET change_kind='repair',source_row_id=excluded.source_row_id,changed_at=excluded.changed_at,status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL",
-          [table, prepared.historyKey, row.id == null ? null : row.id, now]
-        );
-        added++;
-      }
-      await tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at WHERE app_settings.value IS NOT excluded.value', [checkpoint, fingerprint, now]);
-      return added;
-    });
-    if (queued == null) { repairSkipped++; continue; }
-    repairCount += queued;
-    pendingRepair[table] += queued;
+  };
+  const pageKey = 'history_repair_cursor:' + crypto.createHash('sha256').update(JSON.stringify([request.scope || null, comparisons.map(c => c && [c.tableName,c.segmentKey])])).digest('hex');
+  const saved = (await q('SELECT value FROM app_settings WHERE key=?', [pageKey]))[0];
+  let index = saved ? Number(saved.value) : 0;
+  if (!Number.isInteger(index) || index < 0 || index >= comparisons.length) index = 0;
+  let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
+  const pendingRepair = {};
+  while (index < comparisons.length && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
+    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds || examinedRows >= MANIFEST_REPAIR_LIMITS.rows || repairCount >= REPAIR_CAP) break;
+    const comparison = comparisons[index];
+    examinedSegments++;
+    if (!comparison) { index++; continue; }
+    const table = comparison.tableName, segment = comparison.segmentKey;
+    definition(table);
+    const checkpoint = 'history_repair_segment:' + JSON.stringify([table, segment]);
+    const sent = sentSegments.get(JSON.stringify([table, segment]));
+    const reportedFingerprint = sent ? manifestFingerprint(sent) : null;
+    const prior = repairState(((await q('SELECT value FROM app_settings WHERE key=?', [checkpoint]))[0] || {}).value);
+    if (obsoleteManifest(request, prior, currentClock)) { index++; continue; }
+    const matched = comparison.repairRequested === false && Array.isArray(comparison.mismatchFields) && comparison.mismatchFields.length === 0;
+    if (matched) {
+      await db.transaction(async tx => {
+        const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
+        if (obsoleteManifest(request, state, currentClock)) return;
+        await clearRepairQuarantine(tx, table, segment);
+        await saveRepairState(tx, checkpoint, { version: 2, round: 0, scope: request.scope, lastRequest: request.clock, matchedAt: now }, now);
+      });
+      index++; continue;
+    }
+    if (comparison.repairRequested !== true) { index++; continue; }
+    if (prior.unresolved && reportedFingerprint && prior.fingerprint === reportedFingerprint && (!request.scope || prior.scope === request.scope)) { quarantinedSegments++; index++; continue; }
+    if (pendingRepair[table] == null) pendingRepair[table] = Number(((await q("SELECT COUNT(*) AS n FROM sync_history_dirty_keys INDEXED BY idx_sync_history_pending WHERE peer_node='cloud' AND table_name=? AND status='pending'", [table]))[0] || {}).n || 0);
+    if (pendingRepair[table] >= REPAIR_CAP) { repairSkipped++; index++; continue; }
+    const lookup = segmentQuery(table, segment);
+    const remaining = MANIFEST_REPAIR_LIMITS.rows - examinedRows;
+    const limit = examinedRows === 0 ? MANIFEST_REPAIR_LIMITS.oversizedRows + 1 : remaining + 1;
+    // Bounded source read, outside the write transaction. The node dispatches
+    // radio_uplinks to radio.db and every other source to farming.db.
+    const readSql = lookup.sql + ' LIMIT ?';
+    const rows = await sourceQuery(table, readSql, lookup.params.concat(limit));
+    examinedRows += rows.length;
+    if (rows.length > MANIFEST_REPAIR_LIMITS.oversizedRows) {
+      await db.transaction(async tx => {
+        const state = { ...prior, version: 2, scope: request.scope, fingerprint: reportedFingerprint, unresolved: 'segment_row_limit', lastRequest: request.clock, round: MANIFEST_REPAIR_LIMITS.rounds };
+        await quarantineRepair(tx, table, segment, state, now);
+        await saveRepairState(tx, checkpoint, state, now);
+      });
+      quarantinedSegments++; index++; break;
+    }
+    if ((rows.length > remaining && examinedRows !== rows.length) || (repairCount > 0 && repairCount + rows.length > REPAIR_CAP)
+      || (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP)) break;
+    try {
+      const prepared = [];
+      for (const row of rows) { deadline(); prepared.push(prepareRow(table, gatewayEui, row)); }
+      const fingerprint = manifestFingerprint(buildPreparedSegment(table, segment, prepared).manifest);
+      deadline();
+      const added = await db.transaction(async tx => {
+        const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
+        if (obsoleteManifest(request, state, currentClock)) return 0;
+        const existing = [];
+        for (const row of prepared) {
+          deadline();
+          existing.push(await tx.get("SELECT status FROM sync_history_dirty_keys WHERE peer_node='cloud' AND table_name=? AND row_key=?", [table, row.historyKey]));
+        }
+        const changed = state.fingerprint !== fingerprint || (request.scope && request.scope !== state.scope);
+        if (changed) { state.round = 0; state.budgetFailures = 0; delete state.unresolved; await clearRepairQuarantine(tx, table, segment); }
+        // An active partial generation already has per-row durable ACKs. A new
+        // mismatch after it drains must recheck the cloud, even before parity.
+        const active = !changed && state.round > 0 && existing.some(row => row && row.status === 'pending');
+        if (!active && state.round >= MANIFEST_REPAIR_LIMITS.rounds) {
+          state.unresolved = state.unresolved || 'round_limit';
+          state.lastRequest = request.clock;
+          await quarantineRepair(tx, table, segment, state, now);
+          await saveRepairState(tx, checkpoint, state, now);
+          quarantinedSegments++; return 0;
+        }
+        if (state.unresolved === 'work_deadline') { delete state.unresolved; await clearRepairQuarantine(tx, table, segment); }
+        if (!active) state.round = (state.round || 0) + 1;
+        let count = 0;
+        for (let i = 0; i < prepared.length; i++) {
+          deadline();
+          const entry = existing[i];
+          if (entry && (entry.status === 'pending' || entry.status === 'rejected' || (entry.status === 'done' && active))) continue;
+          await tx.run("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,source_row_id,changed_at,status,attempts,next_attempt_at,last_error) VALUES('cloud',?,?,'repair',?,?,'pending',0,NULL,NULL) ON CONFLICT(peer_node,table_name,row_key) DO UPDATE SET change_kind='repair',source_row_id=excluded.source_row_id,changed_at=excluded.changed_at,status='pending',attempts=0,next_attempt_at=NULL,last_error=NULL", [table, prepared[i].historyKey, rows[i].id == null ? null : rows[i].id, now]);
+          count++;
+        }
+        deadline();
+        await saveRepairState(tx, checkpoint, { ...state, version: 2, scope: request.scope, fingerprint, budgetFailures: 0, lastRequest: request.clock, startedAt: state.startedAt || now }, now);
+        return count;
+      });
+      repairCount += added;
+      pendingRepair[table] += added;
+      index++;
+    } catch (error) {
+      if (error.code !== 'MANIFEST_BUDGET') throw error;
+      // The transaction rolled back. Retry this whole segment next time; a
+      // repeatedly unserviceable segment becomes explicit unresolved work.
+      await db.transaction(async tx => {
+        const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
+        if (request.scope && state.scope !== request.scope) { state.round = 0; state.budgetFailures = 0; }
+        state.scope = request.scope;
+        state.fingerprint = state.fingerprint || reportedFingerprint;
+        state.budgetFailures = (state.budgetFailures || 0) + 1;
+        if (state.budgetFailures >= MANIFEST_REPAIR_LIMITS.rounds) {
+          state.unresolved = 'work_deadline'; await quarantineRepair(tx, table, segment, state, now); quarantinedSegments++; index++;
+        }
+        await saveRepairState(tx, checkpoint, state, now);
+      });
+      break;
+    }
   }
-  return { repairCount, repairSkipped };
+  repairSkipped += comparisons.slice(index).filter(c => c && c.repairRequested === true).length;
+  await db.transaction(async tx => tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [pageKey, String(index >= comparisons.length ? 0 : index), now]));
+  return { repairCount, repairSkipped, examinedRows, examinedSegments, quarantinedSegments };
+}
+
+function normalizeCloudServerUrl(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+function normalizeGatewayDeviceEui(value) {
+  const raw = String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (!raw) return '';
+  if (raw.length === 16) return raw === '0101010101010101' ? '' : raw;
+  if (raw.length === 12) return raw.slice(0, 6) + 'FFFE' + raw.slice(6);
+  return '';
 }
 
 module.exports = {
@@ -937,5 +1080,10 @@ module.exports = {
   queueManifestRepairs,
   completeDirtyBatch,
   summarizeQuickCheck,
-  pendingRepairCounts
+  pendingRepairCounts,
+  unresolvedRepairCounts,
+  repairProgress,
+  captureManifestRequest,
+  normalizeCloudServerUrl,
+  normalizeGatewayDeviceEui
 };

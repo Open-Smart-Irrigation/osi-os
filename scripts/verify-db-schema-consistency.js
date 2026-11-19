@@ -1261,6 +1261,8 @@ const schemaContract = {
 };
 
 const requiredIndexes = {
+  sync_history_dirty_keys: ['idx_sync_history_pending'],
+  sync_history_quarantine: ['idx_sync_history_repair_unresolved'],
   chameleon_reading_links: ['ux_chameleon_reading_links_device_data'],
   tensiomark_observations: ["idx_tensiomark_observations_device_time", "idx_tensiomark_observations_device_data"],
   sync_outbox_recovery_audit: ['idx_sync_outbox_recovery_audit_event'],
@@ -1373,6 +1375,14 @@ const requiredIndexes = {
 };
 
 const requiredIndexSqlFragments = {
+  idx_sync_history_pending: [
+    'on sync_history_dirty_keys(table_name, change_kind)',
+    "where peer_node='cloud' and status='pending'",
+  ],
+  idx_sync_history_repair_unresolved: [
+    'on sync_history_quarantine(table_name)',
+    "where peer_node='cloud' and reason='manifest_repair_exhausted'",
+  ],
   ux_chameleon_reading_links_device_data: [
     'unique index',
     'on chameleon_reading_links(device_data_id)',

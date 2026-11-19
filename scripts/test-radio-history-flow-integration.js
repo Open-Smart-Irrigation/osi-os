@@ -34,6 +34,7 @@ function fixture(t) {
       try {
         const value = await executor({
           all: async (sql, params = []) => farming.prepare(sql).all(...params),
+          get: async (sql, params = []) => farming.prepare(sql).get(...params),
           run: async (sql, params = []) => farming.prepare(sql).run(...params)
         });
         farming.exec('COMMIT');
