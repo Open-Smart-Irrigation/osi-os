@@ -239,6 +239,11 @@ test('actual profile-gated STREGA decoder feeds the shipped SQL wrapper', async 
   assert.equal(runtimeResult.formattedData.currentState, 'OPEN');
   assert.equal((await fixture.db.get('SELECT COUNT(*) AS count FROM device_data WHERE deveui=?', [EUI])).count, 1);
   assert.equal((await fixture.db.get('SELECT current_state FROM devices WHERE deveui=?', [EUI])).current_state, 'OPEN');
+  // Drive the SQL wrapper directly again, bypassing the process-local decoder
+  // cache just as a redelivery after restart does.
+  const replay = await invoke(stregaSql, fixture.db, null, decoded, events);
+  assert.equal(replay,null);
+  assert.equal((await fixture.db.get('SELECT COUNT(*) AS count FROM device_data WHERE deveui=?', [EUI])).count, 1);
   fixture.cleanup();
 });
 
@@ -269,6 +274,26 @@ test('profile decoder preserves absent and malformed report times as untrusted a
   assert.equal((await fixture.db.get('SELECT current_state FROM devices WHERE deveui=?', [EUI])).current_state, 'CLOSED');
   assert.ok(events.some((entry) => entry[0] === 'warn' && String(entry[1]).includes('CLOSED evidence')));
   fixture.cleanup();
+});
+
+test('replayed untrusted STREGA report cannot replace a newer observed state', async () => {
+  const fixture = await tempDb();
+  const events = [];
+  const message = (id,state,at) => ({
+    formattedData:{devEui:EUI,timestamp:null,rawTimestamp:null,arrivalTimestamp:at,currentState:state,eventIdentity:{deduplicationId:id}},
+    runtimeContext:trustedObservationRuntime(at)
+  });
+  try {
+    const oldOpen = message('untrusted-open','OPEN','2026-10-18T10:00:01.000Z');
+    assert.ok(await invoke(stregaSql,fixture.db,null,oldOpen,events));
+    assert.ok(await invoke(stregaSql,fixture.db,null,message('newer-close','CLOSED','2026-10-18T10:00:02.000Z'),events));
+    const before = await fixture.db.get('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?',[EUI]);
+    const replay = await invoke(stregaSql,fixture.db,null,oldOpen,events);
+    assert.equal((await fixture.db.get('SELECT current_state FROM devices WHERE deveui=?',[EUI])).current_state,'CLOSED');
+    assert.deepEqual(await fixture.db.get('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?',[EUI]),before);
+    assert.equal((await fixture.db.get('SELECT COUNT(*) AS n FROM device_data WHERE deveui=?',[EUI])).n,2);
+    assert.equal(replay,null);
+  } finally {fixture.cleanup();}
 });
 
 test('live wrapper invokes exact-CLOSE evidence after each committed CLOSED report', async () => {

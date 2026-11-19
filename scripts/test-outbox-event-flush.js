@@ -345,6 +345,15 @@ function buildHarness(store, nowMs, outboxRows = OUTBOX_ROWS) {
       const done = typeof params === 'function' ? params : cb;
       if (done) done(null);
     }
+    async get(sql) { return rowsFor(String(sql))[0]; }
+    async transaction(fn) {
+      // This fixture tests the flush lease; the helper's real queue and
+      // rollback isolation are exercised by test-manual-facade-transactions.
+      return fn({
+        get: (sql) => this.get(sql),
+        run: async (sql) => { this.run(sql); },
+      });
+    }
     close(cb) { if (cb) cb(null); }
   }
   return {

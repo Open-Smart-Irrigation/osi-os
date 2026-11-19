@@ -129,11 +129,12 @@ function runtime(dbPath) {
   };
   const apply = compile('Apply Config');
   const write = compile('LSN50 Normalize + Write');
-  async function deliver(rainCount, offsetSeconds) {
+  async function deliver(rainCount, offsetSeconds, deduplicationId) {
     const msg = {
       payload: [{ dendro_enabled: 0, temp_enabled: 0, device_mode: 9, chameleon_enabled: 0, dendro_force_legacy: 0, dendro_invert_direction: 0 }],
       formattedData: { devEui: EUI, timestamp: new Date(T0 + offsetSeconds * 1000).toISOString(), observedModeCode: 9 },
       _rawPayload: mod9Payload(rainCount),
+      uplinkIdentity: deduplicationId ? {deduplicationId} : null,
     };
     const applied = await apply(msg);
     return write(applied);
@@ -147,6 +148,30 @@ function snapshot(dbPath, sql) {
 }
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+test('MOD9 replay after reopening the runtime stores one canonical and rain observation', async () => {
+  const dbPath = seedFile();
+  await runtime(dbPath).deliver(100,0,'mod9-replay');
+  const before = {
+    raw: snapshot(dbPath,'SELECT * FROM device_data ORDER BY id'),
+    rain: snapshot(dbPath,'SELECT * FROM rain_observations ORDER BY id'),
+    quarantine: snapshot(dbPath,'SELECT * FROM ingest_quarantine ORDER BY id')
+  };
+  assert.equal(before.raw.length,1);
+  assert.equal(before.rain.length,1);
+  const restarted = runtime(dbPath);
+  const originalCapture = MODULES.rain.captureLsn50Observation;
+  let captureCalls = 0;
+  MODULES.rain.captureLsn50Observation = (...args) => { captureCalls++; return originalCapture(...args); };
+  try {
+    for (let replay=0;replay<3;replay++) assert.equal(await restarted.deliver(100,0,'mod9-replay'),null);
+    assert.deepEqual(restarted.errors,[]);
+    assert.equal(captureCalls,0,'an ignored canonical insert never calls rain observation capture');
+    assert.deepEqual(snapshot(dbPath,'SELECT * FROM device_data ORDER BY id'),before.raw,'all persisted rain/flow counters remain unchanged');
+    assert.deepEqual(snapshot(dbPath,'SELECT * FROM rain_observations ORDER BY id'),before.rain,'one unchanged rain observation');
+    assert.deepEqual(snapshot(dbPath,'SELECT * FROM ingest_quarantine ORDER BY id'),before.quarantine,'no duplicate quarantine effects');
+  } finally { MODULES.rain.captureLsn50Observation = originalCapture; }
+});
 
 for (const order of ['101 first', '102 first']) {
   test(`MOD9 rain counter: 100, then 101 and 102 in flight together (${order}) store 2 x 0.2 mm`, async () => {

@@ -288,11 +288,7 @@ function snapshotDb() {
 }
 
 function callbackDatabase(db) {
-  return class Database {
-    all(sql, params, callback) { try { callback(null, db.prepare(sql).all(...(params || [])).map((r) => ({ ...r }))); } catch (error) { callback(error); } }
-    run(sql, params, callback) { try { db.prepare(sql).run(...(params || [])); callback(null); } catch (error) { callback(error); } }
-    close(callback) { callback(); }
-  };
+  return require('./lib/queued-db-fixture').osiDbFor(db).Database;
 }
 
 function assertZoneEnvironments(items, warnings) {

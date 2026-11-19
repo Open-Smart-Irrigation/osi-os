@@ -49,3 +49,14 @@ test('a frame with zero latitude bits but non-zero longitude bits still decodes'
   assert.ok(pos);
   assert.ok(pos.longitude>0);
 });
+
+
+test('legacy radio identity separates devices and original network times',()=>{
+ const radio=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper');
+ const legacy={...event,deduplicationId:undefined,fCnt:1};
+ const first=radio.fromChirpStack(legacy).deduplication_id;
+ assert.ok(first);
+ assert.equal(radio.fromChirpStack({...legacy}).deduplication_id,first);
+ assert.notEqual(radio.fromChirpStack({...legacy,deviceInfo:{...legacy.deviceInfo,devEui:'A840410000000002'}}).deduplication_id,first);
+ assert.notEqual(radio.fromChirpStack({...legacy,time:'2026-09-10T10:00:30Z'}).deduplication_id,first);
+});
