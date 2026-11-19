@@ -56,15 +56,7 @@ function fixture() {
   raw.prepare("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,label,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version,created_at,updated_at) VALUES('fixed-1',?,'WEEKLY','Fixed',127,'06:00',10,'UTC',1,1,?,?)").run(VALVE, NOW, NOW);
   raw.prepare("INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled,observation_window_minutes,min_interval_minutes,max_daily_minutes,delivery_settings_json,sync_version,created_at,updated_at) VALUES('policy-1','zone-north',?, 'UTC',1,60,60,240,'{}',1,?,?)").run(JSON.stringify({ kind: 'SWT', threshold_kpa: 30, sources: [{ device_eui: SENSOR, channel: 'SWT_1' }] }), NOW, NOW);
   raw.prepare("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,label,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version,created_at,updated_at,condition_policy_uuid) VALUES('conditional-1',?,'WEEKLY','Conditional',127,'07:00',10,'UTC',1,1,?,?,'policy-1')").run(VALVE, NOW, NOW);
-  function callbackDb() {
-    return {
-      all(sql, params, callback) { if (typeof params === 'function') { callback = params; params = []; } try { callback(null, raw.prepare(sql).all(...(params || []))); } catch (error) { callback(error); } },
-      get(sql, params, callback) { if (typeof params === 'function') { callback = params; params = []; } try { callback(null, raw.prepare(sql).get(...(params || []))); } catch (error) { callback(error); } },
-      run(sql, params, callback) { if (typeof params === 'function') { callback = params; params = []; } try { const r = raw.prepare(sql).run(...(params || [])); if (callback) callback.call({ changes: Number(r.changes) }, null); } catch (error) { if (callback) callback(error); } },
-      close(callback) { if (callback) callback(); },
-    };
-  }
-  return { raw, Database: function Database() { return callbackDb(); } };
+  return { raw, Database: require('./lib/queued-db-fixture').osiDbFor(raw).Database };
 }
 
 function runtime(p) {

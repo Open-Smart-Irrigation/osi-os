@@ -156,19 +156,7 @@ for (const profile of PROFILES) {
 // --- Layer 3: full end-to-end -- real 0024 trigger + real, unmodified ------
 // --- "Build Edge Event Batch" node function against a real sqlite fixture. -
 function makeOsiDbShim(db) {
-  class ShimDatabase {
-    constructor(_filename) {}
-    all(sql, params, callback) {
-      try { callback(null, db.prepare(sql).all(...(params || []))); }
-      catch (error) { callback(error); }
-    }
-    run(sql, params, callback) {
-      try { db.prepare(sql).run(...(params || [])); callback(null); }
-      catch (error) { callback(error); }
-    }
-    close(callback) { callback(); }
-  }
-  return { Database: ShimDatabase };
+  return require('./lib/queued-db-fixture').osiDbFor(db);
 }
 
 async function runSyncOutboxBuildFunc(func, db, envValues) {
