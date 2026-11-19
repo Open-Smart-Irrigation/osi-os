@@ -48,6 +48,15 @@ grep -i chirpstack /data/log/osi-system.log | tail -20
 Expect both stream parameters and `level="warn"`. A healthy service may emit
 no warnings, so empty log output alone does not disprove capture.
 
+Capture has limits in ChirpStack 4.12.1. Missing device sessions and invalid
+MICs are logged at INFO for ordinary and relayed uplinks, so `warn` hides
+those rejection diagnostics. Device-session `database is locked` errors reach
+the captured stream, but enqueue-side lock and gRPC INTERNAL causes do not:
+the enqueue path propagates errors into INTERNAL without logging the cause,
+and the target filter excludes `tower_http` failure events at every level.
+Promoting rejection diagnostics to WARN and logging enqueue failure causes
+require a follow-up source patch.
+
 The persistent writer follows the whole system log with `logread -f -F` and
 rotates at 2048 KiB, keeping one previous file. It has no per-service rate
 limit. For scale, an assumed five uplinks/s at just one 250-byte info line per
@@ -103,7 +112,7 @@ take logd from 128 KiB to 2 MiB of RAM and restart it, losing the ring.
 A `log_buffer_size` of `64` means an older build of this change is deployed.
 Nothing breaks, but retention is halved against the OpenWrt default; redeploy.
 
-Worst case on disk is `osi-system.log` plus one rotated `osi-system.log.0`,
+Worst case on disk is `osi-system.log` plus one rotated `osi-system.log.old`,
 about 4 MiB. If `df` shows /data tight enough for 4 MiB to matter, that is a
 disk-pressure finding in its own right — deal with it before the reboot in
 step 4.
@@ -150,7 +159,7 @@ sleep 10
 ls -l /data/log/
 ```
 
-Expect exactly two files afterwards, `osi-system.log` and `osi-system.log.0`,
+Expect exactly two files afterwards, `osi-system.log` and `osi-system.log.old`,
 the live one well under 2048 KiB because it restarted after the rename. Three
 or more files, or one file past 2048 KiB, means the cap is not being applied
 and the worst-case disk figure in this document is wrong — stop and report it
