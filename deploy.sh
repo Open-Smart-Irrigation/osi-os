@@ -175,6 +175,28 @@ warn_root_password() {
 }
 warn_root_password
 
+# Advisory only: the operator schedules ChirpStack's separate WAL one-shot.
+# Read the header without opening SQLite or creating shared-memory sidecars.
+note_chirpstack_wal() {
+    if node -e '
+        const fs = require("fs");
+        const fd = fs.openSync(process.argv[1], "r");
+        try {
+            const b = Buffer.alloc(20);
+            const n = fs.readSync(fd, b, 0, 20, 0);
+            process.exitCode = n === 20 && b[18] === 1 && b[19] === 1 ? 3 : 0;
+        } finally { fs.closeSync(fd); }
+    ' "${OSI_CS_DB:-/srv/chirpstack/chirpstack.sqlite}" 2>/dev/null; then
+        :
+    else
+        ncw_status=$?
+        if [ "$ncw_status" = 3 ]; then
+            echo "NOTE: ChirpStack SQLite is not on WAL; after operator review, copy scripts/pi/chirpstack-sqlite-wal.sh to /tmp on the gateway, then run: setsid sh /tmp/chirpstack-sqlite-wal.sh --apply > /tmp/cs-wal.log 2>&1 < /dev/null &"
+        fi
+    fi
+    return 0
+}
+
 # deploy lock begin
 take_deploy_lock || exit 1
 # deploy lock end
@@ -4198,6 +4220,7 @@ if [ "$soil_profile_repair_failed" = 1 ]; then
     echo ""
 fi
 print_bootstrap_note
+note_chirpstack_wal
 # An unverified start is the deploy's last line (exit 0: the new release runs).
 if [ "$PROBE_OK" = "unverified" ]; then
     echo "UNVERIFIED: payloads/$DEPLOY_STAMP runs, but its start could not be confirmed: $NODE_RED_START_REASON. The next deploy checks it again."
