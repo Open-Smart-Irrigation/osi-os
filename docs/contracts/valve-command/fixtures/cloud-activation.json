@@ -1,0 +1,920 @@
+{
+  "contract_version": 1,
+  "suite": "cloud-activation",
+  "consumers": [
+    "CL9",
+    "CL1",
+    "CL2"
+  ],
+  "cases": [
+    {
+      "id": "envelope-swt-create",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 30,
+            "sources": [
+              {
+                "device_eui": "A840410000000001",
+                "channel": "swt_1"
+              }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "envelope-dendro-create",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "DENDRO",
+            "minimum_stress": "moderate",
+            "response_mode": "fixed"
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "envelope-partial-update",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": 2,
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": 4,
+              "duration_minutes": 20
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "envelope-pause-current",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "PAUSE_IRRIGATION_POLICY",
+          "expected_policy_version": null
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "envelope-retry-valve",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "RETRY_IRRIGATION_VALVE",
+          "device_eui": "A840410000000002"
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "invalid-missing-actor",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 30,
+            "sources": [
+              {
+                "device_eui": "A840410000000001",
+                "channel": "swt_1"
+              }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": false
+      }
+    },
+    {
+      "id": "invalid-missing-schedule-version",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 30,
+            "sources": [
+              {
+                "device_eui": "A840410000000001",
+                "channel": "swt_1"
+              }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": false
+      }
+    },
+    {
+      "id": "invalid-negative-version",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": -1,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 30,
+            "sources": [
+              {
+                "device_eui": "A840410000000001",
+                "channel": "swt_1"
+              }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": false
+      }
+    },
+    {
+      "id": "invalid-invalid-request-id",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "bad",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 30,
+            "sources": [
+              {
+                "device_eui": "A840410000000001",
+                "channel": "swt_1"
+              }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": false
+      }
+    },
+    {
+      "id": "authority-owner-manage",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "owner",
+          "zone_permission": "manage",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "accepted",
+        "authorized": true,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-admin-manage",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "admin",
+          "zone_permission": "manage",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "accepted",
+        "authorized": true,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-member-manage",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "member",
+          "zone_permission": "manage",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "accepted",
+        "authorized": true,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-member-operate",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "member",
+          "zone_permission": "operate",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "authorized": false,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-viewer-read",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "viewer",
+          "zone_permission": "read",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "authorized": false,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-member-other-zone",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "member",
+          "zone_permission": "other_zone",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "authorized": false,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "authority-disabled-manage",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "actor": "disabled",
+          "zone_permission": "manage",
+          "command_type": "UPSERT_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "authorized": false,
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "edge-capability-missing",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "edge_capability": false,
+          "cloud_capability": true
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "legacy_fallback_calls": 0,
+        "conditional_rows_sent": 0
+      }
+    },
+    {
+      "id": "cloud-capability-missing",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "edge_capability": true,
+          "cloud_capability": false
+        },
+        "events": [
+          {
+            "type": "activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "legacy_fallback_calls": 0,
+        "conditional_rows_sent": 0
+      }
+    },
+    {
+      "id": "revoked-after-cloud-queue",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "revoke_zone_grant"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "refused",
+        "physical_enqueues": 0,
+        "confirmed_enabled": false
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "activation-edge-ack-applied",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "confirmed_enabled": false
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "edge_ack_applied"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "mirror_match"
+          }
+        ]
+      },
+      "expected": {
+        "after_first_signal": {
+          "pending": true,
+          "activation_confirmed": false
+        },
+        "after_both": {
+          "pending": false,
+          "confirmed_enabled": true
+        },
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "activation-mirror-match",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "confirmed_enabled": false
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "mirror_match"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "edge_ack_applied"
+          }
+        ]
+      },
+      "expected": {
+        "after_first_signal": {
+          "pending": true,
+          "activation_confirmed": false
+        },
+        "after_both": {
+          "pending": false,
+          "confirmed_enabled": true
+        },
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "definitive-rejection-no-mirror-needed",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "confirmed_enabled": false
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "edge_reject",
+            "reason": "qualification_unavailable"
+          }
+        ]
+      },
+      "expected": {
+        "pending": false,
+        "confirmed_enabled": false,
+        "reason": "qualification_unavailable"
+      }
+    },
+    {
+      "id": "offline-does-not-confirm",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "confirmed_enabled": false
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "disconnect"
+          }
+        ]
+      },
+      "expected": {
+        "pending": true,
+        "confirmed_enabled": false
+      }
+    },
+    {
+      "id": "request-replay-no-second-edit",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "request_id": "52345678-1234-4234-8234-123456789abc"
+        },
+        "events": [
+          {
+            "type": "cloud_accept",
+            "payload": "same"
+          },
+          {
+            "type": "retry",
+            "payload": "same"
+          }
+        ]
+      },
+      "expected": {
+        "pending_edits": 1,
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "request-reuse-conflicts",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "request_id": "52345678-1234-4234-8234-123456789abc"
+        },
+        "events": [
+          {
+            "type": "cloud_accept",
+            "threshold_kpa": 30
+          },
+          {
+            "type": "retry",
+            "threshold_kpa": 50
+          }
+        ]
+      },
+      "expected": {
+        "second_admission": "refused",
+        "pending_edits": 1
+      }
+    },
+    {
+      "id": "stale-policy-version",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "expected_policy_version": 2,
+          "current_policy_version": 3
+        },
+        "events": [
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "version_conflict",
+        "confirmed_policy_version": 3,
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "pause-behind-unanswered-create",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "create_handed_off"
+          },
+          {
+            "type": "pause_requested"
+          },
+          {
+            "type": "disconnect"
+          },
+          {
+            "type": "create_mirrored"
+          },
+          {
+            "type": "reconnect"
+          },
+          {
+            "type": "pause_apply"
+          }
+        ]
+      },
+      "expected": {
+        "pause_intents": 1,
+        "confirmed_enabled": false,
+        "fixed_plan_restored": false,
+        "physical_closed": null
+      }
+    },
+    {
+      "id": "withdraw-never-delivered-create",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "create_not_delivered"
+          },
+          {
+            "type": "pause_requested"
+          }
+        ]
+      },
+      "expected": {
+        "pause_state": "create_withdrawn",
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "activation-waits-for-clear-and-qualification",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "edge_capability": true,
+          "cloud_capability": true,
+          "qualified": true,
+          "clear_acked": false
+        },
+        "events": [
+          {
+            "type": "policy_applied"
+          },
+          {
+            "type": "due"
+          }
+        ]
+      },
+      "expected": {
+        "confirmed_enabled": true,
+        "ready_to_water": false,
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "qualified-daily-cloud-run",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authority": "manage",
+          "qualified": true,
+          "clear_acked": true,
+          "same_zone": true,
+          "clock_usable": true,
+          "budget_available": true,
+          "interval_available": true
+        },
+        "events": [
+          {
+            "type": "cloud_activate"
+          },
+          {
+            "type": "edge_ack_and_mirror"
+          },
+          {
+            "type": "daily_due",
+            "condition": "MET"
+          },
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "reported_open"
+          },
+          {
+            "type": "reported_closed"
+          }
+        ]
+      },
+      "expected": {
+        "physical_enqueues": 1,
+        "observation": "observed_complete",
+        "trigger": "conditional",
+        "measured_flow_liters": null
+      },
+      "decision": "S8"
+    }
+  ]
+}

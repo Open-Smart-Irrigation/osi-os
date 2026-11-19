@@ -1,0 +1,897 @@
+{
+  "contract_version": 1,
+  "suite": "policy",
+  "consumers": [
+    "EB11a",
+    "EB11b"
+  ],
+  "cases": [
+    {
+      "id": "swt-equality-waters",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 30
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "MET",
+        "reason": "threshold_met",
+        "value": 30,
+        "unit": "kPa"
+      }
+    },
+    {
+      "id": "swt-below-threshold",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 29.9
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "NOT_MET",
+        "reason": "threshold_not_met",
+        "value": 29.9,
+        "unit": "kPa"
+      }
+    },
+    {
+      "id": "swt-zero-is-wet",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 0
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "NOT_MET",
+        "value": 0,
+        "unit": "kPa"
+      }
+    },
+    {
+      "id": "swt-missing-is-unknown",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": []
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "missing_evidence",
+        "value": null
+      }
+    },
+    {
+      "id": "swt-ineligible-source",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": false,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 50
+                }
+              ],
+              "reason": "calibration_unavailable"
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "calibration_unavailable",
+        "value": null
+      }
+    },
+    {
+      "id": "swt-invalid-negative",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": -2
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "missing_evidence",
+        "value": null
+      }
+    },
+    {
+      "id": "swt-equal-source-weight",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            },
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_2"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 20
+                },
+                {
+                  "id": 2,
+                  "at": "2026-11-20T05:10:00.000Z",
+                  "value": 20
+                },
+                {
+                  "id": 3,
+                  "at": "2026-11-20T05:20:00.000Z",
+                  "value": 20
+                }
+              ]
+            },
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_2",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 50
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "MET",
+        "value": 35,
+        "unit": "kPa"
+      }
+    },
+    {
+      "id": "swt-missing-selected-channel",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            },
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_2"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T05:00:00.000Z",
+                  "value": 50
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "source_unavailable",
+        "value": null
+      }
+    },
+    {
+      "id": "swt-duplicate-and-window-boundary",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 30,
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evidence": {
+          "sources": [
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1",
+              "eligible": true,
+              "samples": [
+                {
+                  "id": 1,
+                  "at": "2026-11-20T06:00:00.000Z",
+                  "value": 60
+                },
+                {
+                  "id": 2,
+                  "at": "2026-11-20T06:00:00.000Z",
+                  "value": 30
+                },
+                {
+                  "id": 3,
+                  "at": "2026-11-20T06:00:00.001Z",
+                  "value": 100
+                },
+                {
+                  "id": 4,
+                  "at": "2026-11-20T04:59:59.999Z",
+                  "value": 100
+                }
+              ]
+            }
+          ]
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "MET",
+        "value": 30
+      }
+    },
+    {
+      "id": "dendro-equality-waters",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "MET",
+        "reason": "stress_threshold_met",
+        "value": "moderate"
+      }
+    },
+    {
+      "id": "dendro-below-threshold",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "mild",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "NOT_MET",
+        "reason": "stress_below_threshold"
+      }
+    },
+    {
+      "id": "dendro-maintain-recovery-hold",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain_recovery_hold"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "NOT_MET",
+        "reason": "maintain_recovery_hold"
+      }
+    },
+    {
+      "id": "dendro-maintain-rain-suppression",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain_rain_suppression"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "NOT_MET",
+        "reason": "maintain_rain_suppression"
+      }
+    },
+    {
+      "id": "dendro-no-tree",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 0,
+            "stress": "moderate",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "dendro_no_usable_trees"
+      }
+    },
+    {
+      "id": "dendro-future",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.001Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "dendro_evidence_stale"
+      }
+    },
+    {
+      "id": "dendro-older-than-36h",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-18T17:59:59.999Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "dendro_evidence_stale"
+      }
+    },
+    {
+      "id": "dendro-unknown-action",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-20T06:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "unknown"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "dendro_action_unknown"
+      }
+    },
+    {
+      "id": "dendro-exactly-36h",
+      "basis": "baseline",
+      "check": "policy_evaluate",
+      "input": {
+        "condition": {
+          "kind": "DENDRO",
+          "minimum_stress": "moderate",
+          "response_mode": "fixed"
+        },
+        "evidence": {
+          "analysis": {
+            "computed_at": "2026-11-18T18:00:00.000Z",
+            "usable_tree_count": 1,
+            "stress": "moderate",
+            "action": "maintain"
+          }
+        },
+        "dueAt": "2026-11-20T06:00:00.000Z",
+        "windowMinutes": 60
+      },
+      "expected": {
+        "status": "MET"
+      }
+    },
+    {
+      "id": "gate-watermark-row",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "DRAGINO_LSN50",
+          "watermark_readings_link": true
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "watermark_interlock"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gate-clover",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "TEKTELIC_CLOVER",
+          "kind": "VWC",
+          "qualified_capture": false
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "clover_activation_pending"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gate-wrong-zone",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "KIWI_SENSOR",
+          "same_zone": false
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "device_not_assigned_to_zone"
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "gate-qualification",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "qualified": false
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "qualification_unavailable"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gate-clock-behind",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "clock_behind_data": true
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "clock_untrusted"
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "gate-clear-ack",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "clear_acked": false
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "plan_update_pending"
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "gate-budget",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "daily_budget_remaining_minutes": 0
+        },
+        "events": [
+          {
+            "type": "due_evaluation"
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0,
+        "guard": "daily_budget_exhausted"
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "threshold-crossing-waits-until-due",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "policy_enabled": true,
+          "daily_local_time": "06:00"
+        },
+        "events": [
+          {
+            "type": "sample",
+            "local_time": "05:00",
+            "swt_kpa": 60
+          }
+        ]
+      },
+      "expected": {
+        "dispatches": 0
+      }
+    },
+    {
+      "id": "kiwi-watermark-is-not-lsn50-interlock",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "KIWI_SENSOR",
+          "channel": "swt_1",
+          "watermark_readings_link": false
+        },
+        "events": [
+          {
+            "type": "check_source"
+          }
+        ]
+      },
+      "expected": {
+        "source_eligible": true
+      }
+    },
+    {
+      "id": "dendro-fixed-duration",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "response_mode": "fixed",
+          "base_duration_minutes": 30,
+          "analysis_action": "emergency_irrigate"
+        },
+        "events": [
+          {
+            "type": "condition_met"
+          }
+        ]
+      },
+      "expected": {
+        "effective_duration_minutes": 30
+      },
+      "decision": "S6"
+    },
+    {
+      "id": "policy-pause-does-not-rearm-fixed-plan",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "convert_conditional"
+          },
+          {
+            "type": "clear_acks"
+          },
+          {
+            "type": "pause"
+          }
+        ]
+      },
+      "expected": {
+        "policy_enabled": false,
+        "fixed_plan_restored": false
+      }
+    },
+    {
+      "id": "unexpected-onboard-open-blocks",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "conditional_active"
+          },
+          {
+            "type": "onboard_scheduled_open"
+          },
+          {
+            "type": "next_due"
+          }
+        ]
+      },
+      "expected": {
+        "incident_recorded": true,
+        "new_conditional_dispatches": 0
+      }
+    }
+  ]
+}
