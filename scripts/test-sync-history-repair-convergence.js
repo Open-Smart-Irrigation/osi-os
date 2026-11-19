@@ -95,9 +95,9 @@ for (const profile of PROFILES) {
     comparisons = [earlier, ...comparisons.filter((c, i) => i >= 16 && c !== removed)].reverse();
     const restarted = createHarness({ db, profile, env: { DEVICE_EUI: GATEWAY } });
     const second = await call(restarted.helper);
-    assert.equal(second.examinedSegments, 8, 'removed resume anchor still seeks to its successor');
+    assert.ok(second.examinedSegments <= 32, 'removed entries do not affect the batch limit');
     assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(target)));
-    assert.equal(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(earlier)), undefined, 'earlier addition waits for wrap');
+    assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(earlier)), 'a missing earlier checkpoint is examined without waiting for a wrap');
     comparisons.push(comparison('2026-08-10'));
     await call(restarted.helper);
     assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get(checkpoint(earlier)), 'a completed page wraps even when later segments keep arriving');
@@ -151,28 +151,37 @@ for (const profile of PROFILES) {
     assert.equal(result.examinedSegments, 1, 'lookup must not consume the deadline before examining an unseen segment');
     const cursors = db.prepare("SELECT value FROM app_settings WHERE key GLOB 'history_repair_cursor:*'").all();
     assert.ok(cursors.reduce((n, row) => n + Buffer.byteLength(row.value), 0) <= 32768, 'cursor storage is bounded');
-    assert.ok(cursors.every(row => JSON.parse(row.value).pages.length === 0), 'completed ranges are pruned');
+    assert.equal(cursors.length, 0, 'completed work retains no page or range cursor');
   });
-  test(`${profile}: cursor range overflow stays bounded and retains unfinished tails`, async t => {
+  test(`${profile}: active pages retain examination ranks without accumulating cursor state`, async t => {
     const { db, h } = fixture(t, profile, 0);
     const adapter = sqliteAdapter(db);
-    const tails = [];
-    const call = (comparisons, clock = () => 0) => h.helper.queueManifestRepairs({ comparisons, db: adapter, q: adapter.q,
+    let rankLookups = 0;
+    const q = async (sql, params = []) => {
+      if (sql.startsWith('SELECT key,CASE WHEN json_valid')) {
+        rankLookups++;
+        assert.ok(params.length <= 500, 'rank lookup is limited to this answer');
+        const plans = db.prepare('EXPLAIN QUERY PLAN ' + sql).all(...params).map(row => row.detail).join(' ');
+        assert.match(plans, /SEARCH app_settings USING INDEX/);
+      }
+      return adapter.q(sql, params);
+    };
+    const call = (comparisons, clock = () => 0) => h.helper.queueManifestRepairs({ comparisons, db: adapter, q,
       sourceQuery: async () => [], now: '2026-11-19', gatewayEui: GATEWAY, request: { scope: 'same-link' }, clock });
     for (let range = 0; range < 40; range++) {
       const comparisons = Array.from({ length: 40 }, (_, i) => ({ tableName: 'device_data',
         segmentKey: SENSOR + '|' + new Date(Date.UTC(2020, 0, range * 100 + i + 1)).toISOString().slice(0, 10), repairRequested: true }));
-      tails.push(comparisons[39].segmentKey);
       await call(comparisons);
-      const value = db.prepare("SELECT value FROM app_settings WHERE key='history_repair_cursor:v3'").get().value;
-      const pages = JSON.parse(value).pages;
-      assert.ok(pages.length <= 32);
-      assert.ok(Buffer.byteLength(value) <= 32768);
-      for (const tail of tails) assert.ok(pages.some(page => page.after[1] < tail && page.last[1] >= tail), 'compaction must retain every unfinished tail');
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM app_settings WHERE key GLOB 'history_repair_cursor:*'").get().n, 0);
+      const state = JSON.parse(db.prepare('SELECT value FROM app_settings WHERE key=?').get(
+        'history_repair_segment:' + JSON.stringify(['device_data', comparisons[0].segmentKey])).value);
+      assert.deepEqual(Object.keys(state.lastExamined).sort(), ['order', 'scope']);
+      assert.ok(Number.isSafeInteger(state.lastExamined.order));
     }
     let elapsed = 0;
     const result = await call([{ tableName: 'device_data', segmentKey: SENSOR + '|2040-01-01', repairRequested: true }], () => (elapsed += 3));
-    assert.equal(result.examinedSegments, 1, 'even a full cursor set leaves work budget under the charged clock');
+    assert.equal(result.examinedSegments, 1, 'existing pages do not consume the charged-clock lookup budget');
+    assert.equal(rankLookups, 41, 'one indexed rank lookup per answer');
   });
   test(`${profile}: more recurring pages than cursor slots still visit every unfinished tail`, async t => {
     const { db, h } = fixture(t, profile, 0);
@@ -195,12 +204,13 @@ for (const profile of PROFILES) {
     const call = page => h.helper.queueManifestRepairs({ comparisons: page, db: adapter, q: adapter.q,
       sourceQuery: async () => [], now: '2026-11-19', gatewayEui: GATEWAY, request: { scope: 'same-link' }, clock: () => 0 });
     await call(comparisons);
-    const state = () => db.prepare("SELECT value FROM app_settings WHERE key='history_repair_cursor:v3'").get().value;
+    const state = () => db.prepare('SELECT value FROM app_settings WHERE key=?').get('history_repair_segment:' + JSON.stringify(['device_data', comparisons[0].segmentKey])).value;
     const active = state();
     const put = db.prepare('INSERT INTO app_settings(key,value) VALUES(?,?)');
     for (let i = 0; i < 96; i++) put.run('history_repair_cursor:' + i.toString(16).padStart(64, '0'), '32');
     put.run('history_repair_cursor:v2', JSON.stringify({ scope: 'same-link', pages: Array.from({ length: 1000 }, () => ({ first: ['device_data', 'old'], last: ['device_data', 'old'], after: null })) }));
-    const legacy = () => db.prepare("SELECT COUNT(*) n FROM app_settings WHERE key GLOB 'history_repair_cursor:*' AND key<>'history_repair_cursor:v3'").get().n;
+    put.run('history_repair_cursor:v3', JSON.stringify({ scope: 'same-link', pages: [{ first: ['device_data', 'old'], last: ['device_data', 'old'], after: ['device_data', 'old'] }] }));
+    const legacy = () => db.prepare("SELECT COUNT(*) n FROM app_settings WHERE key GLOB 'history_repair_cursor:*'").get().n;
     for (let i = 0; i < 1000; i++) {
       const before = legacy();
       await call([{ tableName: 'device_data', segmentKey: SENSOR + '|' + new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10), repairRequested: false, mismatchFields: [] }]);
@@ -209,9 +219,37 @@ for (const profile of PROFILES) {
     }
     assert.equal(legacy(), 0);
     await call(comparisons);
-    assert.equal(JSON.parse(state()).pages.length, 0, 'completing the retained range prunes it');
+    assert.equal(legacy(), 0, 'no range cursor is recreated when work completes');
     assert.ok(db.prepare('SELECT value FROM app_settings WHERE key=?').get('history_repair_segment:' + JSON.stringify(['device_data', comparisons[39].segmentKey])));
   });
+  for (const schedule of [
+    { order: 'ascending', pageCount: 40, pageSize: 500, spacing: 1000, rounds: 171 },
+    { order: 'descending', pageCount: 64, pageSize: 40, spacing: 100, rounds: 40 }
+  ]) {
+    test(`${profile}: ${schedule.order} ${schedule.pageCount}x${schedule.pageSize} recurring pages examine every tail`, async t => {
+      const { db, h } = fixture(t, profile, 0);
+      const adapter = sqliteAdapter(db);
+      const pages = Array.from({ length: schedule.pageCount }, (_, range) => Array.from({ length: schedule.pageSize }, (_, i) => ({
+        tableName: 'device_data', segmentKey: SENSOR + '|' + new Date(Date.UTC(2020, 0, range * schedule.spacing + i + 1)).toISOString().slice(0, 10), repairRequested: true
+      })));
+      if (schedule.order === 'descending') pages.reverse();
+      const seen = new Set();
+      let rounds = 0;
+      for (; rounds < schedule.rounds && seen.size < schedule.pageCount * schedule.pageSize; rounds++) {
+        for (const comparisons of pages) {
+          const result = await h.helper.queueManifestRepairs({ comparisons, db: adapter, q: adapter.q,
+            sourceQuery: async (table, sql, params) => { seen.add(params[0] + '|' + params[1]); return []; },
+            now: '2026-11-19', gatewayEui: GATEWAY, request: { scope: 'same-link' }, clock: () => 0 });
+          assert.ok(result.examinedSegments <= 32);
+        }
+      }
+      const tails = pages.filter(page => seen.has(page.at(-1).segmentKey)).length;
+      t.diagnostic(JSON.stringify({ rounds, examinedIdentities: seen.size, examinedTails: tails }));
+      assert.equal(tails, schedule.pageCount, 'every tail must reach the source query, not just a saved range');
+      assert.equal(seen.size, schedule.pageCount * schedule.pageSize);
+      assert.ok(rounds <= Math.ceil(schedule.pageSize / 32), 'fixed pages finish within the same round bound as main');
+    });
+  }
   test(`${profile}: upgrade rechecks legacy done keys when the cloud reports a mismatch`, async t => {
     const { db, h } = fixture(t, profile, 3);
     db.prepare("INSERT INTO sync_history_dirty_keys(peer_node,table_name,row_key,change_kind,changed_at,status) VALUES('cloud','device_data',?,'repair','2026-07-01','done')").run(key(1));
