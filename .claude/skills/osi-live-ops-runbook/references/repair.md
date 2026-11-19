@@ -450,7 +450,9 @@ an earlier one means.
   (temporary sets or the maintenance lock) fails. Check which data ChirpStack
   and Redis are serving before you act on it.
 - **`RECOVERY: original inventory verified; services remain stopped`:** the
-  original files are in place and unchanged; retry `restore.sh`.
+  original files are in place and unchanged. The helper does not probe the
+  services before printing this, so check that ChirpStack and Redis are both
+  stopped, then retry `restore.sh`.
 - **After `ROLLBACK INCOMPLETE`,** the helper does not start the services, but a
   failed stop can leave one running. Check that both ChirpStack and Redis are
   stopped before you touch any live file, then follow the printed recovery steps
