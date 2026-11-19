@@ -2,6 +2,29 @@
 
 Part of the osi-live-ops-runbook skill; read SKILL.md first.
 
+## ChirpStack helper recovery
+
+When `/opt/chirpstack/backup.sh` or `restore.sh` prints a recovery block, keep
+that complete block and rerun it after fixing the reported fault. It checks
+the maintenance generation before making service calls, preserves the
+original stop-attempt mask, and verifies the original file inventory before
+restart. An unfinished hash record can be completed only when no live file
+was moved or replaced; hashes already recorded must still match. If the
+original main database or Redis dump was absent, recovery leaves services
+stopped and releases the verified generation so restore can be retried.
+
+An interrupted recovery can leave an empty execution-claim directory. The
+printed block acquires the BusyBox `flock` process lock before clearing that
+directory with `rmdir`; a live owner causes refusal. After SIGKILL, the
+kernel releases the process lock once that execution and its children exit,
+so rerunning the same block performs the checked cleanup. A nonempty claim
+is retained for inspection, including any recovery files inside it.
+
+Never delete `/srv/backup/.chirpstack-recovery.guard`: the block keeps this
+inode in place so concurrent executions use the same kernel lock. Do not
+remove the maintenance lock or an execution claim by hand to bypass a
+refusal. These checks do not establish power-loss durability.
+
 ## Pre-repair backup script
 
 The script stops at the first required artifact it cannot secure and prints

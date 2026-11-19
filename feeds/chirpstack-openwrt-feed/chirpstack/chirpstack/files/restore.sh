@@ -2,6 +2,9 @@
 # Standalone LuCI helper. Keep the shared safety functions identical in both scripts.
 # Restore reports and keeps the newest pre-restore generation after verified
 # success; older generations are pruned then. Incomplete recovery never prunes.
+# After an interrupted printed recovery, rerun its entire block. A kernel
+# process lock checks exclusive ownership before clearing an empty abandoned
+# claim. Never delete the permanent .chirpstack-recovery.guard file.
 # OSI_CS_ROOT prefixes filesystem paths for the isolated failure-injection tests.
 set -u
 umask 077
@@ -23,6 +26,8 @@ UNCLEAR_MOVES=
 ORIGINAL_FILES=
 ORIGINAL_MANIFEST=
 ORIGINALS_RECORDED=0
+ORIGINAL_INVENTORY=0
+ORIGINAL_MANIFEST_READY=0
 ROLLED_BACK=0
 RECOVERY_INCOMPLETE=0
 RESTORING=0
@@ -148,20 +153,43 @@ validate_set() {
     done
 }
 record_originals() {
+    # Capture presence before any fallible hash. A partial hash record must
+    # never turn an unrecorded original into an originally absent file.
+    if [ "$ORIGINAL_INVENTORY" = 0 ]; then
+        ORIGINAL_FILES=
+        for inventory_name in $FILES; do
+            live_path "$inventory_name"
+            if [ -e "$LIVE" ] || [ -L "$LIVE" ]; then ORIGINAL_FILES="$ORIGINAL_FILES $inventory_name"; fi
+        done
+        ORIGINAL_INVENTORY=1
+    fi
+    # Backup publication consumes staging. A later restart failure still needs
+    # a private hash record, never extra files inside the published set.
+    if [ -z "$TMP" ] || [ ! -d "$TMP" ]; then
+        TMP=$(mktemp -d "$BASE/.chirpstack-stage.XXXXXX") || return 1
+        chmod 700 "$TMP" || return 1
+    fi
     ORIGINAL_MANIFEST="$TMP/ORIGINAL.sha256"
-    : > "$ORIGINAL_MANIFEST" || return 1
-    for original_name in $FILES; do
-        live_path "$original_name"
-        if [ -e "$LIVE" ]; then
+    if [ "$ORIGINAL_MANIFEST_READY" = 0 ]; then
+        : > "$ORIGINAL_MANIFEST" || return 1
+        ORIGINAL_MANIFEST_READY=1
+    fi
+    for inventory_name in $ORIGINAL_FILES; do
+        live_path "$inventory_name"
+        [ -f "$LIVE" ] && [ ! -L "$LIVE" ] || return 1
+        if original_hash "$inventory_name"; then
+            hash_matches "$LIVE" "$ORIGINAL_HASH" || return 1
+        else
             hash_file "$LIVE" || return 1
-            printf '%s  %s\n' "$HASH" "$original_name" >> "$ORIGINAL_MANIFEST" || return 1
-            ORIGINAL_FILES="$ORIGINAL_FILES $original_name"
+            printf '%s  %s\n' "$HASH" "$inventory_name" >> "$ORIGINAL_MANIFEST" || return 1
         fi
     done
+    verify_live "$ORIGINAL_MANIFEST" || return 1
     ORIGINALS_RECORDED=1
 }
 original_hash() {
     ORIGINAL_HASH=
+    [ -f "$ORIGINAL_MANIFEST" ] || return 1
     while read -r original_expected original_name; do
         if [ "$original_name" = "$1" ]; then ORIGINAL_HASH=$original_expected; return 0; fi
     done < "$ORIGINAL_MANIFEST"
@@ -243,7 +271,7 @@ rollback() {
 }
 restartable_originals() {
     for restart_name in chirpstack.sqlite chirpstack.redis; do
-        original_hash "$restart_name" || return 1
+        case " $ORIGINAL_FILES " in *" $restart_name "*) ;; *) return 1 ;; esac
         live_path "$restart_name"
         if [ -e "$LIVE.pre-restore-$STAMP" ]; then
             [ -s "$LIVE.pre-restore-$STAMP" ] || return 1
@@ -280,19 +308,34 @@ report_recovery() {
     log '(' >&2
     quote_path "$LOCK"; log "recovery_lock=$QUOTED" >&2
     quote_path "$STAMP"; log "recovery_token=$QUOTED" >&2
+    log "recovery_stop_chirpstack=$STOP_CHIRPSTACK" >&2
+    log "recovery_stop_redis=$STOP_REDIS" >&2
+    quote_path "$ORIGINAL_MANIFEST"; log "recovery_manifest=$QUOTED" >&2
     cat >&2 <<'RECOVERY_START'
-# The generation token rejects completed replay. The separate execution claim
-# serializes operators and stays held through maintenance-lock release.
+# flock is enabled by the shipped BusyBox defaults. Keep this guard inode:
+# unlinking it could give concurrent executions different process locks.
+# Its kernel ownership ends when the recovery process and its children exit.
+recovery_guard="${recovery_lock%/*}/.chirpstack-recovery.guard"
 recovery_claim="$recovery_lock.recovery-$recovery_token"
-recovery_interrupted=0
-trap 'recovery_interrupted=1' HUP INT TERM
 [ -d "$recovery_lock" ] && [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || {
     echo 'ERROR: recovery already completed or another maintenance owner holds the lock' >&2
     exit 1
 }
-mkdir "$recovery_claim" 2>/dev/null || { echo 'ERROR: recovery execution already claimed' >&2; exit 1; }
-# No service call or live write precedes this second check. A caller delayed
-# across completion must not touch a newer maintenance generation.
+command -v flock >/dev/null 2>&1 || { echo 'ERROR: recovery requires BusyBox flock; lock retained' >&2; exit 1; }
+[ ! -L "$recovery_guard" ] && { [ ! -e "$recovery_guard" ] || [ -f "$recovery_guard" ]; } || exit 1
+# Ignore signals across external acquisition commands and owner bookkeeping.
+trap '' HUP INT TERM
+exec 9>>"$recovery_guard" || exit 1
+flock -n 9 || { echo 'ERROR: recovery execution already claimed' >&2; exit 1; }
+# Holding flock proves no live recovery owner can be using an empty claim.
+# A killed process leaves that directory behind; clear only an empty real dir.
+if ! mkdir "$recovery_claim" 2>/dev/null; then
+    [ -d "$recovery_claim" ] && [ ! -L "$recovery_claim" ] && rmdir "$recovery_claim" && mkdir "$recovery_claim" || {
+        echo 'ERROR: recovery claim contains retained files; inspect it, do not delete it' >&2
+        exit 1
+    }
+    echo 'RECOVERY: cleared abandoned empty execution claim under exclusive process lock' >&2
+fi
 recovery_owned=0
 recovery_finish() {
     recovery_result=$?
@@ -300,16 +343,16 @@ recovery_finish() {
     trap '' HUP INT TERM
     if [ "$recovery_owned" = 1 ] && [ "$recovery_result" -ne 0 ] &&
        [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ]; then
-        service chirpstack stop
-        service redis stop
+        [ "$recovery_stop_chirpstack" = 0 ] || service chirpstack stop
+        [ "$recovery_stop_redis" = 0 ] || service redis stop
     fi
     rmdir "$recovery_claim" || recovery_result=1
     exit "$recovery_result"
 }
 trap recovery_finish 0
+# A delayed contender must recheck after it owns the process lock and claim.
 [ -d "$recovery_lock" ] && [ "$(cat "$recovery_lock/recovery" 2>/dev/null)" = "$recovery_token" ] || exit 1
 recovery_owned=1
-[ "$recovery_interrupted" = 0 ] || exit 1
 trap 'exit 1' HUP INT TERM
 recovery_fail() { echo "ERROR: recovery $*; lock retained" >&2; exit 1; }
 recovery_hash_matches() {
@@ -325,8 +368,8 @@ recovery_move() {
     recovery_fail "move outcome unclear: $1 -> $2"
 }
 
-service chirpstack stop || recovery_fail 'stop ChirpStack'
-service redis stop || recovery_fail 'stop Redis'
+[ "$recovery_stop_chirpstack" = 0 ] || service chirpstack stop || recovery_fail 'stop ChirpStack'
+[ "$recovery_stop_redis" = 0 ] || service redis stop || recovery_fail 'stop Redis'
 RECOVERY_START
     if [ "$PROBE" = pidof ]; then
         log 'recovery_running() { pidof "$1" >/dev/null 2>&1; }' >&2
@@ -335,6 +378,10 @@ RECOVERY_START
     fi
     cat >&2 <<'RECOVERY_STOP'
 for recovery_process in chirpstack redis-server; do
+    case "$recovery_process" in
+        chirpstack) [ "$recovery_stop_chirpstack" = 1 ] || continue ;;
+        redis-server) [ "$recovery_stop_redis" = 1 ] || continue ;;
+    esac
     recovery_wait=0
     while :; do
         recovery_running "$recovery_process"
@@ -365,7 +412,9 @@ RECOVERY_STOP
         for recovery_name in $FILES; do
             case " $ORIGINAL_FILES " in *" $recovery_name "*) continue ;; esac
             live_path "$recovery_name"; quote_path "$LIVE"
-            log "rm -f $QUOTED || recovery_fail 'remove originally absent $recovery_name'" >&2
+            if [ -n "$MOVED$UNCLEAR_MOVES" ] || [ "$RESTORING" = 1 ]; then
+                log "rm -f $QUOTED || recovery_fail 'remove originally absent $recovery_name'" >&2
+            fi
             log "[ ! -e $QUOTED ] && [ ! -L $QUOTED ] || recovery_fail 'verify absent $recovery_name'" >&2
         done
         while read -r expected recovery_name; do
@@ -373,7 +422,38 @@ RECOVERY_STOP
             log "printf '%s  %s\n' '$expected' $QUOTED | sha256sum -c - || recovery_fail 'verify original $recovery_name'" >&2
         done < "$ORIGINAL_MANIFEST"
         done_recovery_inventory=1
+    elif [ "$ORIGINAL_INVENTORY" = 1 ] && [ -z "$MOVED$UNCLEAR_MOVES" ] && [ "$RESTORING" = 0 ]; then
+        # No live mutation occurred. Complete only the missing hashes, under
+        # the same generation lock, before verifying or restarting anything.
+        cat >&2 <<'RECOVERY_INVENTORY'
+recovery_record_unmoved() {
+    recovery_expected=
+    if [ -f "$recovery_manifest" ]; then
+        while read -r recovery_hash recovery_name; do
+            if [ "$recovery_name" = "$2" ]; then recovery_expected=$recovery_hash; break; fi
+        done < "$recovery_manifest"
+    fi
+    if [ -z "$recovery_expected" ]; then
+        [ -f "$1" ] && [ ! -L "$1" ] || recovery_fail 'unmoved original is not a regular file'
+        recovery_sum=$(sha256sum "$1") || recovery_fail 'complete unmoved original hash'
+        recovery_expected=${recovery_sum%% *}
+        [ "${#recovery_expected}" = 64 ] || recovery_fail 'invalid original hash'
+        case "$recovery_expected" in *[!0-9a-f]*) recovery_fail 'invalid original hash' ;; esac
+        printf '%s  %s\n' "$recovery_expected" "$2" >> "$recovery_manifest" || recovery_fail 'record unmoved original hash'
+    fi
+    recovery_hash_matches "$1" "$recovery_expected" || recovery_fail 'verify unmoved original'
+}
+RECOVERY_INVENTORY
+        for recovery_name in $FILES; do
+            live_path "$recovery_name"; quote_path "$LIVE"
+            case " $ORIGINAL_FILES " in
+                *" $recovery_name "*) log "recovery_record_unmoved $QUOTED '$recovery_name'" >&2 ;;
+                *) log "[ ! -e $QUOTED ] && [ ! -L $QUOTED ] || recovery_fail 'verify absent $recovery_name'" >&2 ;;
+            esac
+        done
+        done_recovery_inventory=1
     else
+        log "recovery_fail 'original inventory unavailable; inspect retained snapshot and live paths'" >&2
         done_recovery_inventory=0
     fi
     # A verified original inventory may intentionally lack required live files.
@@ -382,12 +462,14 @@ RECOVERY_STOP
         quote_path "$ROOT/srv/chirpstack/chirpstack.sqlite"; log "test -s $QUOTED || recovery_fail 'missing SQLite main file'" >&2
         quote_path "$REDIS"; log "test -s $QUOTED || recovery_fail 'missing Redis dump'" >&2
         cat >&2 <<'RECOVERY_END'
-service redis start || recovery_fail 'restart Redis'
-service chirpstack start || recovery_fail 'restart ChirpStack'
+[ "$recovery_stop_redis" = 0 ] || service redis start || recovery_fail 'restart Redis'
+[ "$recovery_stop_chirpstack" = 0 ] || service chirpstack start || recovery_fail 'restart ChirpStack'
 recovery_wait=0
 while :; do
-    recovery_running redis-server; recovery_redis=$?
-    recovery_running chirpstack; recovery_chirpstack=$?
+    recovery_redis=0
+    recovery_chirpstack=0
+    if [ "$recovery_stop_redis" = 1 ]; then recovery_running redis-server; recovery_redis=$?; fi
+    if [ "$recovery_stop_chirpstack" = 1 ]; then recovery_running chirpstack; recovery_chirpstack=$?; fi
     [ "$recovery_redis$recovery_chirpstack" != 00 ] || break
     case "$recovery_redis:$recovery_chirpstack" in 0:1|1:0|1:1) ;; *) recovery_fail 'restart probe failed' ;; esac
     [ "$recovery_wait" -lt 30 ] || recovery_fail 'restart services not running together'
@@ -508,8 +590,19 @@ finish() {
             report_recovery
         fi
     fi
-    if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 0 ]; then
-        if [ "$ROLLED_BACK" = 1 ] && ! restartable_live; then
+    if [ "$result" -ne 0 ] && [ "$RECOVERY_INCOMPLETE" = 0 ] && [ "$STOP_CHIRPSTACK$STOP_REDIS" != 00 ]; then
+        # Every failed run must verify the original inventory before startup,
+        # including failures before the first move or during hash recording.
+        # Completing an unfinished record is read-only and only permitted when
+        # no live mutation occurred; known hashes are checked, never replaced.
+        if [ "$ORIGINALS_RECORDED" != 1 ] && [ -z "$MOVED$UNCLEAR_MOVES" ] && [ "$RESTORING" = 0 ]; then
+            record_originals || { ERROR="$ERROR; original inventory unverified"; RECOVERY_INCOMPLETE=1; }
+        fi
+        if [ "$ORIGINALS_RECORDED" != 1 ] || ! verify_live "$ORIGINAL_MANIFEST"; then
+            RECOVERY_INCOMPLETE=1
+            ERROR="$ERROR; original live set unverified"
+            report_recovery
+        elif ! restartable_live; then
             log 'RECOVERY: original inventory verified; services remain stopped; retry restore.sh'
         elif ! start_services; then
             ERROR="$ERROR; recovery service start failed"
@@ -545,14 +638,12 @@ elif command -v pgrep >/dev/null 2>&1; then
 else fail 'preflight: neither pidof nor pgrep is available'; fi
 command -v sha256sum >/dev/null 2>&1 || fail 'preflight: sha256sum is unavailable'
 mkdir -p "$BASE" || fail 'preflight: cannot create backup directory'
-# Defer catchable signals until lock ownership is recorded, including failure.
-lock_interrupted=0
-trap 'lock_interrupted=1' HUP INT TERM
+# Ignore signals in the shell AND mkdir child until ownership is recorded.
+trap '' HUP INT TERM
 if mkdir "$LOCK"; then LOCKED=1; else
     fail 'preflight: backup or restore already running (lock retained after uncatchable interruption)'
 fi
 trap 'fail "signal: interrupted"' HUP INT TERM
-[ "$lock_interrupted" = 0 ] || fail 'signal: interrupted during lock acquisition'
 TMP=$(mktemp -d "$BASE/.chirpstack-stage.XXXXXX") || fail 'preflight: cannot create temporary set'
 chmod 700 "$TMP" || fail 'preflight: cannot secure temporary set'
 STAMP=$(date -u +%Y%m%dT%H%M%SZ) || fail 'preflight: cannot read UTC time'
