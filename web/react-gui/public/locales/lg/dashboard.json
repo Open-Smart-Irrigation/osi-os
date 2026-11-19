@@ -38,5 +38,9 @@
     "zones": "Ebitundu",
     "data": "Data",
     "journal": "Journal"
+  },
+  "header": {
+    "menu": "Menu",
+    "primaryNavigation": "Primary navigation"
   }
 }

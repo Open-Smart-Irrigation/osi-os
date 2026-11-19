@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useGatewayModules } from '../hooks/useGatewayModules';
 
@@ -19,12 +20,12 @@ interface AppHeaderProps {
    * Settings and Account controls.
    */
   actions?: React.ReactNode;
-  /** Shows the Admin menu (Users / Grants) when the caller is a scoped admin. */
+  /** Adds Users / Access grants to Account when the caller is a scoped admin. */
   showAdmin?: boolean;
 }
 
 const HEADER_BUTTON =
-  'rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] shadow-lg transition-colors hover:bg-[var(--border)]';
+  'inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--secondary-bg)] px-3 py-2 text-center text-sm font-bold text-[var(--text)] transition-colors hover:bg-[var(--border)]';
 
 /**
  * Top-level chrome for pages that carry the primary tab bar
@@ -32,8 +33,7 @@ const HEADER_BUTTON =
  * tab navigation. The Data tab routes to the desktop analysis workspace or the
  * mobile history view depending on the device — the two are one destination.
  *
- * Styling deliberately mirrors DashboardHeader so the Journal page sits inside
- * the same chrome as the rest of the GUI.
+ * DashboardHeader and HistoryMobileHeader compose this same navigation.
  */
 export const AppHeader: React.FC<AppHeaderProps> = ({
   title,
@@ -95,49 +95,22 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
   return (
     <header className="bg-[var(--header-bg)] shadow-xl">
-      <div className="max-w-7xl mx-auto px-4 pt-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-              {title}
-            </h1>
-            <p className="text-[var(--header-subtext)] text-lg mt-1">
-              {t('welcome', { username })}
-            </p>
+      <div className="max-w-7xl mx-auto px-4 pt-4 sm:pt-6">
+        <div className="flex flex-wrap items-start justify-between gap-3 lg:items-center">
+          <div className="min-w-0 flex-1 sm:basis-full lg:basis-0">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-[var(--header-text)] high-contrast-text break-words">
+                {title}
+              </h1>
+              {username && <p className="text-[var(--header-subtext)] text-base mt-1">
+                {t('welcome', { username })}
+              </p>}
+            </div>
           </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {actions}
-
-            {showAdmin && (
-              <HeaderMenu
-                label={t('admin')}
-                className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] text-lg px-6 py-3"
-                items={[
-                  { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
-                  { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
-                ]}
-              />
-            )}
-
-            <Link to="/settings" className={`w-[calc(50%-4px)] sm:w-auto ${HEADER_BUTTON}`}>
-              {t('settings:entryPoint')}
-            </Link>
-
-            <HeaderMenu
-              label={t('account')}
-              className="w-[calc(50%-4px)] sm:w-auto"
-              triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-lg px-6 py-3"
-              items={[
-                { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
-                { key: 'logout', label: t('logout'), onSelect: onLogout },
-              ]}
-            />
-          </div>
+          <HeaderActions onLogout={onLogout} showAdmin={showAdmin} actions={actions} />
         </div>
 
-        <nav className="mt-4 pb-3" aria-label="Primary">
+        <nav className="mt-4 pb-3" aria-label={t('header.primaryNavigation')}>
           <div className="inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-[var(--secondary-bg)] p-1">
             {tabs.map((tab) => (
               <Link
@@ -159,5 +132,57 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     </header>
   );
 };
+
+function HeaderActions({ onLogout, showAdmin, actions }: Pick<AppHeaderProps, 'onLogout' | 'showAdmin' | 'actions'>) {
+  const { t } = useTranslation(['dashboard', 'settings']);
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const { pathname } = useLocation();
+
+  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    panel.current?.querySelector<HTMLElement>('button, a')?.focus();
+    const dismiss = (event: MouseEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', dismiss);
+    return () => document.removeEventListener('mousedown', dismiss);
+  }, [open]);
+
+  return <div ref={container} className="relative shrink-0 sm:ml-auto" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }} onKeyDown={(event) => {
+    if (event.key === 'Escape' && !event.defaultPrevented && open) {
+      event.preventDefault();
+      setOpen(false);
+      trigger.current?.focus();
+    }
+  }}>
+    <button ref={trigger} type="button" className={`${HEADER_BUTTON} sm:hidden gap-2`}
+      aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+      {t('header.menu')}
+    </button>
+    <div ref={panel} id={panelId} className={`${open ? 'flex' : 'hidden'} absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--header-bg)] p-3 shadow-xl sm:static sm:mt-0 sm:flex sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none`}>
+      {actions}
+      <Link to="/settings" className={HEADER_BUTTON}>{t('settings:entryPoint')}</Link>
+      <LanguageSwitcher triggerClassName="min-h-11 px-3 py-2 text-sm" />
+      <HeaderMenu label={t('account')} triggerClassName={HEADER_BUTTON} items={[
+        ...(showAdmin ? [
+          { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
+          { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
+        ] : []),
+        { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
+        { key: 'logout', label: t('logout'), onSelect: onLogout },
+      ]} />
+    </div>
+  </div>;
+}
 
 export { HEADER_BUTTON };

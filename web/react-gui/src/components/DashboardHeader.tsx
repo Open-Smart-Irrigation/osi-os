@@ -1,9 +1,8 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
-import { LanguageSwitcher } from './LanguageSwitcher';
-import { isDesktopBrowser } from '../utils/isDesktopBrowser';
+import { AppHeader, HEADER_BUTTON } from './AppHeader';
 import { useGatewayModules } from '../hooks/useGatewayModules';
 
 interface DashboardHeaderProps {
@@ -25,108 +24,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
   const navigate = useNavigate();
-  // Module visibility (2026-09-17): gateway-level settings. Hiding an entry
-  // here is UI-only -- the /analysis, /history, /network and /journal routes
-  // stay registered and reachable by URL. The defaults live on the gateway
-  // (osi-module-defaults); main ships all four on, customer branches flip them
-  // there.
-  //
-  // null until the gateway has answered, and the gated entries render nothing
-  // until then: guessing would flash the wrong header on one kind of gateway.
   const modules = useGatewayModules();
-  const showDesktopData = isDesktopBrowser() && modules?.data === true;
-  const showNetwork = isDesktopBrowser() && modules?.network === true;
 
-  return (
-    <header className="bg-[var(--header-bg)] shadow-xl">
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-4xl font-bold text-[var(--header-text)] high-contrast-text">
-              {t('title')}
-            </h1>
-            <p className="text-[var(--header-subtext)] text-lg mt-1">{t('welcome', { username })}</p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {canWrite && (
-              <HeaderMenu
-                label={t('add')}
-                className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] text-lg px-6 py-3"
-                align="left"
-                items={[
-                  { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
-                  { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-                  ...(modules?.journal
-                    ? [{
-                      key: 'activity',
-                      label: t('addMenu.activity'),
-                      onSelect: () => navigate('/journal?capture=1'),
-                    }]
-                    : []),
-                ]}
-              />
-            )}
-
-            {showDesktopData && (
-              <Link
-                to="/analysis"
-                className="w-[calc(50%-4px)] sm:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-lg px-6 py-3 rounded-lg transition-colors shadow-lg text-center"
-              >
-                {t('data')}
-              </Link>
-            )}
-
-            {showNetwork && (
-              <Link
-                to="/network"
-                className="w-[calc(50%-4px)] sm:w-auto bg-sky-700 hover:bg-sky-800 text-white font-bold text-lg px-6 py-3 rounded-lg transition-colors shadow-lg text-center"
-              >
-                {t('dashboard:network', { defaultValue: 'Network' })}
-              </Link>
-            )}
-
-            {showAdmin && (
-              <HeaderMenu
-                label={t('admin')}
-                className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] text-lg px-6 py-3"
-                items={[
-                  { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
-                  { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
-                ]}
-              />
-            )}
-
-            <span className="hidden sm:block w-px self-stretch bg-[var(--border)]" aria-hidden="true" />
-
-            <Link
-              to="/settings"
-              className="w-[calc(50%-4px)] sm:w-auto rounded-lg bg-[var(--secondary-bg)] px-6 py-3 text-center text-lg font-bold text-[var(--text)] shadow-lg transition-colors hover:bg-[var(--border)]"
-            >
-              {t('settings:entryPoint')}
-            </Link>
-
-            <div className="w-[calc(50%-4px)] sm:w-auto">
-              <LanguageSwitcher
-                menuAlign="left"
-                triggerClassName="w-full justify-center text-lg px-6 py-3 shadow-lg"
-              />
-            </div>
-
-            <HeaderMenu
-              label={t('account')}
-              className="w-[calc(50%-4px)] sm:w-auto"
-              triggerClassName="bg-slate-900 hover:bg-slate-800 text-white text-lg px-6 py-3"
-              items={[
-                { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
-                { key: 'logout', label: t('logout'), onSelect: onLogout },
-              ]}
-            />
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+  return <AppHeader title={t('title')} activeTab="zones" username={username} onLogout={onLogout} showAdmin={showAdmin}
+    actions={canWrite ? <HeaderMenu label={t('add')} align="left" triggerClassName={HEADER_BUTTON} items={[
+      { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
+      { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
+      ...(modules?.journal ? [{ key: 'activity', label: t('addMenu.activity'), onSelect: () => navigate('/journal?capture=1') }] : []),
+    ]} /> : undefined} />;
 };
