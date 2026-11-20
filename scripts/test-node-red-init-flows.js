@@ -295,7 +295,10 @@ for (const condition of ['missing', 'bad digest', 'invalid structure']) {
   test(`a deployed payload holds when its pristine source has ${condition}`, t => {
     const fx = fixture(t, { linked: true, pristine: condition === 'missing' ? null : seed });
     const file = path.join(path.dirname(fx.target), 'flows.pristine.json');
-    if (condition !== 'missing') fs.writeFileSync(file, '[null]');
+    if (condition !== 'missing') {
+      fs.chmodSync(file, 0o644);
+      fs.writeFileSync(file, '[null]');
+    }
     if (condition === 'invalid structure') {
       const digest = require('crypto').createHash('sha256').update('[null]').digest('hex');
       fs.writeFileSync(path.join(path.dirname(file), 'flows-seed.json'), JSON.stringify({ stamp: 'fixture', digest }));
@@ -414,7 +417,7 @@ for (const errorAt of ['open', 'fsync']) {
       }
       return original(target, ...args);
     };
-    const extract = name => bootstrapSource.match(new RegExp('^function ' + name + '[(].*?^}', 'ms'))[0];
+    const extract = name => bootstrapSource.match(new RegExp('^function ' + name + '[(].*?^}$', 'ms'))[0];
     const patch = new Function('fs', 'path', 'require', 'CFG', 'ENV_LOADER_MARKER',
       extract('writeAndSyncStage') + '\n' + extract('patchSettingsJs') + '\npatchSettingsJs();');
     assert.throws(() => patch(injected, path, require, { settingsJs: filename, envFile: '/fixture' }, '// marker'),
