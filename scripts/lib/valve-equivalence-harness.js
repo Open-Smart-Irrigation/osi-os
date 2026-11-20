@@ -84,7 +84,9 @@ function releaseTree(tag) {
 }
 
 function systemDefinition(label, root) {
-  const flows = JSON.parse(fs.readFileSync(path.join(root, SHARE, 'flows.json'), 'utf8'));
+  const shippedFlows = JSON.parse(fs.readFileSync(path.join(root, SHARE, 'flows.json'), 'utf8'));
+  const flows = process.env.OSI_VALVE_X2_ADAPTERS === '1' && root === REPO_ROOT
+    ? require('./valve-ingress-x2-adapters').adaptFlows(shippedFlows) : shippedFlows;
   const nodes = {};
   for (const [name, id] of Object.entries(NODE)) {
     const found = flows.find((entry) => entry.id === id);

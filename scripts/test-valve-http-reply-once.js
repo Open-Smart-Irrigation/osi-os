@@ -45,7 +45,9 @@ const failLedgerRead = {
 
 function profile(name) {
   const base = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share`);
-  const flows = JSON.parse(fs.readFileSync(path.join(base, 'flows.json'), 'utf8'));
+  const shipped = JSON.parse(fs.readFileSync(path.join(base, 'flows.json'), 'utf8'));
+  const flows = process.env.OSI_VALVE_X2_ADAPTERS === '1'
+    ? require('./lib/valve-ingress-x2-adapters').adaptFlows(shipped) : shipped;
   const rawValveControl = require(path.join(base, 'node-red/osi-valve-control'));
   // A timed open is attempted only with a trusted runtime clock; supply a
   // fixture clock marker (as test-valve-command-safety-path.js does).
@@ -87,8 +89,11 @@ function fakeChirpstack(options = {}) {
     async getDeviceQueue() { return []; },
     async enqueueDownlink(item) {
       if (options.reject) throw Object.assign(new Error('enqueue refused'), { code: 'enqueue_rejected' });
+      if (options.phase === 'enqueue_rejected') throw Object.assign(new Error('definite enqueue refusal'), { grpcCode: 3, provenance: 'chirpstack_enqueue_preacceptance', step: 'enqueueDownlink' });
+      if (options.phase === 'enqueue_failed_before_acceptance') throw Object.assign(new Error('local preflight refused'), { code: 'enqueue_failed_before_acceptance', provenance: 'local_preflight', step: 'enqueueDownlink' });
+      if (options.phase === 'UNKNOWN') throw new Error('enqueue timed out; acceptance unknown');
       enqueued.push(item);
-      return { id: 'q-' + enqueued.length };
+      return options.phase === 'missing_queue_id' ? {} : { id: 'q-' + enqueued.length };
     },
   };
   return { enqueued, createProvisioningClientFromEnv: () => client };
@@ -178,6 +183,7 @@ for (const name of PROFILES) {
           const out = await send(p, db, builder, fields(), { wiresOf });
           assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
           assert.equal(out.enqueued.length, 1, 'one frame handed to the transport');
+          assert.equal(out.enqueued[0].expiresAt, undefined, 'ordinary frames keep no gateway-invented queue expiry');
           assert.deepEqual(out.answers.map((a) => a.statusCode), [202], 'exactly one 202 answer; errors: ' + out.errors.join('; '));
         } finally { db.close(); }
       });
@@ -240,6 +246,27 @@ for (const name of PROFILES) {
     });
   }
 
+  // X2 characterizes the distinction between a definite refusal and an
+  // attempted enqueue whose outcome cannot be proven. Neither writes success.
+  for (const [label, builder, fields] of COMMANDS) {
+    for (const [phase, status, error, sent] of [
+      ['enqueue_rejected', 422, 'enqueue_rejected', 0],
+      ['enqueue_failed_before_acceptance', 503, 'enqueue_failed_before_acceptance', 0],
+      ['UNKNOWN', 503, 'UNKNOWN', 0],
+      ['missing_queue_id', 503, 'UNKNOWN', 1],
+    ]) test(`${name}: ${label} ${phase} answers ${status} once and preserves uncertainty`, async () => {
+      const db = seedDb();
+      try {
+        const before = db.prepare('SELECT target_state FROM devices WHERE deveui=?').get(VALVE).target_state;
+        const out = await send(p, db, builder, fields(), { chirpstack: fakeChirpstack({ phase }) });
+        assert.deepEqual(out.answers, [{ statusCode: status, payload: { error, message: 'STREGA transport did not accept the command' } }], out.errors.join('; '));
+        assert.equal(out.enqueued.length, sent);
+        assert.equal(db.prepare('SELECT target_state FROM devices WHERE deveui=?').get(VALVE).target_state, before);
+        assert.equal(out.stopped.filter(node => node.type === 'sqlite' && /INSERT INTO actuator_log/.test(node.msg.topic || '')).length, 0);
+      } finally { db.close(); }
+    });
+  }
+
   // Write STREGA Expectation passes the message on when the module is missing;
   // the encoder must then answer the request itself (NEW-2).
   for (const [label, builder, fields] of COMMANDS.filter(([, id]) => id === 'dde8e1ef265e96d7')) {
@@ -247,7 +274,7 @@ for (const name of PROFILES) {
       const db = seedDb();
       try {
         const out = await send(p, db, builder, fields(), { valveControlMissing: true });
-        assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
+        if (process.env.OSI_VALVE_X2_ADAPTERS !== '1') assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
         assert.equal(out.enqueued.length, 0);
         assert.deepEqual(out.answers, [{ statusCode: 503, payload: { error: 'valve_control_unavailable' } }],
           'errors: ' + out.errors.join('; '));
