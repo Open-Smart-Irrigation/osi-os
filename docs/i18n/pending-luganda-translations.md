@@ -443,3 +443,23 @@ to match `en`. Preserve `{{username}}` in `users.roleFor` as well. A human
 Luganda pass must remove each translated key from the allowlist and this
 section in the same change. The six legacy Users keys remain in their
 existing entry above.
+
+## UI FIX-LIST B2 (Monitors)
+
+| Keys | Reason |
+|---|---|
+| `monitor.current`, `monitor.minimum`, `monitor.maximum`, `monitor.hours`, `monitor.days`, `monitor.readings`, `monitor.noData`, `monitor.failedToLoad` (8 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `rainMonitor.noData`, `rainMonitor.windowTotal`, `rainMonitor.peakInterval`, `rainMonitor.wetIntervals`, `rainMonitor.rainyDays`, `rainMonitor.wettestDay`, `rainMonitor.noIntervalData`, `rainMonitor.noWindowData`, `rainMonitor.intervalTitle`, `rainMonitor.dailyTitle` (10 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `windMonitor.currentSpeed`, `windMonitor.peakGust`, `windMonitor.currentDirection`, `windMonitor.speed`, `windMonitor.gust`, `windMonitor.direction`, `windMonitor.speedAndGust`, `windMonitor.roseTitle`, `windMonitor.samples`, `windMonitor.noData`, `windMonitor.noSpeedData`, `windMonitor.notEnoughData`, `windMonitor.allCalm`, `windMonitor.chartError`, `windMonitor.timestamps` (15 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+| `dendrometerMonitor.title`, `dendrometerMonitor.aboveRange`, `dendrometerMonitor.belowRange`, `dendrometerMonitor.noData`, `dendrometerMonitor.rawOnly`, `dendrometerMonitor.awaitingBaseline`, `dendrometerMonitor.noCalibratedData`, `dendrometerMonitor.stemTitle`, `dendrometerMonitor.stemDescription`, `dendrometerMonitor.mechanicalTitle`, `dendrometerMonitor.mechanicalDescription`, `dendrometerMonitor.engineering`, `dendrometerMonitor.currentPosition`, `dendrometerMonitor.windowRange`, `dendrometerMonitor.strokeUsed`, `dendrometerMonitor.strokeValue`, `dendrometerMonitor.rangeState`, `dendrometerMonitor.outsideRange`, `dendrometerMonitor.calibrationDetails` (19 keys in `devices.json`) | Added by B2 core-monitor localization. These `lg` values ship the English source text until a native Luganda speaker supplies translations. |
+
+## UI FIX-LIST B4 (Analysis)
+
+| Keys | Reason |
+|---|---|
+| `analysis.preset.metricLabel`, `analysis.preset.more`, `analysis.export.label` (3 keys in `common.json`) | B4 changed the cross-zone metric picker label and added its More disclosure and the Export menu label. The first B4 commit supplied unreviewed Luganda text. No human Luganda pass is on record, so these keys now ship the English source text: "Compare a metric across zones", "More metrics" and "Export". |
+
+Tracked in `web/react-gui/tests/b4AnalysisPendingLuganda.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts that each key remains byte-identical
+to English. A human Luganda pass must remove each key from that list and this
+row in the same change.

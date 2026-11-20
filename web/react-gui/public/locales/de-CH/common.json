@@ -44,7 +44,8 @@
       "help": "Ohne Aggregation (Rohdaten) liegt jeder Punkt beim Zeitpunkt der Messung; bei 15-Minuten-Aggregation, stündlicher Aggregation, täglicher Aggregation und wöchentlicher Aggregation liegt er am Anfang seines Zeitraums, und bei Wetterquellen ist ein Tag der lokale Tag der Zone. Regen, ET0 und ETc von einem Wetteranbieter, aus den Stundenwerten einer Station oder aus «daily agronomy» sind Summen für diesen Zeitraum, alle anderen Werte sind Mittelwerte. Stündliche Temperatur, Luftfeuchtigkeit und Wind von Open-Meteo sind Werte zum angezeigten Zeitpunkt. Wetterquellen sind höchstens stündlich aufgelöst, «daily agronomy» täglich."
     },
     "preset": {
-      "metricLabel": "Metrik über Zonen"
+      "metricLabel": "Eine Messgrösse über Zonen vergleichen",
+      "more": "Weitere Messgrössen"
     },
     "tray": {
       "label": "Analysereihen",
@@ -92,6 +93,7 @@
       "normalize": "Normalisieren"
     },
     "export": {
+      "label": "Exportieren",
       "csv": "CSV exportieren",
       "png": "PNG exportieren",
       "allZonesCsv": "CSV für alle Zonen exportieren",

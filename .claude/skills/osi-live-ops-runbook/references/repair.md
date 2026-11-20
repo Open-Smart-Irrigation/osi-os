@@ -413,6 +413,55 @@ regardless of payload. To inspect or change ChirpStack config on a live Pi:
   /etc/init.d/chirpstack start
   ```
 
+### ChirpStack journal after a package upgrade
+
+Run `sh scripts/pi/chirpstack-sqlite-wal.sh --check` (read-only) to see the
+gateway's journal state and configured pragmas. An `opkg` upgrade to a
+`chirpstack` package whose init lacks the locally added pragmas replaces
+`/etc/init.d/chirpstack` and silently drops the 5 s busy wait; the database
+stays WAL. The current OSI feed init already carries these pragmas. After
+an upgrade, re-run `--check`, then `--apply` if it reports missing pragmas.
+
+Backup, restore and the one-shot share `/srv/backup/.chirpstack-maintenance.lock`.
+Restore reports every retained `.pre-restore-*` original. After verified success
+it keeps only the newest generation; incomplete recovery keeps all generations
+and the lock. Printed recovery commands can be rerun after a partial failure and
+release the lock only after a checked restart. Use the phase-specific recovery
+action printed for a stale one-shot lock; helper-only recovery never stops
+ChirpStack. A successful new backup archives legacy flat files under
+`/srv/backup/chirpstack-legacy-*` so released downgrade helpers cannot copy stale
+data over the live files.
+
+### ChirpStack backup and restore helpers (LuCI buttons)
+
+`/opt/chirpstack/backup.sh` and `restore.sh` run from the LuCI backup and restore
+buttons. Read their whole output, not only the last line: a run can print
+several outcome lines (`OK: ...`, `ERROR: ...`, `ROLLED BACK: ...`,
+`RECOVERY: ...`, `ERROR: ROLLBACK INCOMPLETE`), and a later line can change what
+an earlier one means.
+
+- **A reported failure means the outcome is unconfirmed, not that nothing
+  changed.** A `ROLLED BACK: ...` line confirms that the original files are
+  back only if no later line reports `original live set unverified` or
+  `ROLLBACK INCOMPLETE`; the helper verifies them before it restarts the
+  services.
+- **An `ERROR:` without `ROLLED BACK:`** can follow a restore that already
+  replaced the live files and restarted both services, when the final cleanup
+  (temporary sets or the maintenance lock) fails. Check which data ChirpStack
+  and Redis are serving before you act on it.
+- **`RECOVERY: original inventory verified; services remain stopped`:** the
+  original files are in place and unchanged. The helper does not probe the
+  services before printing this, so check that ChirpStack and Redis are both
+  stopped, then retry `restore.sh`.
+- **After `ROLLBACK INCOMPLETE`,** the helper does not start the services, but a
+  failed stop can leave one running. Check that both ChirpStack and Redis are
+  stopped before you touch any live file, then follow the printed recovery steps
+  exactly before you start anything.
+- **v0.8.3 limit:** a restore that fails before it moves the first live file
+  restarts ChirpStack and Redis on the files they had before the attempt,
+  without first verifying them. Later helpers verify them first; one remaining
+  case (a failed restart that checkpoints the WAL) is tracked in #693.
+
 ### Flows fail to load / all routes 404
 
 `functionExternalModules: true` is set in `settings.js` (confirmed at

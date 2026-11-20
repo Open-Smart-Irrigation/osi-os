@@ -158,6 +158,18 @@ afterEach(() => {
 });
 
 describe('CrossZoneAnalysisPage', () => {
+  it('uses natural phone scrolling and a chart height floor with Custom open', () => {
+    catalogState = loadedCatalogState();
+    const { container } = render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.range.custom' }));
+    expect(container.querySelector('.analysis-page')).toHaveClass('min-h-screen', 'lg:h-screen');
+    expect(container.querySelector('.analysis-page')).not.toHaveClass('h-screen');
+    expect(container.querySelector('.analysis-layout')).toHaveClass('max-w-7xl', 'lg:overflow-hidden');
+    expect(container.querySelector('.analysis-layout')).not.toHaveClass('overflow-hidden');
+    expect(container.querySelector('.analysis-main')).not.toHaveClass('overflow-y-auto');
+    expect(screen.getByTestId('analysis-chart-shell')).toHaveClass('min-h-[320px]', 'shrink-0');
+  });
+
   it('passes catalogue sources through to the mounted Data tree', () => {
     const source = { id: 'device-rain-1', hubEui: 'HUB-1', zoneId: null, zoneName: null, name: 'Rain', typeId: 'AQUASCOPE_LORAIN', channelIds: [], presentation: 'timeseries', destination: null, limitation: null };
     catalogState = { ...loadedCatalogState(), catalog: { ...loadedCatalogState().catalog, sources: [source] } } as never;

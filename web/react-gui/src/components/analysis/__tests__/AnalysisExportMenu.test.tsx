@@ -36,6 +36,17 @@ const series: AnalysisSeries[] = [{
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('AnalysisExportMenu', () => {
+  it('groups exports in one disclosure and dismisses it with Escape', () => {
+    const { container } = render(<AnalysisExportMenu series={series} catalogById={new Map()} chartRef={{ current: null }} username={null} exportRange={null} exportGranularity="daily" />);
+    const disclosure = container.querySelector('details');
+    expect(disclosure).toBeInTheDocument();
+    const trigger = screen.getByText('analysis.export.label');
+    disclosure?.setAttribute('open', '');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'analysis.export.csv' }), { key: 'Escape' });
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(trigger).toHaveFocus();
+  });
+
   it('renders chart and account-wide export actions', () => {
     render(
       <AnalysisExportMenu
