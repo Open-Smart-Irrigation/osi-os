@@ -12,6 +12,7 @@
 const test = require('node:test');
 const { after } = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -779,7 +780,7 @@ test('the banner names the bootstrap script path the service runs on this gatewa
   for (const note of [
     'this deploy secures the canonical env file using the /srv/node-red bootstrap copy.',
     'the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines.',
-    'osi-bootstrap uses the updated /srv/node-red script when present, then the firmware copy.'
+    'osi-bootstrap uses the updated /srv/node-red script when its deploy receipt verifies, then the firmware copy.'
   ]) assert.ok(r2.stdout.includes(note), r2.stdout);
 });
 
@@ -830,13 +831,18 @@ test('the printed re-provision command reuses the API key and goes through the s
   assert.deepEqual(initCalls(fx), ['start key=token']);
 });
 
+function installBootstrapFixture(script, contents) {
+  fs.writeFileSync(script, contents);
+  fs.writeFileSync(script + '.atomic-sha256', createHash('sha256').update(contents).digest('hex'));
+}
+
 // The init script's start(), run by hand on a not yet provisioned gateway,
 // with ChirpStack, node, logger and identityd stubbed: it must write the
 // stamp, which a bare `node chirpstack-bootstrap.js` does not.
 test('running the service by hand provisions and writes the stamp', () => {
   const fx = bootstrapFixture({ enabled: true });
   const script = path.join(fx.dir, 'chirpstack-bootstrap.js');
-  fs.writeFileSync(script, '');
+  installBootstrapFixture(script, '');
   writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'node'), [
@@ -846,7 +852,7 @@ test('running the service by hand provisions and writes the stamp', () => {
   writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', `echo "restart-request $*" >> ${JSON.stringify(fx.log)}`]);
   const body = BOOTSTRAP_INIT
-    .slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .slice(BOOTSTRAP_INIT.indexOf('updated_bootstrap_verified() {'))
     .split('/etc/osi-bootstrap.done').join(fx.stampFile)
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
@@ -864,13 +870,14 @@ test('service selects the atomically installed bootstrap before the firmware cop
   const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
   const fallback = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
   fs.mkdirSync(path.dirname(rom), { recursive: true }); fs.mkdirSync(path.dirname(fallback), { recursive: true });
-  fs.writeFileSync(rom, 'old permissive ROM writer'); fs.writeFileSync(fallback, 'updated guarded /srv writer');
+  fs.writeFileSync(rom, 'old permissive ROM writer');
+  installBootstrapFixture(fallback, 'updated guarded /srv writer');
   writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', `printf '%s\n' "$1" >> ${JSON.stringify(fx.log)}`]);
   writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', `echo "restart-request $*" >> ${JSON.stringify(fx.log)}`]);
-  const body = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+  const body = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('updated_bootstrap_verified() {'))
     .split('/etc/osi-bootstrap.done').join(fx.stampFile)
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/usr/share/node-red/chirpstack-bootstrap.js').join(rom)
@@ -889,14 +896,14 @@ test('service selects the atomically installed bootstrap before the firmware cop
 test('an updated bootstrap failure leaves the stamp absent and does not request a restart', () => {
   const fx = bootstrapFixture({ enabled: true });
   const script = path.join(fx.dir, 'chirpstack-bootstrap.js');
-  fs.writeFileSync(script, '');
+  installBootstrapFixture(script, '');
   writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', 'trap \'rc=$?; echo bootstrap-exit:$rc >> ' + JSON.stringify(fx.log) + '\' EXIT', 'echo bootstrap-invoked >> ' + JSON.stringify(fx.log), 'exit 74']);
   writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', 'echo "restart-request $*" >> ' + JSON.stringify(fx.log)]);
   const body = BOOTSTRAP_INIT
-    .slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .slice(BOOTSTRAP_INIT.indexOf('updated_bootstrap_verified() {'))
     .split('/etc/osi-bootstrap.done').join(fx.stampFile)
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))

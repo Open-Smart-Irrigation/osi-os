@@ -114,7 +114,7 @@ fs.renameSync = function(source, target) {
   return rename(source, target);
 };
 `);
-  function start({ boot = false, failSync = '', expectFailure = false } = {}) {
+  function start({ boot = false, failSync = '', expectFailure = false, blockBootstrap = '' } = {}) {
     const result = spawnSync('sh', ['-c', `
 . "$1"
 uci() {
@@ -135,6 +135,13 @@ if [ "$TEST_BOOT" = 1 ]; then
     . "$TEST_BOOT_INIT"
     curl() { return 0; }
     sync() { return 0; }
+    node() {
+        if [ "$1" = "$TEST_BLOCK_BOOTSTRAP" ]; then
+            printf 'selected the retained legacy bootstrap\\n'
+            return 0
+        fi
+        command node "$@"
+    }
     boot
 fi
 `, 'fixture', initPath], {
@@ -145,6 +152,7 @@ fi
         TEST_PASSWORD: password,
         TEST_BOOT: boot ? '1' : '0',
         TEST_BOOT_INIT: bootInit,
+        TEST_BLOCK_BOOTSTRAP: blockBootstrap,
         ...(failSync ? { NODE_OPTIONS: '--require=' + preload, FS_TRACE: trace, FAIL_SYNC: failSync } : {}),
       },
     });
@@ -275,6 +283,43 @@ test('boot recovery reaches the real bootstrap flow validator on the same boot',
   assert.doesNotMatch(log, /bootstrap failed/);
   assert.equal(fs.existsSync(fx.stamp), true);
 });
+
+for (const receipt of ['absent', 'mismatched', 'verified']) {
+  test(`bootstrap boot selects the correct writer when the deploy receipt is ${receipt}`, t => {
+    const fx = fixture(t);
+    fs.writeFileSync(fx.flows, seed);
+    const updated = path.join(fx.userDir, 'chirpstack-bootstrap.js');
+    const installed = 'console.log("selected the atomically installed bootstrap");\n';
+    const retained = process.env.OSI_TEST_V081_BOOTSTRAP
+      ? fs.readFileSync(process.env.OSI_TEST_V081_BOOTSTRAP)
+      : 'console.log("selected the retained legacy bootstrap");\n';
+    if (receipt !== 'absent') {
+      const deploy = fs.readFileSync('deploy.sh', 'utf8');
+      const scriptInstall = deploy.indexOf('fetch_required "chirpstack-bootstrap.js"');
+      const receiptInstall = deploy.indexOf('if ! publish_bootstrap_receipt "$BOOTSTRAP_SCRIPT_FALLBACK"');
+      const serviceInstall = deploy.indexOf('fetch_required "ChirpStack bootstrap service"');
+      assert.ok(scriptInstall > 0 && scriptInstall < receiptInstall && receiptInstall < serviceInstall);
+      const installer = deploy.slice(deploy.indexOf('file_sha256() {'), deploy.indexOf('# The hotplug hook'));
+      fs.writeFileSync(updated, installed);
+      const result = spawnSync('sh', ['-c', installer + '\npublish_bootstrap_receipt "$1"', 'receipt', updated],
+        { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      const file = updated + '.atomic-sha256';
+      assert.equal(fs.readFileSync(file, 'utf8'), createHash('sha256').update(installed).digest('hex'));
+    }
+    if (receipt !== 'verified') fs.writeFileSync(updated, retained);
+    assert.equal(fs.existsSync(fx.stamp), false);
+    const log = fx.start({ boot: true, blockBootstrap: receipt === 'verified' ? '' : updated });
+    assert.match(log, /bootstrap completed successfully/);
+    if (receipt === 'verified') {
+      assert.match(log, /selected the atomically installed bootstrap/);
+      assert.doesNotMatch(log, /flows.json portable communication contract verified/);
+    } else {
+      assert.match(log, /flows.json portable communication contract verified/);
+      assert.doesNotMatch(log, /selected the retained legacy bootstrap/);
+    }
+  });
+}
 
 for (const [failure, expected] of [
   ['file', ['file']],
