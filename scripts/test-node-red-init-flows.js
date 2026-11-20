@@ -459,13 +459,13 @@ test('a same-release deploy can stage past a missing held flow and switch only t
 
 test('a missing DB with a recovery hold refuses a cold start before payload checking', t => {
   const fx = fixture(t);
-  fs.mkdirSync(path.join(fx.root, 'data', 'db'));
-  fs.writeFileSync(path.join(fx.root, 'data', 'db', 'farming.db.osi-recovery'), '');
+  fs.unlinkSync(fx.db);
+  fs.writeFileSync(fx.db + '.osi-recovery', '');
   const result = fx.start({ expectFailure: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /HELD: Database recovery is incomplete/);
   assert.doesNotMatch(result.stdout, /procd start/);
-  assert.equal(fs.existsSync(path.join(fx.root, 'data', 'db', 'farming.db')), false);
+  assert.equal(fs.existsSync(fx.db), false);
 });
 
 test('a failed credentials directory sync restores the prior inode and removes rollback names', t => {

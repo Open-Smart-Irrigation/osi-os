@@ -175,7 +175,7 @@ seed_db_if_missing || exit 1
 for (const [name, good, partial] of [
   ['package.json', '{"name":"before"}', '{"name":'],
   ['package-lock.json', '{"lockfileVersion":3}', '{"packages":'],
-  ['edge-channels.json', '{"channels":[]}', '{"channels":'],
+  ['edge-channels.json', '[]', '[{"channel":'],
   ['codec.js', 'function decodeUplink() {}', 'function decodeUplink('],
 ]) {
   test(`an interrupted or invalid ${name} never touches the live file`, t => {
@@ -183,14 +183,16 @@ for (const [name, good, partial] of [
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const live = path.join(dir, name);
     fs.writeFileSync(live, good);
-    for (const rc of [18, 0]) {
+    const transfers = [[18, partial], [0, partial]];
+    if (name.endsWith('.json')) transfers.push([0, 'null']);
+    for (const [rc, contents] of transfers) {
       const forbidden = spawnSync('sh', ['-c', `
 ${fn('publish_boot_file')}
 ${fn('fetch_required')}
 fetch() { printf '%s' "$PARTIAL" > "$2"; return "$FAIL_STATUS"; }
 fetch_required 'runtime' 'source/runtime' "$1" 644 || exit $?
 `, 'fixture', live], {
-        encoding: 'utf8', env: { ...process.env, PARTIAL: partial, FAIL_STATUS: String(rc) },
+        encoding: 'utf8', env: { ...process.env, PARTIAL: contents, FAIL_STATUS: String(rc) },
       });
       assert.notEqual(forbidden.status, 0);
       assert.match(forbidden.stderr, rc ? /could not fetch source\/runtime/ : /could not install source\/runtime/);
