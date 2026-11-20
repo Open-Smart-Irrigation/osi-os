@@ -15,3 +15,14 @@ needed by the isolated harness are supplied. The test's preinit driver uses
 the UNKNOWN/PENDING/READY branch from `mount_overlay`; the S95 fixture uses
 the existing ext4/F2FS `done` transition. Cleanup operates on disposable
 upper directories containing markers, whiteout canaries and synthetic data.
+
+The image fixture compiles the actual packaged `osi-rootfs-flush` helper.
+It runs S07 before initialization, retains the native descriptor across S95,
+and stops the monitor before each simulated power cycle. The volatile socket
+uses a short temporary path to stay within Unix socket path limits.
+
+`writeback-fuse.c` is a disposable kernel writeback-cache filesystem for the
+separate writeback regression. Its writeback callback returns EIO after a
+successful cached write. The test runs the actual packaged helper and S96,
+including a successful bare BusyBox sync before the checked flush. FUSE is
+required in CI; the test does not skip or substitute a shell error stub.

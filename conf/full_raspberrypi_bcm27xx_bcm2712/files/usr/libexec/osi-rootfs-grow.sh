@@ -18,14 +18,16 @@ osi_rootfs_partition_source() {
 osi_rootfs_target() {
   local record backing loop offset
   ROOT_FSTYPE=unknown
+  ROOT_MOUNT=unknown
   record="$(awk '
-    $2 == "/overlay" { overlay = $1 " " $3 " " $4 }
-    $2 == "/" { root = $1 " " $3 " " $4 }
+    $2 == "/overlay" { overlay = $1 " " $3 " " $4 " " $2 }
+    $2 == "/" { root = $1 " " $3 " " $4 " " $2 }
     END { if (overlay != "") print overlay; else print root }
   ' /proc/mounts)" || return 1
   set -- $record
-  [ "$#" -eq 3 ] || return 1
+  [ "$#" -eq 4 ] || return 1
   ROOT_FSTYPE="$2"
+  ROOT_MOUNT="$4"
   [ "$ROOT_FSTYPE" = ext4 ] || return 1
   case ",$3," in *,rw,*) ;; *) return 1 ;; esac
   ROOT_SRC="$1"

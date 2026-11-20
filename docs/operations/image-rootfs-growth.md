@@ -33,7 +33,12 @@ The new image uses squashfs with an ext4 overlay on a loop device. The shared
 `usr/libexec/osi-rootfs-grow.sh` helper reads the mounted filesystem from
 `/proc/mounts`, checks its loop backing device and offset through sysfs, and
 checks `/dev/root` aliases against the mounted device number. A direct ext4
-root on partition 2 is also accepted. A different device, read-only mount,
+root on partition 2 is also accepted for partition selection and S08 resize.
+The automatic reboot covers the shipped squashfs-plus-overlay layout only.
+A direct ext4 root has no fstools READY transition; after defaults queues
+pending growth, a normal operator restart is required to refresh capacity
+and let S08 finish. S96 logs that requirement and does not reboot it. A
+different device, read-only mount,
 non-ext4 filesystem, bounded loop device or extra partition is refused.
 Existing F2FS media returns a logged no-op, visible under the
 `osi-rootfs-grow` tag in `logread`, and keeps any pending marker untouched.
@@ -56,16 +61,33 @@ After partition growth, the defaults script persists
 `/etc/osi-rootfs-grow-needs-resize` and queues a volatile
 `/var/run/osi-rootfs-grow-reboot` request. It does not reboot from S10.
 Fstools can erase an UNKNOWN/PENDING overlay on the next preinit mount,
-including this marker and defaults whiteouts. Sync alone does not prevent
-that cleanup.
+including this marker and defaults whiteouts. A visible READY link alone
+does not prevent that cleanup.
 
-`S95done` performs the existing `mount_root done` transition. The new
-`S96osi-rootfs-grow-reboot` service accepts the queued request only when
-`readlink /overlay/.fs_state` returns `2` (READY). It syncs that state and
-the pending marker before requesting the growth reboot. It never sets
-`.fs_state` or calls `mount_root done` itself. This preserves fstools'
-initialization protocol and leaves failed readiness visible without forcing
-unrelated provisioning to succeed.
+`S07osi-rootfs-flush` opens an overlay directory descriptor before S08/S10
+initialization writes. A small packaged `osi-rootfs-flush` process retains
+that descriptor and its kernel writeback-error cursor until S96. S10 checks
+that the monitor is available before changing a partition on the shipped
+overlay layout. Missing, stopped or mismatched monitors fail closed.
+
+`S95done` performs the existing `mount_root done` transition. The
+`S96osi-rootfs-grow-reboot` service requires `readlink /overlay/.fs_state`
+to return `2` (READY), then asks the retained descriptor's owner to call
+`syncfs(2)`. This flush covers the pending marker, READY directory entry,
+defaults whiteouts and other initialization files/directories on that
+filesystem. Only a checked zero result permits the growth reboot. Neither
+service sets `.fs_state` or calls `mount_root done` itself.
+
+Bare BusyBox `sync` cannot report writeback errors. Opening a new descriptor
+after a failed writeback can also miss an error already observed elsewhere.
+The retained descriptor tracks errors across initialization, including
+S95's bare sync. Any `syncfs` error poisons the monitor for the rest of the
+boot: flush/check/re-arm requests keep failing, both intents remain, and
+S96 does not reboot. The monitor cannot silently restart or reset its
+cursor on that boot; a stale socket also blocks re-arming. A normal restart
+clears this volatile state. This is error detection, not repair of failed
+storage. Linux's [writeback error sequence documentation](https://www.kernel.org/doc/html/v6.10/core-api/errseq.html)
+explains the cursor model.
 
 The volatile request limits automatic rebooting to the boot that queued
 partition growth. A later filesystem-resize failure retains the persistent
@@ -100,7 +122,8 @@ the scripts refuse further work; preserve the card for diagnosis.
 
 ## Boot-script audit and IM2 handoff
 
-The full-profile init directory contains the growth service,
+The full-profile init directory contains the S07 writeback monitor,
+S08 resize and S96 reboot services,
 `osi-bootstrap`, `osi-identityd`, Redis and `osi-db-integrity`. Bootstrap
 uses `start()` without procd; identityd and Redis use procd with
 `start_service()`. The remaining uci-defaults files execute their setup
@@ -115,11 +138,16 @@ change this service or its database helper.
 ## TF3 real-card qualification
 
 Shell fixtures establish dispatch, command selection and retry behavior.
-They stub partitioning, filesystem growth, sync and reboot. The lifecycle
+They stub partitioning, filesystem growth and reboot. The lifecycle
 regression compiles the pinned fstools cleanup and state functions, runs
 real directory cleanup, and exercises the vendored S10 defaults dispatcher,
 S95done and the S08/S96 services. It does not emulate a kernel mount or
-prove storage behavior during a power cut. TF3 must qualify the final image
+prove storage behavior during a power cut. The separate writeback test uses
+an actual FUSE writeback-cache mount: write(2) succeeds, the later kernel
+writeback receives EIO, and bare BusyBox sync returns zero. The packaged
+helper's held descriptor reports the error, latches it, and the shipped S96
+path refuses reboot. This is kernel-error-path coverage, not an SD-card or
+power-loss qualification. TF3 must qualify the final image
 pin on disposable larger cards for both Pi 4 and Pi 5:
 
 1. Record image SHA, board, card size, boot links, mount types, partition
@@ -130,7 +158,9 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    its start and partition 1 remain unchanged, and exactly one growth reboot
    occurs after S95done. Record `/overlay/.fs_state` before the requested
    reboot: its symlink target must be `2`. Capture pending state, the
-   volatile request and defaults whiteouts at that point. Confirm GNU Parted handles the mounted-partition confirmation
+   volatile request and defaults whiteouts at that point. Capture the checked
+   flush-complete log separately from the first appearance of the READY link.
+   Confirm GNU Parted handles the mounted-partition confirmation
    with the image's actual package version.
 3. Use disposable-image serial/preinit tracing to capture `.fs_state`, the
    pending marker and defaults whiteouts after the next preinit mount and
@@ -152,15 +182,19 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    filesystem plus pending state. Both must finish without shrinking.
 5. Start both UNKNOWN (missing state link) and PENDING (`1`) cases. Cut
    power before, during and after the partition command; after pending state
-   is written but before S95; after READY but before S96; during `resize2fs`;
+   is written but before S95; after the READY link appears but before the
+   checked flush completes; after the checked flush completes but before the
+   reboot request; during `resize2fs`;
    after stamp creation; and before pending-state removal. Repeat with an
    already full partition. Capture state links, markers, whiteouts and
    geometry before each cut and after preinit. Before READY, record the
-   expected fstools cleanup and defaults restoration. After READY, require
-   marker/whiteout and canary persistence. Each recoverable case must finish
+   expected fstools cleanup and defaults restoration. Distinguish visible
+   READY from a successfully completed checked flush: only the latter is a
+   durability receipt. After that flush, require marker/whiteout and canary
+   persistence. Each recoverable case must finish
    without an automatic reboot loop. A cut after READY may replace the growth
-   reboot, yielding zero automatic requests; the uninterrupted path still
-   requires exactly one on each board.
+   reboot after a completed flush, yielding zero automatic requests. The
+   uninterrupted path still requires exactly one on each board.
    Preserve any unreadable card and stop qualification on a failed recovery.
 6. On disposable provisioned media, verify that first-boot partition growth
    is refused, including when only a database sidecar survives. Separately
@@ -175,7 +209,12 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    and unchanged filesystem type, partition geometry, capacity and persistent
    contents. Reboot normally and verify the same canaries and pending state
    persist. No formatter, conversion or filesystem-growth command may run.
-8. Inject missing tools, failed marker writes and a full/read-only overlay.
+8. Exercise a real storage writeback/flush error on disposable media after
+   the READY link appears. Record S07 monitor arming, the kernel I/O error,
+   checked flush failure, retained intents and absence of a reboot request.
+   A same-boot S96 retry and monitor re-arm must remain refused. A visible
+   READY link and a zero exit from bare sync are insufficient receipts.
+9. Inject missing tools, failed marker writes and a full/read-only overlay.
    Expect visible errors, retained retry state and no completion claim.
    Check unsupported backing devices and filesystem types without changing
    those devices. Recheck bootability and filesystem integrity offline after

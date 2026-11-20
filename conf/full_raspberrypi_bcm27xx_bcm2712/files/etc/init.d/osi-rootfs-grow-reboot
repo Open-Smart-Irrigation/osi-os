@@ -16,16 +16,21 @@ start() {
     [ "$ROOT_FSTYPE" = f2fs ] && return 0
     return 1
   fi
+  if [ "$ROOT_MOUNT" != /overlay ]; then
+    logger -t osi-rootfs-grow "direct ext4 root; normal restart required for filesystem growth"
+    return 0
+  fi
   if [ "$(readlink /overlay/.fs_state 2>/dev/null)" != 2 ]; then
     logger -t osi-rootfs-grow "overlay is not READY; deferring queued growth reboot"
     return 1
   fi
-  # Flush both READY and the pending marker before asking procd to shut down.
-  sync || {
-    logger -t osi-rootfs-grow "READY state sync failed; growth reboot deferred"
+  # S07 opened this descriptor before initialization writes. syncfs reports
+  # writeback failures since then, including failures hidden by bare sync.
+  /usr/libexec/osi-rootfs-flush flush /overlay /var/run/osi-rootfs-grow-flush.sock || {
+    logger -t osi-rootfs-grow "checked overlay flush failed; growth reboot deferred, pending state retained"
     return 1
   }
-  logger -t osi-rootfs-grow "overlay READY; rebooting to grow filesystem"
+  logger -t osi-rootfs-grow "checked overlay flush complete; overlay READY; rebooting to grow filesystem"
   reboot || {
     logger -t osi-rootfs-grow "growth reboot request failed; pending state retained"
     return 1

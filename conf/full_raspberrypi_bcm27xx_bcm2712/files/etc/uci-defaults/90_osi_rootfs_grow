@@ -23,6 +23,10 @@ if ! osi_rootfs_geometry; then
   logger -t osi-rootfs-grow "unsupported root filesystem or partition layout; leaving defaults for retry"
   exit 1
 fi
+if [ "$ROOT_MOUNT" = /overlay ] && ! /usr/libexec/osi-rootfs-flush check /overlay /var/run/osi-rootfs-grow-flush.sock; then
+  logger -t osi-rootfs-grow "early writeback monitor unavailable; leaving defaults for retry"
+  exit 1
+fi
 DISK=/dev/mmcblk0
 PART=2
 
