@@ -257,7 +257,7 @@ function createHarness(options) {
       Date: FakeDate,
       Buffer,
       crypto,
-      global: { get: name => name === 'fs' ? options.fs : undefined },
+      global: { get: name => name === 'fs' ? (options.fs || { existsSync: () => false }) : undefined },
       osiDb: { Database },
       osiLib: { require: libraryFor },
       osiCloudHttp,

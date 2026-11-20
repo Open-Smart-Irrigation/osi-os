@@ -328,9 +328,9 @@ const expectedNodeLibs = {
   // Task 7b2 conditional replication is optional at runtime: the builder
   // loads the policy helper and omits conditional resources when it is absent.
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
-  'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
-  'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   // al-link-build-req: same wave 3 port. It now reads/creates/merges the local
   // installation_identity singleton and advertises installationUuid plus the
@@ -360,6 +360,13 @@ const localRestartReader = [
   '  }',
   '}',
 ].join('\n');
+const moduleRestartReader = [
+  'function gatewayIdentityRestartPending() {',
+  "  const load = osiLib.require('installation');",
+  "  return !load.ok || load.value.gatewayWorkBlocked({ fs: global.get('fs'), warn: text => node.warn(text) });",
+  '}',
+].join('\n');
+
 const protectedNodeHashes = {
   // Re-pinned #2 (port/wave3-auth-flaggate, fix(auth): flag-gate the shared scope resolver
   // across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit
@@ -370,7 +377,9 @@ const protectedNodeHashes = {
   // resolution, and the flag-off branch inlines the pre-refactor secret-resolution logic
   // byte-equivalent to the pre-port route. Hash re-derived fresh on this branch.
   // Previous pin (pick-list commit 65, AgroLink d2e81bd6a): a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc
-  'al-link-validate': '586ed5912d0dfb36171c299a3b8b9e24b0588fec91fd47a5fa4549d2f873b842',
+  // EB2: the auth verifier is unchanged; al_* writes now target msg._alState.
+  // Private-target config failures also warn. Recomputed from the function body.
+  'al-link-validate': '883e9d22db8a426f10941b25315ebca623f0c6d0e775dd7b8789277b2cdf150d',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
   // The source branch's own history never closed this gap -- a live rebuild would have created
@@ -967,7 +976,7 @@ for (const flowRelativePath of flowRelativePaths) {
     }
     verifySystemStatsExecution(`${flowRelativePath}:sys-stats-fn`, systemStats.func);
   }
-  const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && node.func.includes(sentinelPath));
+  const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && (node.func.includes(sentinelPath) || node.func.includes('load.value.gatewayWorkBlocked(')));
   expectCondition(
     sentinelReaders.length === sentinelReaderIds.length && sentinelReaders.every((node) => sentinelReaderIds.includes(node.id)),
     `${flowRelativePath}: only system stats and the seven identity gates read the restart sentinel`,
@@ -979,7 +988,7 @@ for (const flowRelativePath of flowRelativePaths) {
       fail(`${flowRelativePath}: missing identity-gate function ${nodeId}`);
       continue;
     }
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, localRestartReader, 'contains the exact fail-closed local restart reader');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, nodeId === 'al-link-build-req' ? localRestartReader : moduleRestartReader, 'contains the exact fail-closed restart reader or module delegation');
     expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]),
       `${flowRelativePath}:${nodeId}: preserves its reviewed libs`,
       `${flowRelativePath}:${nodeId}: libs changed from ${JSON.stringify(expectedNodeLibs[nodeId])}`);
@@ -1038,8 +1047,8 @@ for (const flowRelativePath of flowRelativePaths) {
     expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, 'node.status({', 'reports the scheduled restart');
     expectCondition(node.outputs === 2, `${flowRelativePath}:${nodeId}: has separate success and error outputs`, `${flowRelativePath}:${nodeId}: must declare two outputs`);
     const expectedWires = reason === 'account_link'
-      ? [['al-link-resp', 'al-link-clear-state', 'al-link-bootstrap-link-out'], ['al-link-resp']]
-      : [['al-unlink-resp', 'al-link-clear-state'], ['al-unlink-resp']];
+      ? [['al-link-resp', 'al-link-clear-state', 'al-link-bootstrap-link-out'], ['al-link-resp', 'al-link-clear-state']]
+      : [['al-unlink-resp', 'al-link-clear-state'], ['al-unlink-resp', 'al-link-clear-state']];
     expectCondition(JSON.stringify(node.wires) === JSON.stringify(expectedWires),
       `${flowRelativePath}:${nodeId}: failure reaches only the HTTP response`,
       `${flowRelativePath}:${nodeId}: success/error wiring must be ${JSON.stringify(expectedWires)}`);

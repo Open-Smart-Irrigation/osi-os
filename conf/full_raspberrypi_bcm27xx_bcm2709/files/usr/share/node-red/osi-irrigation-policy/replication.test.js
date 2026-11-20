@@ -778,3 +778,21 @@ test('flowPeerDb propagates transaction failure and labels an attached rollback 
     assert.deepEqual(warnings, rollbackError ? ['Peer invalidation rollback failed: database is locked'] : []);
   }
 });
+
+
+test('an unspecified relink target never inherits the old account; baseline and identity remain fenced', async () => {
+  const f = fixture();
+  try {
+    const context = { server_url: 'https://new-cloud.test', gateway_device_eui: GATEWAY, installation_uuid: INSTALLATION };
+    const attempt = await replication.beginLinkAttempt(f.db, { context, nonce: 'unknown-target' });
+    assert.equal(attempt.context.cloud_user_id, null);
+    assert.equal(attempt.baseline_context.cloud_user_id, USER_UUID);
+    const response = { ...context, cloud_user_id: '77' };
+    const accepted = await replication.validateLinkAttempt(f.db, { nonce: attempt.nonce, context: response, capabilities: ['conditional_irrigation_v1'] });
+    assert.equal(accepted.valid, true);
+    f.native.prepare("UPDATE sync_link_state SET cloud_user_id='concurrent-account' WHERE peer_node='cloud'").run();
+    const stale = await replication.validateLinkAttempt(f.db, { nonce: attempt.nonce, context: response, capabilities: ['conditional_irrigation_v1'] });
+    assert.equal(stale.valid, false);
+    assert.equal(stale.reason, 'stale_peer_context');
+  } finally { closeFixture(f); }
+});

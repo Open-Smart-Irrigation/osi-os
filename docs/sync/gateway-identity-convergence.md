@@ -27,3 +27,19 @@ directly. `/api/system/stats` exposes only
 deadline fields remain private. Do not route identity transitions through the
 GUI `/api/system/reboot` route, and do not edit `sync-init-fn` or any
 `runGatewayMigrationPreflight` body as part of this path.
+
+Account-link and disconnect also pause sync builders while an account operation
+is active or `/data/db/osi-account-link-config.json` exists. This private recovery
+journal coordinates the MQTT UCI options with the SQLite account/peer transaction;
+it carries credentials and must remain mode 0600. The installation helper flushes
+the journal before writing UCI, then flushes the committed database and WAL before
+removing it. A failed local transaction restores the old configuration. After an
+interruption, recovery compares the committed account and peer with the journal
+and either completes the new configuration or restores the old one.
+
+The account finalizer retries recovery on Node-RED startup and publishes a daemon
+restart request before removing the receipt. The next authenticated link or
+disconnect also retries recovery. An unreadable journal or failed restore blocks
+new link requests before cloud authentication; sync transport stays paused until
+recovery succeeds. The identity sentinel still blocks linking and finalization,
+including when it appears while cloud authentication is in flight.

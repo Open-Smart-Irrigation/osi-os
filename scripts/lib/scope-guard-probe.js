@@ -609,6 +609,22 @@ function makeEffectStub(label, recorder, kind = 'effect') {
         what: `${label}(${argsText.slice(1, 61)})`,
         detail: argsText.slice(0, 2000),
       });
+      // Account-link UCI is a recording stand-in, like the DB facade. This
+      // lets an allowed disconnect reach its SQL without running host tools.
+      if (label === 'cp.execFileSync' && args[0] === 'uci') {
+        const argv = args[1] || [];
+        const config = recorder.accountUci || (recorder.accountUci = new Map());
+        if (argv.includes('get')) {
+          if (!config.has(argv.at(-1))) throw Object.assign(new Error('probe UCI option missing'), { status: 1 });
+          return config.get(argv.at(-1)) + '\n';
+        }
+        if (argv[0] === 'set') {
+          const index = argv[1].indexOf('=');
+          config.set(argv[1].slice(0, index), argv[1].slice(index + 1));
+        }
+        if (argv.includes('delete')) config.delete(argv.at(-1));
+        return '';
+      }
       const last = args.length ? args[args.length - 1] : undefined;
       if (typeof last === 'function') {
         setImmediate(() => {
@@ -633,13 +649,32 @@ function enoent(target) {
 const FS_WRITE_PREFIXES = ['write', 'append', 'unlink', 'rm', 'rename', 'mkdir', 'copy', 'truncate', 'chmod', 'chown', 'symlink', 'link', 'utimes', 'createWrite', 'cp'];
 
 function makeRecordingFs(recorder) {
+  const accountFiles = new Map();
+  const accountFds = new Map();
+  let nextAccountFd = 100;
   function method(name) {
     return function probeFs(...args) {
       const target = typeof args[0] === 'string' ? args[0] : String(args[0]);
-      if (name === 'existsSync') return false;
-      const isWrite = FS_WRITE_PREFIXES.some((prefix) => name.startsWith(prefix));
+      const file = typeof args[0] === 'number' ? accountFds.get(args[0]) : target;
+      const accountPath = file && (file.startsWith('/data/db/osi-account-link-config.json') || ['/data/db','/data/db/farming.db'].includes(file));
+      if (name === 'existsSync') return accountFiles.has(target);
+      const isWrite = FS_WRITE_PREFIXES.some((prefix) => name.startsWith(prefix)) || (name === 'openSync' && /[wax+]/.test(String(args[1])));
       if (!(AUTH_SECRET_PATHS.has(target) && !isWrite)) {
         recorder.events.push({ kind: isWrite ? 'effect' : 'file-read', what: `fs.${name}(${target})` });
+      }
+      if (accountPath) {
+        if (name === 'openSync') {
+          const fd = nextAccountFd++;
+          accountFds.set(fd, target);
+          if (String(args[1]).includes('w')) accountFiles.set(target, '');
+          return fd;
+        }
+        if (name === 'writeFileSync') { accountFiles.set(file, String(args[1])); return; }
+        if (name === 'fsyncSync') return;
+        if (name === 'closeSync') { accountFds.delete(args[0]); return; }
+        if (name === 'renameSync') { accountFiles.set(args[1], accountFiles.get(file)); accountFiles.delete(file); return; }
+        if (name === 'readFileSync' && accountFiles.has(file)) return accountFiles.get(file);
+        if (name === 'unlinkSync' && accountFiles.delete(file)) return;
       }
       const error = enoent(target);
       const last = args[args.length - 1];
