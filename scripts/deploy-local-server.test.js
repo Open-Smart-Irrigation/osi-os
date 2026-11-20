@@ -179,3 +179,32 @@ test('HEAD returns headers with no body', async () => {
   await close(server);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('the verified snapshot survives file replacement, link substitution and caller buffer mutation', async t => {
+  const { createVerifiedServer } = require('./deploy-local-server');
+  const { hash } = require('./deploy-archive');
+  const root = mkTempRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'deploy.sh');
+  fs.writeFileSync(file, 'verified');
+  const original = fs.readFileSync(file);
+  const server = createVerifiedServer(new Map([['deploy.sh', original]]), { hashes: { 'deploy.sh': hash(original) } });
+  original.fill(88);
+  fs.unlinkSync(file); fs.symlinkSync('/etc/passwd', file);
+  const address = await listen(server);
+  t.after(() => close(server));
+  assert.equal((await get(address.port, '/deploy.sh')).body.toString(), 'verified');
+  assert.throws(() => createVerifiedServer(new Map([['deploy.sh', Buffer.from('changed')]]), { hashes: { 'deploy.sh': hash(Buffer.from('verified')) } }), /hash mismatch/);
+});
+
+test('directory server keeps the bytes read before a file is replaced', async t => {
+  const root = mkTempRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'deploy.sh');
+  fs.writeFileSync(file, 'verified snapshot');
+  const server = createServer(root);
+  fs.writeFileSync(file, 'different source');
+  const address = await listen(server);
+  t.after(() => close(server));
+  assert.equal((await get(address.port, '/deploy.sh')).body.toString(), 'verified snapshot');
+});

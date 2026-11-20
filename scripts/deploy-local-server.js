@@ -3,12 +3,11 @@
 
 // Zero-dependency static file server, meant to run ON the Pi (BusyBox has no
 // python3 and no busybox httpd, but every gateway has node). Serves a bundle
-// directory (extracted from deploy-bundle.sh's tarball) on 127.0.0.1 so
+// byte snapshot on 127.0.0.1 so
 // deploy.sh's `curl -fsSLo dest "$BASE/$src"` calls work exactly as they do
 // against the SSH-tunnelled workstation server, without needing the tunnel.
 //
-// Only node:http, node:fs, node:path, node:url -- no npm install step, which
-// is the whole point (it must run before/without network access).
+// Uses Node builtins only; it runs without an npm install or network access.
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -41,58 +40,50 @@ function safeResolve(rootDir, requestPath) {
   return target;
 }
 
-function createServer(rootDir, options = {}) {
+function createVerifiedServer(input, options = {}) {
+  // Own the exact buffers checked below; neither callers nor on-disk changes
+  // can replace the bytes after verification and before an HTTP request.
+  const files = new Map();
+  const crypto = require('node:crypto');
+  for (const [name, bytes] of input) {
+    const copy = Buffer.from(bytes);
+    if (options.hashes && crypto.createHash('sha256').update(copy).digest('hex') !== options.hashes[name]) throw new Error('server snapshot hash mismatch');
+    files.set(name, copy);
+  }
   const log = options.log || (() => {});
-
-  const server = http.createServer((req, res) => {
+  return http.createServer((req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.writeHead(405, { Allow: 'GET, HEAD' });
-      res.end();
-      return;
+      res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return;
     }
-
-    const requestPath = req.url || '/';
-    const target = safeResolve(rootDir, requestPath);
-    if (!target) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('Bad request\n');
-      log(`400 ${req.method} ${requestPath}`);
-      return;
-    }
-
-    fs.stat(target, (statErr, stat) => {
-      if (statErr || !stat.isFile()) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found\n');
-        log(`404 ${req.method} ${requestPath}`);
-        return;
-      }
-
-      res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': String(stat.size),
-      });
-
-      if (req.method === 'HEAD') {
-        res.end();
-        log(`200 HEAD ${requestPath}`);
-        return;
-      }
-
-      const stream = fs.createReadStream(target);
-      stream.on('error', () => {
-        // stat succeeded but the read failed mid-stream (e.g. removed
-        // concurrently); nothing more we can safely send once headers are
-        // already flushed, so just tear down the connection.
-        res.destroy();
-        log(`ERROR streaming ${requestPath}`);
-      });
-      stream.pipe(res);
-      res.on('finish', () => log(`200 GET ${requestPath}`));
+    const target = safeResolve('/bundle', req.url || '/');
+    if (!target) { res.writeHead(400); res.end('Bad request\n'); return; }
+    const bytes = files.get(path.relative('/bundle', target));
+    const code = bytes ? 200 : 404;
+    log(`${code} ${req.method} ${req.url}`);
+    res.writeHead(code, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes ? bytes.length : 0),
+      'X-Deploy-Instance': options.nonce || '',
     });
+    res.end(req.method === 'HEAD' ? undefined : bytes);
   });
-
-  return server;
+}
+function createServer(rootDir, options = {}) {
+  const files = new Map();
+  function walk(dir, relative = '') {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      const rel = relative ? `${relative}/${name}` : name;
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) walk(full, rel);
+      else if (stat.isFile()) {
+        const fd = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+        try { files.set(rel, fs.readFileSync(fd)); } finally { fs.closeSync(fd); }
+      }
+    }
+  }
+  walk(rootDir);
+  return createVerifiedServer(files, options);
 }
 
 if (require.main === module) {
@@ -127,4 +118,4 @@ if (require.main === module) {
   process.on('SIGINT', shutdown);
 }
 
-module.exports = { createServer, safeResolve };
+module.exports = { createServer, createVerifiedServer, safeResolve };

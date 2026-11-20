@@ -135,6 +135,9 @@ write_deploy_outcome() {
     elif [ "${ROLLBACK_RESTORED:-0}" = 1 ]; then
         outcome_verdict=auto-rollback
         outcome_reason="deploy failed; the compatible previous payload was restored and its readiness confirmed"
+    elif [ "${DEPLOY_RECOVERY_INCOMPLETE:-0}" = 1 ]; then
+        outcome_verdict=incomplete-recovery
+        outcome_reason="recovery is incomplete; inspect the deploy log and service state before restarting"
     elif [ "$outcome_rc" -eq 0 ] && [ "${DEPLOY_COMPLETED:-0}" = 1 ]; then
         if [ "${PROBE_OK:-}" = 0 ]; then
             outcome_verdict=success
@@ -149,20 +152,27 @@ write_deploy_outcome() {
         outcome_reason="deploy failed after activation or migration; inspect the deploy log"
     fi
     [ "$outcome_verdict" = success ] || [ "$outcome_code" -ne 0 ] || outcome_code=1
-    if [ "$outcome_verdict" != success ] && [ -n "${NODE_RED_START_REASON:-}" ]; then
-        outcome_reason="$outcome_reason: $NODE_RED_START_REASON"
-    fi
-    if [ "$outcome_verdict" != success ] && [ -f "${DEPLOY_LOGFILE:-}" ]; then
-        outcome_detail="$(awk '/ERROR:|ALERT:|HELD:/ { last=$0 } END { print last }' "$DEPLOY_LOGFILE")"
-        [ -z "$outcome_detail" ] || outcome_reason="$outcome_reason: $outcome_detail"
-    fi
+    case "$outcome_verdict" in
+        success) outcome_reason_code=verified ;;
+        unverified) outcome_reason_code=unverified ;;
+        auto-rollback) outcome_reason_code=rollback_verified ;;
+        incomplete-recovery) outcome_reason_code=recovery_incomplete ;;
+        hold) outcome_reason_code=services_held ;;
+        failed) outcome_reason_code=deploy_failed ;;
+        *) outcome_reason_code=deploy_refused ;;
+    esac
+    # Receipts carry codes and fixed messages. Sensitive diagnostics stay in
+    # the deploy log, which is never served with the bundle.
     # Read the active stamp without invoking or mutating the swap machinery.
     outcome_active="$(readlink "${SWAP_ROOT:-/srv/node-red}/payloads/active" 2>/dev/null || true)"
-    {
-        printf 'schema=osi-deploy-result/1\nstate=complete\nexit_code=%s\ndeploy_exit_code=%s\nverdict=%s\n' "$outcome_code" "$outcome_rc" "$outcome_verdict"
-        printf 'payload_stamp=%s\nactive_payload_stamp=%s\nbundle_sha256=%s\nlog=%s\n' "${DEPLOY_STAMP:-unknown}" "${outcome_active:-unknown}" "${DEPLOY_BUNDLE_SHA256:-unknown}" "${DEPLOY_LOGFILE:-unknown}"
-        printf 'reason=%s\n' "$(printf '%s' "$outcome_reason" | tr '\n\r' '  ')"
-    } > "$DEPLOY_OUTCOME_FILE.tmp-$$" && mv "$DEPLOY_OUTCOME_FILE.tmp-$$" "$DEPLOY_OUTCOME_FILE"
+    (
+        umask 077
+        {
+            printf 'schema=osi-deploy-result/1\nstate=complete\nexit_code=%s\ndeploy_exit_code=%s\nverdict=%s\n' "$outcome_code" "$outcome_rc" "$outcome_verdict"
+            printf 'payload_stamp=%s\nactive_payload_stamp=%s\nbundle_sha256=%s\n' "${DEPLOY_STAMP:-unknown}" "${outcome_active:-unknown}" "${DEPLOY_BUNDLE_SHA256:-unknown}"
+            printf 'service_state=%s\nreason_code=%s\nreason=%s\n' "${DEPLOY_SERVICE_STATE:-unknown}" "$outcome_reason_code" "$outcome_reason"
+        } > "$DEPLOY_OUTCOME_FILE.tmp-$$" && mv "$DEPLOY_OUTCOME_FILE.tmp-$$" "$DEPLOY_OUTCOME_FILE"
+    )
 }
 # deploy outcome end
 
@@ -3158,8 +3168,8 @@ fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGE
 STAGED_GUI_ARCHIVE="$TMP_DIR/react_gui.tar.gz"
 STAGED_GUI="$TMP_DIR/gui"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
-mkdir -p "$STAGED_GUI"
-tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
+fetch "scripts/deploy-archive.js" "$TMP_DIR/deploy-archive.js"
+node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"
 # Recorded "staged" before anything is copied in: a staged payload is no
 # rollback target until its health check passes, also when a cut leaves it
 # half copied. Staging comes before settings.js and every other change to
@@ -4380,11 +4390,14 @@ elif [ "$PROBE_OK" = "unverified" ]; then
 else
     echo "ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI" >&2
     # payload rollback begin
+    DEPLOY_RECOVERY_INCOMPLETE=1
+    DEPLOY_SERVICE_STATE=unknown
     if [ -n "${PREV_STAMP:-}" ]; then
         if ! hold_node_red_stopped; then
             echo "ERROR: could not prove Node-RED stopped before rollback activation; leaving payload links unchanged" >&2
             exit 1
         fi
+        DEPLOY_SERVICE_STATE=stopped
         rollback_verify_mode="full"
         if [ "${MIGRATION_RUNNER_AVAILABLE:-0}" != "1" ]; then
             rollback_verify_mode="retained"
@@ -4407,8 +4420,10 @@ else
         fi
         swap_call markFailed "$DEPLOY_STAMP" "its deploy health check failed" >/dev/null || true
         swap_call writePayloadState "$PREV_STAMP" healthy "returned to after payloads/$DEPLOY_STAMP failed its health check" deploy.sh >/dev/null || true
+        DEPLOY_SERVICE_STATE=unknown
         if ! "$NODE_RED_INIT" restart; then
             node_red_restart_needed=0
+            if hold_node_red_stopped; then DEPLOY_SERVICE_STATE=stopped; fi
             echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
             exit 1
         fi
@@ -4418,11 +4433,13 @@ else
         esac
         if ! wait_for_node_red_health "$rollback_health_timeout"; then
             node_red_restart_needed=0
-            hold_node_red_stopped || true
+            if hold_node_red_stopped; then DEPLOY_SERVICE_STATE=stopped; fi
             echo "ERROR: Node-RED was not ready after rollback; leaving it stopped" >&2
             exit 1
         fi
         ROLLBACK_RESTORED=1
+        DEPLOY_RECOVERY_INCOMPLETE=0
+        DEPLOY_SERVICE_STATE=running
         if ! swap_call discardPayload "$DEPLOY_STAMP" >/dev/null; then
             node_red_restart_needed=0
             echo "ERROR: failed activated payload could not be discarded after verified rollback" >&2
@@ -4473,10 +4490,9 @@ if [ "$soil_profile_repair_failed" = 1 ]; then
 fi
 print_bootstrap_note
 note_chirpstack_wal
+# Set only after activation, startup assessment and identityd readiness finish.
+DEPLOY_COMPLETED=1
 # An unverified start is the deploy's last line (exit 0: the new release runs).
 if [ "$PROBE_OK" = "unverified" ]; then
     echo "UNVERIFIED: payloads/$DEPLOY_STAMP runs, but its start could not be confirmed: $NODE_RED_START_REASON. The next deploy checks it again."
 fi
-
-# Set only after activation, startup assessment and identityd readiness finish.
-DEPLOY_COMPLETED=1

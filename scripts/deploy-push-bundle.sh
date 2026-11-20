@@ -142,6 +142,11 @@ if [ "$uploaded_ok" != "1" ]; then
   exit 1
 fi
 
+# These are trusted launcher components, deliberately outside the archive.
+for companion in deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
+  [ -f "$REPO_ROOT/scripts/$companion" ] || { echo "ERROR: missing launcher companion $companion" >&2; exit 1; }
+  remote_run "cat > '$REMOTE_TMP/$companion'" < "$REPO_ROOT/scripts/$companion"
+done
 echo "--- Push deploy-offline.sh ---"
 remote_offline="$REMOTE_TMP/deploy-offline.sh"
 remote_run "cat > '$remote_offline'" < "$DEPLOY_OFFLINE"

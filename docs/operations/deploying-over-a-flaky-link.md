@@ -22,8 +22,8 @@ choice on a stable LAN.
 |---|---|---|
 | `scripts/deploy-bundle.sh` | workstation | Packs every file `deploy.sh` can fetch, plus `deploy.sh` and `deploy-local-server.js` themselves, into `dist/deploy-bundle-<sha>.tar.gz` + a `.sha256` sidecar. |
 | `scripts/deploy-push-bundle.sh` | workstation | Streams that tarball to the gateway over one `ssh … 'cat > /tmp/...'` pipe (resumable), then launches `deploy-offline.sh` there. |
-| `scripts/deploy-local-server.js` | gateway | Zero-dependency Node static file server bound to `127.0.0.1`; ships inside the bundle. |
-| `scripts/deploy-offline.sh` | gateway | Extracts the bundle, brings up the local server under `setsid`, then runs `deploy.sh` under a second `setsid` session so it keeps running after your SSH connection ends. |
+| `scripts/deploy-local-server.js` | gateway | Serves an immutable verified byte snapshot on `127.0.0.1`; a trusted copy travels beside the launcher. |
+| `scripts/deploy-offline.sh` | gateway | Starts a detached Node supervisor that verifies inputs, owns the server and deploy child, and records the final outcome. |
 
 `deploy.sh` still does `curl -fsSLo dest "$BASE/$src"`
 against `$BASE`. The only difference is that `$BASE` now points at a Node
@@ -33,9 +33,9 @@ dropping.
 
 ### Repeatability and file verification
 
-For the same source tree and GUI archive bytes, the builder produces the same
-bundle bytes. It sorts archive entries, sets owners to 0, normalizes file and
-directory modes, fixes mtimes to epoch zero and uses `gzip -n`. Set
+For the same source tree, source SHA label, GUI archive bytes and
+`SOURCE_DATE_EPOCH`, the builder produces the same bundle bytes. It sorts archive
+entries, sets owners to 0, normalizes file and directory modes, fixes mtimes to epoch zero and uses `gzip -n`. Set
 `SOURCE_DATE_EPOCH` to select another fixed mtime. `BUNDLE_TS` is an optional
 legacy filename suffix; it never enters the archive. The manifest records the
 source SHA label and a SHA-256 digest for every regular file except itself.
@@ -46,14 +46,20 @@ changes the input bytes and therefore the bundle. To package an existing GUI
 build reproducibly with GNU tar:
 
 ```bash
-tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -cf - -C web/react-gui/build . | gzip -n > react_gui.tar.gz
+bash scripts/package-deploy-gui.sh web/react-gui/build react_gui.tar.gz
 ```
 
-The gateway checks the archive checksum, rejects links, special files and unsafe
-paths before extraction, then verifies the manifest against the entire extracted
-file set before starting the server. A missing, changed or extra file refuses the
-deploy. Older bundles without the manifest must be rebuilt. These checks detect
+The helper stages a copy, sets files to 0644 and directories to 0755, and resets
+the locale and tar/gzip environment overrides before packaging. Source executable
+bits and the caller's umask do not change the GUI archive.
+
+The trusted launcher checks the archive checksum, manifest hashes and complete
+file inventory from one buffered read. It validates the nested GUI tarball too:
+links, special files and unsafe paths in either archive refuse the deploy before
+extraction or service changes. It never executes the bundled verifier to verify
+that verifier. The server retains its own hash-checked buffers for all requests;
+changing an extracted file cannot change the bytes served. A missing, changed or
+extra file refuses the deploy. Older bundles without the manifest must be rebuilt. These checks detect
 incomplete or changed content relative to the supplied sidecar; source selection
 and SSH authentication remain the operator's responsibility.
 
@@ -76,8 +82,7 @@ instead of quietly omitting the file from the bundle.
 # 1. Build and package the React GUI (same as the tunnel flow — not built by
 #    deploy-bundle.sh itself; frontend builds OOM this workstation)
 cd web/react-gui && npm ci && npm run build && cd ../..
-tar --sort=name --format=gnu --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -cf - -C web/react-gui/build . | gzip -n > react_gui.tar.gz
+bash scripts/package-deploy-gui.sh web/react-gui/build react_gui.tar.gz
 
 # 2. Build the bundle
 scripts/deploy-bundle.sh react_gui.tar.gz
@@ -108,10 +113,11 @@ time after hand-off), the deploy itself is unaffected:
   partial remote file is resumed from the last byte (`tail -c +N`), not
   restarted from zero. A remote file whose sha256 doesn't match on
   completion is deleted and re-uploaded.
-- **Session drops after hand-off**: `deploy-offline.sh` already backgrounded
-  `sh deploy.sh <port>` under `setsid`, in a session with no controlling
-  terminal, so it is not a child of the SSH session and receives no
-  `SIGHUP`. Reconnect and run `cat /data/deploy-<run>.result`, then read the named log.
+- **Session drops after hand-off**: the supervisor runs in its own session,
+  without a controlling terminal. Launcher HUP or TERM leaves it running.
+  HUP or TERM sent directly to the supervisor is forwarded to the deploy
+  process group; the supervisor waits for the deploy's recovery handler and
+  records its actual exit status. Reconnect and read the result and deploy log.
 
 ### Manually, without `deploy-push-bundle.sh`
 
@@ -121,6 +127,9 @@ If you'd rather copy the tarball over yourself:
 ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz' < dist/deploy-bundle-<sha>.tar.gz
 ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz.sha256' < dist/deploy-bundle-<sha>.tar.gz.sha256
 ssh root@<pi-ip> 'cat > /tmp/deploy-offline.sh' < scripts/deploy-offline.sh
+for file in deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
+  ssh root@<pi-ip> "cat > /tmp/$file" < "scripts/$file"
+done
 ssh root@<pi-ip> 'sh /tmp/deploy-offline.sh /tmp/deploy-bundle.tar.gz --wait'
 ```
 
@@ -130,29 +139,28 @@ for exactly this reason.)
 
 ## What `deploy-offline.sh` actually does
 
-1. Verifies the bundle's sha256 against its `.sha256` sidecar.
-2. Checks free space under `/tmp` before extracting (bundle size × 3 +
-   4 MB margin, the same wrap-safe `df -k` idiom `deploy.sh` uses for its own
-   migration disk gate).
-3. Rejects unsafe archive entries, extracts to `/tmp/deploy-bundle-<run>` and
-   verifies `bundle-manifest.json`. The default run identifier includes UTC time
-   and the launcher PID; an existing run is refused rather than overwritten.
-4. Starts `deploy-local-server.js` under `setsid`, polls
-   `http://127.0.0.1:<port>/deploy.sh` until it answers (up to 30s).
-5. Launches `sh deploy.sh <port> > /data/deploy-<run>.log 2>&1` inside a
-   *second* `setsid` session that also owns stopping the local server once
-   `deploy.sh` exits — success or failure, `--wait` or not. This is what
-   makes "the local server always gets stopped" true even when nothing is
-   left attached to watch it: the watcher is detached too.
-6. Records the terminal verdict in `/data/deploy-<run>.result` with an atomic
-   rename. `--wait` prints that result and returns its `exit_code`. Without
-   `--wait`, the launcher prints the result path and returns immediately.
+1. Starts the detached supervisor before any deploy can start. It creates a
+   persistent pending receipt and preallocates a recovery receipt under `/data`.
+2. Checks the bundle checksum and both archive trees, verifies all manifest
+   entries, then extracts to a new `/tmp/deploy-bundle-<run>` directory.
+   An existing run is refused rather than overwritten.
+3. Binds its own server to loopback and probes it with a unique instance token.
+   An occupied port refuses the deploy; another listener cannot satisfy readiness.
+4. Runs the verified `deploy.sh` bytes from memory, serving verified buffers for
+   every fetch. The child receives its own process group for signal forwarding.
+5. Waits for the child's real exit, reconciles its private lifecycle report,
+   stops the server and durably writes `/data/deploy-<run>.result`.
+6. `--wait` observes supervisor exit and returns the final status. A missing
+   scratch completion marker cannot strand it. A dead supervisor returns 125;
+   a receipt persistence failure returns 74, never success.
 
 ### Reading the final outcome
 
 Both push and direct offline delivery print the command for that run:
 
 ```sh
+sh /tmp/deploy-offline.sh --result /data/deploy-<run>.result
+# Or inspect the plain text directly:
 cat /data/deploy-<run>.result
 ```
 
@@ -166,6 +174,8 @@ the payload state before retrying.
 |---|---|---|
 | `success` | Activation, local health check and identity supervisor readiness completed. | 0 |
 | `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
+| `incomplete-recovery` | Recovery could not be confirmed; `service_state` says stopped or unknown. | Nonzero deploy status, or 74 for receipt persistence failure |
+| `interrupted` | Supervisor received a catchable signal before activation began. | 128 + signal number |
 | `hold` | The deploy left services deliberately stopped for operator recovery. | Nonzero deploy status |
 | `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
 | `failed` | The deploy process failed without a confirmed rollback, including interruption after its lifecycle report. | Nonzero deploy status |
@@ -173,24 +183,23 @@ the payload state before retrying.
 
 `payload_stamp` identifies the attempted payload; `active_payload_stamp` identifies
 the final active link, which can differ after rollback. A refusal before
-`deploy.sh` starts uses `unknown`. The result also records `reason`, `bundle_sha256`, `log` and
-`deploy_exit_code` (the raw script status). The bundle runner returns 3 for an
+`deploy.sh` starts uses `unknown`. The result also records `reason_code`, a fixed
+`reason`, `bundle_sha256` and `deploy_exit_code` (the raw script status). The bundle runner returns 3 for an
 unverified start even though the native deploy script retains its existing exit-0
 behavior and leaves the running payload alone. A failed migration, activation or
 health check cannot become a successful bundle verdict.
 
 The deploy script writes a private outcome. After the process exits, the detached
-watcher reconciles that outcome with the actual exit status and publishes the
+supervisor reconciles that outcome with the actual exit status and publishes the
 final result before its temporary completion marker. A late failure or SIGKILL
-cannot leave an earlier success receipt visible. Its server cleanup and result writing continue after the SSH session ends.
+cannot leave an earlier success receipt visible. Server cleanup and result
+writing continue after the SSH session ends.
 An SSH transport error during `--wait` describes the connection; reconnect and
 read the result file to learn the deploy outcome.
 
-`deploy.sh`'s own `EXIT`/`INT`/`TERM` traps (Node-RED restart after a
-migration failure, `identityd` state restoration) are untouched: the offline
-path runs the identical `sh deploy.sh <port>` invocation the tunnel flow
-runs, just reading `deploy.sh` from local disk instead of via the first
-`curl … | sh` fetch.
+The deploy's lifecycle traps still handle migration recovery and `identityd`
+restoration. Offline delivery feeds the verified script buffer to `sh`, as the
+tunnel flow feeds the initial `curl` response to `sh`.
 
 ### The ordering rule this path (and every deploy path) must preserve
 
@@ -231,3 +240,12 @@ mechanism of its own.
   path exists for links (Tailscale over rural cellular/satellite, congested
   wifi) where a dropped SSH session is a real, recurring risk rather than an
   edge case.
+
+Receipts and private lifecycle reports are mode 0600, outside the served tree.
+Reasons use allowlisted codes and fixed messages; raw errors, identifiers and
+URLs stay in `/data/deploy-<run>.log`. Pending, running and final receipts use a
+temporary file, file fsync, rename and directory fsync. Before starting deploy,
+the supervisor also fsyncs a preallocated `.result.recovery` receipt. If final
+publication fails, it promotes that receipt and returns 74. Persistent storage
+failure can prevent promotion too; inspect `.result.recovery` and the log in
+that case. The supervisor never acknowledges success after a persistence error.

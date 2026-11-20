@@ -40,7 +40,9 @@ grep -qi 'react_gui.tar.gz' "$work/no-gui.log" || {
 }
 
 echo "build a real bundle..."
-printf 'stub gui bundle\n' | gzip > "$gui_tar"
+mkdir "$work/gui"
+printf 'stub gui bundle\n' > "$work/gui/index.html"
+bash "$script_dir/package-deploy-gui.sh" "$work/gui" "$gui_tar"
 REPO_ROOT="$repo_root" OUT_DIR="$out_dir" REACT_GUI_TARBALL="$gui_tar" SOURCE_DATE_EPOCH=0 BUNDLE_TS="20260911T000000Z" \
   bash "$builder" >"$work/build.log" 2>&1 || {
   echo "expected deploy-bundle.sh to succeed with a react_gui.tar.gz present" >&2

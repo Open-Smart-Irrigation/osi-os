@@ -25,6 +25,7 @@ test('deploy reports the final lifecycle verdict, including rollback and an unve
       ['failed', 1, 'PAYLOAD_FLIPPED=1', 1],
       ['failed', 1, 'DEPLOY_ACTIVATION_ATTEMPTED=1; PAYLOAD_FLIPPED=0', 1],
       ['hold', 1, 'DEPLOY_OUTCOME_HOLD=1', 1],
+      ['incomplete-recovery', 1, 'DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_SERVICE_STATE=stopped', 1],
     ];
     for (const [verdict, status, setup, expectedCode] of cases) {
       const result = path.join(dir, 'result');
@@ -37,7 +38,9 @@ test('deploy reports the final lifecycle verdict, including rollback and an unve
       assert.match(record, new RegExp(`^exit_code=${expectedCode}$`, 'm'));
       assert.match(record, /^deploy_exit_code=\d+$/m);
       assert.match(record, /^payload_stamp=candidate$/m);
-      assert.match(record, verdict === 'success' ? /^reason=.*health self-check passed/m : /^reason=.*fixture migration or health failure/m);
+      assert.match(record, /^reason_code=[a-z_]+$/m);
+      assert.doesNotMatch(record, /fixture migration or health failure/);
+      assert.equal(fs.statSync(result).mode & 0o777, 0o600);
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -74,5 +77,22 @@ ${invoke}
       assert.equal(run.status, verdict === 'refused' ? 7 : 1, run.stderr);
       assert.match(fs.readFileSync(result, 'utf8'), new RegExp(`^verdict=${verdict}$`, 'm'));
     }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('native receipt excludes synthetic sensitive reasons and log diagnostics', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-native-privacy-'));
+  try {
+    const result = path.join(dir, 'result');
+    const log = path.join(dir, 'deploy.log');
+    const sensitive = '0016C001F1000001 https://user:password@example.invalid/private';
+    fs.writeFileSync(log, `ERROR: ${sensitive}\n`);
+    const block = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+    const run = spawnSync('sh', ['-c', `${block}\nDEPLOY_HOLD_SERVICES=1\nNODE_RED_START_REASON='${sensitive}'\nwrite_deploy_outcome 1`], { encoding: 'utf8', env: { ...process.env, SWAP_ROOT: dir, DEPLOY_LOGFILE: log, DEPLOY_OUTCOME_FILE: result } });
+    assert.equal(run.status, 0, run.stderr);
+    const receipt = fs.readFileSync(result, 'utf8');
+    assert.doesNotMatch(receipt, /0016C001F1000001|password|https:/);
+    assert.match(receipt, /^reason_code=services_held$/m);
+    assert.equal(fs.statSync(result).mode & 0o777, 0o600);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -214,13 +214,14 @@ test('deploy.sh stages flows before migration and flips only after migration suc
 
 test('deploy.sh stages the GUI into the same payload before migration and activates the pair', () => {
   const guiFetchIdx = indexOf('fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"');
-  const guiExtractIdx = indexOf('tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"');
+  const guiExtractIdx = indexOf('node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"');
   const stageIdx = indexOf('swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"');
   const migrationIdx = indexOf('run_schema_migration || exit 1');
   const migrateIdx = indexOf('if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH"');
   const pairFlipIdx = indexOf('swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT"');
   const restartIdx = deploy.indexOf('if ! restart_node_red; then', migrateIdx);
 
+  assert.ok(guiFetchIdx < guiExtractIdx, 'GUI must be fetched before validation and extraction');
   assert.ok(guiFetchIdx < stageIdx, 'GUI must be fetched before payload staging');
   assert.ok(guiExtractIdx < stageIdx, 'GUI must be unpacked into staging before payload staging');
   assert.ok(stageIdx < migrationIdx, 'both payload halves must be staged before schema migration');

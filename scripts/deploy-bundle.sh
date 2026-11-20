@@ -81,10 +81,9 @@ done < "$fetch_list_file"
 cp "$REPO_ROOT/deploy.sh" "$stage_dir/deploy.sh"
 
 # deploy-local-server.js: also not part of computeFetchList's output (it is
-# offline-deploy tooling, not something deploy.sh itself fetches), but
-# deploy-offline.sh execs it from inside the extracted bundle
-# ($EXTRACT_DIR/scripts/deploy-local-server.js), so it must travel with the
-# bundle too.
+# offline-deploy tooling, not something deploy.sh itself fetches). Keep a
+# manifest-covered copy for inventory compatibility; the trusted launcher uses
+# its separately supplied copy, never code from an unverified archive.
 mkdir -p "$stage_dir/scripts"
 cp "$REPO_ROOT/scripts/deploy-local-server.js" "$stage_dir/scripts/deploy-local-server.js"
 cp "$REPO_ROOT/scripts/deploy-bundle-manifest.js" "$stage_dir/scripts/deploy-bundle-manifest.js"

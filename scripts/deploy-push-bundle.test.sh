@@ -37,6 +37,9 @@ echo "deploy-offline.sh invoked with: \$*" >> "$run_log"
 exit "\${STUB_DEPLOY_OFFLINE_EXIT:-0}"
 EOF
 chmod +x "$fixture_repo/scripts/deploy-offline.sh"
+for companion in deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
+  cp "$script_dir/$companion" "$fixture_repo/scripts/$companion"
+done
 
 remote_tmp="$work/remote"
 mkdir -p "$remote_tmp"

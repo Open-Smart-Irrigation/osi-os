@@ -40,6 +40,9 @@ async function fixture(t, verdict = 'success', rawCode = 0) {
   }[verdict];
   fs.writeFileSync(path.join(stage, 'deploy.sh'), `#!/bin/sh\nset -eu\n${block}\ntouch ${quote(path.join(root, 'started'))}\nDEPLOY_STAMP=fixture-payload\nNODE_RED_START_REASON='fixture migration or health refusal'\n${setup}\ntrap 'write_deploy_outcome $?' EXIT\nexit ${rawCode}\n`);
   for (const file of ['deploy-local-server.js', 'deploy-bundle-manifest.js']) fs.copyFileSync(path.join(__dirname, file), path.join(stage, 'scripts', file));
+  const gui = path.join(root, 'gui');
+  fs.mkdirSync(gui); fs.writeFileSync(path.join(gui, 'index.html'), 'fixture gui');
+  await exec('tar', ['czf', path.join(stage, 'react_gui.tar.gz'), '-C', gui, '.']);
   await exec(process.execPath, [manifestTool, 'create', stage, 'fixture-commit']);
   const bundle = path.join(root, 'bundle.tar.gz');
   async function pack() {
@@ -60,7 +63,7 @@ async function run(f, wait = true) {
 }
 
 for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback', 1, 1], ['hold', 1, 1], ['refused', 7, 7], ['failed', 1, 1], ['unverified', 0, 3]]) {
-  test(`offline --wait reports ${verdict} durably with status ${expected}`, async t => {
+  test(`offline --wait reports ${verdict} durably with status ${expected}`, { timeout: 20000 }, async t => {
     const f = await fixture(t, verdict, rawCode);
     const result = await run(f);
     assert.equal(result.code, expected, result.output);
@@ -68,12 +71,13 @@ for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback',
     assert.match(record, new RegExp(`^verdict=${verdict}$`, 'm'));
     assert.match(record, new RegExp(`^exit_code=${expected}$`, 'm'));
     assert.match(record, /^payload_stamp=fixture-payload$/m);
-    assert.match(record, verdict === 'success' ? /^reason=.*health self-check passed/m : /^reason=.*fixture migration or health refusal/m);
+    assert.match(record, /^reason_code=[a-z_]+$/m);
+    assert.doesNotMatch(record, /fixture migration or health refusal/);
     assert.match(result.output, /Read result: cat /);
   });
 }
 for (const defect of ['changed', 'extra', 'magic-key', 'missing', 'link', 'no-manifest']) {
-  test(`offline refuses ${defect} bundle before executing deploy.sh, despite matching archive checksum`, async t => {
+  test(`offline refuses ${defect} bundle before executing deploy.sh, despite matching archive checksum`, { timeout: 20000 }, async t => {
     const f = await fixture(t);
     if (defect === 'changed') fs.appendFileSync(path.join(f.stage, 'deploy.sh'), '\n# changed\n');
     if (defect === 'extra') fs.writeFileSync(path.join(f.stage, 'extra'), 'unexpected');
@@ -88,7 +92,7 @@ for (const defect of ['changed', 'extra', 'magic-key', 'missing', 'link', 'no-ma
     assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=refused$/m);
   });
 }
-test('detached deploy publishes the final result after its launcher is gone', async t => {
+test('detached deploy publishes the final result after its launcher is gone', { timeout: 20000 }, async t => {
   const f = await fixture(t, 'auto-rollback', 1);
   const script = path.join(f.stage, 'deploy.sh');
   fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', 'sleep 2\ntouch '));
@@ -104,7 +108,7 @@ test('detached deploy publishes the final result after its launcher is gone', as
 
 
 for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback', 1, 1], ['hold', 1, 1], ['unverified', 0, 3]]) {
-  test(`push --wait prints the real ${verdict} result and returns ${expected}`, async t => {
+  test(`push --wait prints the real ${verdict} result and returns ${expected}`, { timeout: 20000 }, async t => {
     const f = await fixture(t, verdict, rawCode);
     const ssh = path.join(f.root, 'ssh-stub');
     fs.writeFileSync(ssh, '#!/bin/sh\nshift\nexec sh -c "$1"\n', { mode: 0o755 });
@@ -121,7 +125,7 @@ for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback',
 }
 
 
-test('an SSH-style HUP during --wait leaves the detached deploy to publish its result', async t => {
+test('an SSH-style HUP during --wait leaves the detached deploy to publish its result', { timeout: 20000 }, async t => {
   const f = await fixture(t, 'auto-rollback', 1);
   const script = path.join(f.stage, 'deploy.sh');
   fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('DEPLOY_STAMP=fixture-payload', 'sleep 2\nDEPLOY_STAMP=fixture-payload'));
@@ -142,7 +146,7 @@ test('an SSH-style HUP during --wait leaves the detached deploy to publish its r
 
 
 for (const [rawCode, verdict, expected] of [[0, 'unverified', 3], [7, 'failed', 7]]) {
-  test(`a missing lifecycle report with raw status ${rawCode} becomes ${verdict}`, async t => {
+  test(`a missing lifecycle report with raw status ${rawCode} becomes ${verdict}`, { timeout: 20000 }, async t => {
     const f = await fixture(t, 'success', rawCode);
     const script = path.join(f.stage, 'deploy.sh');
     fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace(/^trap .* EXIT\n/m, ''));
@@ -155,7 +159,7 @@ for (const [rawCode, verdict, expected] of [[0, 'unverified', 3], [7, 'failed', 
 }
 
 for (const [termination, expected] of [['exit 7', 7], ['kill -KILL "$$"', 137]]) {
-  test(`a process failure after writing success corrects the durable result (${expected})`, async t => {
+  test(`a process failure after writing success corrects the durable result (${expected})`, { timeout: 20000 }, async t => {
     const f = await fixture(t);
     const script = path.join(f.stage, 'deploy.sh');
     fs.writeFileSync(script, fs.readFileSync(script, 'utf8')
@@ -171,3 +175,121 @@ for (const [termination, expected] of [['exit 7', 7], ['kill -KILL "$$"', 137]])
     assert.match(record, new RegExp(`^deploy_exit_code=${expected}$`, 'm'));
   });
 }
+
+test('an occupied port refuses deploy instead of accepting another server', { timeout: 20000 }, async t => {
+  const http = require('node:http');
+  const occupied = http.createServer((req, res) => res.end('other payload'));
+  await new Promise(resolve => occupied.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => occupied.close(resolve)));
+  const f = await fixture(t);
+  await assert.rejects(exec('sh', [offline, f.bundle, '--port', String(occupied.address().port), '--wait'], { env: f.env, timeout: 10000 }), e => e.code === 1);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^reason_code=server_bind_failed$/m);
+});
+for (const defect of ['symlink', 'hardlink', 'traversal']) {
+  test(`a nested GUI ${defect} refuses before payload or services change`, { timeout: 20000 }, async t => {
+    const f = await fixture(t);
+    const gui = path.join(f.root, 'gui');
+    fs.writeFileSync(path.join(f.root, 'active-payload'), 'old complete');
+    fs.writeFileSync(path.join(f.root, 'service-state'), 'running');
+    if (defect === 'symlink') fs.symlinkSync('../../active-payload', path.join(gui, 'link'));
+    if (defect === 'hardlink') fs.linkSync(path.join(gui, 'index.html'), path.join(gui, 'link'));
+    const args = ['czf', path.join(f.stage, 'react_gui.tar.gz'), ...(defect === 'traversal' ? ['--transform=s|index.html|../active-payload|'] : []), '-C', gui, '.'];
+    await exec('tar', args);
+    await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+    const result = await run(f);
+    assert.notEqual(result.code, 0);
+    assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+    assert.equal(fs.readFileSync(path.join(f.root, 'active-payload'), 'utf8'), 'old complete');
+    assert.equal(fs.readFileSync(path.join(f.root, 'service-state'), 'utf8'), 'running');
+  });
+}
+test('a modified bundled verifier is rejected without executing it', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  fs.writeFileSync(path.join(f.stage, 'scripts/deploy-bundle-manifest.js'), `require('fs').writeFileSync(${JSON.stringify(path.join(f.root, 'verifier-executed'))}, 'unsafe');\n`);
+  await f.pack();
+  assert.notEqual((await run(f)).code, 0);
+  assert.equal(fs.existsSync(path.join(f.root, 'verifier-executed')), false);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+});
+test('private and public receipts stay 0600, unserved and free of sensitive diagnostics', { timeout: 20000 }, async t => {
+  const http = require('node:http');
+  const f = await fixture(t, 'hold', 1);
+  const script = path.join(f.stage, 'deploy.sh');
+  const sensitive = '0016C001F1000001 https://user:password@example.invalid/private';
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace("NODE_RED_START_REASON='fixture migration or health refusal'", `echo 'ERROR: ${sensitive}'\nNODE_RED_START_REASON='${sensitive}'`).replace('trap ', 'sleep 1\ntrap '));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  const port = await freePort();
+  const launcher = spawn('sh', [offline, f.bundle, '--port', String(port), '--wait'], { env: f.env, stdio: 'ignore' });
+  const exited = new Promise(resolve => launcher.once('exit', resolve));
+  for (let n = 0; n < 100 && !fs.existsSync(path.join(f.root, 'started')); n++) await pause(30);
+  for (const file of ['.deploy.outcome', '.deploy-fixture/outcome', '../data/deploy-fixture.result']) {
+    const status = await new Promise((resolve, reject) => http.get({ host: '127.0.0.1', port, path: `/${file}` }, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); }).on('error', reject));
+    assert.notEqual(status, 200);
+  }
+  assert.equal(await exited, 1);
+  assert.match(fs.readFileSync(path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, 'deploy-fixture.log'), 'utf8'), /password/);
+  for (const file of [f.result, path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, '.deploy-fixture/outcome')]) {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /0016C001F1000001|password|https:/);
+  }
+});
+for (const signal of ['SIGTERM', 'SIGHUP']) {
+  test(`the supervisor reaps a ${signal} child recovery and --wait returns its true status`, { timeout: 20000 }, async t => {
+    const f = await fixture(t, 'hold', 1);
+    const script = path.join(f.stage, 'deploy.sh');
+    const code = signal === 'SIGTERM' ? 143 : 129;
+    fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `trap 'DEPLOY_HOLD_SERVICES=1; exit ${code}' ${signal.slice(3)}\ntrap 'write_deploy_outcome $?' EXIT\ntouch `).replace(/\nexit 1\n$/, '\nsleep 30\nexit 1\n'));
+    await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+    const launcher = spawn('sh', [offline, f.bundle, '--port', String(await freePort()), '--wait'], { env: f.env, stdio: 'ignore' });
+    const exited = new Promise(resolve => launcher.once('exit', resolve));
+    for (let n = 0; n < 100 && !fs.existsSync(path.join(f.root, 'started')); n++) await pause(30);
+    const pid = Number(fs.readFileSync(path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, '.deploy-fixture/supervisor.pid')));
+    process.kill(pid, signal);
+    assert.equal(await exited, code);
+    assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=hold$/m);
+    assert.match(fs.readFileSync(f.result, 'utf8'), new RegExp(`^deploy_exit_code=${code}$`, 'm'));
+  });
+}
+test('launcher loss at supervisor spawn transfers ownership without a false refusal', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort()), '--wait'];
+  const launcher = spawn(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)}); r.launch(r.config(${JSON.stringify(args)}), {supervisorSpawned(){process.kill(process.pid,'SIGHUP')}}).then(c=>process.exitCode=c)`], { env: f.env, stdio: 'ignore' });
+  assert.equal(await new Promise(resolve => launcher.once('exit', resolve)), 129);
+  for (let n = 0; n < 100 && (!fs.existsSync(f.result) || !/^state=complete$/m.test(fs.readFileSync(f.result, 'utf8'))); n++) await pause(30);
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=success$/m);
+});
+test('a signal at the verified-before-start boundary cancels without a false refusal', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const cfg = require('./deploy-offline-runtime').config([f.bundle, '--port', String(await freePort())]);
+  Object.assign(cfg, { ts: 'fixture', logDir: f.env.DEPLOY_OFFLINE_LOG_DIR, tmpRoot: f.env.DEPLOY_OFFLINE_TMP_ROOT, extract: path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture'), private: path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, '.deploy-fixture'), log: path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, 'deploy-fixture.log'), result: f.result });
+  fs.mkdirSync(cfg.logDir);
+  const boundary = path.join(f.root, 'boundary');
+  const supervisor = spawn(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.supervise(${JSON.stringify(cfg)},{async beforeDeploy(){require('fs').writeFileSync(${JSON.stringify(boundary)},'ready');await new Promise(r=>setTimeout(r,250))}}).then(c=>process.exitCode=c)`], { env: f.env, stdio: 'ignore' });
+  const exited = new Promise(resolve => supervisor.once('exit', resolve));
+  for (let n = 0; n < 100 && !fs.existsSync(boundary); n++) await pause(30);
+  assert.equal(fs.existsSync(boundary), true);
+  supervisor.kill('SIGTERM');
+  assert.equal(await exited, 143);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=interrupted$/m);
+});
+test('a failed completion marker cannot strand --wait', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `mkdir ${quote(path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture/.deploy.rc'))}\ntouch `));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  assert.equal((await run(f)).code, 0);
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=success$/m);
+});
+test('a dead supervisor cannot strand --wait or fabricate success', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  // Kill before deploy starts using a deterministic verified boundary hook.
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort()), '--wait'];
+  const runner = spawn(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.launch(r.config(${JSON.stringify(args)}),{supervisorSpawned(c){c.kill('SIGKILL')}}).then(c=>process.exitCode=c)`], { env: f.env, stdio: 'ignore' });
+  assert.equal(await new Promise(resolve => runner.once('exit', resolve)), 125);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+});

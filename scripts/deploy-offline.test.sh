@@ -6,7 +6,7 @@
 #
 # This is a POSIX sh test driver. CI runs it in two lanes whose /bin/sh is
 # dash or BusyBox ash (.github/workflows/deploy-bundle-shells.yml); it starts
-# deploy-offline.sh, and that script starts its detached watcher, with the
+# deploy-offline.sh, whose Node supervisor starts the deploy child with the
 # lane's sh. Prerequisites: node, tar, sha256sum, wget, setsid, awk, df,
 # tail, date, mktemp and ordinary shell utilities. Ports 18761-18764 on
 # 127.0.0.1 must be free; an occupied port is a setup failure.
@@ -39,8 +39,12 @@ if (!['cleanup', 'audit', 'pid', 'delay-live', 'delay-gone'].includes(mode) || !
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function classify(args) {
   const exe = path.basename(args[0] || '');
-  if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/deploy-local-server.js'))) return 'server';
-  if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/fixture-delay.js'))) return 'delay';
+  const isNode = exe === path.basename(process.execPath) || ['node', 'nodejs'].includes(exe);
+  if (isNode && args[1]?.endsWith('/deploy-offline-runtime.js') && args[2] === 'supervise') {
+    try { if (typeof JSON.parse(args[3]).extract === 'string' && JSON.parse(args[3]).extract.startsWith(prefix)) return 'server'; } catch { return null; }
+  }
+  if (isNode && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/fixture-delay.js'))) return 'delay';
+  if (args[0]?.startsWith(prefix) && args[0].endsWith('/deploy.sh') && args[1] === '-s') return 'watcher-or-stub';
   if (['sh', 'dash', 'ash', 'busybox', 'setsid'].includes(exe) && args.some(a => a.includes(prefix)) && args.some(a => a.includes('/deploy.sh'))) return 'watcher-or-stub';
   if (exe === 'tail' && args.some(a => a.startsWith(logPrefix) && a.endsWith('.log'))) return 'log-tail';
   return null;
@@ -165,7 +169,10 @@ async function sweep() {
       if (quiet === 3) break; // three scans 250 ms apart; catches watcher forks
     } else {
       quiet = 0;
-      if (mode === 'cleanup') for (const item of live) signal(item, Date.now() - started < 2000 ? 'SIGTERM' : 'SIGKILL');
+      // Signal the identified delay before its supervisor forwards a group
+      // signal. The control must prove it found that child independently.
+      const ordered = [...live].sort((a, b) => Number(b.kind === 'delay') - Number(a.kind === 'delay'));
+      if (mode === 'cleanup') for (const item of ordered) signal(item, Date.now() - started < 2000 ? 'SIGTERM' : 'SIGKILL');
     }
     await pause(250);
   }
@@ -188,7 +195,10 @@ if (mode === 'pid') {
   if (!/^[1-9][0-9]*$/.test(pid)) process.exit(1);
   const live = read(pid, true);
   if (errors.length) { for (const error of errors) console.error(error); process.exit(1); }
-  if (live && (live.kind !== 'server' || !live.args.includes(expected))) process.exit(1);
+  if (live) {
+    const argv = live.args.split('\0');
+    if (live.kind !== 'server' || argv[2] !== 'supervise' || JSON.parse(argv[3]).extract !== extract) process.exit(1);
+  }
   console.log(`fixture PID ${pid}: ${live ? `server startticks ${live.start}` : 'already exited'}`);
 } else if (mode === 'delay-live' || mode === 'delay-gone') {
   try {
@@ -240,6 +250,10 @@ build_bundle() {
     mkdir -p "$fixture/scripts"
     cp "$server_js" "$fixture/scripts/deploy-local-server.js"
     cp "$script_dir/deploy-bundle-manifest.js" "$fixture/scripts/deploy-bundle-manifest.js"
+    mkdir "$fixture/gui-input"
+    printf 'fixture GUI\n' > "$fixture/gui-input/index.html"
+    tar czf "$fixture/react_gui.tar.gz" -C "$fixture/gui-input" .
+    rm -r "$fixture/gui-input"
     cat > "$fixture/deploy.sh" <<EOF
 #!/bin/sh
 set -eu

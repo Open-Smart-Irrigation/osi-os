@@ -34,7 +34,7 @@ jobs:
         run: |
           set -eu
           sh scripts/deploy-bundle.test.sh
-          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
+          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-offline-runtime.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
           sh scripts/deploy-push-bundle.test.sh
           sh scripts/deploy-offline.test.sh
           premarker_log=$(mktemp)
@@ -86,7 +86,7 @@ jobs:
         run: |
           set -eu
           sh scripts/deploy-bundle.test.sh
-          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
+          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-offline-runtime.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
           sh scripts/deploy-push-bundle.test.sh
           sh scripts/deploy-offline.test.sh
           premarker_log=$(mktemp)
