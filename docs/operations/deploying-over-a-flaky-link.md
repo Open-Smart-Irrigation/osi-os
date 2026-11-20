@@ -168,7 +168,7 @@ the payload state before retrying.
 | `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
 | `hold` | The deploy left services deliberately stopped for operator recovery. | Nonzero deploy status |
 | `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
-| `failed` | Activation or migration failed without a confirmed rollback. | Nonzero deploy status |
+| `failed` | The deploy process failed without a confirmed rollback, including interruption after its lifecycle report. | Nonzero deploy status |
 | `unverified` | The new payload runs, but its startup could not be confirmed, or no final lifecycle report was received. | 3 |
 
 `payload_stamp` identifies the attempted payload; `active_payload_stamp` identifies
@@ -179,8 +179,10 @@ unverified start even though the native deploy script retains its existing exit-
 behavior and leaves the running payload alone. A failed migration, activation or
 health check cannot become a successful bundle verdict.
 
-The detached watcher publishes the final result before its temporary completion
-marker. Its server cleanup and result writing continue after the SSH session ends.
+The deploy script writes a private outcome. After the process exits, the detached
+watcher reconciles that outcome with the actual exit status and publishes the
+final result before its temporary completion marker. A late failure or SIGKILL
+cannot leave an earlier success receipt visible. Its server cleanup and result writing continue after the SSH session ends.
 An SSH transport error during `--wait` describes the connection; reconnect and
 read the result file to learn the deploy outcome.
 

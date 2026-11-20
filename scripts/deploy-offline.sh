@@ -239,10 +239,11 @@ setsid sh -c '
         printf "%s\n" "$watcher_rc" > "$rcfile.tmp-$$" && mv "$rcfile.tmp-$$" "$rcfile"
     }
     trap watcher_exit EXIT
-    DEPLOY_OUTCOME_FILE="$result" DEPLOY_LOGFILE="$log" DEPLOY_BUNDLE_SHA256="$bundle_sha" \
+    outcome="$extract/.deploy.outcome"
+    DEPLOY_OUTCOME_FILE="$outcome" DEPLOY_LOGFILE="$log" DEPLOY_BUNDLE_SHA256="$bundle_sha" \
         sh "$extract/deploy.sh" "$port" >"$log" 2>&1
     rc=$?
-    if ! grep -qx "state=complete" "$result"; then
+    if ! grep -qx "schema=osi-deploy-result/1" "$outcome" || ! grep -qx "state=complete" "$outcome"; then
         # Older/missing reporting is never interpreted as a verified success.
         verdict=failed
         effective=$rc
@@ -252,12 +253,25 @@ setsid sh -c '
         {
             printf "schema=osi-deploy-result/1\nstate=complete\nexit_code=%s\ndeploy_exit_code=%s\nverdict=%s\n" "$effective" "$rc" "$verdict"
             printf "payload_stamp=unknown\nactive_payload_stamp=unknown\nbundle_sha256=%s\nlog=%s\nreason=%s\n" "$bundle_sha" "$log" "$reason"
-        } > "$result.tmp-$$" && mv "$result.tmp-$$" "$result" || exit 1
+        } > "$result.tmp-$$" || exit 1
+    else
+        effective=$(sed -n "s/^exit_code=//p" "$outcome")
+        case "$effective" in ""|*[!0-9]*) effective=1 ;; esac
+        [ "$rc" -eq 0 ] || effective=$rc
+        verdict=$(sed -n "s/^verdict=//p" "$outcome")
+        # A report is private until the process has exited. A late failure
+        # cannot leave an earlier success visible in the durable result.
+        if [ "$rc" -ne 0 ] && { [ "$verdict" = success ] || [ "$verdict" = unverified ]; }; then
+            sed -e "s/^exit_code=.*/exit_code=$effective/" \
+                -e "s/^deploy_exit_code=.*/deploy_exit_code=$rc/" \
+                -e "s/^verdict=.*/verdict=failed/" \
+                -e "s/^reason=/reason=deploy process exited with status $rc after its lifecycle report; /" "$outcome"
+        else
+            sed -e "s/^exit_code=.*/exit_code=$effective/" \
+                -e "s/^deploy_exit_code=.*/deploy_exit_code=$rc/" "$outcome"
+        fi > "$result.tmp-$$" || exit 1
     fi
-    effective=$(sed -n "s/^exit_code=//p" "$result")
-    case "$effective" in ""|*[!0-9]*) effective=1 ;; esac
-    # Even a broken report cannot hide a failing process exit.
-    if [ "$rc" -ne 0 ] && [ "$effective" -eq 0 ]; then effective=$rc; fi
+    mv "$result.tmp-$$" "$result" || exit 1
     exit "$effective"
 ' deploy-watcher "$EXTRACT_DIR" "$PORT" "$LOGFILE" "$RESULTFILE" "$RCFILE" "$SERVER_PIDFILE" "$actual_sha" \
     </dev/null >/dev/null 2>&1 &

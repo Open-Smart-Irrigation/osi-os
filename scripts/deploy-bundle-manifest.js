@@ -22,7 +22,7 @@ function inventory(root, relative = '', files = Object.create(null)) {
 }
 
 function main([mode, root, sourceCommit]) {
-  if (!['create', 'verify'].includes(mode) || !root) throw new Error('usage: deploy-bundle-manifest.js create|verify <root> [source-commit]');
+  if (!['create', 'verify', 'list'].includes(mode) || !root) throw new Error('usage: deploy-bundle-manifest.js create|verify|list <root> [source-commit]');
   const files = inventory(root);
   const file = path.join(root, MANIFEST);
   if (mode === 'create') {
@@ -38,6 +38,17 @@ function main([mode, root, sourceCommit]) {
     if (!Object.hasOwn(files, rel) || !Object.hasOwn(expected, rel) || files[rel] !== expected[rel]) throw new Error(`bundle manifest mismatch: ${rel}`);
   }
   if (!Object.keys(expected).length) throw new Error('empty bundle manifest');
+  if (mode === 'list') {
+    // Directory entries carry their trailing slash before sorting, so a
+    // directory and a file sharing a prefix have one global archive order.
+    const entries = new Set(['./', `./${MANIFEST}`]);
+    for (const rel of Object.keys(files)) {
+      entries.add(`./${rel}`);
+      for (let dir = path.posix.dirname(rel); dir !== '.'; dir = path.posix.dirname(dir)) entries.add(`./${dir}/`);
+    }
+    process.stdout.write([...entries].sort().join('\0') + '\0');
+    return;
+  }
   console.log(`OK: verified ${Object.keys(files).length} bundle files (source ${manifest.source_commit})`);
 }
 try { main(process.argv.slice(2)); }

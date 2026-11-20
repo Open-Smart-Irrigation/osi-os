@@ -153,3 +153,21 @@ for (const [rawCode, verdict, expected] of [[0, 'unverified', 3], [7, 'failed', 
     assert.match(fs.readFileSync(f.result, 'utf8'), new RegExp(`^verdict=${verdict}$`, 'm'));
   });
 }
+
+for (const [termination, expected] of [['exit 7', 7], ['kill -KILL "$$"', 137]]) {
+  test(`a process failure after writing success corrects the durable result (${expected})`, async t => {
+    const f = await fixture(t);
+    const script = path.join(f.stage, 'deploy.sh');
+    fs.writeFileSync(script, fs.readFileSync(script, 'utf8')
+      .replace(/^trap .* EXIT\n/m, '')
+      .replace(/\nexit 0\n$/, () => `\nwrite_deploy_outcome 0\n${termination}\n`));
+    await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']);
+    await f.pack();
+    const result = await run(f);
+    assert.equal(result.code, expected, result.output);
+    const record = fs.readFileSync(f.result, 'utf8');
+    assert.match(record, /^verdict=failed$/m);
+    assert.match(record, new RegExp(`^exit_code=${expected}$`, 'm'));
+    assert.match(record, new RegExp(`^deploy_exit_code=${expected}$`, 'm'));
+  });
+}

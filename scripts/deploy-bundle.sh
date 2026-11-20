@@ -109,9 +109,10 @@ bundle_path="$OUT_DIR/$bundle_name"
 # A temporary output prevents a failed build publishing a partial bundle.
 bundle_tmp="$bundle_path.tmp-$$"
 trap 'rm -f "$bundle_tmp"; cleanup' EXIT INT TERM
-tar --sort=name --format=gnu --mtime="@$SOURCE_DATE_EPOCH" \
-  --owner=0 --group=0 --numeric-owner --mode='a=rX,u+w,a-s' \
-  -cf - -C "$stage_dir" . | gzip -n > "$bundle_tmp"
+node "$REPO_ROOT/scripts/deploy-bundle-manifest.js" list "$stage_dir" | \
+  tar -C "$stage_dir" --null --no-recursion --files-from=- --format=gnu --mtime="@$SOURCE_DATE_EPOCH" \
+    --owner=0 --group=0 --numeric-owner --mode='a=rX,u+w,a-s' \
+    -cf - | gzip -n > "$bundle_tmp"
 mv "$bundle_tmp" "$bundle_path"
 
 sha256sum "$bundle_path" > "$bundle_path.sha256"
