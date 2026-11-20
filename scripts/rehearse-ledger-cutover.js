@@ -43,7 +43,8 @@
 // EXPECTED_CHANGES lists the existing migration rules. Opt in to reviewed
 // additional deltas with --expect-row-change lorain-legacy-rates (0078 and
 // its history trigger) and/or --expect-row-change boot-device-identity
-// (blank device identity filled from the EUI used for boot).
+// (blank device identity filled from the EUI used for boot). Each selected
+// declaration must apply and change at least one row in pass 1.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -261,6 +262,7 @@ function rainDirtyRule(keys, migrationWindow) {
     table: 'sync_history_dirty_keys',
     columns: [...Object.keys(RAIN_DIRTY_DELTA), 'source_row_id', 'changed_at'],
     append: { peer_node: ['cloud'], table_name: ['device_data'] },
+    appendAffectsSequence: false, // The correction key is composite, with no AUTOINCREMENT.
     migration: '0078 history trigger',
     validate({ addedRows, changedRows, columns, context }) {
       const problems = [];
@@ -579,6 +581,12 @@ function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set(),
   }
 }
 
+function requireExpectedRows(snapshot, declaration, rule) {
+  if (!snapshot.tables[rule.table]?.expectedUpdate?.expectedRows) {
+    throw new Error(`${declaration}: predicate selected no rows in ${rule.table}`);
+  }
+}
+
 function summarizeSnapshot(snapshot) {
   return Object.fromEntries(Object.entries(snapshot.tables).map(([name, t]) => [name, { count: t.count, sha256: t.sha256 }]));
 }
@@ -680,7 +688,9 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
   }
   // sqlite_sequence follows the tables it counts: a row may change or appear
   // for a table that gained rows by design or is new.
-  const appendTables = new Set([...rules.entries()].filter(([, list]) => list.some((r) => r.append)).map(([t]) => t));
+  const appendTables = new Set([...rules.entries()]
+    .filter(([, list]) => list.some((r) => r.append && r.appendAffectsSequence !== false))
+    .map(([t]) => t));
   for (const t of result.newTables) appendTables.add(t.table);
   for (const d of deferred) {
     const problems = [];
@@ -874,10 +884,13 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   let applied = [];
   let migrationRules;
   const migrationWindow = {};
-  const declared = new Set(options.expectedRowChanges);
-  const rainRule = REVIEWED_UPDATES['lorain-legacy-rates'];
-  const bootRule = declared.has('boot-device-identity')
-    ? { ...REVIEWED_UPDATES['boot-device-identity'], delta: { gateway_device_eui: gatewayEui.value } }
+  // Only the first pass can satisfy declarations. Pass 2 must be a no-op.
+  const declared = new Set(passNumber === 1 ? options.expectedRowChanges : []);
+  const rainChange = 'lorain-legacy-rates';
+  const bootChange = 'boot-device-identity';
+  const rainUpdate = declared.has(rainChange) ? REVIEWED_UPDATES[rainChange] : null;
+  const bootUpdate = declared.has(bootChange)
+    ? { ...REVIEWED_UPDATES[bootChange], delta: { gateway_device_eui: gatewayEui.value } }
     : null;
 
   await runStep(pass, 'preflight', log, async () => {
@@ -931,7 +944,10 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   // says which tables carry a rule, and those keep every row's values.
   await runStep(pass, 'snapshot-before', log, async () => {
     const keepValuesFor = ruleTables(pendingAfterReconcile);
-    const rainUpdate = declared.has('lorain-legacy-rates') && pendingAfterReconcile.includes(rainRule.version) ? rainRule : null;
+    if (rainUpdate && !pendingAfterReconcile.includes(rainUpdate.version)) {
+      const version = String(rainUpdate.version).padStart(4, '0');
+      throw new Error(`${rainChange}: migration ${version} is not pending`);
+    }
     migrationRules = rulesFor(pendingAfterReconcile);
     if (rainUpdate) {
       const dirty = rainDirtyRule(rainDirtyKeys(workDb), migrationWindow);
@@ -939,6 +955,7 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
       keepValuesFor.add(dirty.table);
     }
     snapBefore = snapshotTables(workDb, { keepValuesFor, expectedUpdate: rainUpdate });
+    if (rainUpdate) requireExpectedRows(snapBefore, rainChange, rainUpdate);
     return { tables: Object.keys(snapBefore.tables).length, valuesKeptFor: [...keepValuesFor], rows: summarizeSnapshot(snapBefore) };
   });
 
@@ -979,9 +996,10 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
     // The migration comparison projects the original columns. Start a fresh
     // boot baseline if migrations added columns, so boot checks those too.
     const addedColumns = Object.values(snapMigrated.tables).some((table) => table.addedColumns.length);
-    snapBeforeBoot = bootRule || addedColumns
-      ? snapshotTables(workDb, { expectedUpdate: bootRule })
+    snapBeforeBoot = bootUpdate || addedColumns
+      ? snapshotTables(workDb, { expectedUpdate: bootUpdate })
       : snapMigrated;
+    if (bootUpdate) requireExpectedRows(snapBeforeBoot, bootChange, bootUpdate);
     return { tables: Object.keys(snapMigrated.tables).length };
   });
 
@@ -1197,6 +1215,7 @@ if (require.main === module) main();
 module.exports = {
   EXPECTED_CHANGES,
   LEGACY_STAGE_TO_FAO,
+  rainDirtyRule,
   WORK_MARKER,
   REPORT_NAME,
   parseArgs,

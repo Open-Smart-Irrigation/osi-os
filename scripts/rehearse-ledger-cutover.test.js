@@ -17,7 +17,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const {
   parseArgs, checkLedgerShape, snapshotTables, compareSnapshots, rulesFor, EXPECTED_CHANGES, WORK_MARKER, REPORT_NAME,
-  gitState, checkoutProvenance,
+  gitState, checkoutProvenance, rainDirtyRule,
 } = require('./rehearse-ledger-cutover');
 const { buildEarlierLineageGatewayDb } = require('./fixtures/earlier-lineage-gateway-db');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
@@ -559,6 +559,15 @@ test('mixed rain and identity fixture requires declared changes and passes on bo
   } finally {
     await runner.close();
   }
+  await t.test('pending 0078 must select a legacy LoRain reading', () => {
+    const work = path.join(root, 'no-legacy-rates');
+    const run = runCli(['--db', db, '--work', work, '--expect-row-change', 'lorain-legacy-rates']);
+    assert.equal(run.status, 1, run.stderr.slice(-3000));
+    const report = readReport(work);
+    assert.equal(report.failedStep, 'pass 1 snapshot-before');
+    assert.match(stepOf(report, 1, 'snapshot-before').error, /lorain-legacy-rates.*selected no rows/);
+  });
+
   sql(db, `
     INSERT INTO devices (deveui, name, type_id, gateway_device_eui, created_at, updated_at) VALUES
       ('lorain-fixture', 'Rain gauge', 'AQUASCOPE_LORAIN', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
@@ -609,6 +618,24 @@ test('mixed rain and identity fixture requires declared changes and passes on bo
     }
   }
 
+  const current = path.join(root, 'bcm2712', 'farming.db');
+  await t.test('already-applied 0078 cannot satisfy a declaration', () => {
+    const work = path.join(root, 'already-applied');
+    const run = runCli(['--db', current, '--work', work, '--expect-row-change', 'lorain-legacy-rates']);
+    assert.equal(run.status, 1, run.stderr.slice(-3000));
+    const report = readReport(work);
+    assert.equal(report.failedStep, 'pass 1 snapshot-before');
+    assert.match(stepOf(report, 1, 'snapshot-before').error, /lorain-legacy-rates.*0078.*not pending/);
+  });
+  await t.test('already-filled device identities cannot satisfy a boot declaration', () => {
+    const work = path.join(root, 'already-filled');
+    const run = runCli(['--db', current, '--work', work, '--expect-row-change', 'boot-device-identity']);
+    assert.equal(run.status, 1, run.stderr.slice(-3000));
+    const report = readReport(work);
+    assert.equal(report.failedStep, 'pass 1 snapshot-migrated');
+    assert.match(stepOf(report, 1, 'snapshot-migrated').error, /boot-device-identity.*selected no rows/);
+  });
+
   // Zone identity fill is a separate boot effect. The device rule must not
   // permit it, even when the same column changes in both tables.
   sql(db, `
@@ -628,4 +655,27 @@ test('mixed rain and identity fixture requires declared changes and passes on bo
   const strayComparison = stepOf(strayReport, 1, 'data-compare').result;
   assert.equal(strayComparison.migrationPhase.ok, true);
   assert.ok(strayComparison.bootPhase.unexpected.some((d) => d.table === 'irrigation_zones'));
+});
+
+test('the LoRain dirty key permits a correction but no sequence row', (t) => {
+  const root = scratch();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const db = path.join(root, 'sequence.db');
+  fs.copyFileSync(BUNDLED_DB, db);
+  const before = snapshotTables(db);
+  const key = 'DEVICE_DATA|0016C001F1000001|1';
+  const changedAt = '2026-01-01T00:00:00.000Z';
+  const now = Date.parse(changedAt);
+  const rule = rainDirtyRule(new Map([[key, 1n]]), { start: now, end: now });
+  const rules = new Map([[rule.table, [rule]]]);
+  sql(db, `INSERT INTO sync_history_dirty_keys
+    (peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+    VALUES ('cloud', 'device_data', '${key}', 'correction', 1, '${changedAt}');`);
+  assert.equal(compareSnapshots(before, snapshotTables(db, { columnsFrom: before }), { rules }).ok, true);
+
+  sql(db, "INSERT INTO sqlite_sequence (name, seq) VALUES ('sync_history_dirty_keys', 1);");
+  const result = compareSnapshots(before, snapshotTables(db, { columnsFrom: before }), { rules });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.unexpected.map((diff) => diff.table), ['sqlite_sequence']);
+  assert.match(result.unexpected[0].reason, /sync_history_dirty_keys/);
 });
