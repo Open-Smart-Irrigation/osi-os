@@ -354,7 +354,14 @@ function moduleFetches(source) {
 test('deploy.sh fetches every helper module into the staged payload, never into /srv/node-red', () => {
   assert.match(deploy, /^MODULE_STAGE="\$PAYLOADS_ROOT\/\$DEPLOY_STAMP\/modules"$/m);
   const fetches = moduleFetches(deploy);
-  const staged = fetches.filter(({ name }) => !LIVE_MODULES.includes(name));
+  // This CLI runs at S90, before the payload is loaded. Its own boot-file
+  // install is durable and it is never loaded as a flow helper.
+  const bootCli = ({ name, file, destination }) =>
+    name === 'osi-db-integrity' && file === 'index.js' && destination === '/usr/share/node-red/osi-db-integrity/index.js';
+  const stagedModule = (entry) => !LIVE_MODULES.includes(entry.name) && !bootCli(entry);
+  assert.equal(fetches.filter(bootCli).length, 1);
+  assert.match(deploy, /"\/usr\/share\/node-red\/osi-db-integrity\/index\.js" 644 \|\| exit 1/);
+  const staged = fetches.filter(stagedModule);
   assert.ok(staged.length > 100, `expected the full module block, parsed ${staged.length}`);
   const wrong = staged.filter(({ name, file, destination }) => destination !== `$MODULE_STAGE/${name}/${file}`);
   assert.deepEqual(wrong, [], 'every helper-module fetch must land in $MODULE_STAGE/<module>/<file>');
@@ -366,8 +373,8 @@ test('deploy.sh fetches every helper module into the staged payload, never into 
   // The fence catches a doctored in-place destination.
   const doctored = deploy.replace('"$MODULE_STAGE/osi-valve-control/index.js"', '"/srv/node-red/osi-valve-control/index.js"');
   assert.notEqual(doctored, deploy);
-  assert.deepEqual(moduleFetches(doctored).filter(({ name, file, destination }) =>
-    !LIVE_MODULES.includes(name) && destination !== `$MODULE_STAGE/${name}/${file}`).map((f) => f.name), ['osi-valve-control']);
+  assert.deepEqual(moduleFetches(doctored).filter(stagedModule).filter(({ name, file, destination }) =>
+    destination !== `$MODULE_STAGE/${name}/${file}`).map((f) => f.name), ['osi-valve-control']);
 });
 
 test('deploy.sh seals, captures and links helper modules before npm install and the Node-RED stop', () => {
