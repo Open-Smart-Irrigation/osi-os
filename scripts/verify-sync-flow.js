@@ -4054,7 +4054,7 @@ expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script no
 expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, marking done', 'missing-script success path');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done && sync; then', 'init script syncs the stamp before reporting successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates the restart request on successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60', 'init script requests a coordinated restart after successful provisioning');
