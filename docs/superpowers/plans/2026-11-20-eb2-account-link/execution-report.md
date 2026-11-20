@@ -95,6 +95,11 @@ the suite then passed. Neither failure required a runtime or cloud change.
 
 No GUI gates apply. No live gateway or backend service was contacted.
 
+CI on the first draft also found stale URL sandbox exceptions for the extracted
+account-link handler and MQTT staging node. Both obsolete entries were removed.
+`node --test scripts/verify-flows-sandbox.test.js` then passed 9/9, and
+`node scripts/verify-flows-sandbox.js` passed for all repository profiles.
+
 ## Verification blocker
 
 The first umbrella run failed in the scoped-access probe because `al-unlink-db`
