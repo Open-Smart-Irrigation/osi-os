@@ -432,6 +432,36 @@ ChirpStack. A successful new backup archives legacy flat files under
 `/srv/backup/chirpstack-legacy-*` so released downgrade helpers cannot copy stale
 data over the live files.
 
+### ChirpStack backup and restore helpers (LuCI buttons)
+
+`/opt/chirpstack/backup.sh` and `restore.sh` run from the LuCI backup and restore
+buttons. Read their whole output, not only the last line: a run can print
+several outcome lines (`OK: ...`, `ERROR: ...`, `ROLLED BACK: ...`,
+`RECOVERY: ...`, `ERROR: ROLLBACK INCOMPLETE`), and a later line can change what
+an earlier one means.
+
+- **A reported failure means the outcome is unconfirmed, not that nothing
+  changed.** A `ROLLED BACK: ...` line confirms that the original files are
+  back only if no later line reports `original live set unverified` or
+  `ROLLBACK INCOMPLETE`; the helper verifies them before it restarts the
+  services.
+- **An `ERROR:` without `ROLLED BACK:`** can follow a restore that already
+  replaced the live files and restarted both services, when the final cleanup
+  (temporary sets or the maintenance lock) fails. Check which data ChirpStack
+  and Redis are serving before you act on it.
+- **`RECOVERY: original inventory verified; services remain stopped`:** the
+  original files are in place and unchanged. The helper does not probe the
+  services before printing this, so check that ChirpStack and Redis are both
+  stopped, then retry `restore.sh`.
+- **After `ROLLBACK INCOMPLETE`,** the helper does not start the services, but a
+  failed stop can leave one running. Check that both ChirpStack and Redis are
+  stopped before you touch any live file, then follow the printed recovery steps
+  exactly before you start anything.
+- **v0.8.3 limit:** a restore that fails before it moves the first live file
+  restarts ChirpStack and Redis on the files they had before the attempt,
+  without first verifying them. Later helpers verify them first; one remaining
+  case (a failed restart that checkpoints the WAL) is tracked in #693.
+
 ### Flows fail to load / all routes 404
 
 `functionExternalModules: true` is set in `settings.js` (confirmed at
