@@ -53,14 +53,16 @@ afterEach(() => {
 });
 
 describe('Sdi12SoilCard Tensiomark locale', () => {
-  it('renders German labels and the common water-state badge', () => {
+  it('renders the unverified calibration and probe addresses in German', () => {
     render(
       <I18nextProvider i18n={germanI18n()}>
         <Sdi12SoilCard device={device} readOnly removeContext="farm" />
       </I18nextProvider>,
     );
 
-    expect(screen.queryByText('Kalibrierbereich: nicht verifiziert')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Kalibrierbereich: nicht verifiziert')).toHaveLength(2);
+    expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByText('Adresse 1')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Bodenspannung 2' })).getByText('Adresse 4')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Bodenwasserspannung' })).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByRole('button', { name: '30.2 kPa' })).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByRole('button', { name: 'Boden 21.5 °C' })).toBeInTheDocument();
@@ -68,6 +70,6 @@ describe('Sdi12SoilCard Tensiomark locale', () => {
     expect(screen.getByText('Identifiziert')).toBeInTheDocument();
     expect(screen.getByText(/Zuletzt gesehen: vor 30 Min\./)).toBeInTheDocument();
     expect(screen.queryByText(/^SWT|Bodentemperatur|TENSIOMARK|Last seen/)).not.toBeInTheDocument();
-    expect(document.querySelectorAll('[data-swt-status]')).toHaveLength(2);
+    expect(document.querySelectorAll('[data-swt-status]')).toHaveLength(0);
   });
 });
