@@ -36,7 +36,7 @@
     },
     {
       "id": "timezone-once-retains-instant",
-      "basis": "proposed",
+      "basis": "requirement",
       "check": "scenario",
       "input": {
         "context": {
@@ -322,6 +322,110 @@
         "physical_run_stopped": null
       },
       "decision": "S3"
+    },
+    {
+      "id": "fixed-weekly-duration-0",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 0,
+        "enabled": true
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_duration"
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 1
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-240",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 240,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 240
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-241",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 241,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 241
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1439",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1439,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 1439
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1440",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1440,
+        "enabled": true
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_duration"
+      }
     }
   ]
 }

@@ -77,47 +77,57 @@
       }
     },
     {
-      "id": "at-grace",
+      "id": "at-grace-accepted-receipt",
       "basis": "baseline",
-      "check": "scenario",
+      "check": "once_tick",
       "input": {
-        "context": {
-          "fire_at": "2026-11-20T06:00:00.000Z",
-          "enqueue_attempted": false,
-          "snapshot_cutoff": null
-        },
-        "events": [
-          {
-            "type": "tick",
-            "elapsed_ms": 600000
-          }
-        ]
+        "fire_at": "2026-11-20T06:00:00.000Z",
+        "elapsed_ms": 600000,
+        "enqueue_outcome": "accepted"
+      },
+      "expected": {
+        "schedule_settlement": "fired",
+        "once_state": "FIRED",
+        "intent_state": "SENT",
+        "new_physical_enqueues": 1,
+        "fired_results": 1,
+        "transport_failures": 0
+      }
+    },
+    {
+      "id": "at-grace-lost-reply",
+      "basis": "baseline",
+      "check": "once_tick",
+      "input": {
+        "fire_at": "2026-11-20T06:00:00.000Z",
+        "elapsed_ms": 600000,
+        "enqueue_outcome": "lost_reply"
       },
       "expected": {
         "schedule_settlement": "pending",
-        "new_physical_enqueues": 1
+        "once_state": "PENDING",
+        "intent_state": "UNKNOWN",
+        "new_physical_enqueues": 1,
+        "fired_results": 0,
+        "transport_failures": 1
       }
     },
     {
       "id": "after-grace",
       "basis": "baseline",
-      "check": "scenario",
+      "check": "once_tick",
       "input": {
-        "context": {
-          "fire_at": "2026-11-20T06:00:00.000Z",
-          "enqueue_attempted": false,
-          "snapshot_cutoff": null
-        },
-        "events": [
-          {
-            "type": "tick",
-            "elapsed_ms": 600001
-          }
-        ]
+        "fire_at": "2026-11-20T06:00:00.000Z",
+        "elapsed_ms": 600001,
+        "enqueue_outcome": "accepted"
       },
       "expected": {
         "schedule_settlement": "missed",
-        "new_physical_enqueues": 0
+        "once_state": "SKIPPED",
+        "intent_state": "SKIPPED",
+        "new_physical_enqueues": 0,
+        "fired_results": 0,
+        "transport_failures": 0
       }
     },
     {
@@ -167,7 +177,8 @@
         "once_state": "FIRED",
         "once_proof": "receipt",
         "label": "Fired",
-        "additional_enqueues": 0
+        "additional_enqueues": 0,
+        "intent_state": "SENT"
       }
     },
     {
@@ -196,7 +207,8 @@
         "once_state": "FIRED",
         "once_proof": "queue",
         "label": "Fired",
-        "additional_enqueues": 0
+        "additional_enqueues": 0,
+        "intent_state": "SENT"
       }
     },
     {
@@ -225,7 +237,8 @@
         "once_state": "FIRED",
         "once_proof": "observed_open",
         "label": "Valve reported open",
-        "additional_enqueues": 0
+        "additional_enqueues": 0,
+        "intent_state": "SENT"
       }
     },
     {
@@ -541,6 +554,33 @@
         "once_state": "PENDING",
         "finalized_as_fired": false,
         "additional_enqueues": 0
+      }
+    },
+    {
+      "id": "intent-check-rejects-fired",
+      "basis": "baseline",
+      "check": "intent_states",
+      "input": {
+        "states": [
+          "PENDING",
+          "ATTEMPTED",
+          "SENT",
+          "UNKNOWN",
+          "SKIPPED",
+          "FIRED"
+        ]
+      },
+      "expected": {
+        "accepted": [
+          "PENDING",
+          "ATTEMPTED",
+          "SENT",
+          "UNKNOWN",
+          "SKIPPED"
+        ],
+        "rejected": [
+          "FIRED"
+        ]
       }
     }
   ]

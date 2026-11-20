@@ -828,7 +828,7 @@
     },
     {
       "id": "dendro-fixed-duration",
-      "basis": "proposed",
+      "basis": "requirement",
       "check": "scenario",
       "input": {
         "context": {
@@ -891,6 +891,271 @@
       "expected": {
         "incident_recorded": true,
         "new_conditional_dispatches": 0
+      }
+    },
+    {
+      "id": "conditional-weekly-duration-240",
+      "basis": "baseline",
+      "check": "conditional_schedule_schema",
+      "input": {
+        "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+        "expected_sync_version": 4,
+        "duration_minutes": 240
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "conditional-weekly-duration-241",
+      "basis": "baseline",
+      "check": "conditional_schedule_schema",
+      "input": {
+        "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+        "expected_sync_version": 4,
+        "duration_minutes": 241
+      },
+      "expected": {
+        "schema_valid": false
+      }
+    },
+    {
+      "id": "dendro-proportional-local-activation",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "condition": {
+            "kind": "DENDRO",
+            "minimum_stress": "moderate",
+            "response_mode": "proportional"
+          },
+          "stored_enabled": true,
+          "conditional_activation_live": true,
+          "qualified": true,
+          "condition_result": "MET",
+          "clear_acked": true
+        },
+        "events": [
+          {
+            "type": "local_activation"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "activation_allowed": false,
+        "dispatches": 0,
+        "guard": "dendro_proportional_not_activatable"
+      }
+    },
+    {
+      "id": "dendro-proportional-resume",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "condition": {
+            "kind": "DENDRO",
+            "minimum_stress": "moderate",
+            "response_mode": "proportional"
+          },
+          "stored_enabled": true,
+          "conditional_activation_live": true,
+          "qualified": true,
+          "condition_result": "MET",
+          "clear_acked": true
+        },
+        "events": [
+          {
+            "type": "resume"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "activation_allowed": false,
+        "dispatches": 0,
+        "guard": "dendro_proportional_not_activatable"
+      }
+    },
+    {
+      "id": "dendro-proportional-due-worker",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "condition": {
+            "kind": "DENDRO",
+            "minimum_stress": "moderate",
+            "response_mode": "proportional"
+          },
+          "stored_enabled": true,
+          "conditional_activation_live": true,
+          "qualified": true,
+          "condition_result": "MET",
+          "clear_acked": true
+        },
+        "events": [
+          {
+            "type": "due_worker"
+          }
+        ]
+      },
+      "expected": {
+        "activation_allowed": false,
+        "dispatches": 0,
+        "guard": "dendro_proportional_not_activatable",
+        "decision": "SKIPPED",
+        "reason": "dendro_proportional_not_activatable"
+      }
+    },
+    {
+      "id": "dendro-upgrade-preserves-proportional-read-only",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "stored_policy": {
+            "condition": {
+              "kind": "DENDRO",
+              "minimum_stress": "moderate",
+              "response_mode": "proportional"
+            },
+            "enabled": true,
+            "sync_version": 4
+          },
+          "history_ids": [
+            "event-1"
+          ]
+        },
+        "events": [
+          {
+            "type": "upgrade"
+          },
+          {
+            "type": "open_editor"
+          }
+        ]
+      },
+      "expected": {
+        "policy_unchanged": true,
+        "history_ids": [
+          "event-1"
+        ],
+        "read_only": true,
+        "editor_default_mode": "fixed",
+        "notice": "Proportional mode comes with the 2027 dendrometer trials.",
+        "switch_to_fixed_available": true,
+        "dispatches": 0
+      }
+    },
+    {
+      "id": "dendro-switch-to-fixed-cancelled",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "response_mode": "proportional",
+          "sync_version": 4
+        },
+        "events": [
+          {
+            "type": "switch_to_fixed"
+          },
+          {
+            "type": "cancelled"
+          }
+        ]
+      },
+      "expected": {
+        "policy_unchanged": true,
+        "history_unchanged": true,
+        "dispatches": 0
+      }
+    },
+    {
+      "id": "dendro-switch-to-fixed-missing-duration",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "response_mode": "proportional",
+          "sync_version": 4
+        },
+        "events": [
+          {
+            "type": "switch_to_fixed"
+          },
+          {
+            "type": "missing_duration"
+          }
+        ]
+      },
+      "expected": {
+        "policy_unchanged": true,
+        "history_unchanged": true,
+        "dispatches": 0
+      }
+    },
+    {
+      "id": "dendro-explicit-switch-to-fixed",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "response_mode": "proportional",
+          "sync_version": 4,
+          "authorized": true
+        },
+        "events": [
+          {
+            "type": "switch_to_fixed"
+          },
+          {
+            "type": "duration_confirmed",
+            "duration_minutes": 30,
+            "expected_policy_version": 4
+          }
+        ]
+      },
+      "expected": {
+        "condition": {
+          "kind": "DENDRO",
+          "response_mode": "fixed"
+        },
+        "duration_minutes": 30,
+        "history_unchanged": true,
+        "activation_requires_normal_gates": true,
+        "dispatches": 0
+      }
+    },
+    {
+      "id": "dendro-field-count-unknown",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "hosts_named_by_phil": false
+        },
+        "events": [
+          {
+            "type": "report_field_count"
+          }
+        ]
+      },
+      "expected": {
+        "field_count": null,
+        "field_count_status": "unknown",
+        "host_inspections": 0
       }
     }
   ]

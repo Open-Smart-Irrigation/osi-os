@@ -915,6 +915,179 @@
         "measured_flow_liters": null
       },
       "decision": "S8"
+    },
+    {
+      "id": "envelope-dendro-proportional-still-schema-valid",
+      "basis": "baseline",
+      "check": "command_schema",
+      "input": {
+        "envelope": {
+          "command_id": "12345678-1234-4234-8234-123456789abc",
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "0016C001F1000001",
+          "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+          "requested_at": "2026-11-20T06:00:00.000Z",
+          "request_id": "52345678-1234-4234-8234-123456789abc",
+          "command_type": "UPSERT_IRRIGATION_POLICY",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "DENDRO",
+            "minimum_stress": "moderate",
+            "response_mode": "proportional"
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": null,
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema_valid": true
+      }
+    },
+    {
+      "id": "activation-refuses-dendro-proportional",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "envelope": {
+            "command_id": "12345678-1234-4234-8234-123456789abc",
+            "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+            "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+            "gateway_device_eui": "0016C001F1000001",
+            "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+            "requested_at": "2026-11-20T06:00:00.000Z",
+            "request_id": "52345678-1234-4234-8234-123456789abc",
+            "command_type": "UPSERT_IRRIGATION_POLICY",
+            "expected_policy_version": null,
+            "condition": {
+              "kind": "DENDRO",
+              "minimum_stress": "moderate",
+              "response_mode": "proportional"
+            },
+            "timezone": "UTC",
+            "enabled": true,
+            "observation_window_minutes": 60,
+            "min_interval_minutes": 15,
+            "max_daily_minutes": 120,
+            "delivery_settings": {},
+            "schedules": [
+              {
+                "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+                "expected_sync_version": null,
+                "device_eui": "A840410000000002",
+                "kind": "WEEKLY",
+                "weekdays_mask": 127,
+                "start_time": "06:00",
+                "duration_minutes": 30,
+                "enabled": true,
+                "detach": false,
+                "execution": "conditional"
+              }
+            ]
+          },
+          "actor_permission": "manage",
+          "edge_capability": true,
+          "cloud_capability": true,
+          "qualified": true,
+          "clear_acked": true,
+          "conditional_activation_live": true
+        },
+        "events": [
+          {
+            "type": "cloud_activate"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "dendro_proportional_not_activatable",
+        "pending_edits": 0,
+        "confirmed_policy_unchanged": true,
+        "physical_enqueues": 0
+      }
+    },
+    {
+      "id": "edge-refuses-proportional-from-old-cloud",
+      "basis": "requirement",
+      "check": "scenario",
+      "decision": "S6",
+      "input": {
+        "context": {
+          "envelope": {
+            "command_id": "12345678-1234-4234-8234-123456789abc",
+            "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+            "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+            "gateway_device_eui": "0016C001F1000001",
+            "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+            "requested_at": "2026-11-20T06:00:00.000Z",
+            "request_id": "52345678-1234-4234-8234-123456789abc",
+            "command_type": "UPSERT_IRRIGATION_POLICY",
+            "expected_policy_version": null,
+            "condition": {
+              "kind": "DENDRO",
+              "minimum_stress": "moderate",
+              "response_mode": "proportional"
+            },
+            "timezone": "UTC",
+            "enabled": true,
+            "observation_window_minutes": 60,
+            "min_interval_minutes": 15,
+            "max_daily_minutes": 120,
+            "delivery_settings": {},
+            "schedules": [
+              {
+                "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+                "expected_sync_version": null,
+                "device_eui": "A840410000000002",
+                "kind": "WEEKLY",
+                "weekdays_mask": 127,
+                "start_time": "06:00",
+                "duration_minutes": 30,
+                "enabled": true,
+                "detach": false,
+                "execution": "conditional"
+              }
+            ]
+          },
+          "actor_permission": "manage",
+          "qualified": true,
+          "conditional_activation_live": true
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "refused",
+        "reason": "dendro_proportional_not_activatable",
+        "confirmed_policy_unchanged": true,
+        "physical_enqueues": 0
+      }
     }
   ]
 }
