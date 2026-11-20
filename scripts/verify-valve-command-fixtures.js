@@ -184,12 +184,12 @@ assert.equal(manifest.contract, 'valve-command/v1');
 assert.equal(manifest.status, 'edge_lead_signed_with_exceptions');
 assert.equal(manifest.signed_at, '2026-11-20');
 assert.deepEqual(manifest.decision_status, {
-  S1: 'signed', S2: 'signed', S3: 'deferred', S4: 'open_CL1', S5: 'signed',
-  S6: 'CTO_ruled_fixed_only_0.9_1.0', S7: 'open_until_K1', S8: 'open_Phil_receipts_contract_rule_signed',
+  S1: 'signed', S2: 'signed', S3: 'deferred_to_1.1', S4: 'open_CL1', S5: 'signed',
+  S6: 'CTO_ruled_fixed_only_0.9_1.0', S7: 'open_until_K1', S8: 'R8_decided_activation_receipts_open',
 });
 assert.equal(manifest.proportional_policy_field_count, null);
 assert.equal(manifest.proportional_policy_field_count_status, 'unknown_pending_named_hosts');
-assert.deepEqual(manifest.deferred_packages, ['EB21']);
+assert.deepEqual(manifest.deferred_packages, ['EB21', 'GX2']);
 assert.equal(manifest.physical_qualification, false, 'fixtures cannot qualify production activation');
 assert.deepEqual(manifest.decisions, ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']);
 assert.equal(manifest.fixtures.length, 6);

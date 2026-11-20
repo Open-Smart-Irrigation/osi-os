@@ -43,7 +43,7 @@
         "GX1",
         "GX2"
       ],
-      "cases": 32
+      "cases": 34
     },
     {
       "path": "fixtures/schedules-history.json",
@@ -76,16 +76,17 @@
   "decision_status": {
     "S1": "signed",
     "S2": "signed",
-    "S3": "deferred",
+    "S3": "deferred_to_1.1",
     "S4": "open_CL1",
     "S5": "signed",
     "S6": "CTO_ruled_fixed_only_0.9_1.0",
     "S7": "open_until_K1",
-    "S8": "open_Phil_receipts_contract_rule_signed"
+    "S8": "R8_decided_activation_receipts_open"
   },
   "proportional_policy_field_count": null,
   "proportional_policy_field_count_status": "unknown_pending_named_hosts",
   "deferred_packages": [
-    "EB21"
+    "EB21",
+    "GX2"
   ]
 }
