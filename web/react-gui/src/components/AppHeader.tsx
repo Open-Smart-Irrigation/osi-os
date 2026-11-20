@@ -153,7 +153,7 @@ function HeaderActions({ onLogout, showAdmin, actions }: Pick<AppHeaderProps, 'o
     return () => document.removeEventListener('mousedown', dismiss);
   }, [open]);
 
-  return <div ref={container} className="relative shrink-0 sm:ml-auto" onBlur={(event) => {
+  return <div ref={container} className="relative flex shrink-0 items-center gap-2 max-sm:basis-full max-sm:justify-end sm:ml-auto" onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
   }} onKeyDown={(event) => {
     if (event.key === 'Escape' && !event.defaultPrevented && open) {
@@ -162,6 +162,9 @@ function HeaderActions({ onLogout, showAdmin, actions }: Pick<AppHeaderProps, 'o
       trigger.current?.focus();
     }
   }}>
+    <div className="sm:order-2">
+      <LanguageSwitcher triggerClassName="min-h-11 px-3 py-2 text-sm" />
+    </div>
     <button ref={trigger} type="button" className={`${HEADER_BUTTON} sm:hidden gap-2`}
       aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
       <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -169,18 +172,21 @@ function HeaderActions({ onLogout, showAdmin, actions }: Pick<AppHeaderProps, 'o
       </svg>
       {t('header.menu')}
     </button>
-    <div ref={panel} id={panelId} className={`${open ? 'flex' : 'hidden'} absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--header-bg)] p-3 shadow-xl sm:static sm:mt-0 sm:flex sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none`}>
-      {actions}
-      <Link to="/settings" className={HEADER_BUTTON}>{t('settings:entryPoint')}</Link>
-      <LanguageSwitcher triggerClassName="min-h-11 px-3 py-2 text-sm" />
-      <HeaderMenu label={t('account')} triggerClassName={HEADER_BUTTON} items={[
-        ...(showAdmin ? [
-          { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
-          { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
-        ] : []),
-        { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
-        { key: 'logout', label: t('logout'), onSelect: onLogout },
-      ]} />
+    <div ref={panel} id={panelId} className={`${open ? 'flex' : 'hidden'} absolute right-0 top-full z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--header-bg)] p-3 shadow-xl sm:static sm:mt-0 sm:contents sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none`}>
+      <div className="flex flex-col gap-2 sm:order-1 sm:flex-row sm:items-center">
+        {actions}
+        <Link to="/settings" className={HEADER_BUTTON}>{t('settings:entryPoint')}</Link>
+      </div>
+      <div className="sm:order-3">
+        <HeaderMenu label={t('account')} triggerClassName={HEADER_BUTTON} items={[
+          ...(showAdmin ? [
+            { key: 'admin-users', label: t('adminMenu.users'), to: '/admin/users' },
+            { key: 'admin-grants', label: t('adminMenu.grants'), to: '/admin/grants' },
+          ] : []),
+          { key: 'osi-server', label: t('accountMenu.osiServer'), to: '/account-link' },
+          { key: 'logout', label: t('logout'), onSelect: onLogout },
+        ]} />
+      </div>
     </div>
   </div>;
 }

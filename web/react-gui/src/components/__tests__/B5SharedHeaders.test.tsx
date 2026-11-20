@@ -69,3 +69,13 @@ it('focuses the phone actions and dismisses them with Escape or outside click', 
   fireEvent.mouseDown(document.body);
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });
+
+it('keeps language selection outside the collapsed phone utility panel', () => {
+  render(<MemoryRouter><AppHeader title="Analysis" username="user" onLogout={vi.fn()} /></MemoryRouter>);
+  const toggle = screen.getByRole('button', { name: 'header.menu' });
+  const panel = document.getElementById(toggle.getAttribute('aria-controls')!);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(panel).toHaveClass('hidden');
+  // JSDOM cannot apply the responsive CSS; the unmodified browser spec checks visibility.
+  expect(panel).not.toContainElement(screen.getByRole('button', { name: 'Language' }));
+});
