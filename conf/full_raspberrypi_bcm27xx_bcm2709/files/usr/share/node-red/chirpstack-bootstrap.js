@@ -919,7 +919,8 @@ function patchSettingsJs() {
     console.log(`  ⚠ settings.js not found at ${CFG.settingsJs} — skipping patch`);
     return;
   }
-  let src = fs.readFileSync(CFG.settingsJs, 'utf8');
+  const target = fs.realpathSync(CFG.settingsJs);
+  let src = fs.readFileSync(target, 'utf8');
   if (src.includes(ENV_LOADER_MARKER)) {
     console.log('  ✓ settings.js already patched');
     return;
@@ -951,7 +952,28 @@ try {
   } else {
     src = loader + src;
   }
-  fs.writeFileSync(CFG.settingsJs, src, 'utf8');
+  const { uid, gid, mode } = fs.statSync(target);
+  const temporary = target + '.tmp-' + require('crypto').randomUUID();
+  const fd = fs.openSync(temporary, 'wx', 0o600);
+  try {
+    try {
+      fs.fchownSync(fd, uid, gid);
+      fs.fchmodSync(fd, mode & 0o7777);
+      fs.writeFileSync(fd, src);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporary, target);
+    const dir = fs.openSync(path.dirname(target), 'r');
+    try {
+      fs.fsyncSync(dir);
+    } finally {
+      fs.closeSync(dir);
+    }
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
   console.log('  ✓ settings.js patched to load env file on startup');
 }
 

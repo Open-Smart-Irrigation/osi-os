@@ -7,21 +7,44 @@ DST=/srv/node-red
 mkdir -p "$DST" "$DST/node_modules"
 chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 
-if [ -f /usr/share/flows.json ] && [ ! -f "$DST/flows.json" ]; then
-    cp /usr/share/flows.json "$DST/flows.json"
-fi
+# node-red.init validates and publishes flows.json before starting the service.
+# Publish the other create-only files durably before their existence can suppress
+# a retry. Use a hard link so a concurrent creator always keeps its own file.
+node - "$SRC" "$DST" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
 
-if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then
-    cp "$SRC/settings.js" "$DST/settings.js"
-fi
-
-if [ -f "$SRC/package.json" ] && [ ! -f "$DST/package.json" ]; then
-    cp "$SRC/package.json" "$DST/package.json"
-fi
-
-if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
-    cp "$SRC/package-lock.json" "$DST/package-lock.json"
-fi
+const [src, dst] = process.argv.slice(2);
+const dir = fs.openSync(dst, 'r');
+try {
+  for (const name of ['settings.js', 'package.json', 'package-lock.json']) {
+    const source = path.join(src, name);
+    const target = path.join(dst, name);
+    if (fs.existsSync(target) || !fs.existsSync(source)) continue;
+    const temporary = path.join(dst, '.node-red-seed-' + randomUUID());
+    fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
+    try {
+      const fd = fs.openSync(temporary, 'r');
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      try {
+        fs.linkSync(temporary, target);
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    } finally {
+      fs.unlinkSync(temporary);
+    }
+    fs.fsyncSync(dir);
+  }
+} finally {
+  fs.closeSync(dir);
+}
+NODE
 
 # The image's helpers, codecs, node files, edge-channels.json and node_modules are copied
 # once per image install, at its first boot, before the sqlite3 block can
@@ -68,7 +91,8 @@ done
 
 if [ "$SEED_COPY" = 1 ]; then
     if ! sync; then
-        echo 'WARN: sync failed before recording the image copy' >&2
+        echo 'ERROR: sync failed before recording the image copy' >&2
+        exit 1
     fi
     if ! touch "$SEED_COPIED"; then
         echo "WARN: could not write $SEED_COPIED; a refusing seed copies the image again at the next boot" >&2
