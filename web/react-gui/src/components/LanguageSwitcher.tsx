@@ -15,6 +15,6 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ triggerClass
     ?? SUPPORTED_LANGUAGES.find(candidate => language.startsWith(candidate.code))
     ?? SUPPORTED_LANGUAGES[0];
   return <HeaderMenu label={current.label} align={menuAlign}
-    triggerClassName={`bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] ${triggerClassName ?? 'px-3 py-2 text-sm'}`}
+    triggerClassName={`border border-[var(--text-tertiary)] bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] ${triggerClassName ?? 'px-3 py-2 text-sm'}`}
     items={SUPPORTED_LANGUAGES.map(lang => ({key: lang.code, label: lang.label, onSelect: () => { void i18n.changeLanguage(lang.code); }}))} />;
 };

@@ -17,6 +17,10 @@ vi.mock('react-i18next', () => ({
         'addMenu.device': 'Device',
         'addMenu.activity': 'Activity',
         data: 'Data',
+        'tabs.data': 'Data',
+        'tabs.zones': 'Zones',
+        'tabs.journal': 'Journal',
+        network: 'Network',
         'dashboard:network': 'Network',
         'settings:entryPoint': 'Settings',
         account: 'Account',
@@ -81,8 +85,7 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeInTheDocument();
     expect(screen.getByText('Welcome farmer')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Lang/i })).toBeInTheDocument();
-    expect(screen.getByTitle('Change language')).toHaveAttribute('data-align', 'left');
-    expect(screen.getByTitle('Change language')).toHaveClass('w-full', 'justify-center', 'text-lg', 'px-6', 'py-3');
+    expect(screen.getByTitle('Change language')).toHaveClass('min-h-11', 'text-sm', 'px-3', 'py-2');
     expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 
@@ -97,16 +100,11 @@ describe('DashboardHeader (osi-os)', () => {
     expect(onAddDevice).toHaveBeenCalledOnce();
   });
 
-  it('uses the wrapping server-style action layout so header menus are not clipped', () => {
+  it('uses the shared wrapping tab navigation with Zones active', () => {
     renderHeader();
-
-    const addMenuWrapper = screen.getByRole('button', { name: 'Add' }).closest('div');
-    expect(addMenuWrapper).toHaveClass('w-[calc(50%-4px)]');
-    expect(addMenuWrapper).toHaveClass('sm:w-auto');
-
-    const actionGroup = addMenuWrapper?.parentElement;
-    expect(actionGroup).toHaveClass('flex-wrap');
-    expect(actionGroup).not.toHaveClass('overflow-x-auto');
+    expect(screen.getByRole('link', { name: 'Zones' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
+    expect(screen.getByRole('navigation').firstElementChild).toHaveClass('flex-wrap', 'max-w-full');
   });
 
   it('opens the Add menu from the left edge on compact layouts', () => {
@@ -123,10 +121,10 @@ describe('DashboardHeader (osi-os)', () => {
     expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/analysis');
   });
 
-  it('hides the Data link on mobile/tablet browsers', () => {
+  it('points the shared Data tab to history on mobile/tablet browsers', () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(false);
     renderHeader();
-    expect(screen.queryByRole('link', { name: 'Data' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/history');
   });
 
   // Module visibility (2026-09-17): Data view / Network are switchable in
@@ -164,10 +162,12 @@ describe('DashboardHeader (osi-os)', () => {
 
   // The journal module is gateway-level; with it off, the Add menu must not
   // offer the one entry point that lands on /journal.
-  it('offers the journal capture entry in the Add menu when the journal module is on', () => {
+  it('offers journal capture as a real link when the journal module is on', () => {
     renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Activity' })).toBeInTheDocument();
+    const activity = screen.getByRole('menuitem', { name: 'Activity' });
+    expect(activity).toBeInstanceOf(HTMLAnchorElement);
+    expect(activity).toHaveAttribute('href', '/journal?capture=1');
   });
 
   it('hides the journal capture entry from the Add menu when the journal module is off', () => {
