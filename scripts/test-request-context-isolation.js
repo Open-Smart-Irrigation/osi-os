@@ -27,6 +27,7 @@
 // Run: node --test scripts/test-request-context-isolation.js
 
 const assert = require('node:assert/strict');
+const { inlineForMutation } = require('./flow-function-source');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -2417,8 +2418,8 @@ test('cloned ingress mutant: removing the shared-key read changes the discrimina
 // same interleaving the isolation tests use. The tests are only evidence if this
 // shape makes A lose its own target.
 function sharedContextMutant(writerId, writerAnchor, writeLine, readerId, readerAnchor, readLine) {
-  const writer = flowNode(writerId);
-  const reader = flowNode(readerId);
+  const writer = inlineForMutation(flowNode(writerId), MODULES);
+  const reader = inlineForMutation(flowNode(readerId), MODULES);
   assert.ok(writer.func.includes(writerAnchor), 'mutant anchor present in ' + writerId);
   assert.ok(reader.func.includes(readerAnchor), 'mutant anchor present in ' + readerId);
   return new Map([

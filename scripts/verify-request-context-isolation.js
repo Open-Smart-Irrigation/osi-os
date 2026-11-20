@@ -20,6 +20,7 @@
 // Usage: node scripts/verify-request-context-isolation.js [--flows <path>]...
 
 const fs = require('node:fs');
+const { functionSource } = require('./flow-function-source');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -84,7 +85,7 @@ function checkProfile(file) {
   for (const node of flows) {
     if (!node || node.type !== 'function') continue;
     functionNodes += 1;
-    const sources = [node.func, node.initialize, node.finalize].filter(Boolean).join('\n');
+    const sources = [functionSource(node, path.join(path.dirname(file), 'node-red')), node.initialize, node.finalize].filter(Boolean).join('\n');
     const calls = contextCalls(sources);
     for (const call of calls) {
       if (call.key && REQUEST_SCRATCH_KEY.test(call.key)) {
@@ -101,7 +102,7 @@ function checkProfile(file) {
         failures.push(label + ': ' + node.id + ' (' + node.name + ') touches shared context outside its allowlist: ' + call.text);
       }
     }
-    if (converted.kind && !node.func.includes("'" + converted.kind + "'")) {
+    if (converted.kind && !functionSource(node, path.join(path.dirname(file), 'node-red')).includes("'" + converted.kind + "'")) {
       failures.push(label + ': ' + node.id + ' (' + node.name + ") no longer handles the '" + converted.kind + "' request envelope");
     }
   }

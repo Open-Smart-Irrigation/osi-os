@@ -53,6 +53,7 @@
     "osi-installation-location-helper": "file:osi-installation-location-helper",
     "osi-network-api": "file:osi-network-api",
     "osi-rejection-recovery": "file:osi-rejection-recovery",
-    "osi-sdi12-archive": "file:osi-sdi12-archive"
+    "osi-sdi12-archive": "file:osi-sdi12-archive",
+    "osi-daily-scheduler": "file:osi-daily-scheduler"
   }
 }

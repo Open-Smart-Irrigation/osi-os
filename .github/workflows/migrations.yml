@@ -120,6 +120,9 @@ jobs:
         run: node --test scripts/test-history-source-guards.js
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
+      - run: node scripts/test-daily-scheduler-parity.js
+      - name: X1 prepared adapters preserve authorization and request isolation
+        run: node --require ./scripts/lib/daily-scheduler-prepared-flow-hook.js --test scripts/test-scoped-access-writes.js scripts/test-request-context-isolation.js scripts/test-unified-soil-tension-scheduler.js scripts/test-dendro-rolling-7d-rain.js
       - run: node --test scripts/test-scheduler-clock-jump.js
       - run: node --test scripts/test-crash-loop-escalation.js
       - run: node --test scripts/migration-caller-corpus.test.js scripts/ops/rebuild-corpus.test.js scripts/deploy-corpus.test.js

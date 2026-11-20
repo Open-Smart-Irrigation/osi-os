@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
+const { functionSource } = require('./flow-function-source');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -33,7 +34,7 @@ function nodeById(id) {
 function funcOf(id) {
   const node = nodeById(id);
   assert.strictEqual(node.type, 'function', `${id} must be a function node`);
-  return String(node.func || '');
+  return functionSource(node, nodeRedRoot);
 }
 
 function assertIncludes(haystack, needle, label) {

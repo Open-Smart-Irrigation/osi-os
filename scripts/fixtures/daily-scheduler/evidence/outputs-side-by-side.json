@@ -1,0 +1,2550 @@
+[
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "swt-mean-30",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": null,
+                "max_recorded_at": null
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":null,\"max_recorded_at\":null},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": null,
+                "max_recorded_at": null
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":null,\"max_recorded_at\":null},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "utc-2026-05-10T06:10:00Z",
+    "before": {
+      "result": [
+        null,
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'SKIP', 'clock_jump_backward_suppressed', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"SKIP\",\"reason\":\"clock_jump_backward_suppressed\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30,\"mean_kpa\":30,\"n_points\":2,\"valve_deveui\":\"A840410000000001\",\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        null
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "last_triggered_at": "2026-05-10T06:10:00Z"
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [
+        [
+          "warn",
+          "clock_jump_backward_suppressed: zone 2 already fired for today's window (last_triggered_at=2026-05-10T06:10:00Z); skipping re-fire"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        null,
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'SKIP', 'clock_jump_backward_suppressed', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"SKIP\",\"reason\":\"clock_jump_backward_suppressed\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30,\"mean_kpa\":30,\"n_points\":2,\"valve_deveui\":\"A840410000000001\",\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        null
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "last_triggered_at": "2026-05-10T06:10:00Z"
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [
+        [
+          "warn",
+          "clock_jump_backward_suppressed: zone 2 already fired for today's window (last_triggered_at=2026-05-10T06:10:00Z); skipping re-fire"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "dendro-age-129600000",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "tree's stress",
+              "effective_reasoning": "tree's stress",
+              "zone_stress_summary": "moderate",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"tree''s stress\",\"effective_reasoning\":\"tree''s stress\",\"zone_stress_summary\":\"moderate\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-08T18:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "tree's stress",
+              "effective_reasoning": "tree's stress",
+              "zone_stress_summary": "moderate",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"tree''s stress\",\"effective_reasoning\":\"tree''s stress\",\"zone_stress_summary\":\"moderate\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-08T18:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "dendro-server_preferred-bundle-age-21600000",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 30,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "server_preferred",
+              "recommendation_source": "server_shared_bundle",
+              "recommendation_action": "emergency_irrigate",
+              "effective_action": "emergency_irrigate",
+              "recommendation_reasoning": "server's advice",
+              "effective_reasoning": "server's advice",
+              "zone_stress_summary": "server_preferred",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 30, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"server_preferred\",\"recommendation_source\":\"server_shared_bundle\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"emergency_irrigate\",\"effective_action\":\"emergency_irrigate\",\"recommendation_reasoning\":\"server''s advice\",\"effective_reasoning\":\"server''s advice\",\"zone_stress_summary\":\"server_preferred\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":30,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "scheduling_mode": "server_preferred",
+          "shared_environment_json": "{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"server's advice\",\"recommendationDate\":\"2026-05-10\"}},\"display\":{\"sharedGeneratedAt\":\"2026-05-10T06:05:00.000Z\"},\"drift\":{\"serverActionCode\":\"emergency_irrigate\"}}",
+          "shared_environment_received_at": "2026-05-10T00:05:00.000Z"
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 30,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "server_preferred",
+              "recommendation_source": "server_shared_bundle",
+              "recommendation_action": "emergency_irrigate",
+              "effective_action": "emergency_irrigate",
+              "recommendation_reasoning": "server's advice",
+              "effective_reasoning": "server's advice",
+              "zone_stress_summary": "server_preferred",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 30, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"server_preferred\",\"recommendation_source\":\"server_shared_bundle\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"emergency_irrigate\",\"effective_action\":\"emergency_irrigate\",\"recommendation_reasoning\":\"server''s advice\",\"effective_reasoning\":\"server''s advice\",\"zone_stress_summary\":\"server_preferred\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":30,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "scheduling_mode": "server_preferred",
+          "shared_environment_json": "{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"server's advice\",\"recommendationDate\":\"2026-05-10\"}},\"display\":{\"sharedGeneratedAt\":\"2026-05-10T06:05:00.000Z\"},\"drift\":{\"serverActionCode\":\"emergency_irrigate\"}}",
+          "shared_environment_received_at": "2026-05-10T00:05:00.000Z"
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "auth-scoped-access",
+    "before": {
+      "result": [
+        null,
+        {
+          "payload": {
+            "message": "Forbidden"
+          },
+          "req": {
+            "headers": {
+              "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+            },
+            "params": {
+              "id": "2"
+            }
+          },
+          "req_body": {
+            "trigger_metric": "SWT_1",
+            "threshold_kpa": 30,
+            "duration_minutes": 20
+          },
+          "authUserId": 1,
+          "authUsername": "actor's name",
+          "statusCode": 403
+        }
+      ],
+      "msg": {
+        "payload": {
+          "message": "Forbidden"
+        },
+        "req": {
+          "headers": {
+            "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+          },
+          "params": {
+            "id": "2"
+          }
+        },
+        "req_body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20
+        },
+        "authUserId": 1,
+        "authUsername": "actor's name",
+        "statusCode": 403
+      },
+      "trace": [
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "global-get",
+          "fs"
+        ],
+        [
+          "resolve-secret",
+          "synthetic-x1-secret"
+        ],
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "db-open",
+          "/data/db/farming.db"
+        ],
+        [
+          "db-get",
+          "SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1",
+          [
+            1,
+            "actor's name"
+          ]
+        ],
+        [
+          "resolve-zone",
+          2
+        ],
+        [
+          "access",
+          "synthetic-actor",
+          "synthetic-zone",
+          {
+            "scopedMode": true
+          }
+        ],
+        [
+          "db-close"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        null,
+        {
+          "payload": {
+            "message": "Forbidden"
+          },
+          "req": {
+            "headers": {
+              "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+            },
+            "params": {
+              "id": "2"
+            }
+          },
+          "req_body": {
+            "trigger_metric": "SWT_1",
+            "threshold_kpa": 30,
+            "duration_minutes": 20
+          },
+          "authUserId": 1,
+          "authUsername": "actor's name",
+          "statusCode": 403
+        }
+      ],
+      "msg": {
+        "payload": {
+          "message": "Forbidden"
+        },
+        "req": {
+          "headers": {
+            "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+          },
+          "params": {
+            "id": "2"
+          }
+        },
+        "req_body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20
+        },
+        "authUserId": 1,
+        "authUsername": "actor's name",
+        "statusCode": 403
+      },
+      "trace": [
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "global-get",
+          "fs"
+        ],
+        [
+          "resolve-secret",
+          "synthetic-x1-secret"
+        ],
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "db-open",
+          "/data/db/farming.db"
+        ],
+        [
+          "db-get",
+          "SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1",
+          [
+            1,
+            "actor's name"
+          ]
+        ],
+        [
+          "resolve-zone",
+          2
+        ],
+        [
+          "access",
+          "synthetic-actor",
+          "synthetic-zone",
+          {
+            "scopedMode": true
+          }
+        ],
+        [
+          "db-close"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "upsert-version-undefined-enabled-1",
+    "before": {
+      "result": [
+        {
+          "payload": [
+            {
+              "id": 2,
+              "user_id": 1,
+              "zone_uuid": "synthetic-zone",
+              "schedule_sync_version": {
+                "$undefined": true
+              },
+              "last_applied_at": null
+            }
+          ],
+          "osi": {
+            "request": {
+              "v": 1,
+              "kind": "zone_schedule_put",
+              "requestId": "x1-request",
+              "actorId": 9,
+              "zoneId": 2,
+              "validatedPatch": {
+                "trigger_metric": "SWT_1",
+                "threshold_kpa": 30,
+                "duration_minutes": 20,
+                "enabled": 1,
+                "response_mode": "fixed"
+              }
+            },
+            "applied": {
+              "zone_uuid": "synthetic-zone",
+              "gateway_device_eui": "0016C001F1000001",
+              "sync_version": 1,
+              "last_applied_at": null
+            }
+          },
+          "syncAck": {
+            "existing": true,
+            "aggregateType": "SCHEDULE",
+            "aggregateKey": "synthetic-zone",
+            "appliedSyncVersion": 1,
+            "result": "SUCCESS"
+          },
+          "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+        },
+        null
+      ],
+      "msg": {
+        "payload": [
+          {
+            "id": 2,
+            "user_id": 1,
+            "zone_uuid": "synthetic-zone",
+            "schedule_sync_version": {
+              "$undefined": true
+            },
+            "last_applied_at": null
+          }
+        ],
+        "osi": {
+          "request": {
+            "v": 1,
+            "kind": "zone_schedule_put",
+            "requestId": "x1-request",
+            "actorId": 9,
+            "zoneId": 2,
+            "validatedPatch": {
+              "trigger_metric": "SWT_1",
+              "threshold_kpa": 30,
+              "duration_minutes": 20,
+              "enabled": 1,
+              "response_mode": "fixed"
+            }
+          },
+          "applied": {
+            "zone_uuid": "synthetic-zone",
+            "gateway_device_eui": "0016C001F1000001",
+            "sync_version": 1,
+            "last_applied_at": null
+          }
+        },
+        "syncAck": {
+          "existing": true,
+          "aggregateType": "SCHEDULE",
+          "aggregateKey": "synthetic-zone",
+          "appliedSyncVersion": 1,
+          "result": "SUCCESS"
+        },
+        "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": [
+            {
+              "id": 2,
+              "user_id": 1,
+              "zone_uuid": "synthetic-zone",
+              "schedule_sync_version": {
+                "$undefined": true
+              },
+              "last_applied_at": null
+            }
+          ],
+          "osi": {
+            "request": {
+              "v": 1,
+              "kind": "zone_schedule_put",
+              "requestId": "x1-request",
+              "actorId": 9,
+              "zoneId": 2,
+              "validatedPatch": {
+                "trigger_metric": "SWT_1",
+                "threshold_kpa": 30,
+                "duration_minutes": 20,
+                "enabled": 1,
+                "response_mode": "fixed"
+              }
+            },
+            "applied": {
+              "zone_uuid": "synthetic-zone",
+              "gateway_device_eui": "0016C001F1000001",
+              "sync_version": 1,
+              "last_applied_at": null
+            }
+          },
+          "syncAck": {
+            "existing": true,
+            "aggregateType": "SCHEDULE",
+            "aggregateKey": "synthetic-zone",
+            "appliedSyncVersion": 1,
+            "result": "SUCCESS"
+          },
+          "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+        },
+        null
+      ],
+      "msg": {
+        "payload": [
+          {
+            "id": 2,
+            "user_id": 1,
+            "zone_uuid": "synthetic-zone",
+            "schedule_sync_version": {
+              "$undefined": true
+            },
+            "last_applied_at": null
+          }
+        ],
+        "osi": {
+          "request": {
+            "v": 1,
+            "kind": "zone_schedule_put",
+            "requestId": "x1-request",
+            "actorId": 9,
+            "zoneId": 2,
+            "validatedPatch": {
+              "trigger_metric": "SWT_1",
+              "threshold_kpa": 30,
+              "duration_minutes": 20,
+              "enabled": 1,
+              "response_mode": "fixed"
+            }
+          },
+          "applied": {
+            "zone_uuid": "synthetic-zone",
+            "gateway_device_eui": "0016C001F1000001",
+            "sync_version": 1,
+            "last_applied_at": null
+          }
+        },
+        "syncAck": {
+          "existing": true,
+          "aggregateType": "SCHEDULE",
+          "aggregateKey": "synthetic-zone",
+          "appliedSyncVersion": 1,
+          "result": "SUCCESS"
+        },
+        "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "downstream-refusal-swt",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": "2026-05-10T05:10:00Z",
+                "max_recorded_at": "2026-05-10T06:00:00Z"
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 20,
+                "reason": "scheduler_threshold",
+                "mean_kpa_last_hour": 30,
+                "threshold_kpa": 30,
+                "trigger_metric": "SWT_1",
+                "n_points_last_hour": 2,
+                "window": {
+                  "min_recorded_at": "2026-05-10T05:10:00Z",
+                  "max_recorded_at": "2026-05-10T06:00:00Z"
+                },
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": "2026-05-10T05:10:00Z",
+                "max_recorded_at": "2026-05-10T06:00:00Z"
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 20,
+                "reason": "scheduler_threshold",
+                "mean_kpa_last_hour": 30,
+                "threshold_kpa": 30,
+                "trigger_metric": "SWT_1",
+                "n_points_last_hour": 2,
+                "window": {
+                  "min_recorded_at": "2026-05-10T05:10:00Z",
+                  "max_recorded_at": "2026-05-10T06:00:00Z"
+                },
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2712",
+    "case": "downstream-refusal-dendro",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "",
+              "effective_reasoning": "Dendrometer recommendation",
+              "zone_stress_summary": "unknown",
+              "analytics_date": null,
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 22,
+                "reason": "scheduler_dendro",
+                "scheduling_mode": "local",
+                "recommendation_source": "local_dendro",
+                "recommendation_action": "increase_10",
+                "effective_action": "increase_10",
+                "recommendation_reasoning": "",
+                "effective_reasoning": "Dendrometer recommendation",
+                "zone_stress_summary": "unknown",
+                "analytics_date": null,
+                "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+                "trigger_metric": "DENDRO",
+                "threshold_kpa": 30,
+                "base_duration_minutes": 20,
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "",
+              "effective_reasoning": "Dendrometer recommendation",
+              "zone_stress_summary": "unknown",
+              "analytics_date": null,
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 22,
+                "reason": "scheduler_dendro",
+                "scheduling_mode": "local",
+                "recommendation_source": "local_dendro",
+                "recommendation_action": "increase_10",
+                "effective_action": "increase_10",
+                "recommendation_reasoning": "",
+                "effective_reasoning": "Dendrometer recommendation",
+                "zone_stress_summary": "unknown",
+                "analytics_date": null,
+                "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+                "trigger_metric": "DENDRO",
+                "threshold_kpa": 30,
+                "base_duration_minutes": 20,
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "swt-mean-30",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": null,
+                "max_recorded_at": null
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":null,\"max_recorded_at\":null},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": null,
+                "max_recorded_at": null
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":null,\"max_recorded_at\":null},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "utc-2026-05-10T06:10:00Z",
+    "before": {
+      "result": [
+        null,
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'SKIP', 'clock_jump_backward_suppressed', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"SKIP\",\"reason\":\"clock_jump_backward_suppressed\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30,\"mean_kpa\":30,\"n_points\":2,\"valve_deveui\":\"A840410000000001\",\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        null
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "last_triggered_at": "2026-05-10T06:10:00Z"
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [
+        [
+          "warn",
+          "clock_jump_backward_suppressed: zone 2 already fired for today's window (last_triggered_at=2026-05-10T06:10:00Z); skipping re-fire"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        null,
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'SKIP', 'clock_jump_backward_suppressed', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"SKIP\",\"reason\":\"clock_jump_backward_suppressed\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30,\"mean_kpa\":30,\"n_points\":2,\"valve_deveui\":\"A840410000000001\",\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        null
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "last_triggered_at": "2026-05-10T06:10:00Z"
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [
+        [
+          "warn",
+          "clock_jump_backward_suppressed: zone 2 already fired for today's window (last_triggered_at=2026-05-10T06:10:00Z); skipping re-fire"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "dendro-age-129600000",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "tree's stress",
+              "effective_reasoning": "tree's stress",
+              "zone_stress_summary": "moderate",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"tree''s stress\",\"effective_reasoning\":\"tree''s stress\",\"zone_stress_summary\":\"moderate\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-08T18:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "tree's stress",
+              "effective_reasoning": "tree's stress",
+              "zone_stress_summary": "moderate",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"tree''s stress\",\"effective_reasoning\":\"tree''s stress\",\"zone_stress_summary\":\"moderate\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-08T18:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-08T18:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "dendro-server_preferred-bundle-age-21600000",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 30,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "server_preferred",
+              "recommendation_source": "server_shared_bundle",
+              "recommendation_action": "emergency_irrigate",
+              "effective_action": "emergency_irrigate",
+              "recommendation_reasoning": "server's advice",
+              "effective_reasoning": "server's advice",
+              "zone_stress_summary": "server_preferred",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 30, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"server_preferred\",\"recommendation_source\":\"server_shared_bundle\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"emergency_irrigate\",\"effective_action\":\"emergency_irrigate\",\"recommendation_reasoning\":\"server''s advice\",\"effective_reasoning\":\"server''s advice\",\"zone_stress_summary\":\"server_preferred\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":30,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "scheduling_mode": "server_preferred",
+          "shared_environment_json": "{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"server's advice\",\"recommendationDate\":\"2026-05-10\"}},\"display\":{\"sharedGeneratedAt\":\"2026-05-10T06:05:00.000Z\"},\"drift\":{\"serverActionCode\":\"emergency_irrigate\"}}",
+          "shared_environment_received_at": "2026-05-10T00:05:00.000Z"
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 30,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "server_preferred",
+              "recommendation_source": "server_shared_bundle",
+              "recommendation_action": "emergency_irrigate",
+              "effective_action": "emergency_irrigate",
+              "recommendation_reasoning": "server's advice",
+              "effective_reasoning": "server's advice",
+              "zone_stress_summary": "server_preferred",
+              "analytics_date": "2026-05-10",
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 30, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"server_preferred\",\"recommendation_source\":\"server_shared_bundle\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"emergency_irrigate\",\"effective_action\":\"emergency_irrigate\",\"recommendation_reasoning\":\"server''s advice\",\"effective_reasoning\":\"server''s advice\",\"zone_stress_summary\":\"server_preferred\",\"analytics_date\":\"2026-05-10\",\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":30,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1,
+          "scheduling_mode": "server_preferred",
+          "shared_environment_json": "{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"server's advice\",\"recommendationDate\":\"2026-05-10\"}},\"display\":{\"sharedGeneratedAt\":\"2026-05-10T06:05:00.000Z\"},\"drift\":{\"serverActionCode\":\"emergency_irrigate\"}}",
+          "shared_environment_received_at": "2026-05-10T00:05:00.000Z"
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "action_reasoning": "tree's stress",
+            "zone_stress_summary": "moderate",
+            "analytics_date": "2026-05-10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+            "recommendation_json": "{}"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "auth-scoped-access",
+    "before": {
+      "result": [
+        null,
+        {
+          "payload": {
+            "message": "Forbidden"
+          },
+          "req": {
+            "headers": {
+              "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+            },
+            "params": {
+              "id": "2"
+            }
+          },
+          "req_body": {
+            "trigger_metric": "SWT_1",
+            "threshold_kpa": 30,
+            "duration_minutes": 20
+          },
+          "authUserId": 1,
+          "authUsername": "actor's name",
+          "statusCode": 403
+        }
+      ],
+      "msg": {
+        "payload": {
+          "message": "Forbidden"
+        },
+        "req": {
+          "headers": {
+            "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+          },
+          "params": {
+            "id": "2"
+          }
+        },
+        "req_body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20
+        },
+        "authUserId": 1,
+        "authUsername": "actor's name",
+        "statusCode": 403
+      },
+      "trace": [
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "global-get",
+          "fs"
+        ],
+        [
+          "resolve-secret",
+          "synthetic-x1-secret"
+        ],
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "db-open",
+          "/data/db/farming.db"
+        ],
+        [
+          "db-get",
+          "SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1",
+          [
+            1,
+            "actor's name"
+          ]
+        ],
+        [
+          "resolve-zone",
+          2
+        ],
+        [
+          "access",
+          "synthetic-actor",
+          "synthetic-zone",
+          {
+            "scopedMode": true
+          }
+        ],
+        [
+          "db-close"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        null,
+        {
+          "payload": {
+            "message": "Forbidden"
+          },
+          "req": {
+            "headers": {
+              "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+            },
+            "params": {
+              "id": "2"
+            }
+          },
+          "req_body": {
+            "trigger_metric": "SWT_1",
+            "threshold_kpa": 30,
+            "duration_minutes": 20
+          },
+          "authUserId": 1,
+          "authUsername": "actor's name",
+          "statusCode": 403
+        }
+      ],
+      "msg": {
+        "payload": {
+          "message": "Forbidden"
+        },
+        "req": {
+          "headers": {
+            "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiYWN0b3IncyBuYW1lIiwiZXhwIjoxNzc4MzkzMTAxMDAwfQ.Bm2CQQztANIl1ZrVG3iNQNnMLSsn7IoZB46dCJOTfEI"
+          },
+          "params": {
+            "id": "2"
+          }
+        },
+        "req_body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20
+        },
+        "authUserId": 1,
+        "authUsername": "actor's name",
+        "statusCode": 403
+      },
+      "trace": [
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "global-get",
+          "fs"
+        ],
+        [
+          "resolve-secret",
+          "synthetic-x1-secret"
+        ],
+        [
+          "require",
+          "scope"
+        ],
+        [
+          "db-open",
+          "/data/db/farming.db"
+        ],
+        [
+          "db-get",
+          "SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1",
+          [
+            1,
+            "actor's name"
+          ]
+        ],
+        [
+          "resolve-zone",
+          2
+        ],
+        [
+          "access",
+          "synthetic-actor",
+          "synthetic-zone",
+          {
+            "scopedMode": true
+          }
+        ],
+        [
+          "db-close"
+        ]
+      ],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "upsert-version-undefined-enabled-1",
+    "before": {
+      "result": [
+        {
+          "payload": [
+            {
+              "id": 2,
+              "user_id": 1,
+              "zone_uuid": "synthetic-zone",
+              "schedule_sync_version": {
+                "$undefined": true
+              },
+              "last_applied_at": null
+            }
+          ],
+          "osi": {
+            "request": {
+              "v": 1,
+              "kind": "zone_schedule_put",
+              "requestId": "x1-request",
+              "actorId": 9,
+              "zoneId": 2,
+              "validatedPatch": {
+                "trigger_metric": "SWT_1",
+                "threshold_kpa": 30,
+                "duration_minutes": 20,
+                "enabled": 1,
+                "response_mode": "fixed"
+              }
+            },
+            "applied": {
+              "zone_uuid": "synthetic-zone",
+              "gateway_device_eui": "0016C001F1000001",
+              "sync_version": 1,
+              "last_applied_at": null
+            }
+          },
+          "syncAck": {
+            "existing": true,
+            "aggregateType": "SCHEDULE",
+            "aggregateKey": "synthetic-zone",
+            "appliedSyncVersion": 1,
+            "result": "SUCCESS"
+          },
+          "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+        },
+        null
+      ],
+      "msg": {
+        "payload": [
+          {
+            "id": 2,
+            "user_id": 1,
+            "zone_uuid": "synthetic-zone",
+            "schedule_sync_version": {
+              "$undefined": true
+            },
+            "last_applied_at": null
+          }
+        ],
+        "osi": {
+          "request": {
+            "v": 1,
+            "kind": "zone_schedule_put",
+            "requestId": "x1-request",
+            "actorId": 9,
+            "zoneId": 2,
+            "validatedPatch": {
+              "trigger_metric": "SWT_1",
+              "threshold_kpa": 30,
+              "duration_minutes": 20,
+              "enabled": 1,
+              "response_mode": "fixed"
+            }
+          },
+          "applied": {
+            "zone_uuid": "synthetic-zone",
+            "gateway_device_eui": "0016C001F1000001",
+            "sync_version": 1,
+            "last_applied_at": null
+          }
+        },
+        "syncAck": {
+          "existing": true,
+          "aggregateType": "SCHEDULE",
+          "aggregateKey": "synthetic-zone",
+          "appliedSyncVersion": 1,
+          "result": "SUCCESS"
+        },
+        "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    },
+    "after": {
+      "result": [
+        {
+          "payload": [
+            {
+              "id": 2,
+              "user_id": 1,
+              "zone_uuid": "synthetic-zone",
+              "schedule_sync_version": {
+                "$undefined": true
+              },
+              "last_applied_at": null
+            }
+          ],
+          "osi": {
+            "request": {
+              "v": 1,
+              "kind": "zone_schedule_put",
+              "requestId": "x1-request",
+              "actorId": 9,
+              "zoneId": 2,
+              "validatedPatch": {
+                "trigger_metric": "SWT_1",
+                "threshold_kpa": 30,
+                "duration_minutes": 20,
+                "enabled": 1,
+                "response_mode": "fixed"
+              }
+            },
+            "applied": {
+              "zone_uuid": "synthetic-zone",
+              "gateway_device_eui": "0016C001F1000001",
+              "sync_version": 1,
+              "last_applied_at": null
+            }
+          },
+          "syncAck": {
+            "existing": true,
+            "aggregateType": "SCHEDULE",
+            "aggregateKey": "synthetic-zone",
+            "appliedSyncVersion": 1,
+            "result": "SUCCESS"
+          },
+          "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+        },
+        null
+      ],
+      "msg": {
+        "payload": [
+          {
+            "id": 2,
+            "user_id": 1,
+            "zone_uuid": "synthetic-zone",
+            "schedule_sync_version": {
+              "$undefined": true
+            },
+            "last_applied_at": null
+          }
+        ],
+        "osi": {
+          "request": {
+            "v": 1,
+            "kind": "zone_schedule_put",
+            "requestId": "x1-request",
+            "actorId": 9,
+            "zoneId": 2,
+            "validatedPatch": {
+              "trigger_metric": "SWT_1",
+              "threshold_kpa": 30,
+              "duration_minutes": 20,
+              "enabled": 1,
+              "response_mode": "fixed"
+            }
+          },
+          "applied": {
+            "zone_uuid": "synthetic-zone",
+            "gateway_device_eui": "0016C001F1000001",
+            "sync_version": 1,
+            "last_applied_at": null
+          }
+        },
+        "syncAck": {
+          "existing": true,
+          "aggregateType": "SCHEDULE",
+          "aggregateKey": "synthetic-zone",
+          "appliedSyncVersion": 1,
+          "result": "SUCCESS"
+        },
+        "topic": "INSERT INTO irrigation_schedules\n  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)\nVALUES\n  (2, 'SWT_1', 30, 20, 1, 'fixed', 1, NULL, '2026-05-10T06:05:00.000Z', '2026-05-10T06:05:00.000Z')\nON CONFLICT(irrigation_zone_id) DO UPDATE SET\n  trigger_metric = excluded.trigger_metric,\n  threshold_kpa = excluded.threshold_kpa,\n  duration_minutes = excluded.duration_minutes,\n  enabled = excluded.enabled,\n  response_mode = excluded.response_mode,\n  deleted_at = NULL,\n  sync_version = 1,\n  updated_at = excluded.updated_at"
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      }
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "downstream-refusal-swt",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": "2026-05-10T05:10:00Z",
+                "max_recorded_at": "2026-05-10T06:00:00Z"
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 20,
+                "reason": "scheduler_threshold",
+                "mean_kpa_last_hour": 30,
+                "threshold_kpa": 30,
+                "trigger_metric": "SWT_1",
+                "n_points_last_hour": 2,
+                "window": {
+                  "min_recorded_at": "2026-05-10T05:10:00Z",
+                  "max_recorded_at": "2026-05-10T06:00:00Z"
+                },
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 20,
+              "reason": "scheduler_threshold",
+              "mean_kpa_last_hour": 30,
+              "threshold_kpa": 30,
+              "trigger_metric": "SWT_1",
+              "n_points_last_hour": 2,
+              "window": {
+                "min_recorded_at": "2026-05-10T05:10:00Z",
+                "max_recorded_at": "2026-05-10T06:00:00Z"
+              },
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "mean_kpa": 30,
+            "n_points": 2,
+            "min_recorded_at": "2026-05-10T05:10:00Z",
+            "max_recorded_at": "2026-05-10T06:00:00Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 20,
+                "reason": "scheduler_threshold",
+                "mean_kpa_last_hour": 30,
+                "threshold_kpa": 30,
+                "trigger_metric": "SWT_1",
+                "n_points_last_hour": 2,
+                "window": {
+                  "min_recorded_at": "2026-05-10T05:10:00Z",
+                  "max_recorded_at": "2026-05-10T06:00:00Z"
+                },
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n    (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n  VALUES\n    (1, 2, 'IRRIGATE', 'scheduler_threshold', 30, 30, 20, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_threshold\",\"mean_kpa_last_hour\":30,\"threshold_kpa\":30,\"trigger_metric\":\"SWT_1\",\"n_points_last_hour\":2,\"valve_deveui\":\"A840410000000001\",\"duration_minutes\":20,\"window\":{\"min_recorded_at\":\"2026-05-10T05:10:00Z\",\"max_recorded_at\":\"2026-05-10T06:00:00Z\"},\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n  SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n      updated_at = '2026-05-10T06:05:00.000Z'\n  WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    }
+  },
+  {
+    "profile": "full_raspberrypi_bcm27xx_bcm2709",
+    "case": "downstream-refusal-dendro",
+    "before": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "",
+              "effective_reasoning": "Dendrometer recommendation",
+              "zone_stress_summary": "unknown",
+              "analytics_date": null,
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 22,
+                "reason": "scheduler_dendro",
+                "scheduling_mode": "local",
+                "recommendation_source": "local_dendro",
+                "recommendation_action": "increase_10",
+                "effective_action": "increase_10",
+                "recommendation_reasoning": "",
+                "effective_reasoning": "Dendrometer recommendation",
+                "zone_stress_summary": "unknown",
+                "analytics_date": null,
+                "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+                "trigger_metric": "DENDRO",
+                "threshold_kpa": 30,
+                "base_duration_minutes": 20,
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    },
+    "after": {
+      "result": [
+        {
+          "payload": {
+            "type": "actuator_command",
+            "device": {
+              "devEui": "A840410000000001",
+              "zone_id": 2
+            },
+            "data": {
+              "action": "OPEN_FOR_DURATION",
+              "duration_minutes": 22,
+              "reason": "scheduler_dendro",
+              "scheduling_mode": "local",
+              "recommendation_source": "local_dendro",
+              "recommendation_action": "increase_10",
+              "effective_action": "increase_10",
+              "recommendation_reasoning": "",
+              "effective_reasoning": "Dendrometer recommendation",
+              "zone_stress_summary": "unknown",
+              "analytics_date": null,
+              "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+              "trigger_metric": "DENDRO",
+              "threshold_kpa": 30,
+              "base_duration_minutes": 20,
+              "timestamp": "2026-05-10T06:05:00.000Z"
+            }
+          },
+          "_systemActuation": true,
+          "_stregaInternalSource": "scheduler"
+        },
+        {
+          "topic": "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        },
+        {
+          "topic": "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        }
+      ],
+      "msg": {
+        "zone": {
+          "user_id": 1,
+          "zone_id": 2,
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 30,
+          "duration_minutes": 20,
+          "valve_deveui": "A840410000000001",
+          "enabled_scope_holders": 1
+        },
+        "payload": [
+          {
+            "irrigation_action": "increase_10",
+            "analytics_computed_at": "2026-05-10T06:05:00.000Z"
+          }
+        ]
+      },
+      "trace": [],
+      "error": {
+        "$undefined": true
+      },
+      "downstream": [
+        [
+          "dispatch",
+          {
+            "accepted": false,
+            "reason": "synthetic refusal"
+          },
+          {
+            "payload": {
+              "type": "actuator_command",
+              "device": {
+                "devEui": "A840410000000001",
+                "zone_id": 2
+              },
+              "data": {
+                "action": "OPEN_FOR_DURATION",
+                "duration_minutes": 22,
+                "reason": "scheduler_dendro",
+                "scheduling_mode": "local",
+                "recommendation_source": "local_dendro",
+                "recommendation_action": "increase_10",
+                "effective_action": "increase_10",
+                "recommendation_reasoning": "",
+                "effective_reasoning": "Dendrometer recommendation",
+                "zone_stress_summary": "unknown",
+                "analytics_date": null,
+                "analytics_computed_at": "2026-05-10T06:05:00.000Z",
+                "trigger_metric": "DENDRO",
+                "threshold_kpa": 30,
+                "base_duration_minutes": 20,
+                "timestamp": "2026-05-10T06:05:00.000Z"
+              }
+            },
+            "_systemActuation": true,
+            "_stregaInternalSource": "scheduler"
+          }
+        ],
+        [
+          "event-write",
+          "INSERT INTO irrigation_events\n      (user_id, irrigation_zone_id, action, reason, aggregate_kpa, threshold_kpa, duration_minutes, valve_deveui, payload_json)\n    VALUES\n      (1, 2, 'IRRIGATE', 'scheduler_dendro', NULL, 30, 22, 'A840410000000001', '{\"zone_id\":2,\"action\":\"IRRIGATE\",\"reason\":\"scheduler_dendro\",\"scheduling_mode\":\"local\",\"recommendation_source\":\"local_dendro\",\"trigger_metric\":\"DENDRO\",\"threshold_kpa\":30,\"recommendation_action\":\"increase_10\",\"effective_action\":\"increase_10\",\"recommendation_reasoning\":\"\",\"effective_reasoning\":\"Dendrometer recommendation\",\"zone_stress_summary\":\"unknown\",\"analytics_date\":null,\"analytics_computed_at\":\"2026-05-10T06:05:00.000Z\",\"valve_deveui\":\"A840410000000001\",\"base_duration_minutes\":20,\"duration_minutes\":22,\"timestamp\":\"2026-05-10T06:05:00.000Z\"}');"
+        ],
+        [
+          "schedule-write",
+          "UPDATE irrigation_schedules\n    SET last_triggered_at = '2026-05-10T06:05:00.000Z',\n        updated_at = '2026-05-10T06:05:00.000Z'\n    WHERE irrigation_zone_id = 2;"
+        ]
+      ]
+    }
+  }
+]

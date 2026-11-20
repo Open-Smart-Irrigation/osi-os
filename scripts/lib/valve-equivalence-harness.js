@@ -333,6 +333,7 @@ class Gateway {
       node: { warn: record('warn'), error: record('error'), log: record('log'), status() {}, send(value) { sent.push(value); } },
       osiDb: { Database },
       osiLib: { require(module) {
+        if (module === 'daily-scheduler') return { ok: true, value: require(path.join(self.definition.moduleDir, 'osi-daily-scheduler')) };
         if (module === 'osi-db-helper') return { ok: true, value: { Database } };
         if (module === 'osi-valve-control') return { ok: true, value: self.valveControl };
         if (module === 'osi-command-ledger') return { ok: true, value: self.commandLedger };

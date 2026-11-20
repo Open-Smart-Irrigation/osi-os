@@ -1,0 +1,181 @@
+[
+  {
+    "id": "a0a61f4b7dca1c2e",
+    "type": "function",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Build zones query (enabled schedules)",
+    "func": "const scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.buildZonesQuery(msg, { env, node, osiLib, Date });",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 540,
+    "y": 120,
+    "wires": [
+      [
+        "d7ad7b3d0c9e0b8a"
+      ]
+    ],
+    "entry": "buildZonesQuery"
+  },
+  {
+    "id": "d0b2b1c1a937e16d",
+    "type": "function",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Build mean query (last hour, all datapoints)",
+    "func": "const scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.buildMeanQuery(msg, { env, node, osiLib, Date });",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 520,
+    "y": 200,
+    "wires": [
+      [
+        "f4f8af0d3a4f3e5c"
+      ]
+    ],
+    "entry": "buildMeanQuery"
+  },
+  {
+    "id": "5f0d2b7e9b9b1b3a",
+    "type": "function",
+    "z": "c2b43a6c6e7d2c11",
+    "name": "Decide + build actuator cmd + build DB logs",
+    "func": "const scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.decide(msg, { env, node, osiLib, Date });",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 520,
+    "y": 280,
+    "wires": [
+      [
+        "b64b9e8c1a0e2c77"
+      ],
+      [
+        "2cb3b5c1a3d0e5f7"
+      ],
+      [
+        "3a0d9d0f1a1b2c3d"
+      ]
+    ],
+    "entry": "decide"
+  },
+  {
+    "id": "70fcbea336401bd1",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Decode Token",
+    "func": "const scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.decodeToken(msg, { env, node, osiLib, crypto, osiDb, global, Date });",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      }
+    ],
+    "x": 440,
+    "y": 1440,
+    "wires": [
+      [
+        "697f8cfd92ccf539"
+      ],
+      [
+        "device-response"
+      ]
+    ],
+    "entry": "decodeToken"
+  },
+  {
+    "id": "22cc64fa2a899cea",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Verify Zone Ownership",
+    "func": "// msg.osi.request kind: 'zone_schedule_put'.\nconst scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.verifyZoneOwnership(msg, { env, node, osiLib, Date });",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 920,
+    "y": 1440,
+    "wires": [
+      [
+        "bda5f35469bb5fc6"
+      ],
+      [
+        "device-response"
+      ]
+    ],
+    "entry": "verifyZoneOwnership"
+  },
+  {
+    "id": "d7e5c762c820aa16",
+    "type": "function",
+    "z": "device-api-tab",
+    "name": "Build UPSERT",
+    "func": "// msg.osi.request kind: 'zone_schedule_put'.\nconst scheduler = osiLib.require('daily-scheduler');\nif (!scheduler.ok) { node.error('daily-scheduler unavailable: ' + scheduler.error, msg); return null; }\nreturn scheduler.value.buildUpsert(msg, { env, node, osiLib, Date });",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 1400,
+    "y": 1440,
+    "wires": [
+      [
+        "conditional-legacy-schedule-adapter"
+      ],
+      [
+        "device-response"
+      ]
+    ],
+    "entry": "buildUpsert"
+  }
+]
