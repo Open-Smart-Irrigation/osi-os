@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const MANIFEST = 'bundle-manifest.json';
 
-function inventory(root, relative = '', files = {}) {
+function inventory(root, relative = '', files = Object.create(null)) {
   for (const name of fs.readdirSync(path.join(root, relative)).sort()) {
     const rel = relative ? `${relative}/${name}` : name;
     if (!/^[a-zA-Z0-9_.\/-]+$/.test(rel) || name === '.' || name === '..') throw new Error(`unsupported file name: ${rel}`);

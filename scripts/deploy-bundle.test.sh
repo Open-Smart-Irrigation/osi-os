@@ -41,7 +41,7 @@ grep -qi 'react_gui.tar.gz' "$work/no-gui.log" || {
 
 echo "build a real bundle..."
 printf 'stub gui bundle\n' | gzip > "$gui_tar"
-REPO_ROOT="$repo_root" OUT_DIR="$out_dir" REACT_GUI_TARBALL="$gui_tar" BUNDLE_TS="20260911T000000Z" \
+REPO_ROOT="$repo_root" OUT_DIR="$out_dir" REACT_GUI_TARBALL="$gui_tar" SOURCE_DATE_EPOCH=0 BUNDLE_TS="20260911T000000Z" \
   bash "$builder" >"$work/build.log" 2>&1 || {
   echo "expected deploy-bundle.sh to succeed with a react_gui.tar.gz present" >&2
   cat "$work/build.log" >&2
@@ -64,6 +64,13 @@ actual_sha=$(sha256sum "$bundle" | cut -d ' ' -f1)
 echo "verify bundle contains deploy.sh and react_gui.tar.gz..."
 listing="$work/listing.txt"
 tar tzf "$bundle" > "$listing"
+LC_ALL=C sort "$listing" > "$work/sorted-listing.txt"
+cmp "$listing" "$work/sorted-listing.txt"
+TZ=UTC0 tar --full-time --numeric-owner -tvzf "$bundle" > "$work/metadata.txt"
+awk '$2 != "0/0" || $4 != "1970-01-01" || $5 != "00:00:00" { exit 1 }' "$work/metadata.txt" || {
+  echo "bundle owners or mtimes were not normalized" >&2
+  exit 1
+}
 grep -qx './deploy.sh' "$listing" || grep -qx 'deploy.sh' "$listing" || {
   echo "bundle missing deploy.sh" >&2
   exit 1
@@ -112,7 +119,7 @@ echo "OK: bundle contains all $fetch_count deploy.sh-derived paths + deploy.sh +
 
 echo "verify byte-identical builds across time and umask..."
 sleep 2
-(umask 077; REPO_ROOT="$repo_root" OUT_DIR="$work/second" REACT_GUI_TARBALL="$gui_tar" BUNDLE_TS="20260911T000000Z" \
+(umask 077; REPO_ROOT="$repo_root" OUT_DIR="$work/second" REACT_GUI_TARBALL="$gui_tar" SOURCE_DATE_EPOCH=0 BUNDLE_TS="20260911T000000Z" \
   bash "$builder" >"$work/second.log" 2>&1)
 second=$(find "$work/second" -name 'deploy-bundle-*.tar.gz' | head -1)
 second_sha=$(sha256sum "$second" | cut -d ' ' -f1)

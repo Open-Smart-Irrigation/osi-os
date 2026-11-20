@@ -72,11 +72,12 @@ for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback',
     assert.match(result.output, /Read result: cat /);
   });
 }
-for (const defect of ['changed', 'extra', 'missing', 'link', 'no-manifest']) {
+for (const defect of ['changed', 'extra', 'magic-key', 'missing', 'link', 'no-manifest']) {
   test(`offline refuses ${defect} bundle before executing deploy.sh, despite matching archive checksum`, async t => {
     const f = await fixture(t);
     if (defect === 'changed') fs.appendFileSync(path.join(f.stage, 'deploy.sh'), '\n# changed\n');
     if (defect === 'extra') fs.writeFileSync(path.join(f.stage, 'extra'), 'unexpected');
+    if (defect === 'magic-key') fs.writeFileSync(path.join(f.stage, '__proto__'), 'unexpected');
     if (defect === 'missing') fs.unlinkSync(path.join(f.stage, 'scripts/deploy-local-server.js'));
     if (defect === 'link') fs.symlinkSync('../outside', path.join(f.stage, 'escape'));
     if (defect === 'no-manifest') fs.unlinkSync(path.join(f.stage, 'bundle-manifest.json'));
