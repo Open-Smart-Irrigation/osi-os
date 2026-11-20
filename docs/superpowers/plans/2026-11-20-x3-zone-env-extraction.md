@@ -116,3 +116,14 @@ that throws is attempted again by the outer catch. The latter is deliberately
 characterized as two attempts. It cannot be changed while claiming behavior
 parity. Provider and compatibility-DDL catches retain their current diagnostics,
 including silence where the old handler is silent.
+
+## Squash and package-load follow-up
+
+The lead's additional gate requires the oracle and handoff to survive removal of
+all PR-only history. Keep fixtures in the tree, use exclusive evidence creation,
+and defer extraction-module loading until a new entry point is requested. Test
+loader failures through the real osi-lib package in both profiles and retain the
+approved 503 adapter fallback. Register these tests and run parity and the
+staged affected handoff from an independent clone of a local squash-equivalent
+commit, whose only parent is in main ancestry and whose object store contains no
+PR-only commits.

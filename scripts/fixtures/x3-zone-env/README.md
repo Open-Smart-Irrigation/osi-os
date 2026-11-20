@@ -48,3 +48,13 @@ The source fixture also protects the handoff: `scripts/x3-zone-env-adapters.js`
 refuses an intervening change to any source body. It renders both profiles into
 an external scratch directory and prints the exact unified patch. It never
 writes a reserved repository flow file.
+
+`X3_EVIDENCE=/new/path.json` writes a separate parity receipt with exclusive
+creation. Existing files and links are rejected; it cannot replace an oracle.
+Capture also refuses to replace the committed fixtures.
+
+`node scripts/test-x3-zone-env-squash.js` creates a temporary local squash commit
+with a main-ancestry parent, clones it without shared objects or PR refs, and
+checks that the source-only commit objects are absent. It runs parity and the
+staged affected handoff inside that clone. The worktree must be committed first.
+Run it through osi-heavy as above; full suites remain the exact-head CI gate.

@@ -236,7 +236,7 @@ function zoneEnvironmentDelegationProblem(node, indexSource, facadeSource) {
   if (!node || node.func !== x3Body('zone-env-fn')) return 'environment adapter is not the reviewed source';
   if (!/return await loaded\.value\.environmentSummary\(msg, \{ db,/.test(node.func) ||
       !/const db = new osiDb\.Database\(/.test(node.func)) return 'adapter must await environmentSummary with its database';
-  if (!indexSource.includes("...require('./http-facade')")) return 'index must export the facade';
+  if (!indexSource.includes("lazyEntry('environmentSummary', () => require('./http-facade').environmentSummary)")) return 'index must lazily export the facade';
   const source = stripComments(facadeSource);
   if (!/const _db = db;/.test(source) || !/const R = _rainLoad\.value;/.test(source) ||
       !/const _rainLoad = osiLib\.require\('rain'\)/.test(source)) return 'facade must keep the passed DB and guarded rain binding';

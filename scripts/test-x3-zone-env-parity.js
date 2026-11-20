@@ -6,12 +6,14 @@ const { scanFunctionNodes } = require('./flows-bare-require-scan');
 const { applyTo } = require('./x3-zone-env-adapters');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { assertNewEvidencePath, writeEvidence } = require('./lib/x3-evidence-writer');
 const { compare, assertFrozenInput, assertOriginalBlobs } = require('./lib/x3-parity-contract');
 const { execute, scenarios, LEGACY, PROFILES, FIXTURES, share } = require('./lib/x3-zone-env-harness');
 async function main() {
   const mode = process.argv[2] || '--verify';
   assert.ok(['--capture', '--legacy', '--verify'].includes(mode));
   assertOriginalBlobs();
+  assertNewEvidencePath(process.env.X3_EVIDENCE);
   if (mode === '--capture') {
     for (const profile of PROFILES) assertFrozenInput(JSON.parse(fs.readFileSync(path.join(share(profile), 'flows.json'))));
     throw new Error('Original oracle is immutable; use the additive capture command with a new output path');
@@ -74,7 +76,7 @@ async function main() {
     assert.equal(bad.result.payload.liters, null);
     assert.notDeepEqual(bad.result, expected[c.name].result, 'oracle rejects a real zero changed to null');
   }
-  if (process.env.X3_EVIDENCE) fs.writeFileSync(process.env.X3_EVIDENCE, JSON.stringify({ node: process.versions.node, timezone: process.env.TZ, cases: evidence }, null, 2) + '\n');
+  writeEvidence(process.env.X3_EVIDENCE, { node: process.versions.node, timezone: process.env.TZ, cases: evidence });
   console.log(`X3 ${mode}: ${count} exact traces, ${cases.length} cases x both profiles; Node ${process.versions.node}, TZ=${process.env.TZ || 'host'}`);
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

@@ -5,12 +5,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const legacy = require('./fixtures/x3-zone-env/legacy-nodes.json');
 const METHODS = { 'zone-env-fn': 'environmentSummary', 'strega-today-liters-fn': 'todayLiters', 'get-actuations-query': 'queryActuations', 'get-actuations-response': 'formatActuations' };
+function loader(id) {
+  return `let loaded = osiLib.require('zone-env');
+if (loaded.ok) {
+  try { void loaded.value.${METHODS[id]}; }
+  catch (error) { loaded = { ok: false, error: String(error && error.message ? error.message : error) }; }
+}`;
+}
 function body(id) {
   if (id === 'strega-today-liters-fn') {
     const source = legacy.find(n => n.id === id).func;
     const start = source.indexOf("  const db = new osiDb.Database('/data/db/farming.db');");
     const tail = source.indexOf('})().catch((error) =>');
-    return source.slice(0, start) + `  const loaded = osiLib.require('zone-env');
+    return source.slice(0, start) + `  ${loader(id)}
   if (!loaded.ok) {
     node.error('strega-today-liters-fn: zone-env module unavailable: ' + loaded.error, msg);
     msg.statusCode = 503;
@@ -23,7 +30,7 @@ function body(id) {
 
   if (id === 'zone-env-fn') return `return (async () => {
 const db = new osiDb.Database('/data/db/farming.db');
-const loaded = osiLib.require('zone-env');
+${loader(id)}
 if (!loaded.ok) {
   msg.statusCode = 503;
   msg.payload = { error: 'module_unavailable', module: 'zone-env', message: loaded.error };
@@ -35,7 +42,7 @@ return await loaded.value.environmentSummary(msg, { db, ZE: loaded.value, osiLib
 })();\n`;
   const parameters = id === 'strega-today-liters-fn' ? 'osiDb, osiLib, crypto, env, node, global, Date' : id === 'get-actuations-query' ? 'osiDb, osiLib, env, node, Date' : 'Date';
   const early = id === 'get-actuations-query' ? `if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n` : '';
-  return `${early}const loaded = osiLib.require('zone-env');
+  return `${early}${loader(id)}
 if (!loaded.ok) {
   node.error('${id}: zone-env module unavailable: ' + loaded.error, msg);
   msg.statusCode = 503;

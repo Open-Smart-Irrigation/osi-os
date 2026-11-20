@@ -210,3 +210,43 @@ UTC stop: **2026-11-20T01:58:25Z**. Correction-round wall time: **0:42:07**
 This is an elapsed cost record; active subparts were not separately timed in
 this review round. Reservation-window cost remains **0.00 h**. Publication and
 GitHub CI wait follow this stop; their exact-head state is reported with the PR.
+
+## Squash and package-load correction
+
+Implementation UTC start: **2026-11-20T11:15:39Z**, following the lead's
+squash-survival addition. The saved startup-readiness file is from the original
+replaced checkout and reports MISMATCH. This continuation deliberately retains
+`c217b8384` on the same review branch, based on main-ancestry commit `1a984f31`
+(0 behind, 4 ahead of that intended base). AGENTS.md revision is `c63103827`;
+current main has advanced. No checkout repair or reserved flow edit is needed.
+
+The executable X3 oracle and handoff paths already read committed fixture files;
+none reads a PR-only commit. The existing workflow's bootstrap baseline is in
+main ancestry. Historical review SHAs in this report are provenance, not inputs
+to a check. A new squash test constructs a local one-parent commit with the
+candidate tree and main-ancestry parent, pushes only that history into a private
+bare repository, then clones it through Git's transport. It checks every PR-only
+commit object is absent, checks the tree and parent, rejects unexpected refs or
+object alternates, and runs original/additive parity plus the staged affected
+handoff in that fresh clone. CI runs the same test.
+
+The evidence writer now uses exclusive creation. An existing destination is
+rejected before parity starts, and the final atomic write uses `wx` to close the
+race after that check. Tests cover ordinary files, hard links, symbolic links,
+dangling links and `X3_EVIDENCE` aimed at the original oracle. Additive capture
+already uses exclusive creation; the original capture blobs remain untouched.
+
+The zone-env index defers the two extraction modules until a caller requests a
+new entry point. The real osi-lib loader is tested with each dependency made to
+throw: legacy helper calls and a second package load must still succeed without
+quarantine. Adapters guard lazy entry-point resolution and keep the existing 503
+reply and diagnostic, with legacy early replies still preceding that resolution.
+
+The dependency/error regression test was RED before the lazy-loading change:
+2 tests passed and 6 failed (both dependencies in both profiles, plus both
+adapter error-path tests). The corrected focused batch exits 0: 8/8 packaging
+tests, 54/54 module tests, 286 original and 134 additive comparisons in each
+process timezone, and the staged affected handoff. Inventory reports 1,014 files
+with 834 direct runners. Hygiene and prose checks pass. The regenerated adapters
+total 8,266 characters per profile; the only libs addition remains the approved
+osiLib binding on `get-actuations-response`.

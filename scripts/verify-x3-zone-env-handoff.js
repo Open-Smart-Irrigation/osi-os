@@ -47,7 +47,7 @@ console.log('flows-bare-require-scan: OK (both staged profiles; negative control
       'verify-flows-size-ratchet.js', 'test-flows-wiring.js', 'test-task5b2-projections.js',
       'verify-osi-lib-db-caller-binding.js', 'verify-osi-lib-db-caller-binding.test.js',
       'verify-auth-flag-off-hermetic.js', 'verify-auth-flag-off-hermetic.test.js',
-      'test-x3-zone-env-revision.js', 'verify-sync-flow.js'].map(gate => ['scripts/' + gate]),
+      'test-x3-zone-env-revision.js', 'test-x3-zone-env-packaging.js', 'verify-sync-flow.js'].map(gate => ['scripts/' + gate]),
   ];
   for (const args of commands.filter(args => !process.argv.includes('--affected') || args[0] !== 'scripts/verify-sync-flow.js')) {
     const result = spawnSync(process.execPath, args, { cwd: root, env: { ...env, TZ: args.includes('--non-utc') ? 'Europe/Zurich' : process.env.TZ || 'UTC' }, stdio: 'inherit' });
