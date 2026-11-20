@@ -6,7 +6,7 @@ The canonical flow file is `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/shar
 
 ## Coverage and gaps
 
-The snapshot contains 166 HTTP entry nodes, 83 inline bearer-verifier nodes, 52 module consumer records and 52 flow functions that carry or use auth state. Ten entries are OPTIONS/CORS routes. No flow WebSocket/TCP/UDP nodes exist at this pin.
+The snapshot contains 166 HTTP entry nodes per profile: 73 inline HMAC implementations, 10 direct shared-verifier caller nodes and six further delegated admin guards (89 verifier caller records), 60 module consumer records and 59 flow functions carrying or using borrowed auth state. Ten HTTP entries are OPTIONS/CORS. No flow WebSocket/TCP/UDP nodes exist at this pin. The legacy JSON field `inline_bearer_nodes` contains the 83 lexical verifyBearer matches; each now has an explicit kind, and `verification_callers` includes the six additional guards.
 
 | Gap | Checked finding |
 | --- | --- |
@@ -17,10 +17,11 @@ The snapshot contains 166 HTTP entry nodes, 83 inline bearer-verifier nodes, 52 
 | G5 | Device-owner SQL or ownedValve still refuses a zone grantee after a successful scope check (#451). Remove only after replacing it with current authorized resource targeting. |
 | G6 | No installer entitlement exists. Current network/radio gates admit ordinary scoped users or admins; hiding the GUI alone cannot enforce installer-only tools. |
 | G7 | Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority. |
-| G8 | Linked credential changes and cloud global-account changes have no agreed paired session-revocation delivery/version contract. Local reset correctly refuses linked sign-in accounts. |
+| G8 | No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation. |
 | G9 | Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token. |
 | G11 | Edge GET /api/users lists accounts without grant assignments; no GET grant directory exists at this pin. The entire account/grant router is 404 with scoped access off, so Admin cannot inspect/revoke existing grants in every mode. |
 | G10 | Some verifiers allow absent/zero expiry or treat exp equality as valid. K1 requires bounded expiry and rejection at now >= exp. |
+| G12 | Public feature discovery, account-wide measurement export, ownerless legacy today-liters read and writer-only valve list have different admission paths; shared route groups cannot describe them as one bearer/scope gate. |
 
 Scope-cache invalidation alone does not implement #520. Even the fresh-role routes can accept the same signed token after re-enable or reset. Every bearer boundary needs the durable session check, including flag-off and independent module copies. Reads are consumers too.
 
@@ -48,7 +49,7 @@ The check-group names below reference `check_groups` in the JSON. For a hexadeci
 | `POST /api/irrigation-zones/schedules/disable-all` | `settings-disable-schedules-http` | `settings-disable-schedules-fn` | `disable_schedules` |
 | `POST /api/valve/:deveui` | POST /api/valve/:deveui (id in JSON) | Auth + Validate + Normalize (id in JSON) | `manual_valve` |
 | `GET /download-fieldtest` | `httpin_download_fieldtest` | `fieldtest-download-admin-read-guard` | `admin_guard` |
-| `GET /download-sensordata` | `httpin_download_sensordata` | `fn_build_sensor_sql_params` | `device_read` |
+| `GET /download-sensordata` | `httpin_download_sensordata` | `fn_build_sensor_sql_params` | `sensor_download` |
 | `GET /api/devices/:deveui/dendro-history` | `dendro-history-http` | `dendro-history-fn` | `device_read` |
 | `PUT /api/devices/:deveui/dendro` | `put-dendro-http` | `scoped-device-config-guard` | `device_config` |
 | `PUT /api/devices/:deveui/temp` | `put-temp-http` | `scoped-device-config-guard` | `device_config` |
@@ -102,7 +103,7 @@ The check-group names below reference `check_groups` in the JSON. For a hexadeci
 | `POST /api/devices/:deveui/dendro-baseline/reset` | `post-dendro-baseline-reset-http` | `scoped-device-config-guard` | `device_config` |
 | `POST /api/v1/valves/:deveui/cancel` | `cancel-valve-http-in` | `cancel-strega-actuation-fn` | `cancel` |
 | `POST /api/valve/:deveui/cancel` | `cancel-valve-local-http-in` | `cancel-strega-actuation-fn` | `cancel` |
-| `GET /api/v1/devices/:deveui/today-liters` | `strega-today-liters-http-in` | `strega-today-liters-fn` | `device_read` |
+| `GET /api/v1/devices/:deveui/today-liters` | `strega-today-liters-http-in` | `strega-today-liters-fn` | `today_liters` |
 | `POST /api/devices/:deveui/chameleon/refresh-calibration` | POST /api/devices/:deveui/chameleon/refresh-calibration (id in JSON) | `scoped-device-config-guard` | `device_config` |
 | `PUT /api/devices/:deveui/chameleon/depth` | PUT /api/devices/:deveui/chameleon/depth (id in JSON) | `scoped-device-config-guard` | `device_config` |
 | `GET /api/devices/:deveui/watermark/calibration` | `watermark-cal-get-http` | `watermark-cal-fn` | `watermark_read` |
@@ -126,7 +127,7 @@ The check-group names below reference `check_groups` in the JSON. For a hexadeci
 | `POST /api/history/zones/:zoneId/cards/:cardId/opened` | `history-zone-card-opened-http` | `history-api-router-fn` | `history` |
 | `PUT /api/history/gateways/:gatewayEui/cards/:cardId/preferences` | `history-gateway-card-preferences-http` | `history-api-router-fn` | `history` |
 | `POST /api/history/gateways/:gatewayEui/cards/:cardId/opened` | `history-gateway-card-opened-http` | `history-api-router-fn` | `history` |
-| `GET /api/system/features` | `history-system-features-http` | `history-api-router-fn` | `history` |
+| `GET /api/system/features` | `history-system-features-http` | `history-api-router-fn` | `public_features` |
 | `POST /api/history/rollups/run` | `history-rollups-run-http` | `history-rollups-admin-write-guard` | `admin_guard` |
 | `GET /api/history/zones/:zoneId/export.csv` | `history-zone-export-csv-http` | `history-api-router-fn` | `history` |
 | `GET /api/history/export.csv` | `history-all-zones-export-csv-http` | `portable-history-api-fn` | `portable_history` |
@@ -160,7 +161,7 @@ The check-group names below reference `check_groups` in the JSON. For a hexadeci
 | `PUT /api/devices/:deveui/sdi12/config` | `sdi12-config-http` | `scoped-device-config-guard` | `device_config` |
 | `GET /api/sdi12/probe-profiles` | `sdi12-profiles-http` | `sdi12-profiles-scope-fn` | `sdi12_profiles` |
 | `POST /api/devices/:deveui/sdi12/identify` | `sdi12-identify-http` | `scoped-device-config-guard` | `device_config` |
-| `GET /api/valves` | `valve-list-get-http` | `valve-api-router-fn` | `valve_api` |
+| `GET /api/valves` | `valve-list-get-http` | `valve-api-router-fn` | `valve_list` |
 | `GET /api/valves/:deveui/schedules` | `valve-schedules-get-http` | `valve-api-router-fn` | `valve_api` |
 | `POST /api/valves/:deveui/schedules` | `valve-schedules-post-http` | `valve-api-router-fn` | `valve_api` |
 | `PUT /api/valves/:deveui/schedules/:uuid` | `valve-schedule-put-http` | `valve-api-router-fn` | `valve_api` |
@@ -197,7 +198,7 @@ The check-group names below reference `check_groups` in the JSON. For a hexadeci
 | `POST /api/irrigation-zones/:id/irrigation-policy/retry-valve` | `conditional-policy-retry-http` | `conditional-policy-route-fn` | `conditional` |
 | `GET /api/irrigation-zones/:id/irrigation-policy/decisions` | `conditional-policy-decisions-http` | `conditional-policy-route-fn` | `conditional` |
 
-The `/api/devices/:deveui/sdi12/recipe/apply` and `/rollback` entry points go directly to `sdi12-config-auth-fn`; updating `scoped-device-config-guard` misses them. `/api/gateway/location` and `/api/gateways/:gatewayEui/location` GET use bearer plus owner-EXISTS SQL without an enabled-account check. The network PUT uses a different module and admin rule.
+The direct `/api/devices/:deveui/sdi12/recipe/apply` and `/rollback` POSTs skip bearer, role and owner checks with scoped mode on. They bypass `scoped-device-config-guard`; flag-off verifies inline HMAC and filters by device owner. Their action nodes call `applyDesiredRecipe` / `rollbackCompatibleRecipe` with no principal. EB5b needs a writer/device/session fence through final commissioning dispatch on both actions, not only a replacement of the skipped verifier. `/api/gateway/location` and `/api/gateways/:gatewayEui/location` GET use bearer plus owner-EXISTS SQL without an enabled-account check. The network PUT uses a different module and admin rule.
 
 For #451, the shared device-config guard has 27 selected outputs. Inspect its selected downstream handler: STREGA and Chameleon owner queries can still refuse an authorized grantee. The separate valve API calls `freshValveScope` and then `ownedValve`, which preserves the same owner barrier. The JSON marks the affected routes with G5.
 
@@ -259,6 +260,14 @@ Each JSON record names its exact function, current checks and required revocatio
 | `osi-command-ledger/index.js` | `withProtectedCommandTransaction` | Delivery, effect binding, payload identity and replay are verified; actor authorization belongs to mutation callback. Gaps: G4, G7. |
 | `osi-zone-commands/index.js` | `applyOnce` | Versioned zone command validates owner binding and desired state; no local bearer. Gaps: G4, G7. |
 | `osi-journal/commands.js` | `applyJournalCommand` | Retained cloud journal applier relies on command binding and current scoped rules; no browser session verifier. Gaps: G4, G7. |
+| `osi-journal/api.js` | `handleHttpRequest` | Own bearer verifier -> resolvePrincipal -> scoped read/write dispatch; flag-off remains independent. Gaps: G1, G4. |
+| `osi-valve-control/api.js` | `freshValveScope` | Uncached current enabled writer; targeted calls check device scope, EUI-less list checks role only. Gaps: G1, G4. |
+| `osi-valve-control/api.js` | `handleHttpRequest` | Own bearer verifier, operational list versus targeted ownedValve; write transactions repeat authorization. Gaps: G1, G4. |
+| `osi-network-api/index.js` | `actor` | Fresh id+username/disabled in both modes; flag-off substitutes admin. Gaps: G1, G4. |
+| `osi-network-api/index.js` | `authorize` | Fresh actor/current installation/device binding; device scope, writer on PUT. No installer entitlement. Gaps: G1, G4. |
+| `osi-sdi12-commissioning/identify-handler.js` | `handleIdentifyAction` | Flag-off own bearer and owner lookup; scoped trusts upstream guard context. Gaps: G1, G4. |
+| `osi-sdi12-commissioning/index.js` | `applyDesiredRecipe` | Claims deployment and enqueues recipe for target; no user/session input. Gaps: G1, G4. |
+| `osi-sdi12-commissioning/index.js` | `rollbackCompatibleRecipe` | Claims rollback deployment and enqueues snapshot for target; no user/session input. Gaps: G1, G4. |
 
 Module re-exports are not extra verifiers: `osi-journal/index.js` exports `api.verifyBearer`/HTTP handling; `osi-history-helper/index.js` exports analysis functions; `osi-valve-control/index.js` composes its API/live wrappers. EB5b must update the implementations and exercise the shipped wrappers.
 
@@ -291,3 +300,41 @@ HTTP exports can hold a request while querying and building a buffer. Recheck be
 Use the machine-readable route list to parameterize actual verifier/route tests. Cover local and linked credentials, each flag state, warm/cold caches and pending loads. Include all module copies, direct SDI-12 recipe paths, exports, account-admin mutations and queued effect boundaries. Test revoke, re-enable, restart and new login with two distinct sessions for the same account; a single-token happy path does not prove all-session revocation.
 
 Rerun `node scripts/test-authority-contract.js` for inventory consistency against the pinned Git object. The inventory remains a dated baseline as implementation changes land; record new consumers and their implementation tests in the owning package. No runtime gate is green merely because this documentation check passes.
+
+## Split admissions and delegated paths
+
+`GET /api/system/features` returns public flags before authentication in either
+mode. It remains public. `/download-sensordata` is account-wide measurement data
+in both flags; only the scoped path currently checks enabled account state.
+`today-liters` similarly lacks the legacy user/owner gate, but its required
+flag-off scope is target ownership. `/api/valves` is an operational writer list,
+not an account-wide viewer read; its list and targeted routes have distinct
+current checks. These each have a separate `check_group`, `admission_today` and
+required admission in the JSON.
+
+The six additional admin verifier callers are
+`account-link-admin-write-guard`, `account-unlink-admin-write-guard`,
+`sync-force-admin-write-guard`, `history-rollups-admin-write-guard`,
+`database-download-admin-read-guard` and `sync-state-admin-read-guard`.
+They delegate to `scope.authorizeAdminRead`; replacing only lexical local
+HMAC implementations misses them. `caller_edges` records real module calls;
+`selected_outputs` records the route-specific guard branch. The validator
+checks both profile copies against the pin and follows those outputs to sinks.
+
+Borrowed-authority records include `al-unlink-db` consuming `_unlinkAuth`,
+`sync-outbox-recover-fn` consuming `_recoveryActor`, both SDI-12 recipe action
+nodes consuming `deviceRow`, and `sdi12-identify-action-fn` delegating to its
+module verifier. The shared module entry/dispatch records name journal
+`handleHttpRequest`, valve `freshValveScope` / `handleHttpRequest` and network
+`actor` / `authorize`. A caller marker is never a durable session fence.
+
+## Cloud admission deltas
+
+`cloud_baseline_deltas` names the reviewed owner shortcut in zone writes,
+caller-link legacy default, claimer physical-command fallback, direct edge-backed
+device rename and prediction owner shortcut. Each records today's admission,
+capability source and legacy fallback separately from the required path. These
+are required CL2 changes, not evidence that the pinned cloud is already conformant.
+The rename adapter retains PATCH `/api/v1/devices/{deviceEui}`, but an edge-backed
+name requires `entity_name_commands_v1`, pending issuance and authoritative
+ACK/mirror settlement. Unbound cloud-local labels remain a separate owner path.

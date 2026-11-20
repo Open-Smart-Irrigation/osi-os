@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 'use strict';
-// Contract/coverage checks only. EB5a/EB5b/EB6/CL2 must test actual consumers.
+// Source coverage and executable normalized vectors; runtime consumers need conformance tests.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { isFakeEui } = require('./verify-doc-hygiene');
+const Ajv2020 = require('ajv/dist/2020');
+const model = require('./lib/authority-contract-model');
 const ROOT = path.resolve(__dirname, '..');
 const DIR = path.join(ROOT, 'docs/contracts/authority');
 const read = name => JSON.parse(fs.readFileSync(path.join(DIR, name), 'utf8'));
@@ -18,15 +20,38 @@ function verify() {
   const inventory = read('fixtures/auth-consumers.json');
   const authority = read('fixtures/authorization.json');
   const revocation = read('fixtures/revocation.json');
+  const pauses = read('fixtures/pause-continuations.json');
+  const decisions = read('fixtures/decisions.json');
+  assert.deepEqual([...manifest.open_questions].sort(), decisions.decisions.map(d => d.id).sort());
+  const schema = read('vectors.schema.json');
+  const ajv = new Ajv2020({ strict: true, allErrors: true });
+  ajv.addSchema(schema);
+  const validate = (def, value) => {
+    const check = ajv.getSchema(schema.$id + '#/$defs/' + def);
+    assert.ok(check(value), `${def}: ${ajv.errorsText(check.errors)}`);
+  };
+  const projection = (actual, expected, where) => {
+    for (const [key, value] of Object.entries(expected)) {
+      assert.deepEqual(actual[key], value, `${where}.${key}`);
+    }
+  };
+  const verifyCase = c => {
+    validate('authorityCase', c);
+    const input = model.merge(authority.valid_defaults, c.input);
+    validate('authorityInput', input);
+    projection(model.authorize(input), c.expected, c.id);
+    return input;
+  };
   assert.equal(inventory.sources.edge_commit, manifest.sources.edge_commit);
   assert.equal(inventory.sources.cloud_commit, manifest.sources.cloud_commit);
   for (const file of manifest.files) assert.ok(fs.existsSync(path.join(DIR, file)), `missing ${file}`);
-  for (const fixture of [inventory, authority, revocation]) {
+  for (const fixture of [inventory, authority, revocation, pauses, decisions]) {
     assert.equal(fixture.contract_version, manifest.contract_version);
   }
   const pinned = file => execFileSync('git', ['show', `${inventory.sources.edge_commit}:${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   const flows = JSON.parse(pinned(inventory.sources.flow_file));
   const nodes = new Map(flows.map(n => [n.id, n]));
+  assert.equal(pinned(inventory.sources.flow_file), pinned(inventory.sources.mirror_flow_file), 'both profile flow copies');
   unique(inventory.routes.map(r => r.node_id), 'HTTP node');
   assert.deepEqual(inventory.routes.map(r => r.node_id).sort(), flows.filter(n => n.type === 'http in').map(n => n.id).sort(), 'every HTTP route, including public/preflight/disabled routes');
   for (const route of inventory.routes) {
@@ -38,13 +63,55 @@ function verify() {
     assert.equal(typeof route.installer_only_in_0_9, 'boolean');
     assert.ok(inventory.check_groups[route.check_group], `check group ${route.node_id}`);
     for (const id of route.auth_nodes) assert.ok(nodes.has(id), `unknown auth node ${id}`);
+    const selected = {};
+    const entry = nodes.get(route.entry_node);
+    if (entry.id === 'scoped-device-config-guard') {
+      const table = JSON.parse(entry.func.match(/const routeTable = (\[.*?\]);/)[1]);
+      selected[entry.id] = table.find(r => r.method === route.method && r.suffix === route.path.split(':deveui')[1]).index;
+    } else if (entry.id === 'scoped-zone-config-guard') {
+      const table = JSON.parse(entry.func.match(/const routes = (\[.*?\]);/)[1]);
+      selected[entry.id] = table.find(r => r.method === route.method && r.routePath === route.path).index;
+    } else if (entry.id === 'sdi12-config-auth-fn') {
+      const selectors = [...entry.func.matchAll(/suffix === '([^']+)' \? (\d+)/g)];
+      selected[entry.id] = Number(selectors.find(m => route.path.endsWith(m[1]))[2]);
+    }
+    assert.deepEqual(route.selected_outputs, selected, `route-specific outputs ${route.path}`);
+    const seen = new Set();
+    const pending = [route.node_id];
+    while (pending.length) {
+      const id = pending.shift();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = nodes.get(id);
+      if (['http response', 'link out', 'mqtt out'].includes(node.type)) continue;
+      const wires = Object.hasOwn(selected, id) ? [node.wires[selected[id]], node.wires.at(-1)] : node.wires || [];
+      pending.push(...wires.flat());
+    }
+    for (const id of route.auth_nodes) assert.ok(seen.has(id), `unreachable consumer ${route.path}/${id}`);
   }
   assert.deepEqual(inventory.inline_bearer_nodes.map(n => n.node_id).sort(), flows.filter(n => /verifyBearer/.test(n.func || '')).map(n => n.id).sort(), 'all inline bearer implementations');
   for (const item of inventory.inline_bearer_nodes) {
     assert.equal(item.file, inventory.sources.flow_file);
     assert.ok(item.revocation_path);
   }
-  assert.deepEqual(inventory.flow_state_consumers.map(n => n.node_id).sort(), flows.filter(n => /authUserId|authUsername|_authUser|_scopedZoneWriteAuthorized|_actorUserUuid|actor_user_uuid|request\.actorId|msg\.osi/.test(n.func || '')).map(n => n.id).sort(), 'all functions carrying or using authenticated actor state');
+  const borrowed = /authUserId|authUsername|_authUser|_scopedZoneWriteAuthorized|_actorUserUuid|actor_user_uuid|request\.actorId|msg\.osi|_unlinkAuth|_recoveryActor|msg\.deviceRow/;
+  assert.equal(inventory.borrowed_authority_pattern, borrowed.source);
+  assert.deepEqual(inventory.flow_state_consumers.map(n => n.node_id).sort(), flows.filter(n => borrowed.test(n.func || '')).map(n => n.id).sort(), 'all borrowed authority consumers');
+  assert.deepEqual(inventory.verification_callers.map(n => n.node_id).sort(), flows.filter(n => /verifyBearer|authorizeAdminRead/.test(n.func || '')).map(n => n.id).sort(), 'includes delegated admin guards');
+  assert.equal(inventory.verification_callers.filter(c => c.kind === 'inline_hmac').length, 73);
+  assert.equal(inventory.verification_callers.filter(c => c.kind === 'shared_bearer').length, 10);
+  assert.equal(inventory.verification_callers.filter(c => c.kind === 'shared_admin').length, 6);
+  for (const route of inventory.routes) {
+    for (const sink of route.module_sinks || []) {
+      assert.ok(pinned(sink.file).includes(sink.function));
+      assert.ok(nodes.get(sink.caller_node).func.includes(sink.function), `real sink caller ${sink.caller_node}`);
+    }
+  }
+  for (const edge of inventory.caller_edges) {
+    const caller = edge.caller_node ? nodes.get(edge.caller_node).func : pinned(edge.caller_file);
+    assert.ok(caller.includes(edge.call), `real caller ${edge.caller_file}/${edge.call}`);
+    assert.ok(pinned(edge.callee_file).includes(`function ${edge.callee_function}(`), `real function ${edge.callee_function}`);
+  }
   for (const state of inventory.state_consumers) {
     if (state.file === inventory.sources.flow_file) {
       for (const id of state.nodes) assert.ok(nodes.has(id), `unknown state consumer ${id}`);
@@ -64,6 +131,7 @@ function verify() {
   }
   for (const item of inventory.module_consumers) {
     const source = pinned(item.file);
+    assert.equal(source, pinned(item.file.replace('bcm2712', 'bcm2709')), `both profile modules: ${item.file}`);
     assert.ok(source.includes(item.function), `missing ${item.file} ${item.function}`);
     assert.ok(item.checks_today && item.revocation_path);
     for (const gap of item.gaps) assert.ok(gaps.has(gap));
@@ -76,36 +144,54 @@ function verify() {
   }
   unique(authority.cases.map(c => c.id), 'authorization case');
   unique(revocation.cases.map(c => c.id), 'revocation case');
-  for (const c of authority.cases) {
-    assert.ok(['allow', 'deny', 'unresolved'].includes(c.expected.decision));
-    assert.ok(manifest.modes.includes(c.mode));
-    assert.equal(typeof c.scoped_access, 'boolean');
-    if (c.expected.decision !== 'allow') assert.equal(c.expected.effects, 0);
-    if (c.expected.decision === 'unresolved') assert.ok(manifest.open_questions.includes(c.expected.question));
+  unique(pauses.cases.map(c => c.id), 'pause case');
+  const inputs = authority.cases.map(verifyCase);
+  for (const c of revocation.cases) {
+    validate('lifecycleCase', c);
+    model.runLifecycle(c.initial, c.steps, authority.valid_defaults, (actual, expected, op) => projection(actual, expected, `${c.id}/${op}`));
   }
-  for (const mode of manifest.modes) {
-    for (const scoped of [false, true]) {
-      for (const action of ['admin_accounts', 'system_reboot', 'system_fan']) {
-        assert.ok(authority.cases.some(c => c.mode === mode && c.scoped_access === scoped && c.action === action && c.actor.gateway_role === 'admin' && c.expected.decision === 'allow'), `${mode}/${scoped}/${action} admin coverage`);
-      }
-    }
+  for (const [id, op, oldDecision] of [
+    ['relink-delayed-credential-cannot-cross', 'credential_delivery', 'committed'],
+    ['credential-ordering-and-duplicate', 'credential_delivery', 'committed'],
+    ['v1-invalid-subject-no-legacy-fallback', 'login', 'allow'],
+  ]) {
+    const bad = structuredClone(revocation.cases.find(c => c.id === id));
+    const step = bad.steps.find(s => s.op === op && s.expected?.decision === 'deny');
+    assert.ok(step, `mutation target ${id}`);
+    step.expected = { decision: oldDecision };
+    validate('lifecycleCase', bad);
+    assert.throws(() => model.runLifecycle(bad.initial, bad.steps, authority.valid_defaults,
+      (actual, expected, name) => projection(actual, expected, `${id}/${name}`)), /decision/);
   }
-  for (const action of ['valve_open', 'valve_cancel', 'strega_timed', 'strega_partial', 'strega_flush', 'chameleon_config']) {
-    for (const origin of ['edge', 'cloud']) {
-      assert.ok(authority.cases.some(c => c.origin === origin && c.action === action && c.actor.gateway_role === 'researcher' && c.actor.zone_relation === 'granted' && c.expected.decision === 'allow'), `granted member parity ${origin}/${action}`);
-    }
+  for (const c of pauses.cases) {
+    validate('pauseCase', c);
+    model.runPause(c.initial, c.steps, authority.valid_defaults, (actual, expected, op) => projection(actual, expected, `${c.id}/${op}`));
   }
-  for (const event of ['disable', 'password_reset', 'role_change']) {
-    for (const scoped of [false, true]) {
-      const c = revocation.cases.find(c => c.event === event && c.scoped_access === scoped);
-      assert.ok(c, `${event}/${scoped} coverage`);
-      assert.ok(c.assertions.some(a => a.after === 'commit' && a.token === 'old' && a.decision === 'deny'));
-      assert.ok(c.assertions.some(a => a.after === 'restart_and_cache_reload' && a.token === 'old' && a.decision === 'deny'));
-    }
+  for (const d of decisions.decisions.filter(d => d.kind === 'product')) {
+    assert.equal(d.owner, 'Phil');
+    assert.equal(d.status, 'open');
+    assert.equal(d.selected_option, null, 'a recommendation is not approval');
+    assert.ok(Object.hasOwn(d.options, d.recommended_option));
+  }
+  const dimensions = { Q1: 'installer', Q2: 'owner_system', Q3: 'offline', Q5: 'prediction', Q7: 'stop_authority', Q8: 'first_admin', Q9: 'clock' };
+  for (const [id, dimension] of Object.entries(dimensions)) {
+    const d = decisions.decisions.find(d => d.id === id);
+    for (const option of Object.keys(d.options)) assert.ok(inputs.some(i => i.policies[dimension] === option), `${id}/${option} runnable`);
+  }
+  // Deliberately corrupt required expectations to the reviewed old behavior.
+  // A shape-only checker would accept these records.
+  for (const id of ['sdi12_recipe_apply-1-missing_bearer', 'sdi12_recipe_rollback-1-revoked', 'cloud-owner-viewer-zone_config', 'rename-no-name-capability']) {
+    const bad = structuredClone(authority.cases.find(c => c.id === id));
+    assert.ok(bad, id);
+    bad.expected = { decision: 'allow', effects: 1 };
+    // Schema is still valid after preserving the required reason.
+    bad.expected.reason = 'authorized';
+    validate('authorityCase', bad);
+    assert.throws(() => verifyCase(bad), /decision/, `${id} old behavior must fail`);
   }
   const doc = fs.readFileSync(path.join(DIR, 'v1.md'), 'utf8');
   for (const question of manifest.open_questions) assert.ok(doc.includes(question));
-  console.log(`authority contract: OK (${inventory.routes.length} routes, ${inventory.inline_bearer_nodes.length} inline verifiers, ${inventory.module_consumers.length} module consumers, ${authority.cases.length} authority cases, ${revocation.cases.length} revocation cases)`);
+  console.log(`authority contract: OK (${inventory.routes.length} routes, ${inventory.verification_callers.length} verifier callers (73 inline, 10 shared, 6 admin), ${inventory.module_consumers.length} module consumers, ${authority.cases.length} authority cases, ${revocation.cases.length} lifecycle cases, ${pauses.cases.length} pause cases; old-behavior mutation probes rejected)`);
 }
 if (require.main === module) {
   try { verify(); } catch (error) { console.error(`authority contract: FAIL: ${error.message}`); process.exitCode = 1; }

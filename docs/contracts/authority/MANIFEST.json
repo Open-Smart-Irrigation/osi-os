@@ -8,9 +8,12 @@
   "files": [
     "v1.md",
     "auth-consumers.md",
+    "vectors.schema.json",
     "fixtures/auth-consumers.json",
     "fixtures/authorization.json",
-    "fixtures/revocation.json"
+    "fixtures/revocation.json",
+    "fixtures/pause-continuations.json",
+    "fixtures/decisions.json"
   ],
   "modes": [
     "local_only",
@@ -34,7 +37,14 @@
     "Q3",
     "Q4",
     "Q5",
-    "Q6"
+    "Q6",
+    "Q7",
+    "Q8",
+    "Q9"
   ],
-  "validation": "node scripts/test-authority-contract.js"
+  "validation": "node scripts/test-authority-contract.js",
+  "product_decisions_owner": "Phil",
+  "product_decisions_selected": false,
+  "model": "scripts/lib/authority-contract-model.js (test-only)",
+  "dependencies": "npm ci --prefix scripts --omit=dev --ignore-scripts"
 }

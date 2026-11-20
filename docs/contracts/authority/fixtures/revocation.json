@@ -1,560 +1,4225 @@
 {
   "contract_version": "authority-v1",
-  "representation": "Semantic generation values are illustrative. EB5b owns persistence, token encoding and approved migration; no schema number is reserved by K1.",
+  "representation": "Typed transition model. Each expected object is asserted against that operation result. Credential and transport strings are synthetic equality labels, never usable credentials. Model is test-only; actual consumers must replay the same transitions.",
   "cases": [
     {
-      "id": "disable-flag-0",
-      "event": "disable",
-      "scoped_access": false,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "disable-all-sessions-flag-0",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
         ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
-        "enabled": false,
-        "gateway_role": "admin"
-      },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "disable-flag-1",
-      "event": "disable",
-      "scoped_access": true,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "disable-all-sessions-flag-1",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": true,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
         ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
-        "enabled": false,
-        "gateway_role": "admin"
-      },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "password_reset-flag-0",
-      "event": "password_reset",
-      "scoped_access": false,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "password_reset-all-sessions-flag-0",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
-        ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
-      },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
         "enabled": true,
-        "gateway_role": "admin"
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "password_reset",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "password_reset-flag-1",
-      "event": "password_reset",
-      "scoped_access": true,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "password_reset-all-sessions-flag-1",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
-        ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
-      },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
         "enabled": true,
-        "gateway_role": "admin"
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": true,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "password_reset",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "role_change-flag-0",
-      "event": "role_change",
-      "scoped_access": false,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "role_change-all-sessions-flag-0",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
-        ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
-      },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
         "enabled": true,
-        "gateway_role": "researcher"
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "role_change",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "role_change-flag-1",
-      "event": "role_change",
-      "scoped_access": true,
-      "before": {
-        "enabled": true,
-        "gateway_role": "admin",
+      "id": "role_change-all-sessions-flag-1",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
         "generation": 7,
-        "sessions": [
-          "old-a",
-          "old-b",
-          "old-c"
-        ],
-        "scope_cache": "warm",
-        "pending_scope_load": true
-      },
-      "mutation": {
-        "canonical_commit": true,
-        "generation": 8,
         "enabled": true,
-        "gateway_role": "researcher"
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": true,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "assertions": [
+      "steps": [
         {
-          "after": "commit",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "reenable",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "restart_and_cache_reload",
-          "token": "old",
-          "decision": "deny",
-          "http_status": 401,
-          "effects": 0
+          "op": "issue_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         },
         {
-          "after": "new_login_when_enabled",
+          "op": "commit_account",
+          "change": "role_change",
+          "commit": true,
+          "credential": "credential-b",
+          "role": "researcher",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "enable",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "restart",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old-c",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
           "token": "new",
-          "decision": "allow_session",
-          "generation": 8,
-          "rights": "current_only"
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
         }
       ]
     },
     {
-      "id": "queued-effect-loses-session",
-      "event": "inflight_revocation",
-      "steps": [
-        "validate old session",
-        "wait for writer",
-        "commit target account disable/reset/role change",
-        "acquire writer",
-        "validate session generation again"
-      ],
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "http_status": 401
-      }
-    },
-    {
-      "id": "grant-revoked-after-cloud-issue",
-      "event": "apply_time_scope",
-      "steps": [
-        "cloud validates member write grant and queues command with actor",
-        "edge revokes grant",
-        "edge receives command",
-        "read current actor and target scope in apply boundary"
-      ],
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "command_result": "terminal_authority_rejection",
-        "reason": "scope_denied"
-      }
-    },
-    {
-      "id": "registration-stale-grant",
-      "event": "apply_time_scope",
-      "command": "REGISTER_DEVICE",
-      "steps": [
-        "issue registration with target zone and actor",
-        "revoke actor grant",
-        "edge checks current actor before radio provisioning or DB mutation"
-      ],
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "command_result": "terminal_authority_rejection",
-        "reason": "scope_denied"
-      }
-    },
-    {
-      "id": "system-admin-demoted-after-issue",
-      "event": "apply_time_role",
-      "command": "REBOOT",
-      "steps": [
-        "cloud queues for enabled gateway admin",
-        "edge demotes actor to researcher and revokes local sessions",
-        "apply command with current actor rights"
-      ],
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "command_result": "terminal_authority_rejection",
-        "reason": "insufficient_role"
-      }
-    },
-    {
-      "id": "authority-store-unavailable",
-      "event": "read_failure",
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "http_status": 503,
-        "command_result": "retryable_error",
-        "reason": "authority_unavailable"
-      }
-    },
-    {
-      "id": "revocation-write-rollback",
-      "event": "mutation_rollback",
-      "expected": {
-        "success_reported": false,
-        "generation_advanced": false,
-        "old_session": "unchanged_subject_to_current_rights",
-        "effects": 0
-      }
-    },
-    {
-      "id": "last-admin-refused",
-      "event": "last_admin_guard",
-      "expected": {
-        "http_status": 409,
-        "generation_advanced": false,
-        "account_changed": false,
-        "effects": 0
-      }
-    },
-    {
-      "id": "legacy-token-upgrade",
-      "event": "upgrade",
-      "token": {
-        "generation": null
+      "id": "private-export-revoked-before-release",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "expected": {
-        "decision": "deny",
-        "http_status": 401,
-        "fresh_login_required": true,
-        "effects": 0
-      }
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "begin_export",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true
+        },
+        {
+          "op": "release_export",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        }
+      ]
     },
     {
-      "id": "expiry-equality",
-      "event": "expiry",
-      "token": {
-        "exp_ms": 1000
+      "id": "queued-effect-after-revocation",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "now_ms": 1000,
-      "expected": {
-        "decision": "deny",
-        "http_status": 401,
-        "effects": 0
-      }
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "queue_effect",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "viewer",
+          "commit": true
+        },
+        {
+          "op": "apply_effect",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        }
+      ]
     },
     {
-      "id": "no-expiry",
-      "event": "expiry",
-      "token": {
-        "exp_ms": null
+      "id": "concurrent-password-check-reset",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
       },
-      "expected": {
-        "decision": "deny",
-        "http_status": 401,
-        "effects": 0
-      }
-    },
-    {
-      "id": "concurrent-login-reset",
-      "event": "login_race",
       "steps": [
-        "verify old password at generation 7",
-        "commit password reset to generation 8",
-        "attempt token issuance from old credential check"
-      ],
-      "expected": {
-        "decision": "deny",
-        "effects": 0,
-        "retry_authentication": true
-      }
+        {
+          "op": "prepare_login",
+          "ticket": "login-a",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a"
+        },
+        {
+          "op": "commit_account",
+          "change": "password_reset",
+          "credential": "credential-b",
+          "commit": true
+        },
+        {
+          "op": "finish_login",
+          "ticket": "login-a",
+          "token": "new",
+          "expected": {
+            "decision": "deny",
+            "reason": "login_superseded"
+          }
+        }
+      ]
     },
     {
-      "id": "cache-load-crosses-revocation",
-      "event": "cache_race",
+      "id": "clock-durable_high_water-before",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
       "steps": [
-        "begin old account scope load",
-        "commit revocation",
-        "invalidate cache and pending-load ticket",
-        "old load completes",
-        "request validates old session"
-      ],
-      "expected": {
-        "decision": "deny",
-        "http_status": 401,
-        "effects": 0,
-        "cache_can_authorize_old_session": false
-      }
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 1999
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
     },
     {
-      "id": "old-role-token-after-promotion",
-      "event": "role_change_promotion",
-      "before_role": "viewer",
-      "after_role": "admin",
-      "expected": {
-        "old_token": "deny",
-        "new_login": "current_admin",
-        "effects": 0
-      }
-    },
-    {
-      "id": "cloud-change-offline",
-      "event": "cloud_pending_offline",
-      "expected": {
-        "cloud_state": "pending_until_edge_applies",
-        "immediate_disconnected_edge_notification": "unresolved",
-        "question": "Q3",
-        "no_applied_claim": true
-      }
-    },
-    {
-      "id": "linked-local-reset-refused",
-      "event": "linked_password_reset",
-      "expected": {
-        "http_status": 409,
-        "code": "linked_account_password_reset_unsupported",
-        "generation_advanced": false,
-        "effects": 0,
-        "question": "Q4"
-      }
-    },
-    {
-      "id": "no-replay-effect",
-      "event": "command_replay",
+      "id": "clock-durable_high_water-equal",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
       "steps": [
-        "command applies once while actor authorized",
-        "rights later revoked",
-        "same completed command delivered again"
-      ],
-      "expected": {
-        "decision": "return_recorded_result",
-        "effects": 0,
-        "new_authority_grant": false
-      }
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "effects": 0
+          }
+        }
+      ]
     },
     {
-      "id": "new-command-current-rights",
-      "event": "fresh_command_after_role_change",
+      "id": "clock-durable_high_water-after",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
       "steps": [
-        "role change revokes all local sessions",
-        "cloud authenticates same actor independently",
-        "new command reaches edge with current actor identity"
-      ],
-      "expected": {
-        "decision": "evaluate_current_actor_rights",
-        "browser_token_not_required": true
-      }
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2001
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "effects": 0
+          }
+        }
+      ]
     },
     {
-      "id": "sent-effect-before-revocation",
-      "event": "already_handed_off",
+      "id": "rollback-after-expiry-durable_high_water",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
       "steps": [
-        "authorized frame handed to transport",
-        "revocation commits"
-      ],
-      "expected": {
-        "future_local_session_use": "deny",
-        "retroactive_unsend_claim": false,
-        "cancel_uses_current_actor": true
-      }
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2001
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_expired"
+          }
+        },
+        {
+          "op": "clock",
+          "now_ms": 1000
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_expired"
+          }
+        }
+      ]
+    },
+    {
+      "id": "revocation-before-clock-durable_high_water",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "viewer",
+          "commit": true
+        },
+        {
+          "op": "clock",
+          "now_ms": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "clock-reject_rollback-before",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "reject_rollback",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 1999
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "clock-reject_rollback-equal",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "reject_rollback",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "clock-reject_rollback-after",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "reject_rollback",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2001
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "rollback-after-expiry-reject_rollback",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "reject_rollback",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "clock",
+          "now_ms": 2001
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_expired"
+          }
+        },
+        {
+          "op": "clock",
+          "now_ms": 1000
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "clock_rollback"
+          }
+        }
+      ]
+    },
+    {
+      "id": "revocation-before-clock-reject_rollback",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "reject_rollback",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "viewer",
+          "commit": true
+        },
+        {
+          "op": "clock",
+          "now_ms": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1-login-revocation-offline-reconnect",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v1",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v1"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "old",
+          "credential": "credential-a",
+          "subject": "gateway-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "disconnect"
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v1"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "gateway-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        },
+        {
+          "op": "reconnect"
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-b",
+          "subject": "gateway-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1-invalid-subject-no-legacy-fallback",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v1",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v1"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "missing-subject",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "legacy_hash_available": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1-wrong-installation-context",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v1",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v1"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "gateway-a",
+          "installation": "installation-other",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2-login-revocation-offline-reconnect",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "old",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "disconnect"
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        },
+        {
+          "op": "reconnect"
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2-invalid-subject-no-legacy-fallback",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "missing-subject",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "legacy_hash_available": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2-wrong-installation-context",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-other",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "credential-ordering-and-duplicate",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "duplicate",
+            "effects": 0
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "different",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "credential_revision_conflict"
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 2,
+            "credential": "credential-a",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_credential_revision"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 8,
+            "credential_revision": 3,
+            "credential": "credential-b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unlink-delayed-credential-cannot-relink",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "link_transition",
+          "linked": false,
+          "incarnation": "unlink-tombstone",
+          "revision": 0,
+          "credential": "no-linked-credential",
+          "cloud_account": "none",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "transport_token": "transport-unlink-tombstone",
+          "transport_revision": 1
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_link_context"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "linked": false,
+            "generation": 8,
+            "link_incarnation": "unlink-tombstone"
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_context_mismatch"
+          }
+        }
+      ]
+    },
+    {
+      "id": "relink-delayed-credential-cannot-cross",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "link_transition",
+          "linked": false,
+          "incarnation": "unlink-tombstone",
+          "revision": 0,
+          "credential": "no-linked-credential",
+          "cloud_account": "none",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "transport_token": "transport-unlink-tombstone",
+          "transport_revision": 1
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "link-b",
+          "revision": 1,
+          "credential": "credential-new-account",
+          "cloud_account": "cloud-b",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 9
+          },
+          "transport_token": "transport-link-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 100,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_link_context"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 9,
+            "cloud_account": "cloud-b",
+            "credential": "credential-new-account"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-new-account",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-b",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "link-transition-rollback-atomic",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "link-b",
+          "revision": 1,
+          "credential": "credential-new-account",
+          "cloud_account": "cloud-b",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": false,
+          "expected": {
+            "decision": "deny",
+            "reason": "mutation_rollback"
+          },
+          "transport_token": "transport-link-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "link_incarnation": "link-a",
+            "credential": "credential-a",
+            "cloud_account": "cloud-a"
+          }
+        }
+      ]
+    },
+    {
+      "id": "credential-update-rollback-atomic",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": false,
+          "expected": {
+            "decision": "deny",
+            "reason": "mutation_rollback"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "credential_revision": 2,
+            "credential": "credential-a"
+          }
+        }
+      ]
+    },
+    {
+      "id": "transport-refresh-not-credential-update",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_token": "transport-b",
+          "expected": {
+            "decision": "transport_refreshed"
+          },
+          "transport_revision": 2
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "credential": "credential-a",
+            "credential_revision": 2,
+            "transport_token": "transport-b"
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "stale-refresh-after-relink",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "link_transition",
+          "linked": false,
+          "incarnation": "unlink-tombstone",
+          "revision": 0,
+          "credential": "no-linked-credential",
+          "cloud_account": "none",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "transport_token": "transport-unlink-tombstone",
+          "transport_revision": 1
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "link-b",
+          "revision": 1,
+          "credential": "credential-new-account",
+          "cloud_account": "cloud-b",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 9
+          },
+          "transport_token": "transport-link-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_token": "transport-old-completion",
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_link_context"
+          },
+          "transport_revision": 2
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 9,
+            "transport_token": "transport-link-b",
+            "credential": "credential-new-account"
+          }
+        }
+      ]
+    },
+    {
+      "id": "online-disabled-transport-subject-edge_commit_only",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "exp_ms": 10000
+        },
+        {
+          "op": "transport_principal",
+          "authorized": false
+        },
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_token": "cannot-refresh",
+          "expected": {
+            "decision": "deny",
+            "reason": "transport_unauthorized"
+          },
+          "transport_revision": 2
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false
+          },
+          "commit": true,
+          "expected": {
+            "decision": "pending_stranded",
+            "effects": 0
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "connected": true,
+            "generation": 7,
+            "enabled": true
+          }
+        },
+        {
+          "op": "disconnect"
+        },
+        {
+          "op": "clock",
+          "now_ms": 6000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "online-disabled-transport-subject-bounded_offline_lease",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "bounded_offline_lease"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "exp_ms": 10000
+        },
+        {
+          "op": "transport_principal",
+          "authorized": false
+        },
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_token": "cannot-refresh",
+          "expected": {
+            "decision": "deny",
+            "reason": "transport_unauthorized"
+          },
+          "transport_revision": 2
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false
+          },
+          "commit": true,
+          "expected": {
+            "decision": "pending_stranded",
+            "effects": 0
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "connected": true,
+            "generation": 7,
+            "enabled": true
+          }
+        },
+        {
+          "op": "disconnect"
+        },
+        {
+          "op": "clock",
+          "now_ms": 6000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "authority_lease_expired",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "installation-transport-delivers-disable",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "transport_principal",
+          "authorized": false
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false
+          },
+          "commit": true,
+          "expected": {
+            "decision": "pending_stranded"
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "transport_principal",
+          "authorized": true
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1-identity-transition",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v1",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v1"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "identity-b",
+          "revision": 1,
+          "credential": "credential-new-identity",
+          "cloud_account": "cloud-a",
+          "installation": "installation-b",
+          "gateway": "gateway-b",
+          "scheme": "v1",
+          "commit": true,
+          "transport_token": "transport-identity-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_context_mismatch"
+          }
+        },
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "gateway-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2-identity-transition",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "identity-b",
+          "revision": 1,
+          "credential": "credential-new-identity",
+          "cloud_account": "cloud-a",
+          "installation": "installation-b",
+          "gateway": "gateway-b",
+          "scheme": "v2",
+          "commit": true,
+          "transport_token": "transport-identity-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_context_mismatch"
+          }
+        },
+        {
+          "op": "login",
+          "token": "bad",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate-does-not-undo-later-disable",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": true
+          },
+          "commit": true,
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": true
+          },
+          "commit": true,
+          "expected": {
+            "decision": "duplicate",
+            "effects": 0
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 9,
+            "enabled": false,
+            "credential_revision": 3,
+            "credential": "credential-b"
+          }
+        }
+      ]
+    },
+    {
+      "id": "equal-revision-account-change-conflicts",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "credential_revision_conflict",
+            "effects": 0
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 8,
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "credential-account-revocation-one-commit",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "enabled": false,
+            "role": "viewer"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "account_mutation_authorized": true
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 8,
+            "enabled": false,
+            "role": "viewer",
+            "credential": "credential-b",
+            "credential_revision": 3
+          }
+        }
+      ]
+    },
+    {
+      "id": "promotion-revokes-viewer-session",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "viewer",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "viewer-old"
+        },
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "admin",
+          "commit": true
+        },
+        {
+          "op": "assert_session",
+          "token": "viewer-old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pending-scope-load-cannot-restore-session",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "begin_scope_load",
+          "ticket": "load-a"
+        },
+        {
+          "op": "commit_account",
+          "change": "password_reset",
+          "credential": "credential-b",
+          "commit": true
+        },
+        {
+          "op": "complete_scope_load",
+          "ticket": "load-a",
+          "expected": {
+            "cache_auth_valid": false,
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked"
+          }
+        }
+      ]
+    },
+    {
+      "id": "last-admin-refusal-preserves-generation",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 1,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "last_admin_conflict"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "enabled": true,
+            "generation": 7,
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unchanged-role-no-revocation",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "admin",
+          "commit": true,
+          "expected": {
+            "decision": "noop"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7
+          }
+        }
+      ]
+    },
+    {
+      "id": "existing-no-admin-explicit-operator-recovery",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "researcher",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 0,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "assert_action",
+          "token": "old",
+          "input": {
+            "action": "admin_accounts"
+          },
+          "expected": {
+            "decision": "deny",
+            "reason": "insufficient_role",
+            "effects": 0
+          }
+        },
+        {
+          "op": "operator_recovery",
+          "trusted_operator": false,
+          "target_uuid": "11111111-1111-4111-8111-111111111111",
+          "expected": {
+            "decision": "deny",
+            "reason": "operator_proof_required"
+          }
+        },
+        {
+          "op": "operator_recovery",
+          "trusted_operator": true,
+          "target_uuid": "11111111-1111-4111-8111-111111111111",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_action",
+          "token": "new",
+          "input": {
+            "action": "admin_accounts"
+          },
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "last_admin_conflict"
+          }
+        }
+      ]
+    },
+    {
+      "id": "older-transport-refresh-cannot-overwrite-current",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_revision": 3,
+          "transport_token": "transport-c"
+        },
+        {
+          "op": "transport_refresh",
+          "incarnation": "link-a",
+          "transport_revision": 2,
+          "transport_token": "transport-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_transport_revision"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "credential_revision": 2,
+            "transport_token": "transport-c",
+            "transport_revision": 3
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1-gateway-rebind-current-subject",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v1",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v1"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "rebind-b",
+          "revision": 1,
+          "credential": "credential-rebound",
+          "cloud_account": "cloud-a",
+          "installation": "installation-a",
+          "gateway": "gateway-b",
+          "scheme": "v1",
+          "commit": true,
+          "transport_token": "transport-rebound",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_context_mismatch"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-rebound",
+          "subject": "gateway-b",
+          "installation": "installation-a",
+          "link_incarnation": "rebind-b",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "v2-gateway-rebind-current-subject",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "link_transition",
+          "linked": true,
+          "incarnation": "rebind-b",
+          "revision": 1,
+          "credential": "credential-rebound",
+          "cloud_account": "cloud-a",
+          "installation": "installation-a",
+          "gateway": "gateway-b",
+          "scheme": "v2",
+          "commit": true,
+          "transport_token": "transport-rebound",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_context_mismatch"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-rebound",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "rebind-b",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new",
+          "expected": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "self-service-credential-cannot-change-role",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "viewer",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "role": "admin"
+          },
+          "account_mutation_authorized": false,
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "privileged_account_mutation_required"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "role": "viewer",
+            "generation": 7,
+            "credential": "credential-a"
+          }
+        }
+      ]
+    },
+    {
+      "id": "combined-account-change-keeps-last-admin-guard",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "lease_until_ms": 5000,
+        "policies": {
+          "clock": "durable_high_water",
+          "offline": "edge_commit_only"
+        },
+        "enabled_admins": 1,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1
+      },
+      "steps": [
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2",
+            "role": "admin",
+            "enabled": false
+          },
+          "account_mutation_authorized": true,
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "last_admin_conflict"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "enabled": true,
+            "generation": 7,
+            "credential": "credential-a"
+          }
+        }
+      ]
     }
   ]
 }
