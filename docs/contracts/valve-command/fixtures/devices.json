@@ -10,6 +10,93 @@
   ],
   "cases": [
     {
+      "id": "r8-open-in-first-receive-window",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN1",
+          "uplink_interval_minutes": 10,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": true,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "r8-open-in-second-receive-window",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN2",
+          "uplink_interval_minutes": 20,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": true,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
       "id": "gen1-late-open",
       "basis": "requirement",
       "check": "scenario",
@@ -17,24 +104,57 @@
         "context": {
           "type_id": "STREGA_VALVE",
           "generation": "GEN1",
+          "uplink_interval_minutes": 10,
           "duration_seconds": 180
         },
         "events": [
           {
-            "type": "queue_at",
-            "at": "2026-11-20T06:00:00.000Z"
+            "type": "enqueue_accepted"
           },
           {
-            "type": "deliver_open",
-            "at": "2026-11-20T09:00:00.000Z"
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": null
+          },
+          {
+            "type": "check_delivery_status"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 3,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
           }
         ]
       },
       "expected": {
-        "physical_start": "2026-11-20T09:00:00.000Z",
-        "physical_stop": "2026-11-20T09:03:00.000Z",
-        "new_interlock": false
-      }
+        "r8_delivered_in_time": false,
+        "at_delivery_check": {
+          "ui_delivery_confirmed": false,
+          "history_delivery_confirmed": false,
+          "observation": "unobserved"
+        },
+        "new_interlock": false,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
     },
     {
       "id": "gen1-already-open-ignores-timed-open",
@@ -44,20 +164,19 @@
         "context": {
           "type_id": "STREGA_VALVE",
           "generation": "GEN1",
-          "opened_at": "2026-11-20T06:00:00.000Z",
+          "already_open": true,
           "original_duration_seconds": 180
         },
         "events": [
           {
             "type": "deliver_open",
-            "at": "2026-11-20T06:01:00.000Z",
             "duration_seconds": 600
           }
         ]
       },
       "expected": {
         "additional_starts": 0,
-        "physical_stop": "2026-11-20T06:03:00.000Z"
+        "original_close_unchanged": true
       }
     },
     {
@@ -68,24 +187,57 @@
         "context": {
           "type_id": "STREGA_VALVE",
           "generation": "GEN2",
+          "uplink_interval_minutes": 20,
           "duration_seconds": 180
         },
         "events": [
           {
-            "type": "queue_at",
-            "at": "2026-11-20T06:00:00.000Z"
+            "type": "enqueue_accepted"
           },
           {
-            "type": "deliver_open",
-            "at": "2026-11-20T09:00:00.000Z"
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": null
+          },
+          {
+            "type": "check_delivery_status"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 3,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
           }
         ]
       },
       "expected": {
-        "physical_start": "2026-11-20T09:00:00.000Z",
-        "physical_stop": "2026-11-20T09:03:00.000Z",
-        "new_interlock": false
-      }
+        "r8_delivered_in_time": false,
+        "at_delivery_check": {
+          "ui_delivery_confirmed": false,
+          "history_delivery_confirmed": false,
+          "observation": "unobserved"
+        },
+        "new_interlock": false,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
     },
     {
       "id": "gen2-already-open-ignores-timed-open",
@@ -95,20 +247,19 @@
         "context": {
           "type_id": "STREGA_VALVE",
           "generation": "GEN2",
-          "opened_at": "2026-11-20T06:00:00.000Z",
+          "already_open": true,
           "original_duration_seconds": 180
         },
         "events": [
           {
             "type": "deliver_open",
-            "at": "2026-11-20T06:01:00.000Z",
             "duration_seconds": 600
           }
         ]
       },
       "expected": {
         "additional_starts": 0,
-        "physical_stop": "2026-11-20T06:03:00.000Z"
+        "original_close_unchanged": true
       }
     },
     {
@@ -728,21 +879,20 @@
       "input": {
         "context": {
           "valve_index": 1,
-          "opened_at": "2026-11-20T06:00:00.000Z",
+          "already_open": true,
           "original_duration_seconds": 180
         },
         "events": [
           {
             "type": "deliver_open",
             "valve_index": 1,
-            "at": "2026-11-20T06:01:00.000Z",
             "duration_seconds": 600
           }
         ]
       },
       "expected": {
         "additional_starts": 0,
-        "physical_stop": "2026-11-20T06:03:00.000Z"
+        "original_close_unchanged": true
       }
     },
     {
@@ -757,18 +907,22 @@
         },
         "events": [
           {
-            "type": "queue_at",
-            "at": "2026-11-20T06:00:00.000Z"
+            "type": "enqueue_accepted"
           },
           {
-            "type": "deliver_open",
-            "at": "2026-11-20T09:00:00.000Z"
+            "type": "delivery_unconfirmed"
+          },
+          {
+            "type": "deliver_open"
+          },
+          {
+            "type": "self_close"
           }
         ]
       },
       "expected": {
-        "physical_start": "2026-11-20T09:00:00.000Z",
-        "physical_stop": "2026-11-20T09:03:00.000Z",
+        "physical_starts": 1,
+        "self_closed": true,
         "new_interlock": false
       }
     }
