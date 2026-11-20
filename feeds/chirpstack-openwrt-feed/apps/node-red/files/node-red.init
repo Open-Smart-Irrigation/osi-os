@@ -426,6 +426,10 @@ payload_hold_check() {
 
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
+    if [ -e "$OSI_DB_PATH.osi-recovery" ] || [ -L "$OSI_DB_PATH.osi-recovery" ]; then
+        logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH.osi-recovery before starting Node-RED."
+        return 1
+    fi
     payload_switch_repair
     payload_schema_check || return 0
     payload_hold_check || return 0
@@ -527,7 +531,7 @@ start_service() {
     local flow_file="/srv/$PACKAGE_NAME/flows.json"
     local cloud_broker_node_id="ec43625ea99685a6"
     local agroscope_broker_node_id="agroscope-mqtt-broker"
-    local startup_report startup_warning
+    local startup_report startup_warning committed
     if startup_report="$(
         FLOW_FILE="$flow_file" \
         CRED_FILE="$cred_file" \
@@ -543,7 +547,7 @@ start_service() {
         node 2>&1 <<'NODE'
 const fs = require('fs');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const flowFile = process.env.FLOW_FILE;
 const credFile = process.env.CRED_FILE;
 const cloudBrokerNodeId = process.env.CLOUD_BROKER_NODE_ID;
@@ -583,19 +587,22 @@ function readJson(file, isValid) {
     throw error;
   }
   if (!stat.isFile()) throw new Error('expected a regular file at ' + file);
-  const bytes = fs.readFileSync(file);
-  if (!bytes.length) return { stat, problem: 'empty' };
-  if (bytes.every(byte => byte === 0)) return { stat, problem: 'zeroed' };
+  return { stat, ...parseJson(fs.readFileSync(file), isValid) };
+}
+
+function parseJson(bytes, isValid) {
+  if (!bytes.length) return { problem: 'empty' };
+  if (bytes.every(byte => byte === 0)) return { problem: 'zeroed' };
   let value;
   try {
     value = JSON.parse(bytes.toString('utf8'));
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     // JSON parser errors can contain fragments of credential values.
-    return { stat, problem: 'invalid JSON' };
+    return { problem: 'invalid JSON' };
   }
-  if (!isValid(value)) return { stat, problem: 'unexpected JSON shape' };
-  return { stat, bytes, value };
+  if (!isValid(value)) return { problem: 'unexpected JSON shape' };
+  return { bytes, value };
 }
 
 function syncDirectory(file) {
@@ -632,10 +639,36 @@ function quarantine(file) {
   return saved;
 }
 
+function clearRollbackLinks(file, verify = () => {}) {
+  const parent = path.dirname(file);
+  const prefix = path.basename(file) + '.tmp-';
+  const leftovers = fs.readdirSync(parent).filter(name =>
+    name.startsWith(prefix) && /^[a-f0-9-]{36}\.previous$/.test(name.slice(prefix.length)));
+  if (!leftovers.length || !fs.existsSync(file)) return;
+  verify();
+  const dir = fs.openSync(parent, 'r');
+  try {
+    for (const name of leftovers) {
+      const old = path.join(parent, name);
+      const live = fs.statSync(file);
+      const saved = fs.lstatSync(old);
+      // The live file must already be valid. Even then, only remove an
+      // owned rollback link to a regular file beside it.
+      if (live.isFile() && saved.isFile()) fs.unlinkSync(old);
+    }
+    fs.fsyncSync(dir);
+  } finally {
+    fs.closeSync(dir);
+  }
+}
+
 function writeAtomic(file, content, { mode, uid, gid }, previous, archive) {
   const temp = file + '.tmp-' + randomUUID();
-  const fd = fs.openSync(temp, 'wx', 0o600);
+  const dir = fs.openSync(path.dirname(file), 'r');
+  let staged = false;
   try {
+    const fd = fs.openSync(temp, 'wx', 0o600);
+    staged = true;
     try {
       fs.fchownSync(fd, uid, gid);
       fs.fchmodSync(fd, mode & 0o7777);
@@ -645,41 +678,128 @@ function writeAtomic(file, content, { mode, uid, gid }, previous, archive) {
       fs.closeSync(fd);
     }
 
-    // Keep the previous inode reachable until the directory sync succeeds.
-    // For recovery, leave that inode under its timestamped quarantine name.
     const saved = previous && (archive ? quarantineName(file) : temp + '.previous');
     if (saved) fs.linkSync(file, saved);
     try {
       fs.renameSync(temp, file);
+      staged = false;
     } catch (error) {
-      if (saved) fs.unlinkSync(saved);
+      if (saved) {
+        fs.unlinkSync(saved);
+        fs.fsyncSync(dir);
+      }
       throw error;
     }
-    syncPublishedFile(file, () => {
-      if (saved) fs.renameSync(saved, file);
-      else fs.unlinkSync(file);
-    });
-    if (saved && !archive) fs.unlinkSync(saved);
+    try {
+      fs.fsyncSync(dir);
+    } catch (error) {
+      try {
+        if (saved) fs.renameSync(saved, file);
+        else fs.unlinkSync(file);
+        fs.fsyncSync(dir);
+      } catch (rollback) {
+        throw new Error(error.message + '. Rollback could not be synced: ' + rollback.message);
+      }
+      throw error;
+    }
+    if (saved && !archive) {
+      try {
+        fs.unlinkSync(saved);
+        fs.fsyncSync(dir);
+      } catch (error) {
+        console.warn('WARN: could not finish rollback-link cleanup for ' + file + ': ' + error.message);
+      }
+    }
     return archive ? saved : null;
   } finally {
-    fs.rmSync(temp, { force: true });
+    try {
+      if (staged) fs.rmSync(temp, { force: true });
+    } finally {
+      fs.closeSync(dir);
+    }
   }
 }
 
+function isFlows(value) {
+  if (!Array.isArray(value) || value.some(node => !node || typeof node.id !== 'string' || typeof node.type !== 'string')) return false;
+  const tabs = new Set(value.filter(node => node.type === 'tab').map(node => node.id));
+  return value.some(node => node.type === 'http in' && tabs.has(node.z) &&
+    typeof node.url === 'string' && node.url.startsWith('/') && typeof node.method === 'string' && node.method);
+}
+
+const root = path.dirname(flowFile);
+const payloads = path.join(root, 'payloads');
+const active = ['active', '.active'].map(name => path.join(payloads, name))
+  .find(file => fs.lstatSync(file, { throwIfNoEntry: false }));
+const flowLink = fs.lstatSync(flowFile, { throwIfNoEntry: false })?.isSymbolicLink();
+const guiLink = fs.lstatSync('/usr/lib/node-red/gui', { throwIfNoEntry: false })?.isSymbolicLink();
+
+function persistFlowHold(stamp, reason) {
+  const line = 'HELD: Node-RED stopped. ' + reason + '. Re-run the deploy for this release to stage verified flows.';
+  const mode = { mode: 0o644, uid: process.getuid(), gid: process.getgid() };
+  const state = path.join(root, 'payload-state.json');
+  const note = path.join(root, 'DEPLOY-HELD');
+  const record = { format: 1, active: stamp, state: 'held', reason: line, updated_at: new Date().toISOString(), writer: 'flow-recovery' };
+  console.error(line);
+  writeAtomic(state, JSON.stringify(record) + '\n', mode, fs.existsSync(state), false);
+  writeAtomic(note, line + '\n', mode, fs.existsSync(note), false);
+}
+
 try {
-  const active = path.join(path.dirname(flowFile), 'payloads', 'active');
-  // deploy's boot repair normally recreates the public link. If its target
-  // is missing too, restore that target before recreating the public link.
-  const restoreLink = !fs.lstatSync(flowFile, { throwIfNoEntry: false }) &&
-    fs.lstatSync(active, { throwIfNoEntry: false })?.isSymbolicLink();
+  const restoreLink = !fs.lstatSync(flowFile, { throwIfNoEntry: false }) && Boolean(active);
   const flowVia = restoreLink ? path.join(active, 'flows.json') : flowFile;
-  const flowTarget = realTarget(flowVia);
+  let flowTarget;
+  let stamp = '';
+  const deployed = Boolean(active || flowLink || guiLink);
+  let source;
+  let sourceName = '/usr/share/flows.json';
+  let live;
+  try {
+    flowTarget = realTarget(flowVia);
+    if (deployed) {
+      const realPayloads = fs.realpathSync(payloads);
+      const dir = path.dirname(flowTarget);
+      if (path.dirname(dir) !== realPayloads || path.basename(flowTarget) !== 'flows.json' ||
+          (active && fs.realpathSync(active) !== dir)) {
+        throw new Error('flows do not belong to the selected payload');
+      }
+      stamp = path.basename(dir);
+    }
+    live = readJson(flowTarget, isFlows);
+    source = live;
+    if (live.problem) {
+      if (deployed) {
+        const helper = require(path.join(root, '.payload-swap.js'));
+        const bytes = helper.readPristineFlows(root, stamp);
+        sourceName = path.join(path.dirname(flowTarget), 'flows.pristine.json');
+        source = { stat: fs.statSync(sourceName), ...parseJson(bytes, isFlows) };
+      } else {
+        source = readJson(sourceName, isFlows);
+      }
+      if (source.problem) throw new Error('cannot restore flows.json (' + source.problem + ')');
+    }
+  } catch (error) {
+    if (deployed) {
+      persistFlowHold(stamp, error.message);
+      if (live?.stat && live.problem) {
+        const archive = quarantineName(flowTarget);
+        fs.linkSync(flowTarget, archive);
+        syncDirectory(flowTarget);
+        console.error('HELD: preserved rejected flow bytes at ' + archive);
+      }
+    }
+    throw error;
+  }
+  if (!live.problem) clearRollbackLinks(flowTarget);
+  const settings = realTarget(path.join(root, 'settings.js'));
+  // A completed legacy settings patch can leave a rollback name if power
+  // goes out before cleanup. A valid live file must exist before removing it.
+  clearRollbackLinks(settings, () => {
+    const source = fs.readFileSync(settings, 'utf8');
+    if (!source.trim()) throw new Error('settings.js is empty');
+    new (require('vm').Script)(require('module').wrap(source));
+  });
   const credTarget = realTarget(credFile);
-  const isFlows = value => Array.isArray(value) && value.length > 0;
-  const live = readJson(flowTarget, isFlows);
-  const bundledFile = '/usr/share/flows.json';
-  const source = live.problem ? readJson(bundledFile, isFlows) : live;
-  if (source.problem) throw new Error('cannot restore flows.json from ' + bundledFile + ' (' + source.problem + ')');
 
   const flows = source.value;
   const credentials = readJson(credTarget, value => value !== null && typeof value === 'object' && !Array.isArray(value));
@@ -694,6 +814,7 @@ try {
       fs.chmodSync(credTarget, credentialMode.mode);
     }
   }
+  if (!credentials.problem) clearRollbackLinks(credTarget);
   const creds = credentials.value || {};
   let credsChanged = false;
   let flowsChanged = false;
@@ -755,14 +876,17 @@ try {
     // symlinks still point to the same payload after recovery.
     const saved = writeAtomic(flowTarget, bytes, live.stat || source.stat, live.stat, live.problem);
     if (saved) console.log('WARN: quarantined flows.json (' + live.problem + ') at ' + saved);
-    if (live.problem) console.log('WARN: restored flows.json (' + live.problem + ') from ' + bundledFile + ' to ' + flowTarget);
+    if (live.problem) console.log('WARN: restored flows.json (' + live.problem + ') from ' + sourceName + ' to ' + flowTarget);
   }
   if (restoreLink) {
     fs.symlinkSync(flowVia, flowFile);
     syncPublishedFile(flowFile, () => fs.unlinkSync(flowFile));
     console.log('WARN: recreated the public flows.json symlink');
   }
-  if (live.problem || flowsChanged) console.log('INFO: committed flows.json MQTT runtime settings');
+  if (live.problem || flowsChanged) {
+    const digest = createHash('sha256').update(fs.readFileSync(flowTarget)).digest('hex');
+    console.log('INFO: committed flows.json digest=' + digest + ' stamp=' + (stamp || 'image'));
+  }
 } catch (error) {
   console.error('ERROR: unable to prepare Node-RED runtime files: ' + error.message);
   process.exitCode = 1;
@@ -776,13 +900,10 @@ NODE
             startup_warning="$(printf '%s\n' "$startup_report" | sed -n '/^WARN: /p')"
             # Also mark the lasting write on the boot console, before procd
             # starts Node-RED. The line contains no identity or credentials.
-            case "$startup_report" in
-                *'INFO: committed flows.json MQTT runtime settings'*)
-                    if [ -c /dev/console ]; then
-                        printf '%s\n' 'node-red.init: committed flows.json MQTT runtime settings' 2>/dev/null >/dev/console || true
-                    fi
-                    ;;
-            esac
+            committed="$(printf '%s\n' "$startup_report" | sed -n 's/^INFO: \(committed flows.json digest=.*\)$/\1/p')"
+            if [ -n "$committed" ] && [ -c /dev/console ]; then
+                printf 'node-red.init: %s\n' "$committed" 2>/dev/null >/dev/console || true
+            fi
         fi
     else
         printf '%s\n' "$startup_report" >&2

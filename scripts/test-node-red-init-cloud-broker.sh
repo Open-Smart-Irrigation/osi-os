@@ -121,7 +121,7 @@ HARNESS
 
 write_flows() {
     mkdir -p "$SANDBOX/srv/node-red"
-    printf '[{"id":"%s","type":"mqtt-broker","name":"OSI Cloud Broker","broker":"%s","port":"443","clientid":"device_${DEVICE_EUI}"}]\n' \
+    printf '[{"id":"%s","type":"mqtt-broker","name":"OSI Cloud Broker","broker":"%s","port":"443","clientid":"device_${DEVICE_EUI}"},{"id":"fixture","type":"tab"},{"id":"route","type":"http in","z":"fixture","url":"/api/fixture","method":"get"}]\n' \
         "$BROKER_NODE_ID" "$1" > "$SANDBOX/srv/node-red/flows.json"
 }
 

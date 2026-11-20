@@ -95,11 +95,9 @@ test('an interrupted restore copy cannot publish a partial database', async t =>
     throw new Error('injected copy failure');
   });
   await assert.rejects(runBootIntegrityCheck(dbPath), /injected copy failure/);
-  assert.equal(fs.existsSync(dbPath), false);
-  const saved = fs.readdirSync(dir).filter(name => name.startsWith('farming.db.corrupt-'));
-  assert.equal(saved.length, 1);
-  assert.deepEqual(fs.readFileSync(path.join(dir, saved[0])), original);
-  assert.equal(fs.readdirSync(dir).some(name => name.startsWith('.integrity-stage-')), false);
+  assert.deepEqual(fs.readFileSync(dbPath), original);
+  assert.equal(fs.readdirSync(dir).some(name => name.startsWith('.integrity-restore-')), false);
+  assert.equal((await runBootIntegrityCheck(dbPath)).status, 'held');
 });
 
 test('corrupt DB + newest backup also corrupt, older one passes: restores older', async () => {
@@ -121,10 +119,9 @@ test('corrupt DB + no passing backup: unrecoverable', async () => {
   corrupt(dbPath);
   const result = await runBootIntegrityCheck(dbPath, { now: Date.now() });
   assert.equal(result.status, 'unrecoverable');
-  assert.ok(result.quarantinedTo);
   assert.ok(result.stampPath);
-  assert.ok(!fs.existsSync(dbPath), 'DB absent after unrecoverable (no fabrication)');
-  assert.ok(fs.existsSync(result.quarantinedTo), 'corrupt file quarantined');
+  assert.ok(fs.existsSync(dbPath), 'preserve the original when there is no validated replacement');
+  assert.equal((await runBootIntegrityCheck(dbPath)).status, 'held');
 });
 
 test('missing DB: ok-missing, no side effects', async () => {
@@ -151,4 +148,36 @@ test('corrupt WAL DB: sidecars quarantined alongside main file', async () => {
   assert.ok(quarantined.length >= 1, 'corrupt files moved');
   assert.ok(!fs.existsSync(walPath), 'WAL moved');
   assert.ok(!fs.existsSync(shmPath), 'SHM moved');
+});
+
+for (const failure of ['candidate fsync', 'post-quarantine fsync', 'post-publication fsync']) {
+  test(`${failure} leaves recovery held on reboot`, async t => {
+    const dir = scratch();
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const dbPath = makeDb(dir);
+    makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
+    corrupt(dbPath);
+    const original = fs.readFileSync(dbPath);
+    const sync = fs.fsyncSync;
+    t.mock.method(fs, 'fsyncSync', fd => {
+      const target = fs.readlinkSync('/proc/self/fd/' + fd);
+      const quarantined = fs.readdirSync(dir).some(name => name.startsWith('farming.db.corrupt-'));
+      if ((failure === 'candidate fsync' && target.endsWith('/candidate')) ||
+          (target === dir && quarantined && fs.existsSync(dbPath) === (failure === 'post-publication fsync'))) {
+        throw new Error('injected ' + failure);
+      }
+      return sync(fd);
+    });
+    await assert.rejects(runBootIntegrityCheck(dbPath), new RegExp('injected ' + failure));
+    assert.equal((await runBootIntegrityCheck(dbPath)).status, 'held');
+    if (failure === 'candidate fsync') assert.deepEqual(fs.readFileSync(dbPath), original);
+    if (failure === 'post-quarantine fsync') assert.equal(fs.existsSync(dbPath), false);
+  });
+}
+
+test('the service wrapper propagates the check failure even when logger succeeds', () => {
+  const { spawnSync } = require('node:child_process');
+  const source = fs.readFileSync(path.join(__dirname, '../../../../etc/init.d/osi-db-integrity'), 'utf8');
+  const result = spawnSync('sh', ['-c', source + '\nnode() { return 47; }; logger() { :; }; start']);
+  assert.equal(result.status, 47);
 });
