@@ -5,6 +5,7 @@ import { HeaderMenu } from './HeaderMenu';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { isDesktopBrowser } from '../utils/isDesktopBrowser';
 import { useGatewayModules } from '../hooks/useGatewayModules';
+import { useDesktopData } from '../history/useDesktopData';
 
 type TabKey = 'zones' | 'data' | 'journal' | 'network';
 
@@ -30,8 +31,8 @@ const HEADER_BUTTON =
 /**
  * Top-level chrome for pages that carry the primary tab bar
  * (Zones / Data / Journal): page title + welcome line, the action row, and the
- * tab navigation. The Data tab routes to the desktop analysis workspace or the
- * mobile history view depending on the device — the two are one destination.
+ * tab navigation. Data uses Analysis on desktop and History on narrow screens
+ * and mobile browsers.
  *
  * DashboardHeader and HistoryMobileHeader compose this same navigation.
  */
@@ -55,7 +56,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   // answer arrives.
   const modules = useGatewayModules();
 
-  const dataTarget = isDesktopBrowser() ? '/analysis' : '/history';
+  const dataTarget = useDesktopData() ? '/analysis' : '/history';
   const dataActive =
     activeTab === 'data' ||
     pathname.startsWith('/history') ||

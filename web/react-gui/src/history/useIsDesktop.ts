@@ -12,9 +12,13 @@ export function useIsDesktop(): boolean {
     const mql = window.matchMedia?.(query);
     const onChange = () => setIsDesktop(mql?.matches ?? window.innerWidth >= DESKTOP_MIN_WIDTH);
     onChange();
-    if (mql) {
+    if (typeof mql?.addEventListener === 'function') {
       mql.addEventListener('change', onChange);
       return () => mql.removeEventListener('change', onChange);
+    }
+    if (typeof mql?.addListener === 'function') {
+      mql.addListener(onChange);
+      return () => mql.removeListener(onChange);
     }
     window.addEventListener('resize', onChange);
     return () => window.removeEventListener('resize', onChange);

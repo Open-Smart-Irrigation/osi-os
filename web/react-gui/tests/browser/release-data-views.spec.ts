@@ -115,6 +115,7 @@ test('1.0 packaged GUI keeps the legacy phone route and desktop data chart', asy
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('./#/analysis');
     await expect(page).toHaveURL(/#\/history$/);
+    await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open Soil Moisture history' })).toBeVisible();
     expect(seriesRequests).toHaveLength(0);
   }
