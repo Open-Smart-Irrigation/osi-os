@@ -49,7 +49,7 @@ clock without changing any date calculation.
    package manifest also reports Node 20.18.3-r1 and Node-RED 3.1.15-r1.
 5. Compare old and new under `TZ=Europe/Zurich` as well as UTC. Today-liters uses
    process-local midnight; the environment date uses the zone timezone.
-6. Render the handoff to an external scratch tree. Run the flow parse, wiring,
+6. In GitHub CI, render the handoff to an external scratch tree. Run the flow parse, wiring,
    size, silent-catch, bare-require and full sync-flow gates on that staged result.
    The two repository flow files remain untouched until the dispatcher grants
    the reservation. Repeat those gates after applying the final adapter patch.

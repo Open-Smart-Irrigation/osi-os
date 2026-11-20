@@ -28,7 +28,16 @@ async function main() {
   const cases = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'cases.json')));
   let count = 0;
   let deployedFunction = null;
+  function flowsStarted() {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { RED.events.removeListener('flows:started', ready); reject(new Error('Node-RED flows did not start')); }, 10000);
+      function ready() { clearTimeout(timer); resolve(); }
+      RED.events.once('flows:started', ready);
+    });
+  }
+  const initialStart = flowsStarted();
   await RED.start();
+  await initialStart;
   async function executor(source, msg, deps) {
     // Bind only the libraries actually declared by the selected node. This
     // avoids npm installation in Node-RED and keeps host IO under the harness.
@@ -40,7 +49,9 @@ async function main() {
     const flows = [{ id: 'x3-tab', type: 'tab', label: 'X3 parity' }, functionNode,
       ...Array.from({ length: Number(source.outputs) }, (_, i) => ({ id: 'x3-output-' + i, type: 'x3-capture', z: 'x3-tab', port: i, wires: [] }))];
     if (deployedFunction !== func) {
-      await RED.nodes.setFlows(flows);
+      const started = flowsStarted();
+      await RED.nodes.setFlows(flows, null, 'full', false, true);
+      await started;
       deployedFunction = func;
     }
     RED.nodes.getNode('x3-function').context().global.set('x3', { deps });

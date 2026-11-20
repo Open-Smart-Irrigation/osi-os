@@ -25,6 +25,10 @@ Capture and UTC verification compare to the same committed oracle. A non-UTC run
 must compare old and new directly because the existing today-liters handler uses
 the process-local midnight. This behavior is retained.
 
+On Node 22+, the fixture uses `node:sqlite`. Release Node 20 uses a persistent
+Python SQLite worker over private FIFOs, keeping the same synchronous interface
+without disk fsyncs or an npm native addon. Python 3 and `mkfifo` are required.
+
 For real function-node VM execution, use the pinned release Node 20.18.3 binary
 and set `X3_NODE_RED_DIR` to an installed Node-RED 3.1.15 or 4.0.9 package directory:
 

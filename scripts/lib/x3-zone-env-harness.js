@@ -6,7 +6,8 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
-const { spawnSync } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
+const { spawnSync, spawn } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '../..');
 const FIXTURES = path.join(ROOT, 'scripts/fixtures/x3-zone-env');
 const LEGACY = require('../fixtures/x3-zone-env/legacy-nodes.json');
@@ -28,24 +29,48 @@ function fixedDate(now) {
 }
 function sqlValue(v) { return v == null ? 'NULL' : typeof v === 'number' ? String(v) : "'" + String(v).replace(/'/g, "''") + "'"; }
 function database(dir) {
-  // Node 20 (the release runtime) has no node:sqlite. Use the system SQLite
-  // CLI there, and the native in-memory engine on development Node 22+.
+  // Node 20 (the release runtime) has no node:sqlite. Use a persistent
+  // Python SQLite worker there, and the native engine on development Node 22+.
   let db;
   if (Number(process.versions.node.split('.')[0]) >= 22) {
     const { DatabaseSync } = require('node:sqlite');
     db = new DatabaseSync(':memory:');
     return { exec: sql => db.exec(sql), rows: (sql, params) => db.prepare(sql).all(...params), close: () => db.close() };
   }
-  const file = path.join(dir, 'fixture.db');
-  function call(sql, json) {
-    const r = spawnSync('sqlite3', [...(json ? ['-json'] : []), file], { input: sql, encoding: 'utf8' });
-    if (r.error || r.status) throw r.error || new Error(r.stderr.trim().replace(/^Parse error near line \d+: /, '').split('\n')[0]);
-    return json ? JSON.parse(r.stdout || '[]') : undefined;
+  // A persistent SQLite worker avoids a process and disk fsync per SQL call.
+  // The parent uses blocking FIFOs, so the same synchronous harness interface
+  // runs inside Node-RED 3/4 on release Node 20 without another npm dependency.
+  const input = path.join(dir, 'sql-in');
+  const output = path.join(dir, 'sql-out');
+  const fifo = spawnSync('mkfifo', [input, output], { encoding: 'utf8' });
+  if (fifo.error || fifo.status) throw fifo.error || new Error(fifo.stderr);
+  const inputFd = fs.openSync(input, fs.constants.O_RDWR);
+  const outputFd = fs.openSync(output, fs.constants.O_RDWR);
+  const child = spawn('python3', ['-u', path.join(__dirname, 'x3-sqlite-worker.py')], { stdio: [inputFd, outputFd, 'inherit'] });
+  const buffer = Buffer.alloc(65536);
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  function call(request) {
+    const bytes = Buffer.from(JSON.stringify(request) + '\n');
+    let written = 0;
+    while (written < bytes.length) written += fs.writeSync(inputFd, bytes, written, bytes.length - written);
+    while (!pending.includes('\n')) {
+      const count = fs.readSync(outputFd, buffer, 0, buffer.length, null);
+      if (!count) throw new Error('SQLite worker exited without a response');
+      pending += decoder.write(buffer.subarray(0, count));
+    }
+    const end = pending.indexOf('\n');
+    const answer = JSON.parse(pending.slice(0, end));
+    pending = pending.slice(end + 1);
+    if (!answer.ok) throw new Error(answer.error);
+    return answer.value;
   }
-  return { exec: sql => call(sql, false), rows: (sql, params) => {
-    let i = 0;
-    return call(sql.replace(/\?/g, () => sqlValue(params[i++])), true);
-  }, close() {} };
+  return { exec: sql => call({ kind: 'exec', sql }), rows: (sql, params) => call({ kind: 'rows', sql, params }), close() {
+    call({ kind: 'close' });
+    fs.closeSync(inputFd);
+    fs.closeSync(outputFd);
+    child.unref();
+  } };
 }
 function seed(db, c) {
   db.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
