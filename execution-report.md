@@ -1,100 +1,90 @@
-# EB12 implementation evidence
+# EB12 review fixes
 
-EB12 adds bounded per-zone history CSV generation, a shared export slot and the
-Excel UTF-8 BOM. The draft remains blocked on the dispatcher's flows reservation
-for the per-zone slot and `Retry-After` wiring. No flow or GUI file was edited.
+This revision addresses the seven findings from the review of `365d290a3`.
+Input materialization, encoded CSV bytes and aggregate cells now have separate
+limits enforced before retaining the corresponding work. Both runtime profiles
+are byte-identical. Neither `flows.json` was edited.
 
-Startup: READY, base and HEAD `ec822b556`, behind 0 / ahead 0; AGENTS.md revision
-`c63103827`. The initial inherited checkout was MISMATCH (79 behind / 3 ahead),
-so implementation started on a fresh branch from `origin/main`, as required by
-the common brief. Branch: `fix/eb12-history-export-bounds`.
+Startup for this revision: READY at `5115b35b7`, based on `origin/main`
+`1a984f31f`, behind 0 / ahead 1. AGENTS.md revision: `c63103827`. The branch was
+rebased from the reviewed head onto a runbook-only main change before edits.
 
-## Red evidence
+## Findings and fixes
 
-Before implementation, the new bounds suite failed on both profiles because
-`maxRows: 1` did not reject the per-zone export, and because the second local
-DST day lacked its expected null-valued channel row (4 failures). Separate
-checks failed because the shared slot was not exported and because the CSV
-fixture lacked the three BOM bytes. The first test-fixture attempt also failed
-on required setup timestamps; those setup errors were corrected before the
-behavior red run.
-
-After implementation, the all-zones suite initially reported four byte mismatch
-failures in assertions that still expected BOM-free headers. Only those header
-expectations changed. The new behavior tests passed on both profiles in that run. Broader history
-checks then identified six pinned-byte assertions and two month-row assertions
-affected by the BOM and explicit missing days. The measured-row hashes were
-retained: comparisons remove the BOM and the new blank daily cells. The month
-fixture still requires all 21 measured days and now also requires 9 blank days.
-
-## Implementation
-
-The existing inclusive limits remain 92 raw days, 730 hourly days and 3,660 daily
-days. Both public builders now enforce 200,000 output rows. Aggregate exports
-also check potential source/channel/bucket cells, including empty buckets and
-pF expansion, before reading a zone's history. This budget accumulates across
-zones and cannot be raised through options.
-
-The month-at-a-time aggregate reader limits each daily skeleton to 31 days per
-source window. A three-channel SWT sensor reserves 21,960 cells over 3,660 days;
-nine fit under 200,000 and ten do not. Extreme historical ranges return 413.
-Exact range boundaries and budget accumulation have dedicated tests.
-
-Daily exports emit blank missing values per source/channel, preserving measured
-zero and each zone's local day through DST. No requested depth is replaced by
-another depth. Existing kPa/pF precision and formula escaping remain covered.
-
-All history CSV serializers and generated daily files write one BOM. The golden
-CSV response differs only by that prefix. A compatibility fixture checks quoted
-Unicode text, formulas, zero and missing values through UTF-8 bytes, the GUI's
-blob-wrapping operation and Python's `utf-8-sig` CSV reader. Old daily files gain
-a single BOM on rewrite; repeated writes do not add another.
-
-## Consumer audit
-
-The read-only server checkout at `460c424be` has no history-CSV importer. Its
-history sync uses structured payloads; its `HistoryCsvWriter` is an exporter.
-Provider-weather CSV parsers and Flyway-ledger scripts consume other inputs.
-The edge GUI downloads these files as blobs without parsing the header. Its
-source is unchanged. The in-repo all-zones test parser strips one leading BOM.
-Cloud-generated CSV changes belong to the cloud export package.
-
-## Checks
-
-Every command below exited 0 on the final code. The export suites reported
-51/51 passing tests; the broader history suites reported 120/120. The constrained
-heap run reported 10/10, and the HTTP response suite reported 2/2.
-
-| Command | Result / observed pass signal |
+| Finding | Fix and evidence |
 |---|---|
-| `node --test --test-concurrency=1 scripts/test-history-export-bounds.js scripts/test-history-all-zones-export.js` | PASS; `# tests 51`, `# pass 51`, `# fail 0` |
-| `node scripts/test-history-helper.js` | PASS; ends `OK runRollupJob populates hourly and daily rollups for a zone` |
-| `node conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js` | PASS; 45 tests, 0 failures |
-| `node conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.test.js` | PASS; `76 passed, 0 failed` |
-| `node scripts/capture-history-router-vectors.js --verify` | PASS; `[verify] 4/4 routes passed.` |
-| `node scripts/verify-history-api-contract.js` | PASS; `verify-history-api-contract: OK` |
-| `node --test --test-concurrency=1 scripts/test-history-recorded-at-formats.js scripts/test-history-source-guards.js scripts/test-history-source-v2.js scripts/test-history-router-soil-projection.js` | PASS; 120 tests, 0 failures |
-| `node scripts/verify-sync-flow.js` | PASS; `Sync flow verification passed`, ending `All parity checks passed.` |
-| `node --test scripts/test-history-response-headers.js` | PASS; 2 tests, 0 failures, real Node-RED HTTP CSV bytes on both profiles |
-| `node --max-old-space-size=192 --test scripts/test-history-export-bounds.js` | PASS; 10 tests, 0 failures, including 1900-to-present rejection |
-| `node scripts/verify-profile-parity.js` | PASS; `All parity checks passed.` |
-| `node scripts/verify-no-new-silent-catch.js` | PASS; 65 empty catches per profile, unchanged baseline |
-| `node scripts/verify-doc-hygiene.js` | PASS; built-in patterns only, no private name list supplied |
-| `node scripts/verify-agents-size.js` | PASS; 28,648 bytes, below 30,720 |
-| `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md docs/operations/history-csv-exports.md` | PASS; no tier-1 findings |
-| `git diff --cached --check` | PASS; no whitespace errors |
+| P1: dense in-range reads can allocate without a bound | Per-source indexed reads use SQL `LIMIT remaining + 1`, with a request-wide ceiling of 30,000 candidate rows and 200,000 selected input cells. Dense, null-heavy and multi-source DB tests assert returned counts, remaining allowances and index query plans without a temporary sort. Output channel/pF expansion is charged before retention. |
+| P2: labels can defeat row-only memory estimates | An 8 MiB ceiling counts actual escaped UTF-8, BOM, header and newlines. Checks precede retention of rows or serialized chunks; serializers independently enforce the same ceiling. |
+| P2: late all-zone preflight | Resolve every authorized scope and preflight the combined aggregate budget before the first measurement query. An over-budget two-zone fixture asserts zero such queries. |
+| P2: fractional-DST hourly undercount | Sum rounded-up bucket counts for the actual month windows and reuse those windows when aggregating. Two empty sources across Lord Howe's half-hour changes accept exactly 20,548 potential cells and refuse one fewer. |
+| P2: stable reasons on the wire | Define range, output, input, byte and busy codes in `EXPORT_REASON_CODES`. The portable route and shared `historyExportErrorResponse` formatter preserve codes; busy retains `Retry-After: 30`. Real HTTP fixtures pin JSON refusals without an attachment. |
+| P3: skipped local date borrows preceding data | Map an absent local date to the next existing boundary. A skipped-day-only request is empty, with no measurement query, for every granularity and both builders. The spanning range retains only existing days. |
+| P3: multiline daily rewrite corruption | Read complete quoted CSV records, preserve escaped fields and numeric tokens, and replace by zone-local timestamp date. A BOM-less historical file with quoted newlines survives two rewrites without stray rows or duplicate BOMs. |
 
-All SQLite-heavy suites and the full sync gate run sequentially under
-`osi-heavy wait --contain --scratch-tmpfs 1G --need-gib 8`. No live host,
-gateway or cloud was accessed. No schema, deployment pin or sync transport
-contract changed.
+The input cell allowance counts selected SQL fields, including legacy aliases.
+Indexed lexical date margins also consume work before exact instant filtering.
+The reader therefore bounds sparse selections and dense candidates outside the
+exact instant interval. Overflow is an error, never a partial successful export.
 
-## Flows handoff
+The output budget counts a raw reading's full expansion before keeping any row.
+Aggregate output yields small channel/pF groups into the same checked retention
+path. A byte ceiling supplements the existing 200,000-row/cell ceiling. The
+inclusive day limits remain 92 raw, 730 hourly and 3,660 daily days.
 
-[History CSV export bounds and encoding](docs/operations/history-csv-exports.md)
-contains the exact node and wiring handoff. `history-api-router-fn` must call
-`HR.buildZoneExportCsv` and send its `csv`, then forward error headers through
-`respond`. Its existing `HR` module binding already loads `osi-history-router`.
-Until that lands, per-zone bounds and BOM apply, but its HTTP route has no slot
-or `Retry-After`. The dispatcher supplies the reservation and subsequent Sol
-review; this implementer does not mark ready, request review or merge.
+## Red and green evidence
+
+Before implementation, all 26 initial review cases failed on both profiles.
+The separate accepted-wide-label/one-over qualification also failed 2/2: the old
+implementation accepted the file exceeding the proposed byte ceiling. Tests now
+cover the same defects with bounded SQL results and explicit refusal codes.
+
+Older tests were updated where the intended contract changes: a 30,001-sample
+month now refuses with `EXPORT_INPUT_TOO_LARGE`; the large accepted fixture uses
+a 30-day selected-channel export within all independent limits. Its later-zone
+assertion checks measurement reads rather than the newly required metadata
+preflight. Monthly query assertions now inspect indexed lexical date margins.
+The existing measured CSV hashes were retained.
+
+Every local command below exited 0. SQLite-backed focused checks ran serially
+under `osi-heavy wait --contain --scratch-tmpfs 1G --need-gib 8`.
+
+| Command | Observed result |
+|---|---|
+| `node --max-old-space-size=192 --test --test-concurrency=1 scripts/test-history-export-review.js scripts/test-history-export-bounds.js scripts/test-history-all-zones-export.js` | `# tests 81`, `# pass 81`, `# fail 0` |
+| `node --test --test-concurrency=1 --test-name-pattern='export' scripts/test-history-recorded-at-formats.js scripts/test-history-source-v2.js` | 18 tests, 18 pass, 0 fail |
+| `node --max-old-space-size=192 --test --test-name-pattern='accepted maximum-width' scripts/test-history-export-review.js` | 2 tests, 2 pass, 0 fail |
+| `node --test --test-name-pattern='toCsv\|zone export\|javaDoubleText\|javaPlainDecimalText' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js` | 6 tests, 6 pass, 0 fail |
+| `node conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.test.js` | 76 passed, 0 failed |
+| `node scripts/verify-profile-parity.js` | `All parity checks passed.` |
+| `node scripts/verify-history-api-contract.js` | `verify-history-api-contract: OK` |
+| `node scripts/verify-no-new-silent-catch.js` | OK; 65 empty catches per profile, unchanged |
+| `node scripts/flows-bare-require-scan.js` | Exit 0 |
+| `node scripts/verify-doc-hygiene.js` | OK; built-in patterns only |
+| `node .claude/skills/anti-slop-writing/slop-check.js execution-report.md docs/operations/history-csv-exports.md` | PASS, no tier-1 findings |
+| `git diff --check` | Exit 0 |
+
+The accepted wide-label fixture produced 9,310 rows and 8,388,408 UTF-8 bytes,
+200 bytes below the 8 MiB ceiling. One additional sample was refused. Both
+profiles passed with `--max-old-space-size=192`. Observed peak process RSS was
+137,064 KiB for the first profile and 158,952 KiB after the second; these are host
+fixture measurements, not target-Pi or Excel qualification.
+
+Full sync, GUI, migration, smoke and shell suites are CI gates on the new exact
+head. They were not queued locally in this revision. CI results for the previous
+reviewed SHA do not qualify this revision; the PR body records the new head and
+its CI state after push.
+
+## Remaining reserved work
+
+The detailed handoff is in
+[History CSV export bounds and encoding](docs/operations/history-csv-exports.md).
+After EB2 and a reservation grant, load the same `osiLib` router singleton for
+the per-zone build, send its serialized CSV, and forward the shared error
+formatter's status, payload and headers. Update the old helper-call contract
+assertions and test simultaneous requests through the shipped flow.
+
+The current portable route emits stable codes. The shipped per-zone route still
+needs code/header forwarding and the shared slot. Its focused HTTP fixture uses
+a prepared adapter; it does not claim that reserved wiring has landed. The GUI
+batch must reuse Blob error decoding and map the module's codes to i18n strings.
+No GUI, locale, schema, deploy pin or server file changed. No live host was used.
