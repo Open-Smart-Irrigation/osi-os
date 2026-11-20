@@ -129,6 +129,8 @@ jobs:
           node scripts/test-watermark-cloud-command-path.js
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
+          TZ=UTC node scripts/test-x3-zone-env-parity.js --verify
+          node scripts/verify-x3-zone-env-handoff.js
           node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-env-unknown-rain.js
           node scripts/test-zone-env-rain-policy.js

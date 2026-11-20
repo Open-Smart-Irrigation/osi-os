@@ -5,6 +5,7 @@ const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const { implementationSource: x3Source } = require('./lib/x3-implementation-source');
 const {
   TASK9_OSI_LIB_NODE_POLICIES,
   auditOsiLibBindings,
@@ -386,7 +387,7 @@ function expectIncludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = x3Source(node, nodeRedRoot);
   if (!func.includes(needle)) {
     fail(`${nodeName} missing ${description}`);
   } else {
@@ -400,7 +401,7 @@ function expectExcludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = x3Source(node, nodeRedRoot);
   if (func.includes(needle)) {
     fail(`${nodeName} still contains ${description}`);
   } else {
@@ -445,7 +446,7 @@ function expectIncludesById(nodeId, needle, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (!String(node.func || '').includes(needle)) {
+  if (!x3Source(node, nodeRedRoot).includes(needle)) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -4084,7 +4085,9 @@ if (fs.existsSync(sysupgradeConfPath)) {
 
 expectFileIncludes('sysupgrade.conf', sysupgradeConf, '/etc/osi-bootstrap.done', 'sysupgrade.conf preserves the osi-bootstrap stamp file');
 
-const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
+// Keep the auth-secret guard on the called implementations after X3 moves them.
+const authNodes = flows.map(node => ({ ...node, func: x3Source(node, nodeRedRoot) }))
+  .filter(node => node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
   const offendingNode = authNodes.find((node) => node.func.includes(insecureNeedle));
   if (offendingNode) {

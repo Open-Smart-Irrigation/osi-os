@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { implementationSource: x3Source } = require('./lib/x3-implementation-source');
 const {
     TASK9_OSI_LIB_NODE_POLICIES,
     auditOsiLibBindings,
@@ -1327,7 +1328,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const litersNode = profileFlows.find((node) => node.id === 'strega-today-liters-fn');
     if (!litersNode) {
         failures.push(`H2d ${profile}: strega-today-liters-fn not found`);
-    } else if (!TODAY_LITERS_EXCLUSION_RE.test(litersNode.func || '')) {
+    } else if (!TODAY_LITERS_EXCLUSION_RE.test(x3Source(litersNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(`H2d ${profile}: strega-today-liters-fn must exclude STALE_NO_OBSERVATION rows from litres sums`);
     } else {
         console.log(`OK  H2d ${profile}: strega-today-liters-fn excludes STALE_NO_OBSERVATION from litres`);
@@ -1336,7 +1337,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const zoneEnvNode = profileFlows.find((node) => node.id === 'zone-env-fn');
     if (!zoneEnvNode) {
         failures.push(`H2d ${profile}: zone-env-fn not found`);
-    } else if (!ZONE_ENV_EXCLUSION_RE.test(zoneEnvNode.func || '')) {
+    } else if (!ZONE_ENV_EXCLUSION_RE.test(x3Source(zoneEnvNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(`H2d ${profile}: zone-env-fn must exclude STALE_NO_OBSERVATION rows from estimated irrigation litres`);
     } else {
         console.log(`OK  H2d ${profile}: zone-env-fn excludes STALE_NO_OBSERVATION from estimated irrigation litres`);
@@ -1358,7 +1359,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const profileGetActuationsNode = profileFlows.find((node) => node.id === 'get-actuations-response');
     if (!profileGetActuationsNode) {
         failures.push(`H2f ${profile}: get-actuations-response not found`);
-    } else if (!DISPLAY_GRACE_VALUE_RE.test(profileGetActuationsNode.func || '')) {
+    } else if (!DISPLAY_GRACE_VALUE_RE.test(x3Source(profileGetActuationsNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(
             `H2f ${profile}: get-actuations-response's GRACE_MS must be 1800 * 1000, matching ` +
             `strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC (a healthy run must not be ` +
