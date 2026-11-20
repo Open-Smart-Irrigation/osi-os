@@ -292,7 +292,15 @@ fetch_required() {
     if [ "$#" -gt 3 ]; then
         case "$dest" in
             *.js) node --check < "$stage" || rc=$? ;;
-            *.json) node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$stage" || rc=$? ;;
+            *.json)
+                node -e '
+                  const data = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+                  const valid = process.argv[2] === "edge-channels.json"
+                    ? Array.isArray(data)
+                    : data !== null && typeof data === "object" && !Array.isArray(data);
+                  if (!valid) throw new Error("unexpected runtime JSON shape");
+                ' "$stage" "${dest##*/}" || rc=$?
+                ;;
             *) sh -n "$stage" || rc=$? ;;
         esac
         if [ "$rc" -eq 0 ]; then
