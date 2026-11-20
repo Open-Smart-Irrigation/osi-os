@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -7,16 +7,20 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const guiRoot = path.resolve(here, '..');
 const repoRoot = path.resolve(guiRoot, '../..');
-const viteBin = path.join(guiRoot, 'node_modules', '.bin', 'vite');
 const playwrightBin = path.join(guiRoot, 'node_modules', '.bin', 'playwright');
 const serverScript = path.join(guiRoot, 'scripts', 'serve-mobile-history-build.mjs');
 const buildRoot = await mkdtemp(path.join(os.tmpdir(), 'osi-mobile-history-edge-build-'));
 const offDir = path.join(buildRoot, 'off');
 const onDir = path.join(buildRoot, 'on');
+const feedDir = path.join(buildRoot, 'feed-gui');
+const tarDir = path.join(buildRoot, 'upgrade-gui');
+const guiTarball = path.join(buildRoot, 'react_gui.tar.gz');
 const evidenceDir = process.env.MOBILE_HISTORY_PLAYWRIGHT_OUTPUT
   ? path.resolve(process.env.MOBILE_HISTORY_PLAYWRIGHT_OUTPUT)
   : await mkdtemp(path.join(os.tmpdir(), 'osi-mobile-history-edge-results-'));
 const children = new Set();
+const forwardedArgs = process.argv.slice(2);
+const releaseOnly = forwardedArgs.includes('--release-only');
 
 function run(command, args, env = {}) {
   return new Promise((resolve, reject) => {
@@ -40,11 +44,15 @@ function run(command, args, env = {}) {
 }
 
 async function build(outDir, enabled) {
-  await run(viteBin, ['build', '--outDir', outDir, '--emptyOutDir', '--manifest', '.vite/manifest.json'], {
+  const args = ['--outDir', outDir, '--emptyOutDir', '--manifest', '.vite/manifest.json'];
+  if (enabled) args.push('--config', 'vite.mobile-history.config.js');
+  await run('npm', ['run', 'build', '--', ...args], {
     VITE_BASE_PATH: '/gui/',
-    VITE_MOBILE_HISTORY_INTERNAL: enabled ? 'true' : 'false',
-    VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS: enabled ? 'true' : 'false',
+    VITE_MOBILE_HISTORY_INTERNAL: 'true',
+    VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS: 'true',
+    VITE_HISTORY_UPLOT_SOIL_ENABLED: 'true',
   });
+  if (!enabled) await run(process.execPath, ['scripts/verify-release-phone-chunks.mjs', outDir]);
 }
 
 async function startServer(root, port) {
@@ -84,16 +92,30 @@ async function stop(child) {
 
 let offServer;
 let onServer;
+let feedServer;
 let failure = null;
 try {
   await build(offDir, false);
-  await build(onDir, true);
-  offServer = await startServer(offDir, 4181);
-  onServer = await startServer(onDir, 4182);
-  const playwrightArgs = ['test', '--config', 'playwright.mobile-history.config.ts', ...process.argv.slice(2)];
+  if (!releaseOnly) await build(onDir, true);
+  await cp(offDir, feedDir, { recursive: true });
+  await mkdir(tarDir);
+  await run('tar', ['-czf', guiTarball, '-C', offDir, '.']);
+  await run('tar', ['-xzf', guiTarball, '-C', tarDir]);
+  await run(process.execPath, ['scripts/verify-release-gui-packages.mjs', offDir, feedDir, guiTarball]);
+  offServer = await startServer(tarDir, 4381);
+  if (!releaseOnly) onServer = await startServer(onDir, 4382);
+  feedServer = await startServer(feedDir, 4383);
+  const playwrightArgs = [
+    'test', '--config', 'playwright.mobile-history.config.ts',
+    ...(releaseOnly
+      ? ['--project=edge-off', '--project=release-feed', 'mobile-tension-real-data.spec.ts', 'release-data-views.spec.ts']
+      : []),
+    ...forwardedArgs.filter((arg) => arg !== '--release-only'),
+  ];
   await run(playwrightBin, playwrightArgs, {
-    MOBILE_HISTORY_EDGE_OFF_BASE_URL: 'http://127.0.0.1:4181/gui/',
-    MOBILE_HISTORY_EDGE_ON_BASE_URL: 'http://127.0.0.1:4182/gui/',
+    MOBILE_HISTORY_EDGE_OFF_BASE_URL: 'http://127.0.0.1:4381/gui/',
+    MOBILE_HISTORY_EDGE_ON_BASE_URL: 'http://127.0.0.1:4382/gui/',
+    MOBILE_HISTORY_FEED_BASE_URL: 'http://127.0.0.1:4383/gui/',
     MOBILE_HISTORY_PLAYWRIGHT_OUTPUT: evidenceDir,
   });
 } catch (error) {
@@ -102,6 +124,7 @@ try {
 } finally {
   await stop(offServer);
   await stop(onServer);
+  await stop(feedServer);
   for (const child of [...children]) {
     try { await stop(child); } catch { /* process is already gone */ }
   }

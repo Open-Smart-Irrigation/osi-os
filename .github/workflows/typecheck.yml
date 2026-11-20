@@ -38,6 +38,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run demo:test
+      - name: Release GUI package smoke
+        run: node scripts/run-mobile-tension-build-matrix.mjs --release-only
       - name: Conditional irrigation browser tests
         run: npm run test:browser:conditional
       - name: Device registration browser tests
@@ -58,7 +60,12 @@ jobs:
           node-version: '22'
       - run: node --version && npm --version
       - run: npm ci
-      - run: npm run build
+      - run: npm run build -- --manifest .vite/manifest.json
+        env:
+          VITE_MOBILE_HISTORY_INTERNAL: 'true'
+          VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS: 'true'
+          VITE_HISTORY_UPLOT_SOIL_ENABLED: 'true'
+      - run: node scripts/verify-release-phone-chunks.mjs
   # Upgrade lane: does the same lockfile still install on the next Node LTS
   # (npm 11)? Informational: with job-level continue-on-error a failure
   # shows this job red in the checks list while the workflow run stays

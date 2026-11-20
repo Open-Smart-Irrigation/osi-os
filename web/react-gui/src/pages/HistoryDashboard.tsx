@@ -8,6 +8,8 @@ import { HistoryMobileShell } from '../components/history/HistoryMobileShell';
 import { HistoryMobileHeader } from '../components/history/mobile/HistoryMobileHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
+import { EXPANDED_DATA_VIEWS_ENABLED } from '../history/expandedDataViews';
+import { useDesktopData } from '../history/useDesktopData';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCards } from '../history/useHistoryCards';
 import {
@@ -35,11 +37,6 @@ import type {
 import type { IrrigationZone } from '../types/farming';
 
 const zonesFetcher = () => irrigationZonesAPI.getAll();
-
-function readIsMobileHistoryViewport(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.innerWidth < 1024;
-}
 
 function metadataString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
@@ -82,20 +79,8 @@ export const HistoryDashboard: React.FC = () => {
   const [activeWorkspace, setActiveWorkspace] = useState<HistoryWorkspace | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(null);
   const [panelCapWarning, setPanelCapWarning] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(readIsMobileHistoryViewport);
+  const isMobileViewport = !useDesktopData();
   const previousSelectedZoneId = useRef<number | null>(null);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobileViewport(readIsMobileHistoryViewport());
-    };
-
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
 
   const {
     data: zones,
@@ -128,7 +113,7 @@ export const HistoryDashboard: React.FC = () => {
     refresh: refreshCards,
   } = useHistoryCards(selectedZoneId, featureFlags.historyEnabled);
 
-  const workspacesEnabled = featureFlags.historyEnabled && featureFlags.flags.historyWorkspacesEnabled;
+  const workspacesEnabled = EXPANDED_DATA_VIEWS_ENABLED && featureFlags.historyEnabled && featureFlags.flags.historyWorkspacesEnabled;
   const {
     data: workspaceResponse,
     mutate: refreshWorkspaces,
@@ -290,7 +275,7 @@ export const HistoryDashboard: React.FC = () => {
   };
 
   const handleLoadWorkspace = (record: HistoryWorkspaceRecord) => {
-    if (workspaceRecordZoneId(record) !== selectedZoneId) return;
+    if (!workspacesEnabled || workspaceRecordZoneId(record) !== selectedZoneId) return;
     const migrated = migrateHistoryWorkspace(record.workspace, workspaceContext);
     setActiveWorkspace(migrated);
     setActiveWorkspaceId(record.id);
@@ -323,6 +308,7 @@ export const HistoryDashboard: React.FC = () => {
   };
 
   const handleDeleteWorkspace = async (workspaceId: number) => {
+    if (!workspacesEnabled) return;
     await historyAPI.deleteWorkspace(workspaceId);
     if (activeWorkspaceId === workspaceId) {
       setActiveWorkspace(null);
@@ -534,8 +520,9 @@ export const HistoryDashboard: React.FC = () => {
               workspace={workspace}
               workspaces={visibleWorkspaces}
               activeWorkspaceId={activeWorkspaceId}
-              comparisonEnabled={featureFlags.flags.historyComparisonEnabled}
-              workspacesEnabled={featureFlags.flags.historyWorkspacesEnabled}
+              expandedViewsEnabled={EXPANDED_DATA_VIEWS_ENABLED}
+              comparisonEnabled={EXPANDED_DATA_VIEWS_ENABLED && featureFlags.flags.historyComparisonEnabled}
+              workspacesEnabled={workspacesEnabled}
               panelCapWarning={panelCapWarning}
               viewport={viewport}
               onTogglePinned={handleTogglePinned}

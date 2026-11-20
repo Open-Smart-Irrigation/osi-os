@@ -15,10 +15,7 @@ import type { IrrigationZone } from '../types/farming';
 import { createMobileAnalysisLoader } from '../history/mobileAnalysisHistoryAdapter';
 import { useMobileTensionCatalog } from '../history/useMobileTensionCatalog';
 import { mobileTensionLabels } from '../history/mobileTensionLabels';
-import {
-  MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED,
-  MOBILE_HISTORY_INTERNAL_ENABLED,
-} from '../history/mobileHistoryInternalGate';
+import { MOBILE_HISTORY_INTERNAL_ENABLED } from '../history/mobileHistoryInternalGate';
 
 export function parseMobileHistoryZoneId(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
@@ -54,7 +51,6 @@ export function MobileTensionHistoryRoute() {
     failed: boolean;
   }>({ requestedZoneId: zoneId, loading: true, zones: [], failed: false });
   const [diagnostics, setDiagnostics] = useState<MobileHistoryDiagnostics | null>(null);
-  const diagnosticsEnabled = MOBILE_HISTORY_INTERNAL_ENABLED && MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED;
 
   useEffect(() => {
     if (!MOBILE_HISTORY_INTERNAL_ENABLED || zoneId === null) return;
@@ -88,13 +84,13 @@ export function MobileTensionHistoryRoute() {
   }, []);
 
   useEffect(() => {
-    if (!diagnosticsEnabled || diagnostics === null) return;
+    if (!MOBILE_HISTORY_INTERNAL_ENABLED || diagnostics === null) return;
     const owner = diagnostics;
     window.__osiMobileHistoryDiagnostics = owner;
     return () => {
       if (window.__osiMobileHistoryDiagnostics === owner) delete window.__osiMobileHistoryDiagnostics;
     };
-  }, [diagnostics, diagnosticsEnabled]);
+  }, [diagnostics]);
 
   useEffect(() => {
     if (catalog.error instanceof HistoryAuthError && catalog.error.status === 401) logout();
@@ -133,7 +129,7 @@ export function MobileTensionHistoryRoute() {
         onAuthError={(error) => {
           if (error instanceof HistoryAuthError && error.status === 401) logout();
         }}
-        registerInternalDiagnostics={diagnosticsEnabled ? registerDiagnostics : undefined}
+        registerInternalDiagnostics={MOBILE_HISTORY_INTERNAL_ENABLED ? registerDiagnostics : undefined}
       />
     </Suspense>
   );

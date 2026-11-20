@@ -26,6 +26,19 @@
       "runner": "scripts/verify-sync-flow.js"
     },
     {
+      "path": "scripts/test-release-1.0-surfaces.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "web/react-gui/tests/browser/release-data-views.spec.ts",
+      "runner": "web/react-gui/scripts/run-mobile-tension-build-matrix.mjs"
+    },
+    {
+      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
+      "runner": "web/react-gui/scripts/run-mobile-tension-build-matrix.mjs",
+      "note": "CI runs the release exclusion case. The internal chart performance and interaction cases run in the local matrix."
+    },
+    {
       "path": "web/react-gui/tests/browser/conditional-irrigation.spec.ts",
       "runner": "web/react-gui/playwright.conditional.config.ts",
       "note": "The existing frontend CI job runs the Playwright config through test:browser:conditional."
@@ -76,10 +89,6 @@
     {
       "path": "web/react-gui/demo/tests/polish.spec.ts",
       "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
-    },
-    {
-      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
-      "reason": "production-build Playwright matrix run by npm run test:browser:mobile-history; it uses paired flag-off/flag-on production builds, CDP CPU throttling and frame-timing acceptance, so it remains a controlled local release gate tracked by #516 rather than a shared pull-request runner test"
     },
     {
       "path": "scripts/test-task14-journal-preview.js",

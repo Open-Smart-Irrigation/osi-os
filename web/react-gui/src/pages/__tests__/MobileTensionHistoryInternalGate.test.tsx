@@ -31,7 +31,6 @@ vi.mock('../../history/useMobileTensionCatalog', () => ({ useMobileTensionCatalo
 vi.mock('../../history/mobileTensionLabels', () => ({ mobileTensionLabels: () => ({}) }));
 vi.mock('../../history/mobileHistoryInternalGate', () => ({
   MOBILE_HISTORY_INTERNAL_ENABLED: false,
-  MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED: true,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en', resolvedLanguage: 'en' } }) }));
 

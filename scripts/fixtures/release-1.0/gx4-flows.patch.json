@@ -1,0 +1,107 @@
+{
+  "removeRoutes": [
+    {
+      "id": "history-zone-card-advanced-http",
+      "method": "get",
+      "url": "/api/history/zones/:zoneId/cards/:cardId/advanced",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-gateway-card-advanced-http",
+      "method": "get",
+      "url": "/api/history/gateways/:gatewayEui/cards/:cardId/advanced",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-get-http",
+      "method": "get",
+      "url": "/api/history/workspaces",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-post-http",
+      "method": "post",
+      "url": "/api/history/workspaces",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-put-http",
+      "method": "put",
+      "url": "/api/history/workspaces/:id",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-delete-http",
+      "method": "delete",
+      "url": "/api/history/workspaces/:id",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-delete-http",
+      "method": "delete",
+      "url": "/api/analysis/views/:id",
+      "wires": [
+        [
+          "portable-history-api-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-get-http",
+      "method": "get",
+      "url": "/api/analysis/views",
+      "wires": [
+        [
+          "analysis-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-post-http",
+      "method": "post",
+      "url": "/api/analysis/views",
+      "wires": [
+        [
+          "analysis-api-router-fn"
+        ]
+      ]
+    }
+  ],
+  "editFunction": {
+    "id": "history-api-router-fn",
+    "replacements": [
+      {
+        "before": "  if (requestMethod === 'GET' && /^\\/api\\/history\\/zones\\/[^/]+\\/cards\\/[^/]+\\/advanced$/.test(requestPath)) {\n    phaseStartedAt = Date.now();\n    const scopeContext = await getOwnedZoneContext(q, auth, HR.parseZoneId(msg.req.params && msg.req.params.zoneId));\n    const card = findCard(scopeContext, String(msg.req.params && msg.req.params.cardId || '').trim());\n    markPhase('context', phaseStartedAt);\n    phaseStartedAt = Date.now();\n    const result = await buildAdvancedPayload(q, scopeContext, card, msg.req.query || {});\n    markPhase('advanced', phaseStartedAt);\n    logLabel = 'history zone card advanced';\n    logAggregation = result.meta.aggregation;\n    logSource = result.meta.source;\n    return respond(200, result.payload);\n  }\n\n  if (requestMethod === 'GET' && /^\\/api\\/history\\/gateways\\/[^/]+\\/cards\\/[^/]+\\/advanced$/.test(requestPath)) {\n    phaseStartedAt = Date.now();\n    const scopeContext = await getGatewayContext(q, auth, normalizeGatewayEui(msg.req.params && msg.req.params.gatewayEui));\n    const card = findCard(scopeContext, String(msg.req.params && msg.req.params.cardId || '').trim());\n    markPhase('context', phaseStartedAt);\n    phaseStartedAt = Date.now();\n    const result = await buildAdvancedPayload(q, scopeContext, card, msg.req.query || {});\n    markPhase('advanced', phaseStartedAt);\n    logLabel = 'history gateway card advanced';\n    logAggregation = result.meta.aggregation;\n    logSource = result.meta.source;\n    return respond(200, result.payload);\n  }\n\n",
+        "after": ""
+      },
+      {
+        "before": "  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  markPhase('auth', phaseStartedAt);\n",
+        "after": "  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  markPhase('auth', phaseStartedAt);\n  if (requestPath.endsWith('/data') && String(msg.req.query?.view || '').trim() === 'advanced') return respond(404, { error: 'Not found' });\n"
+      }
+    ]
+  }
+}

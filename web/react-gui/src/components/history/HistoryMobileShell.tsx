@@ -87,7 +87,7 @@ export const HistoryMobileShell: React.FC<HistoryMobileShellProps> = ({
   return (
     <div
       data-testid="history-mobile-shell"
-      className="space-y-3 lg:hidden"
+      className="space-y-3"
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={() => {

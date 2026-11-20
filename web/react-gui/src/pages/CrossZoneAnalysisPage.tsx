@@ -8,6 +8,7 @@ import { applyLabelOverrides } from '../analysis/labelOverrides';
 import { loadWorkspace, migrateWorkspaceSeriesIds, saveWorkspace } from '../analysis/analysisWorkspaceStorage';
 import {
   addSeries,
+  basicTimeline,
   clearLabelOverride,
   clearAxisLabelOverride,
   createDefaultWorkspace,
@@ -46,30 +47,34 @@ function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   return { selectors: ws.selectors, range: ws.range, aggregation: 'auto' };
 }
 
-export function CrossZoneAnalysisPage() {
+export function CrossZoneAnalysisPage({ expandedViewsEnabled = true }: { expandedViewsEnabled?: boolean }) {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
   const { isAdmin, loading: scopeLoading } = useScope();
   const gatewayModules = useGatewayModules();
   const { swtUnit } = useDisplayPreferences();
-  const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
+  const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace(expandedViewsEnabled) ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useAnalysisCatalog();
-  const { views, saveView, deleteView, error: viewsError } = useAnalysisViews();
+  const { views, saveView, deleteView, error: viewsError } = useAnalysisViews(expandedViewsEnabled);
 
-  const activeWorkspace = useMemo(
+  const channelsById = useMemo(
+    () => new Map(catalog?.channels.map((channel) => [channel.seriesId, channel])),
+    [catalog],
+  );
+  const migratedWorkspace = useMemo(
     () => (catalog ? migrateWorkspaceSeriesIds(workspace, catalog.channels) : workspace),
     [catalog, workspace],
   );
+  const activeWorkspace = useMemo(
+    () => expandedViewsEnabled ? migratedWorkspace : basicTimeline(migratedWorkspace, channelsById),
+    [channelsById, expandedViewsEnabled, migratedWorkspace],
+  );
 
   useEffect(() => {
-    if (activeWorkspace !== workspace) {
-      setWorkspace(activeWorkspace);
-    }
-  }, [activeWorkspace, workspace]);
-
-  useEffect(() => { saveWorkspace(activeWorkspace); }, [activeWorkspace]);
+    if (catalog || expandedViewsEnabled) saveWorkspace(activeWorkspace, expandedViewsEnabled);
+  }, [activeWorkspace, catalog, expandedViewsEnabled]);
 
   const request = useMemo(
     () => (catalog ? toRequest(activeWorkspace) : null),
@@ -113,8 +118,15 @@ export function CrossZoneAnalysisPage() {
     () => exportRangeFor(data?.range),
     [data?.range],
   );
-  const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
-    setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
+  const updateWorkspace = (
+    mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState,
+    preferredSeriesId?: string,
+  ) => {
+    setWorkspace((current) => {
+      const migrated = catalog ? migrateWorkspaceSeriesIds(current, catalog.channels) : current;
+      if (expandedViewsEnabled) return mutate(migrated);
+      return basicTimeline(mutate(basicTimeline(migrated, channelsById)), channelsById, preferredSeriesId);
+    });
   };
   const saveCurrentView = async (name: string) => {
     setViewSaveError(null);
@@ -203,30 +215,33 @@ export function CrossZoneAnalysisPage() {
             sources={catalog?.sources}
             gatewayModules={gatewayModules}
             selectedIds={selectedIds}
-            onAdd={(id) => updateWorkspace((currentWorkspace) => addSeries(currentWorkspace, id))}
+            onAdd={(id) => updateWorkspace((currentWorkspace) => addSeries(currentWorkspace, id), id)}
             onRemove={(id) => updateWorkspace((currentWorkspace) => removeSeries(currentWorkspace, id))}
           />
           {catalogLoading && <p className="mt-3 text-sm text-[var(--text-tertiary)]">{t('analysis.catalog.loading')}</p>}
-          <div className="mt-4 border-t border-[var(--border)] pt-4">
-            <AnalysisViewsMenu
-              views={views}
-              onSave={(name) => {
-                void saveCurrentView(name);
-              }}
-              onLoad={loadView}
-              onDelete={(id) => {
-                const name = views.find((view) => view.id === id)?.name ?? '';
-                if (!window.confirm(t('analysis.views.confirmDelete', { name }))) return;
-                setViewSaveError(null);
-                void deleteView(id).catch(setViewSaveError);
-              }}
-            />
-          </div>
+          {expandedViewsEnabled && (
+            <div className="mt-4 border-t border-[var(--border)] pt-4">
+              <AnalysisViewsMenu
+                views={views}
+                onSave={(name) => {
+                  void saveCurrentView(name);
+                }}
+                onLoad={loadView}
+                onDelete={(id) => {
+                  const name = views.find((view) => view.id === id)?.name ?? '';
+                  if (!window.confirm(t('analysis.views.confirmDelete', { name }))) return;
+                  setViewSaveError(null);
+                  void deleteView(id).catch(setViewSaveError);
+                }}
+              />
+            </div>
+          )}
         </aside>
         <main className="analysis-main flex min-h-0 min-w-0 flex-col lg:flex-1 lg:overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1 flex flex-col gap-2">
               <AnalysisControls
+                expandedViewsEnabled={expandedViewsEnabled}
                 rangeLabel={activeWorkspace.range.label}
                 range={activeWorkspace.range}
                 mode={activeWorkspace.mode}
@@ -255,7 +270,7 @@ export function CrossZoneAnalysisPage() {
                   </HelpTip>
                 </div>
               ) : null}
-              {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
+              {expandedViewsEnabled && activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
                 <MetricAcrossZonesPicker
                   channels={displayedCatalog}
                   onApply={applyMetricPreset}
