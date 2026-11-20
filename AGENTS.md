@@ -43,6 +43,7 @@ and tags free of customer-specific history.
 - Gated hosts: the production OSI Server (`osicloud.ch`) and every customer-hosted cloud instance (listed in the private operations docs, never here).
 - Before any SSH session, file inspection, environment read, secret copy or command on a gated host, the user must name that host in the current turn. A loaded key, a local alias or a successful `ssh` probe is never consent.
 - Ambiguous requests such as "the other server" are not enough; clarify, or use the test host `server.opensmartirrigation.org` instead. The test host can carry production gateway data (noted 2026-10-22); treat data-changing operations there as production-affecting.
+- **Fleet-check exception** (owner decision 2026-10-29): the scheduled fleet-check agent needs no per-turn naming for two things. On `osicloud.ch` it may send HTTPS GET requests to `/api/v1/admin/sync-health` and `/api/v1/admin/sync-dead-letters` as its own `FLEET_READER` account. On every gateway in the private fleet inventory, the production site in Uganda included, it may run its fixed read-only SSH checks. Nothing else is covered: no SSH to a cloud host, no environment or file reads there, no other endpoint or method, no customer-hosted instance, and no restart, deploy or write on a gateway. The checks and inventory live in the private repository.
 
 ---
 
