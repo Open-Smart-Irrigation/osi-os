@@ -560,10 +560,10 @@ test('mixed rain and identity fixture requires declared changes and passes on bo
     await runner.close();
   }
   sql(db, `
-    INSERT INTO devices (deveui, name, type_id, gateway_device_eui) VALUES
-      ('lorain-fixture', 'Rain gauge', 'AQUASCOPE_LORAIN', NULL),
-      ('legacy-fixture', 'Legacy sensor', 'KIWI_SENSOR', ''),
-      ('linked-fixture', 'Linked sensor', 'KIWI_SENSOR', '0016C001F1000001');
+    INSERT INTO devices (deveui, name, type_id, gateway_device_eui, created_at, updated_at) VALUES
+      ('lorain-fixture', 'Rain gauge', 'AQUASCOPE_LORAIN', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('legacy-fixture', 'Legacy sensor', 'KIWI_SENSOR', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+      ('linked-fixture', 'Linked sensor', 'KIWI_SENSOR', '0016C001F1000001', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     INSERT INTO device_data (deveui, recorded_at, rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, counter_interval_seconds) VALUES
       ('lorain-fixture', '2026-01-01T00:00:00Z', 0.25, 1.5, 0.25, 600),
       ('lorain-fixture', '2026-01-01T00:05:00Z', 0.5, 6, NULL, 300),
@@ -615,7 +615,8 @@ test('mixed rain and identity fixture requires declared changes and passes on bo
     UPDATE sync_link_state SET linked = 0 WHERE peer_node = 'cloud';
     INSERT INTO users (id, username, password_hash, created_at, user_uuid, auth_mode, server_offline_verifier_version)
       VALUES (1, 'fixture-owner', 'x', '2026-01-01T00:00:00Z', 'fixture-owner', 'local', 0);
-    INSERT INTO irrigation_zones (name, user_id, gateway_device_eui) VALUES ('Zone fixture', 1, '');
+    INSERT INTO irrigation_zones (name, user_id, gateway_device_eui, created_at, updated_at)
+      VALUES ('Zone fixture', 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     UPDATE sync_link_state SET linked = 1 WHERE peer_node = 'cloud';
   `);
   const strayWork = path.join(root, 'stray');
