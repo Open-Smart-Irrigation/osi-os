@@ -3275,7 +3275,7 @@ function csvCell(value) {
 function toCsv(columns, rows) {
   const safeColumns = Array.isArray(columns) ? columns : [];
   const safeRows = Array.isArray(rows) ? rows : [];
-  return [safeColumns.join(',')]
+  return '\uFEFF' + [safeColumns.join(',')]
     .concat(safeRows.map((row) => safeColumns.map((column) => csvRowCell(row, column)).join(',')))
     .join('\n') + '\n';
 }
@@ -3619,6 +3619,7 @@ async function aggregateZoneExportRows(db, scope) {
         for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
           site: scope.site,
           zone: zoneName,
+          includeMissing: scope.granularity === 'daily',
         })) rows.push(csvRow);
         assertExportRowBudget(rows, scope);
       }
@@ -3634,20 +3635,23 @@ async function aggregateZoneExportRows(db, scope) {
 async function buildZoneExportCsv(db, options = {}) {
   const scope = await resolveZoneExportScope(db, options);
   assertExportRangeAllowed(scope);
+  scope.maxRows = exportMaxRows(options);
+  scope.rowBudget = scope.maxRows;
+  assertExportBucketBudget(scope, scope.rowBudget);
   if (scope.granularity === 'raw') {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
   return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
 }
 
-// Upper bound on the rows of one all-zones CSV answer. Node-RED's http response
+// Upper bound on the rows of any history CSV answer. Node-RED's http response
 // sends a whole string, so the answer is built in memory: at most this many
 // lines of text (about 130 bytes each, so about 26 MB) plus the CSV row
 // objects of the one zone being built, which the same budget caps. Past it the
 // export stops and answers 413 instead of growing without limit on the
-// gateway. The budget counts output rows only: the database rows one card
-// (raw) or one source (hourly, daily) fetches for the range are bounded by the
-// range limits of assertExportRangeAllowed, not by this budget.
+// gateway. Aggregate budgets also count empty cells and potential derived pF
+// rows before building a skeleton. Aggregate database reads span at most one
+// local month per source; the date-range cap bounds the number of windows.
 const ALL_ZONES_EXPORT_MAX_ROWS = 200000;
 
 function exportTooLarge(maxRows) {
@@ -3667,6 +3671,31 @@ function exportWindowUnavailable(reasons) {
   return error;
 }
 
+// A caller may lower the budget for a smaller gateway, but cannot raise the
+// process-wide ceiling. Empty aggregate cells and potential pF rows count too.
+function exportMaxRows(options) {
+  return Number.isSafeInteger(options.maxRows) && options.maxRows > 0
+    ? Math.min(options.maxRows, ALL_ZONES_EXPORT_MAX_ROWS)
+    : ALL_ZONES_EXPORT_MAX_ROWS;
+}
+
+function assertExportBucketBudget(scope, remaining) {
+  if (scope.granularity === 'raw') return 0;
+  const buckets = scope.granularity === 'daily'
+    ? exportSpanDays(scope.from, scope.to)
+    : Math.ceil((Date.parse(scope.end) - Date.parse(scope.start)) / 3600000);
+  let cells = 0;
+  for (const card of scope.cards) {
+    for (const device of sourceDevicesForCard(card, scope.devices)) {
+      for (const channel of exportChannelsForDevice(card, device, scope)) {
+        cells += buckets * (isSwtKpaChannel(channel) ? 2 : 1);
+        if (cells > remaining) throw exportTooLarge(scope.maxRows);
+      }
+    }
+  }
+  return cells;
+}
+
 function assertExportRowBudget(rows, scope) {
   if (scope && Number.isFinite(scope.rowBudget) && rows.length > scope.rowBudget) {
     throw exportTooLarge(scope.maxRows);
@@ -3681,9 +3710,7 @@ function assertExportRowBudget(rows, scope) {
 // are alive at any moment (see ALL_ZONES_EXPORT_MAX_ROWS for what bounds the
 // database fetch).
 async function buildAllZonesExportCsv(db, options = {}) {
-  const maxRows = Number.isSafeInteger(options.maxRows) && options.maxRows > 0
-    ? options.maxRows
-    : ALL_ZONES_EXPORT_MAX_ROWS;
+  const maxRows = exportMaxRows(options);
   const granularity = normalizeExportGranularity(options.granularity || 'daily');
   const from = normalizeExportDate(options.from, 'from');
   const to = normalizeExportDate(options.to || options.from, 'to');
@@ -3714,14 +3741,16 @@ async function buildAllZonesExportCsv(db, options = {}) {
     throw error;
   }
 
-  const chunks = [RAW_CSV_COLUMNS.join(',') + '\n'];
+  const chunks = ['\uFEFF' + RAW_CSV_COLUMNS.join(',') + '\n'];
   let rowCount = 0;
+  let bucketCount = 0;
   for (const zone of zones) {
     const scope = await resolveZoneExportScope(db, {
       ...options, zoneId: zone.id, from, to, granularity, nowMs, allowFutureDays: true,
     });
     scope.maxRows = maxRows;
     scope.rowBudget = maxRows - rowCount;
+    bucketCount += assertExportBucketBudget(scope, maxRows - bucketCount);
     const rows = granularity === 'raw'
       ? await rawZoneExportRows(db, scope)
       : await aggregateZoneExportRows(db, scope);
@@ -3762,7 +3791,7 @@ async function writeZoneCsv(options = {}) {
   const dailyBody = [AGG_CSV_COLUMNS.join(',')]
     .concat(keptLines)
     .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvRowCell(row, column)).join(',')));
-  fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
+  fs.writeFileSync(dailyPath, '\uFEFF' + dailyBody.join('\n') + '\n');
 }
 
 async function rotateZoneCsv(options = {}) {
@@ -3982,7 +4011,8 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
   for (const bucket of aggregate.buckets || []) {
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
-      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      const missing = !stats || Number(stats.sampleCount || 0) === 0;
+      if (missing && !context.includeMissing) continue;
       const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,
@@ -3994,8 +4024,8 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
         channel_key: channel.id,
         depth_cm: depthCm,
         array_id: arrayId == null ? null : arrayId,
-        unit: channel.unit || stats.unit || null,
-        value: valueForChannel(stats, channel),
+        unit: channel.unit || (stats && stats.unit) || null,
+        value: missing ? null : valueForChannel(stats, channel),
       };
       rows.push(csvRow);
       if (isSwtKpaChannel(channel)) {

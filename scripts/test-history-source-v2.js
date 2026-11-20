@@ -1633,7 +1633,10 @@ for (const profile of PROFILES) {
         granularity: 'daily',
         nowMs: Date.parse('2026-07-02T00:00:00Z'),
       });
-      const swt1Days = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => row.timestamp);
+      const swt1Rows = result.rows.filter((row) => row.channel_key === 'swt_1');
+      assert.equal(swt1Rows.length, 30, 'one row per requested local day');
+      assert.equal(swt1Rows.filter(row => row.value === null).length, 9, 'unsampled days stay missing');
+      const swt1Days = swt1Rows.filter(row => row.value !== null).map((row) => row.timestamp);
       assert.equal(swt1Days.length, 21);
       assert.equal(swt1Days[0], '2026-06-01T00:00:00.000Z');
       assert.equal(swt1Days[20], '2026-06-21T00:00:00.000Z');
