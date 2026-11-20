@@ -2308,6 +2308,9 @@ function r11Image(gw) {
   fs.mkdirSync(path.join(img, 'codecs'), { recursive: true });
   fs.mkdirSync(path.join(img, 'node_modules'), { recursive: true });
   fs.copyFileSync(writeLockFixture(gw, LOCKED_VERSION), path.join(img, 'package-lock.json'));
+  fs.copyFileSync(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db'),
+    path.join(img, 'farming.db'));
+  fs.copyFileSync(path.join(img, 'farming.db'), path.join(gw.root, 'farming.db'));
   fs.writeFileSync(path.join(img, 'flows.json'), 'image\n');
   fs.writeFileSync(path.join(img, 'edge-channels.json'), 'image\n');
   fs.writeFileSync(path.join(img, 'codecs', 'kiwi.js'), 'image\n');
@@ -2328,6 +2331,9 @@ function r11Script(gw, opts = {}) {
     ['\nSRC=/usr/share/node-red\n', '\nSRC=' + r2Quote(img) + '\n', 1],
     ['\nDST=/srv/node-red\n', '\nDST=' + r2Quote(gw.proj) + '\n', 1],
     ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 1],
+    ['/usr/share/db/farming.db', r2Quote(path.join(img, 'farming.db')), 1],
+    ['/data/db/farming.db', r2Quote(path.join(gw.root, 'farming.db')), 1],
+    ['/usr/lib/node-red/gui', path.join(gw.root, 'gui'), 1],
     ['\n    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3\n',
       '\n    SQLITE_SRC=' + r2Quote(fw) + '\n', 1],
     ['\nSEED_COPIED=/etc/osi-node-red-seed.copied\n',

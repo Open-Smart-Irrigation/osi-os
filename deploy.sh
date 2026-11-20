@@ -232,8 +232,8 @@ try {
   const fd = fs.openSync(stage, 'r');
   try {
     fs.fchmodSync(fd, expected);
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size === 0 || (stat.mode & 0o7777) !== expected) {
+    const metadata = fs.fstatSync(fd);
+    if (!metadata.isFile() || metadata.size === 0 || (metadata.mode & 0o7777) !== expected) {
       throw new Error('invalid staged boot file: ' + target);
     }
     fs.fsyncSync(fd);
