@@ -68,6 +68,12 @@ publication. Caught errors additionally inspect FK ON/legacy OFF on the actual
 repair connection before close. A killed connection cannot run `finally`; the
 original remains intact and an unverified candidate cannot be published.
 
+CI caught a preflight transport regression at `dbe85aaeb`: the guard spawned
+SQLite CLI readers for the persistent reference-chain adapter. The adapter's
+zero-subprocess test failed (3 calls instead of 0). The correction uses native
+adapter reads and a dedicated forced-read-only CLI query method; the focused
+baseline test is included in the queued verification set.
+
 Verification results are recorded below after the queued runs complete. The
 existing boot-node suite's production-column-capture skip is not a field
 rehearsal. All new fixtures are synthetic.

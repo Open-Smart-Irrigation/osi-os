@@ -315,8 +315,8 @@ get past the refusal. This explicit recovery is the sanctioned exception for
 replacing a database file with its own repaired and verified copy, never a seed.
 
 Use the reviewed checkout's `scripts/repair-legacy-device-fk.js`. It stages
-the candidate on the database's filesystem. It requires Node with `node:sqlite` (Node 22 or
-newer built with SQLite). It supports the shipped schema with damaged child FK
+the candidate on the database's filesystem. It requires Node 22.13 or newer with
+`node:sqlite` available. It supports the shipped schema with damaged child FK
 targets, including quoted, unquoted, bracketed and lowercase references. Older
 schemas, unknown or missing objects, divergent ledgers and any surviving
 `devices_old` parent are refused. Preserve the refused catalog for separate
@@ -353,8 +353,17 @@ qualification; do not force it to fit. There is no runtime migration or 0083.
    no source change or backup. A refusal changes nothing in the source:
 
    ```sh
+   WORK=/data/db/backups/legacy-device-fk-work-$(date +%Y%m%d-%H%M%S)
+   mkdir -m 700 "$WORK"
+   export TMPDIR="$WORK"
+   df -h /data/db "$TMPDIR"
    node scripts/repair-legacy-device-fk.js /data/db/farming.db --report
    ```
+
+   Use persistent scratch, not the gateway's small RAM-backed `/tmp`. Allow at
+   least three database sizes of free space for scratch, rebuilt pages, journals
+   and backups, plus filesystem margin. A full disk refuses publication and
+   retains the original; keep any failed-stage evidence for inspection.
 
 4. If the supported-shape report is accepted, apply with a persistent backup
    directory. Use a timestamped directory chosen for this repair:
@@ -381,6 +390,9 @@ qualification; do not force it to fit. There is no runtime migration or 0083.
 
    Expect `ok`, no FK rows and `needed:false`. Do not bypass a remaining schema
    or ledger refusal. The deploy owns the subsequent service restart.
+   The tool closes the candidate in DELETE journal mode; the normal database
+   helper restores WAL on startup. Remove the empty `$WORK` with `rmdir` after
+   acceptance; keep the named backup, receipt and retained original.
 
 An interrupted attempt retains `/data/db/farming.db.legacy-device-fk-repair.lock`.
 Its `stage` file names a private directory with a receipt and any candidate or

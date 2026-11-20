@@ -402,3 +402,24 @@ test('option B deploy uses the shared catalog predicate and refuses before stop,
   const early = deploy.indexOf('\ncheck_live_db_readonly || exit 1\n');
   assert.ok(early > 0 && early < deploy.indexOf('cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp'));
 });
+
+test('option B repairs a proven trigger-only legacy reference without rebuilding healthy child tables', async () => {
+  await withFixture('healthy', async (file, dir) => {
+    const db = new DatabaseSync(file);
+    try {
+      const trigger = db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql LIKE '%FROM devices%' ORDER BY name LIMIT 1").get();
+      assert.ok(trigger, 'the real seed must provide the trigger witness');
+      const damaged = trigger.sql.replace(/\bFROM devices\b/g, 'FROM "devices_old"');
+      assert.notEqual(damaged, trigger.sql);
+      db.exec('DROP TRIGGER "' + trigger.name.replace(/"/g, '""') + '"');
+      db.exec(damaged);
+    } finally { db.close(); }
+    const report = await tool().repair({ dbPath: file });
+    assert.equal(report.needed, true);
+    assert.deepEqual(report.tables, []);
+    const repaired = await tool().repair(options(file, dir));
+    assert.equal(repaired.applied, true);
+    assert.deepEqual(repaired.tables, []);
+    assert.equal((await tool().repair({ dbPath: file })).needed, false);
+  });
+});

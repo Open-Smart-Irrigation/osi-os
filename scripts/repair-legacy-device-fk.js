@@ -179,8 +179,8 @@ async function rebuild(db, proposal, checkpoint) {
     statement.setReadBigInts(true);
     sequence = statement.all();
   }
-  db.exec('PRAGMA foreign_keys=OFF');
   try {
+    db.exec('PRAGMA foreign_keys=OFF');
     db.exec('PRAGMA legacy_alter_table=ON; BEGIN IMMEDIATE');
     try {
       for (const o of proposal.objects.filter(o => o.type === 'trigger')) db.exec(`DROP TRIGGER ${q(o.name)}`);
@@ -237,6 +237,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     assertEqual(hashFile(candidate), hashFile(file), 'snapshot differs from source');
     db = new DatabaseSync(candidate);
     db.exec('PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON');
+    assertEqual(rows(db, 'PRAGMA integrity_check'), [{ integrity_check: 'ok' }], 'source copy integrity_check failed');
     const proposal = await plan(db);
     if (!apply || !proposal.needed) return { applied: false, needed: proposal.needed, tables: proposal.tables, fieldCount: 'unknown' };
     const before = witness(db);
@@ -257,6 +258,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     const copied = path.join(stage, 'candidate.db');
     fs.copyFileSync(candidate, copied, fs.constants.COPYFILE_EXCL);
     candidate = copied;
+    fs.rmSync(scratch, { recursive: true, force: true }); // do not retain a third full working image
     db = new DatabaseSync(candidate);
     await rebuild(db, proposal, checkpoint);
     checkDb(db);

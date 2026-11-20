@@ -226,7 +226,7 @@ node scripts/verify-runtime-schema-parity.js
 node scripts/verify-profile-parity.js
 node scripts/verify-devices-rebuild-fence.js
 node --test scripts/rehearse-devices-rebuild.test.js
-node --test scripts/rehearse-legacy-catalog.test.js
+node scripts/run-legacy-catalog-rehearsal.js
 node scripts/verify-sync-flow.js
 ```
 
