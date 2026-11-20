@@ -961,8 +961,11 @@ try {
   }
   const { uid, gid, mode } = fs.statSync(target);
   const temporary = target + '.tmp-' + require('crypto').randomUUID();
-  const fd = fs.openSync(temporary, 'wx', 0o600);
+  const dir = fs.openSync(path.dirname(target), 'r');
+  let staged = false;
   try {
+    const fd = fs.openSync(temporary, 'wx', 0o600);
+    staged = true;
     try {
       fs.fchownSync(fd, uid, gid);
       fs.fchmodSync(fd, mode & 0o7777);
@@ -972,31 +975,37 @@ try {
     }
     const previous = temporary + '.previous';
     fs.linkSync(target, previous);
-    const dir = fs.openSync(path.dirname(target), 'r');
     try {
-      try {
-        fs.renameSync(temporary, target);
-      } catch (error) {
-        fs.unlinkSync(previous);
-        throw error;
-      }
-      try {
-        fs.fsyncSync(dir);
-      } catch (error) {
-        try {
-          fs.renameSync(previous, target);
-          fs.fsyncSync(dir);
-        } catch (rollbackError) {
-          throw new Error(error.message + '; settings rollback could not be synced: ' + rollbackError.message);
-        }
-        throw error;
-      }
+      fs.renameSync(temporary, target);
+      staged = false;
+    } catch (error) {
       fs.unlinkSync(previous);
+      fs.fsyncSync(dir);
+      throw error;
+    }
+    try {
+      fs.fsyncSync(dir);
+    } catch (error) {
+      try {
+        fs.renameSync(previous, target);
+        fs.fsyncSync(dir);
+      } catch (rollbackError) {
+        throw new Error(error.message + '. Settings rollback could not be synced: ' + rollbackError.message);
+      }
+      throw error;
+    }
+    try {
+      fs.unlinkSync(previous);
+      fs.fsyncSync(dir);
+    } catch (error) {
+      console.warn('Could not finish settings rollback-link cleanup: ' + error.message);
+    }
+  } finally {
+    try {
+      if (staged) fs.rmSync(temporary, { force: true });
     } finally {
       fs.closeSync(dir);
     }
-  } finally {
-    fs.rmSync(temporary, { force: true });
   }
   console.log('  ✓ settings.js patched to load env file on startup');
 }

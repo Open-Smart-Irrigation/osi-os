@@ -210,8 +210,7 @@ deploy_time() {
 }
 
 fetch() {
-    src="$1"
-    dest="$2"
+    local src="$1" dest="$2"
     mkdir -p "$(dirname "$dest")"
     curl -fsSLo "$dest" "$BASE/$src"
 }
@@ -220,16 +219,86 @@ file_sha256() {
     node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
-fetch_required() {
-    label="$1"
-    src="$2"
-    dest="$3"
-    echo "--- $label ---"
-    fetch "$src" "$dest" || {
-        fetch_rc=$?
-        echo "ERROR: could not fetch $src (exit $fetch_rc)" >&2
-        return "$fetch_rc"
+# Boot entry points are exchanged as complete files on their destination
+# filesystem. In particular a partial download cannot truncate the old init.
+publish_boot_file() {
+    node - "$1" "$2" "$3" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [stage, target, mode] = process.argv.slice(2);
+const expected = Number.parseInt(mode, 8);
+const dir = fs.openSync(path.dirname(target), 'r');
+try {
+  const fd = fs.openSync(stage, 'r');
+  try {
+    fs.fchmodSync(fd, expected);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size === 0 || (stat.mode & 0o7777) !== expected) {
+      throw new Error('invalid staged boot file: ' + target);
     }
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const previous = fs.lstatSync(target, { throwIfNoEntry: false }) &&
+    target + '.tmp-' + require('node:crypto').randomUUID() + '.previous';
+  if (previous) fs.linkSync(target, previous);
+  try {
+    fs.renameSync(stage, target);
+  } catch (error) {
+    if (previous) fs.unlinkSync(previous);
+    fs.fsyncSync(dir);
+    throw error;
+  }
+  try {
+    fs.fsyncSync(dir);
+  } catch (error) {
+    if (previous) fs.renameSync(previous, target);
+    else fs.unlinkSync(target);
+    fs.fsyncSync(dir);
+    throw error;
+  }
+  if (previous) {
+    try {
+      fs.unlinkSync(previous);
+      fs.fsyncSync(dir);
+    } catch (error) {
+      console.warn('Boot file committed but rollback cleanup failed: ' + error.message);
+    }
+  }
+} finally {
+  fs.closeSync(dir);
+}
+NODE
+}
+
+# The optional mode selects staged, syntax-checked publication for a boot file.
+fetch_required() {
+    local label="$1" src="$2" dest="$3" stage rc
+    echo "--- $label ---"
+    if [ "$#" -gt 3 ]; then
+        mkdir -p "${dest%/*}" || return 1
+        stage="$(mktemp "$dest.osi-stage.XXXXXX")" || return 1
+        rc=0
+        fetch "$src" "$stage" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            case "$dest" in
+                *.js) node --check < "$stage" || rc=$? ;;
+                *) sh -n "$stage" || rc=$? ;;
+            esac
+        fi
+        if [ "$rc" -eq 0 ]; then
+            publish_boot_file "$stage" "$dest" "$4" || rc=$?
+        fi
+        rm -f "$stage"
+    else
+        rc=0
+        fetch "$src" "$dest" || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "ERROR: could not install $src (exit $rc)" >&2
+        return "$rc"
+    fi
     echo "OK"
 }
 
@@ -718,14 +787,14 @@ enable_osi_bootstrap() {
 # and rewrite the env file. "Provisioned" uses the service's own test (stamp
 # plus a sensors application UUID in the env file).
 print_bootstrap_note() {
-    if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
-        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
-    else
+    if [ -f "$BOOTSTRAP_SCRIPT_FALLBACK" ]; then
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
+    else
+        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
     fi
     echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
     echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."
-    echo "NOTE: osi-bootstrap may still prefer an older ROM script; this deploy does not replace it."
+    echo "NOTE: osi-bootstrap uses the updated /srv/node-red script when present, then the firmware copy."
     if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
        grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
         echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
@@ -1430,6 +1499,10 @@ verify_native_sqlite3_after_npm() {
 
 seed_db_if_missing() {
     echo "--- farming.db ---"
+    if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
+        echo "HELD: Database recovery is incomplete. Refusing to seed $DB_PATH." >&2
+        return 1
+    fi
     if [ -e "$DB_PATH" ]; then
         echo "SKIP: existing live database preserved at $DB_PATH"
         return 0
@@ -2177,6 +2250,10 @@ cleanup_failed_first_payload() {
 # pre-migration checkpoint, which therefore never touches a refused file.
 DAMAGED_DB_DOC="docs/operations/damaged-farm-database.md"
 check_live_db_readonly() {
+    if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
+        echo "HELD: Database recovery is incomplete. Resolve $DB_PATH.osi-recovery before deploying." >&2
+        return 1
+    fi
     [ -e "$DB_PATH" ] || return 0
     command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
     if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
@@ -2811,8 +2888,10 @@ check_live_db_readonly || exit 1
 gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
-if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
-    rm -f /srv/node-red/.payload-swap.js.tmp
+swap_stage="$(mktemp /srv/node-red/.payload-swap.js.osi-stage.XXXXXX)"
+if ! { cp "$SWAP_JS" "$swap_stage" && node --check < "$swap_stage" &&
+       publish_boot_file "$swap_stage" /srv/node-red/.payload-swap.js 644; }; then
+    rm -f "$swap_stage"
     echo "ERROR: could not keep the payload swap helper for node-red.init; refusing before any file is replaced" >&2
     exit 1
 fi
@@ -2948,10 +3027,14 @@ tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
 # discards the stage.
 DISCARD_STAGE_ON_EXIT=1
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null
+swap_call sealPristineFlows "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
 # The release each payload belongs to, for the HELD restore command, which
 # puts osi-server.cloud.firmware_version back with the payload it returns to.
 [ -z "${DEPLOY_FIRMWARE_VERSION:-}" ] || printf '%s\n' "$DEPLOY_FIRMWARE_VERSION" > "$PAYLOADS_ROOT/$DEPLOY_STAMP/release-version"
 PREV_STAMP="$(swap_call currentStamp || true)"
+if [ -z "$PREV_STAMP" ] && swap_call flowRecoveryHeld; then
+    PREV_STAMP="$(swap_call activeStamp || true)"
+fi
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
 if [ -n "${PREV_STAMP:-}" ] && [ ! -d "$GUI_ROOT" ]; then
@@ -3805,39 +3888,42 @@ early_disk_check || exit 1
 ensure_osi_server_config || exit 1
 # osi-server configuration end
 
+fetch_required "Boot database integrity check" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
+    "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
+
+fetch_required "Boot database integrity service" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-db-integrity" \
+    "/etc/init.d/osi-db-integrity" 755 || exit 1
+
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
-    "/srv/node-red/settings.js"
+    "/srv/node-red/settings.js" 644 || exit 1
 
 fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red"
-chmod 755 /etc/init.d/node-red
+    "/etc/init.d/node-red" 755 || exit 1
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
-    "/usr/libexec/osi-gateway-identity.sh"
-chmod 755 /usr/libexec/osi-gateway-identity.sh
+    "/usr/libexec/osi-gateway-identity.sh" 755 || exit 1
 
 fetch_required "Gateway identity daemon" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
-    "/usr/libexec/osi-identityd.sh"
-chmod 755 /usr/libexec/osi-identityd.sh
+    "/usr/libexec/osi-identityd.sh" 755 || exit 1
 
 fetch_required "Gateway identity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
-    "/etc/init.d/osi-identityd"
-chmod 755 /etc/init.d/osi-identityd
+    "/etc/init.d/osi-identityd" 755 || exit 1
 
 fetch_required "Gateway identity service enable script" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
-    "/etc/uci-defaults/94_osi_identityd_enable"
-chmod 755 /etc/uci-defaults/94_osi_identityd_enable
+    "/etc/uci-defaults/94_osi_identityd_enable" 755 || exit 1
 
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
-    "/srv/node-red/chirpstack-bootstrap.js"
+    "/srv/node-red/chirpstack-bootstrap.js" 644 || exit 1
 
 # issue-183 early secure begin
 if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
@@ -3851,8 +3937,7 @@ fi
 
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
-    "/etc/init.d/osi-bootstrap"
-chmod 755 /etc/init.d/osi-bootstrap
+    "/etc/init.d/osi-bootstrap" 755 || exit 1
 enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
@@ -3863,7 +3948,7 @@ fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
 echo "OK"
 
-seed_db_if_missing
+seed_db_if_missing || exit 1
 
 fetch_required "Node-RED runtime package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \

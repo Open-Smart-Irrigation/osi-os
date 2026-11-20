@@ -719,7 +719,7 @@ test('the early secure invocation selects the canonical env file and stops on it
 });
 
 test('deploy.sh enables the service where it installs it, with the init script\'s stamp test', () => {
-  const install = DEPLOY.indexOf('chmod 755 /etc/init.d/osi-bootstrap');
+  const install = DEPLOY.indexOf('"/etc/init.d/osi-bootstrap" 755 || exit 1');
   const call = DEPLOY.indexOf('\nenable_osi_bootstrap\n', install);
   const nextStep = DEPLOY.indexOf('--- Remove legacy gateway GPS sidecar ---', install);
   assert.ok(install > 0 && call > install && call < nextStep,
@@ -769,8 +769,8 @@ test('the banner names the bootstrap script path the service runs on this gatewa
   const flashed = bootstrapFixture({ enabled: true, stamp: true, env: PROVISIONED_ENV });
   const { r: r1, romPath: rom1, fallbackPath: fb1 } = runBootstrapNote(flashed, { rom: true });
   assert.equal(r1.status, 0, r1.stderr);
-  assert.ok(r1.stdout.includes(rom1), r1.stdout);
-  assert.ok(!r1.stdout.includes(fb1), r1.stdout);
+  assert.ok(r1.stdout.includes(fb1), r1.stdout);
+  assert.ok(!r1.stdout.includes(rom1), r1.stdout);
   const stock = bootstrapFixture({ enabled: true });
   const { r: r2, romPath: rom2, fallbackPath: fb2 } = runBootstrapNote(stock, { rom: false });
   assert.equal(r2.status, 0, r2.stderr);
@@ -779,7 +779,7 @@ test('the banner names the bootstrap script path the service runs on this gatewa
   for (const note of [
     'this deploy secures the canonical env file using the /srv/node-red bootstrap copy.',
     'the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines.',
-    'osi-bootstrap may still prefer an older ROM script; this deploy does not replace it.'
+    'osi-bootstrap uses the updated /srv/node-red script when present, then the firmware copy.'
   ]) assert.ok(r2.stdout.includes(note), r2.stdout);
 });
 
@@ -851,7 +851,7 @@ test('running the service by hand provisions and writes the stamp', () => {
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
     .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
-  const r = runShell(`BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_FALLBACK=${JSON.stringify(script)}\n${body}\nstart`,
+  const r = runShell(`BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_UPDATED=${JSON.stringify(script)}\n${body}\nstart`,
     { PATH: childPath(fx.binDir) });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(fs.existsSync(fx.stampFile), 'start() must write the stamp');
@@ -859,7 +859,7 @@ test('running the service by hand provisions and writes the stamp', () => {
   assert.ok(initCalls(fx).some((c) => c.startsWith('restart-request request-restart chirpstack_bootstrap')), initCalls(fx).join('\n'));
 });
 
-test('service still selects an old ROM bootstrap after deploy updates the fallback copy', () => {
+test('service selects the atomically installed bootstrap before the firmware copy', () => {
   const fx = bootstrapFixture({ enabled: true, env: PROVISIONED_ENV });
   const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
   const fallback = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
@@ -877,12 +877,12 @@ test('service still selects an old ROM bootstrap after deploy updates the fallba
     .split('/srv/node-red/chirpstack-bootstrap.js').join(fallback)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
     .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
-  const run = runShell('BOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_FALLBACK=' + JSON.stringify(fallback) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
+  const run = runShell('BOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_UPDATED=' + JSON.stringify(fallback) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
   assert.equal(run.status, 0, run.stderr);
   const calls = fs.readFileSync(fx.log, 'utf8').trim().split('\n');
-  assert.equal(calls[0], rom, 'the old ROM writer remains selected after the fallback is updated');
+  assert.equal(calls[0], fallback, 'the updated writer is selected after deploy');
   assert.ok(calls.includes('restart-request request-restart chirpstack_bootstrap 60'));
-  assert.equal(calls.filter(call => call === rom).length, 1);
+  assert.equal(calls.filter(call => call === fallback).length, 1);
   assert.ok(fs.existsSync(fx.stampFile));
 });
 
@@ -901,7 +901,7 @@ test('an updated bootstrap failure leaves the stamp absent and does not request 
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
     .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
-  const result = runShell('BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_FALLBACK=' + JSON.stringify(script) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
+  const result = runShell('BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_UPDATED=' + JSON.stringify(script) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
   const calls = initCalls(fx);
   const assertFailedBootstrap = evidence => {
     assert.ok(evidence.calls.includes('bootstrap-invoked'), 'start() invoked the failing bootstrap command');
@@ -923,7 +923,7 @@ test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap 
   assert.match(DEPLOY, /^BOOTSTRAP_SCRIPT_FALLBACK="\/srv\/node-red\/chirpstack-bootstrap\.js"$/m);
   // Same precedence as the service itself.
   assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_ROM="\/usr\/share\/node-red\/chirpstack-bootstrap\.js"/);
-  assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_FALLBACK="\/srv\/node-red\/chirpstack-bootstrap\.js"/);
+  assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_UPDATED="\/srv\/node-red\/chirpstack-bootstrap\.js"/);
 });
 
 test('a failed Kiwi/Clover profile repair is repeated in the closing banner with the exact rerun command', () => {

@@ -13,6 +13,11 @@ if [ ! -f "$SEED_SRC" ]; then
     exit 0
 fi
 
+if [ -e "$DATA_DB.osi-recovery" ] || [ -L "$DATA_DB.osi-recovery" ]; then
+    logger -t osi-db-seed "HELD: database recovery in progress. Refusing to seed $DATA_DB."
+    exit 1
+fi
+
 if [ -f "$DATA_DB" ]; then
     logger -t osi-db-seed "$DATA_DB already exists, skipping seed"
     exit 0

@@ -14,9 +14,15 @@ const bootstrapInit = fs.readFileSync(profile + '/etc/init.d/osi-bootstrap', 'ut
 const bootstrapSource = fs.readFileSync('scripts/chirpstack-bootstrap.js', 'utf8');
 const brokerId = init.match(/local cloud_broker_node_id="([^"]+)"/)[1];
 const eui = '0016C001F1000001';
-const seed = JSON.stringify([{ id: brokerId, type: 'mqtt-broker', clientid: '' }]) + '\n';
+const nodes = [
+  { id: brokerId, type: 'mqtt-broker', clientid: '' },
+  { id: 'fixture-tab', type: 'tab' },
+  { id: 'fixture-route', type: 'http in', z: 'fixture-tab', url: '/api/fixture', method: 'get' },
+];
+const seed = JSON.stringify(nodes) + '\n';
+const swap = require('./deploy-payload-swap');
 
-function fixture(t, { linked = false, password = '' } = {}) {
+function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'node-red-init-flows-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'data'));
@@ -32,12 +38,19 @@ function fixture(t, { linked = false, password = '' } = {}) {
   if (linked) {
     fs.symlinkSync('fixture', active);
     fs.symlinkSync('payloads/active/flows.json', flows);
+    fs.copyFileSync(require.resolve('./deploy-payload-swap'), path.join(userDir, '.payload-swap.js'));
+    if (pristine !== null) {
+      fs.writeFileSync(target, pristine);
+      swap.sealPristineFlows(userDir, 'fixture', target);
+      swap.writeCompatibility(userDir, 'fixture', '73', '73:fixture');
+    }
   }
   const initPath = path.join(root, 'node-red.init');
   fs.writeFileSync(initPath, init
     .replaceAll('/srv/', root + '/srv/')
     .replaceAll('/data/', root + '/data/')
     .replaceAll('/usr/libexec/', root + '/usr/libexec/')
+    .replaceAll('/usr/lib/node-red/gui', path.join(root, 'gui'))
     .replaceAll('/dev/console', path.join(root, 'console'))
     .replaceAll('/usr/share/flows.json', bundled));
   const bootInit = path.join(root, 'osi-bootstrap');
@@ -80,7 +93,7 @@ fs.renameSync = function(source, target) {
   return rename(source, target);
 };
 `);
-  function start({ boot = false, failSync = '' } = {}) {
+  function start({ boot = false, failSync = '', expectFailure = false } = {}) {
     const result = spawnSync('sh', ['-c', `
 . "$1"
 uci() {
@@ -115,11 +128,11 @@ fi
       },
     });
     assert.ifError(result.error);
-    if (failSync) return result;
+    if (failSync || expectFailure) return result;
     assert.equal(result.status, 0, result.stderr);
     return result.stdout + result.stderr;
   }
-  return { flows, creds, active, target, start, trace, stamp: path.join(root, 'etc', 'osi-bootstrap.done') };
+  return { root, userDir, initPath, flows, creds, active, target, start, trace, stamp: path.join(root, 'etc', 'osi-bootstrap.done') };
 }
 
 function quarantine(file) {
@@ -136,6 +149,10 @@ for (const [state, bad] of [
   ['zeroed', Buffer.alloc(Buffer.byteLength(seed))],
   ['empty', Buffer.alloc(0)],
   ['invalid JSON', Buffer.from('[{')],
+  ['null node', Buffer.from('[null]')],
+  ['empty node', Buffer.from('[{}]')],
+  ['no tab', Buffer.from(JSON.stringify([nodes[2]]))],
+  ['no HTTP route', Buffer.from(JSON.stringify([nodes[1]]))],
   ['missing', null],
 ]) {
   test(`start restores ${state} flows and applies the gateway client ID`, t => {
@@ -230,7 +247,7 @@ test('boot recovery reaches the real bootstrap flow validator on the same boot',
   const bootstrapPriority = bootstrapInit.match(/^START=(\d+)/m)[1];
   assert.ok('S' + nodePriority + 'node-red' < 'S' + bootstrapPriority + 'osi-bootstrap');
   const fx = fixture(t);
-  fs.writeFileSync(fx.flows, Buffer.alloc(Buffer.byteLength(seed)));
+  fs.writeFileSync(fx.flows, '[null]');
   const log = fx.start({ boot: true });
   assert.match(log, /flows.json portable communication contract verified/);
   assert.match(log, /bootstrap completed successfully/);
@@ -255,5 +272,156 @@ for (const [failure, expected] of [
     assert.equal(fs.statSync(fx.target).ino, previous.ino);
     assert.equal(fs.realpathSync(fx.flows), fx.target);
     assert.deepEqual(fs.readFileSync(fx.trace, 'utf8').trim().split('\n'), expected);
+  });
+}
+
+test('a v0.8.1 image never supplies boot DDL to the deployed v73 schema', t => {
+  const current = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+  const restored = current.find(node => node.id === 'sync-init-fn').func;
+  const newer = JSON.stringify([...nodes, { id: 'sync-init-fn', type: 'function', func: restored }]);
+  const fx = fixture(t, { linked: true, pristine: newer });
+  const image = path.join(fx.root, 'bundled-flows.json');
+  if (process.env.OSI_TEST_V081_FLOW) fs.copyFileSync(process.env.OSI_TEST_V081_FLOW, image);
+  else fs.writeFileSync(image, JSON.stringify([...nodes, { id: 'sync-init-fn', type: 'function', func: 'legacy trigger body' }]));
+  assert.notEqual(JSON.parse(fs.readFileSync(image)).find(node => node.id === 'sync-init-fn').func, restored);
+  fs.writeFileSync(fx.target, '[{}]');
+  const log = fx.start();
+  assert.match(log, /restored flows.json .*flows.pristine.json/);
+  assert.equal(JSON.parse(fs.readFileSync(fx.target)).find(node => node.id === 'sync-init-fn').func, restored);
+  assertPatched(fx);
+});
+
+for (const condition of ['missing', 'bad digest', 'invalid structure']) {
+  test(`a deployed payload holds when its pristine source has ${condition}`, t => {
+    const fx = fixture(t, { linked: true, pristine: condition === 'missing' ? null : seed });
+    const file = path.join(path.dirname(fx.target), 'flows.pristine.json');
+    if (condition !== 'missing') fs.writeFileSync(file, '[null]');
+    if (condition === 'invalid structure') {
+      const digest = require('crypto').createHash('sha256').update('[null]').digest('hex');
+      fs.writeFileSync(path.join(path.dirname(file), 'flows-seed.json'), JSON.stringify({ stamp: 'fixture', digest }));
+      const metadata = path.join(path.dirname(file), 'compatibility.json');
+      const record = JSON.parse(fs.readFileSync(metadata, 'utf8'));
+      fs.writeFileSync(metadata, JSON.stringify({ ...record, flows_pristine_sha256: digest }));
+    }
+    fs.writeFileSync(fx.target, '[{}]');
+    const first = fx.start({ expectFailure: true });
+    assert.equal(first.status, 1);
+    assert.doesNotMatch(first.stdout, /procd start/);
+    assert.match(first.stderr, /HELD: Node-RED stopped/);
+    assert.equal(swap.readPayloadState(fx.userDir).state, 'held');
+    assert.match(fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8'), /Re-run the deploy/);
+    assert.equal(fs.readFileSync(quarantine(fx.target)[0], 'utf8'), '[{}]');
+    assert.doesNotMatch(fx.start(), /procd start/);
+  });
+}
+
+test('a same-release deploy can stage past a missing held flow and switch only to verified bytes', t => {
+  const fx = fixture(t, { linked: true, pristine: null });
+  const gui = path.join(fx.root, 'gui');
+  const activeGui = path.join(path.dirname(fx.target), 'gui');
+  fs.mkdirSync(activeGui);
+  fs.writeFileSync(path.join(activeGui, 'index.html'), '<p>fixture</p>');
+  fs.symlinkSync(path.join(fx.active, 'gui'), gui);
+  assert.equal(fx.start({ expectFailure: true }).status, 1);
+  const image = path.join(fx.root, 'bundled-flows.json');
+  swap.stagePayload(fx.userDir, 'replacement', image, activeGui, 'staged');
+  swap.sealPristineFlows(fx.userDir, 'replacement', image);
+  swap.writeCompatibility(fx.userDir, 'replacement', '73', '73:fixture');
+  assert.doesNotThrow(() => swap.switchPreflight(fx.userDir, 'replacement', gui, 'fixture'));
+  swap.markActivated(fx.userDir, 'replacement');
+  swap.flipTo(fx.userDir, 'replacement', gui, 'fixture');
+  swap.writePayloadState(fx.userDir, 'replacement', 'unverified', 'health check pending', 'deploy.sh');
+  assert.match(fx.start(), /procd start/);
+  assert.equal(swap.currentStamp(fx.userDir), 'replacement');
+});
+
+test('a missing DB with a recovery hold refuses a cold start before payload checking', t => {
+  const fx = fixture(t);
+  fs.mkdirSync(path.join(fx.root, 'data', 'db'));
+  fs.writeFileSync(path.join(fx.root, 'data', 'db', 'farming.db.osi-recovery'), '');
+  const result = fx.start({ expectFailure: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /HELD: Database recovery is incomplete/);
+  assert.doesNotMatch(result.stdout, /procd start/);
+  assert.equal(fs.existsSync(path.join(fx.root, 'data', 'db', 'farming.db')), false);
+});
+
+test('a failed credentials directory sync restores the prior inode and removes rollback names', t => {
+  const fx = fixture(t, { password: 'replacement-password' });
+  fs.writeFileSync(fx.flows, seed);
+  const prior = JSON.stringify({ [brokerId]: { user: eui, password: 'old-password' } });
+  fs.writeFileSync(fx.creds, prior, { mode: 0o600 });
+  const stat = fs.statSync(fx.creds);
+  const result = fx.start({ failSync: 'directory' });
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(fx.creds, 'utf8'), prior);
+  assert.equal(fs.statSync(fx.creds).ino, stat.ino);
+  assert.equal(fs.statSync(fx.creds).mode, stat.mode);
+  assert.equal(fs.readdirSync(fx.userDir).some(name => name.endsWith('.previous')), false);
+});
+
+test('boot removes orphan rollback links only when a valid live file exists', t => {
+  const fx = fixture(t);
+  fs.writeFileSync(fx.flows, seed);
+  const remnant = '.tmp-3b5d89e9-6714-48b7-857c-85e4734c2482.previous';
+  const settings = path.join(fx.userDir, 'settings.js');
+  fs.writeFileSync(settings, 'module.exports = {};');
+  fs.linkSync(settings, settings + remnant);
+  fs.writeFileSync(fx.creds + remnant, '{}', { mode: 0o600 });
+  fx.start();
+  assert.equal(fs.existsSync(settings + remnant), false);
+  assert.equal(fs.existsSync(fx.creds + remnant), true);
+  fs.writeFileSync(fx.creds, '{}', { mode: 0o600 });
+  fx.start();
+  assert.equal(fs.existsSync(fx.creds + remnant), false);
+});
+
+for (const [label, filename] of [['settings', 'settings.js'], ['init', 'node-red.init']]) {
+  test(`a kill during staged ${label} transfer leaves the cold boot of the retained payload intact`, t => {
+    const fx = fixture(t, { linked: true });
+    const deploy = fs.readFileSync('deploy.sh', 'utf8');
+    const bootInstall = deploy.slice(deploy.indexOf('publish_boot_file() {'), deploy.indexOf('# The hotplug hook'));
+    const live = filename === 'settings.js' ? path.join(fx.userDir, filename) : fx.initPath;
+    if (filename === 'settings.js') fs.writeFileSync(live, 'module.exports = {};\n');
+    const old = fs.readFileSync(live);
+    const command = bootInstall + `
+fetch() { printf 'partial transfer' > "$2"; kill -KILL "$$"; }
+fetch_required 'test' 'source' "$1" 755
+`;
+    const result = spawnSync('sh', ['-c', command, 'fixture', live]);
+    assert.equal(result.signal, 'SIGKILL');
+    assert.deepEqual(fs.readFileSync(live), old);
+    assert.match(fx.start(), /procd start/);
+    assert.equal(fs.readlinkSync(fx.active), 'fixture');
+  });
+}
+
+for (const errorAt of ['open', 'fsync']) {
+  test(`a settings directory ${errorAt} failure keeps the old file and leaves no rollback link`, t => {
+    const fx = fixture(t);
+    const filename = path.join(fx.userDir, 'settings.js');
+    const initial = "module.exports = {};\n";
+    fs.writeFileSync(filename, initial, { mode: 0o640 });
+    const before = fs.statSync(filename);
+    const injected = Object.create(fs);
+    const original = fs[errorAt === 'open' ? 'openSync' : 'fsyncSync'];
+    let fired = false;
+    injected[errorAt === 'open' ? 'openSync' : 'fsyncSync'] = (target, ...args) => {
+      const dir = errorAt === 'open' ? target === fx.userDir : fs.fstatSync(target).isDirectory();
+      if (dir && !fired) {
+        fired = true;
+        throw new Error('injected ' + errorAt);
+      }
+      return original(target, ...args);
+    };
+    const extract = name => bootstrapSource.match(new RegExp('^function ' + name + '[(].*?^}', 'ms'))[0];
+    const patch = new Function('fs', 'path', 'require', 'CFG', 'ENV_LOADER_MARKER',
+      extract('writeAndSyncStage') + '\n' + extract('patchSettingsJs') + '\npatchSettingsJs();');
+    assert.throws(() => patch(injected, path, require, { settingsJs: filename, envFile: '/fixture' }, '// marker'),
+      new RegExp('injected ' + errorAt));
+    assert.equal(fs.readFileSync(filename, 'utf8'), initial);
+    assert.equal(fs.statSync(filename).ino, before.ino);
+    assert.equal(fs.statSync(filename).mode, before.mode);
+    assert.equal(fs.readdirSync(fx.userDir).some(name => name.startsWith('settings.js.tmp-')), false);
   });
 }

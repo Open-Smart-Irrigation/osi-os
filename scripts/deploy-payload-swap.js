@@ -785,12 +785,15 @@ function switchEntries(root, stamp, guiRoot, modules, base) {
 //   during its module renames (state-table row S7), and routing the module
 //   completes that switch, as that deploy.sh would have.
 function baseMismatch(root, base, stamp, guiRoot, entries) {
-  if (!isFile(path.join(payloadDir(root, base), 'flows.json'))) return `payloads/${base} has no flows.json`;
+  const heldMissing = flowRecoveryHeld(root) && base === activeStamp(root) &&
+    !statOrNull(flowsLink(root)) && !isFile(path.join(payloadDir(root, base), 'flows.json'));
+  if (!heldMissing && !isFile(path.join(payloadDir(root, base), 'flows.json'))) return `payloads/${base} has no flows.json`;
   if (guiRoot && !isDirectory(guiPayloadDir(root, base))) return `payloads/${base} has no GUI`;
   const flowsInBase = currentStamp(root) === base;
   for (const entry of entries) {
     if (entry.copy) {
       if (sameContent(entry.link, entry.copy, entry.kind)) continue;
+      if (heldMissing && entry.label === 'flows') continue;
       // A node file does not depend on the flows' version (#656): routing it
       // through <base> serves <base>'s copy, never a missing file. A cut
       // switch can leave one node file converted and the other not.
@@ -1385,6 +1388,64 @@ function clearStaleStages(root, keepStamp = '') {
   return lines.join('\n');
 }
 
+function sha256Bytes(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function sealPristineFlows(root, stamp, source) {
+  const dir = payloadDir(root, stamp);
+  const bytes = fs.readFileSync(source);
+  const value = JSON.parse(bytes);
+  if (!Array.isArray(value) || value.some(node => !node || typeof node.id !== 'string' || typeof node.type !== 'string')) {
+    throw new Error('downloaded flows contain invalid node entries');
+  }
+  const tabs = new Set(value.filter(node => node.type === 'tab').map(node => node.id));
+  if (!value.some(node => node.type === 'http in' && tabs.has(node.z) &&
+      typeof node.url === 'string' && node.url.startsWith('/') && typeof node.method === 'string' && node.method)) {
+    throw new Error('downloaded flows are missing the OSI tab or HTTP route structure');
+  }
+  const digest = sha256Bytes(bytes);
+  if (hashFile(path.join(dir, 'flows.json')) !== digest) {
+    throw new Error('staged flows differ from the downloaded flows');
+  }
+  writeDurable(path.join(dir, 'flows.pristine.json'), bytes, 0o444);
+  if (hashFile(path.join(dir, 'flows.pristine.json')) !== digest) {
+    throw new Error('pristine flows failed readback');
+  }
+  return writeDurable(path.join(dir, 'flows-seed.json'), JSON.stringify({ stamp, digest }) + '\n');
+}
+
+function verifiedFlowSeed(root, stamp) {
+  const dir = payloadDir(root, stamp);
+  const sealPath = path.join(dir, 'flows-seed.json');
+  const pristine = path.join(dir, 'flows.pristine.json');
+  if (!lstatOrNull(sealPath) && !lstatOrNull(pristine)) return null;
+  if (!fs.lstatSync(sealPath).isFile() || !fs.lstatSync(pristine).isFile()) {
+    throw new Error('pristine flows or seal are not regular files');
+  }
+  const seal = JSON.parse(fs.readFileSync(sealPath, 'utf8'));
+  const bytes = fs.readFileSync(pristine);
+  if (seal.stamp !== stamp || seal.digest !== sha256Bytes(bytes)) {
+    throw new Error('pristine flows failed the payload digest check');
+  }
+  return { digest: seal.digest, bytes };
+}
+
+function readPristineFlows(root, stamp) {
+  const seal = verifiedFlowSeed(root, stamp);
+  const compatibility = readCompatibility(root, stamp);
+  if (!seal || !compatibility || seal.digest !== compatibility.flows_pristine_sha256) {
+    throw new Error('no pristine flows verified for the selected payload');
+  }
+  return seal.bytes;
+}
+
+function flowRecoveryHeld(root) {
+  const state = readPayloadState(root);
+  return Boolean(state && state.state === 'held' && state.writer === 'flow-recovery' &&
+    state.active === (activeStamp(root) || currentStamp(root) || ''));
+}
+
 function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
   const dir = payloadDir(root, stamp);
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -1396,6 +1457,8 @@ function writeCompatibility(root, stamp, schemaHead, schemaLedger) {
     schema_head: String(schemaHead),
     schema_ledger: String(schemaLedger),
   };
+  const digest = verifiedFlowSeed(root, stamp)?.digest;
+  if (digest) metadata.flows_pristine_sha256 = digest;
   const target = compatibilityPath(root, stamp);
   // A valid record is immutable; an empty or invalid one counts as missing.
   if (compatibilityExists(root, stamp)) {
@@ -1444,10 +1507,10 @@ function healthPath(root, stamp) {
 // before the rename and the directory after it, so a power cut leaves the old
 // or the new record on storage, never none, and the record is on storage
 // before the payload switch that follows it.
-function writeDurable(target, text) {
+function writeDurable(target, text, mode) {
   const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
   try {
-    const fd = fs.openSync(temp, 'wx');
+    const fd = fs.openSync(temp, 'wx', mode);
     try {
       fs.writeSync(fd, text);
       fs.fsyncSync(fd);
@@ -1491,6 +1554,11 @@ function payloadDigests(root, stamp) {
 }
 
 function markActivated(root, stamp) {
+  const compatibility = readCompatibility(root, stamp);
+  const digest = verifiedFlowSeed(root, stamp)?.digest;
+  if (digest && compatibility?.flows_pristine_sha256 !== digest) {
+    throw new Error('pristine flows are not bound to the payload schema record');
+  }
   syncStorage();
   return writeHealth(root, stamp, { state: 'activated' });
 }
@@ -1633,6 +1701,7 @@ function recordBootState(root) {
 // - restore target: the payload a held gateway returns to after restoring
 //   the pre-migration backup.
 function owedCheckPlan(root, schemaHead = '', schemaLedger = '') {
+  if (flowRecoveryHeld(root)) return null;
   const active = unverifiedActive(root);
   if (!active) return null;
   const linked = payloadModuleLinks(root);
@@ -1910,6 +1979,9 @@ module.exports = {
   activeStamp,
   LIVE_ENTRIES,
   stagePayload,
+  sealPristineFlows,
+  readPristineFlows,
+  flowRecoveryHeld,
   sealModules,
   captureModules,
   linkNewModules,

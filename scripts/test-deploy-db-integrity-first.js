@@ -99,6 +99,6 @@ test('a healthy WAL database passes the check, and the checkpoint then folds its
 
 test('the preflight check runs before the deploy\'s first change on the gateway', () => {
   const check = DEPLOY.indexOf('\ncheck_live_db_readonly || exit 1\n');
-  const firstChange = DEPLOY.indexOf('cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp');
+  const firstChange = DEPLOY.indexOf('publish_boot_file "$swap_stage" /srv/node-red/.payload-swap.js 644');
   assert.ok(check > 0 && check < firstChange);
 });

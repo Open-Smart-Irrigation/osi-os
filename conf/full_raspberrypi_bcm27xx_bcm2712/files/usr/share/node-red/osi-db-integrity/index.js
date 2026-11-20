@@ -56,7 +56,8 @@ function backupDb(dbPath, { keep = 5 } = {}) {
 
 function quickCheck(dbPath) {
   try {
-    const out = execFileSync('sqlite3', [dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
+    if (fs.statSync(dbPath).size < 100) return false;
+    const out = execFileSync('sqlite3', ['-readonly', dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
     return out === 'ok';
   } catch {
     return false;
@@ -132,9 +133,45 @@ function writeStamp(dbPath, data) {
   return stampPath;
 }
 
+function syncDirectory(dir) {
+  const fd = fs.openSync(dir, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function recordHold(marker) {
+  // Existence alone holds the boot, even if a media error prevents the
+  // diagnostic text or the marker's fsync from making it to storage.
+  const fd = fs.openSync(marker, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, 'Database recovery is in progress or held. Inspect the preserved database and backups before clearing this record.\n');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  syncDirectory(path.dirname(marker));
+}
+
+function clearHold(marker) {
+  fs.unlinkSync(marker);
+  try {
+    syncDirectory(path.dirname(marker));
+  } catch (error) {
+    recordHold(marker);
+    throw error;
+  }
+}
+
 async function runBootIntegrityCheck(dbPath, opts = {}) {
   const { recentBackupMaxAgeMs = 24 * 3600 * 1000, backupKeep = 5, now = Date.now() } = opts;
+  const marker = dbPath + '.osi-recovery';
 
+  if (fs.lstatSync(marker, { throwIfNoEntry: false })) {
+    return { status: 'held', marker };
+  }
   if (!fs.existsSync(dbPath)) {
     return { status: 'ok-missing' };
   }
@@ -149,34 +186,51 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
     return { status: 'ok' };
   }
 
-  const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
-  const quarantinedTo = quarantine(dbPath, stamp);
-
+  recordHold(marker);
   const goodBackup = findPassingBackup(dbPath);
-  if (goodBackup) {
-    publishAtomic(dbPath, file => fs.copyFileSync(goodBackup, file), { exclusive: true });
+  if (!goodBackup) {
+    const stampPath = writeStamp(dbPath, { event: 'unrecoverable', timestamp: new Date(now).toISOString() });
+    return { status: 'unrecoverable', marker, stampPath };
+  }
+
+  const dir = path.dirname(dbPath);
+  const staging = fs.mkdtempSync(path.join(dir, '.integrity-restore-'));
+  const candidate = path.join(staging, 'candidate');
+  try {
+    fs.copyFileSync(goodBackup, candidate, fs.constants.COPYFILE_EXCL);
+    const check = execFileSync('sqlite3', ['-readonly', candidate, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+    if (!fs.statSync(candidate).size || check !== 'ok') throw new Error('staged restore failed integrity_check');
+    const fd = fs.openSync(candidate, 'r');
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
+    const quarantinedTo = quarantine(dbPath, stamp);
+    syncDirectory(dir);
+    fs.linkSync(candidate, dbPath);
+    syncDirectory(dir);
     const stampPath = writeStamp(dbPath, {
       event: 'recovered',
       restoredFrom: goodBackup,
       quarantinedTo,
       timestamp: new Date(now).toISOString(),
     });
+    clearHold(marker);
     return { status: 'recovered', restoredFrom: goodBackup, quarantinedTo, stampPath };
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
   }
-
-  const stampPath = writeStamp(dbPath, {
-    event: 'unrecoverable',
-    quarantinedTo,
-    timestamp: new Date(now).toISOString(),
-  });
-  return { status: 'unrecoverable', quarantinedTo, stampPath };
 }
 
 if (require.main === module) {
   const dbPath = process.argv[2] || '/data/db/farming.db';
   runBootIntegrityCheck(dbPath).then(result => {
     console.error(`[osi-db-integrity] ${result.status}${result.restoredFrom ? ` (restored from ${result.restoredFrom})` : ''}${result.quarantinedTo ? ` (quarantined to ${result.quarantinedTo})` : ''}`);
-    process.exit(result.status === 'unrecoverable' ? 1 : 0);
+    if (result.marker) console.error('[osi-db-integrity] HELD: resolve ' + result.marker + ' before starting Node-RED');
+    process.exit(result.marker ? 1 : 0);
   }).catch(err => {
     console.error(`[osi-db-integrity] FATAL: ${err.message}`);
     process.exit(1);
