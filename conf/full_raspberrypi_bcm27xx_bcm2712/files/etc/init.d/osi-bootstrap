@@ -51,11 +51,12 @@ start() {
 
 	logger -t osi-bootstrap "running $(basename "$bootstrap_script")..."
 	if node "$bootstrap_script"; then
-		if touch /etc/osi-bootstrap.done; then
+		if touch /etc/osi-bootstrap.done && sync; then
 			provisioned_this_boot=1
 			logger -t osi-bootstrap "bootstrap completed successfully"
 		else
-			logger -t osi-bootstrap "bootstrap completed but stamp write failed, will retry next boot"
+			rm -f /etc/osi-bootstrap.done
+			logger -t osi-bootstrap "bootstrap completed but stamp write or sync failed, will retry next boot"
 		fi
 	else
 		logger -t osi-bootstrap "bootstrap failed, will retry next boot"

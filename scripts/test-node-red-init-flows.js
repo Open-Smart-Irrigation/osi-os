@@ -9,6 +9,9 @@ const { test } = require('node:test');
 
 const init = fs.readFileSync(
   'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init', 'utf8');
+const profile = 'conf/full_raspberrypi_bcm27xx_bcm2712/files';
+const bootstrapInit = fs.readFileSync(profile + '/etc/init.d/osi-bootstrap', 'utf8');
+const bootstrapSource = fs.readFileSync('scripts/chirpstack-bootstrap.js', 'utf8');
 const brokerId = init.match(/local cloud_broker_node_id="([^"]+)"/)[1];
 const eui = '0016C001F1000001';
 const seed = JSON.stringify([{ id: brokerId, type: 'mqtt-broker', clientid: '' }]) + '\n';
@@ -37,7 +40,47 @@ function fixture(t, { linked = false, password = '' } = {}) {
     .replaceAll('/usr/libexec/', root + '/usr/libexec/')
     .replaceAll('/dev/console', path.join(root, 'console'))
     .replaceAll('/usr/share/flows.json', bundled));
-  function start() {
+  const bootInit = path.join(root, 'osi-bootstrap');
+  const service = path.join(root, 'etc', 'init.d', 'osi-identityd');
+  const request = path.join(root, 'usr', 'libexec', 'osi-identityd.sh');
+  for (const stub of [service, request]) {
+    fs.mkdirSync(path.dirname(stub), { recursive: true });
+    fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  }
+  fs.writeFileSync(bootInit, bootstrapInit.replace(/\/(srv|etc|usr)\//g, match => root + match));
+  const bootstrapRuntime = path.join(root, 'usr', 'share', 'node-red', 'chirpstack-bootstrap.js');
+  fs.mkdirSync(path.dirname(bootstrapRuntime), { recursive: true });
+  // Use the real flow consumer under local service/gRPC fixtures.
+  const validator = bootstrapSource.match(/^function validatePortableFlows\(\) \{[^]*?^\}/m)[0];
+  fs.writeFileSync(bootstrapRuntime, [
+    "const fs = require('fs');",
+    'const CFG = { flowsJson: ' + JSON.stringify(flows) + ' };',
+    validator, 'validatePortableFlows();',
+  ].join('\n'));
+
+  const trace = path.join(root, 'fs-trace');
+  const preload = path.join(root, 'fs-trace.cjs');
+  fs.writeFileSync(preload, `
+const fs = require('fs');
+const sync = fs.fsyncSync;
+const rename = fs.renameSync;
+const trace = process.env.FS_TRACE;
+let failed = false;
+fs.fsyncSync = function(fd) {
+  const kind = fs.fstatSync(fd).isDirectory() ? 'directory' : 'file';
+  fs.appendFileSync(trace, kind + '\\n');
+  if (kind === process.env.FAIL_SYNC && !failed) {
+    failed = true;
+    throw new Error('injected ' + kind + ' fsync failure');
+  }
+  return sync(fd);
+};
+fs.renameSync = function(source, target) {
+  fs.appendFileSync(trace, 'rename\\n');
+  return rename(source, target);
+};
+`);
+  function start({ boot = false, failSync = '' } = {}) {
     const result = spawnSync('sh', ['-c', `
 . "$1"
 uci() {
@@ -53,16 +96,30 @@ normalize_gateway_eui() { printf '%s' "$1"; }
 procd_open_instance() { printf 'procd start\\n'; }
 procd_close_instance() { :; }
 procd_set_param() { printf '%s\\n' "$@"; }
-start_service
+start_service || exit $?
+if [ "$TEST_BOOT" = 1 ]; then
+    . "$TEST_BOOT_INIT"
+    curl() { return 0; }
+    sync() { return 0; }
+    boot
+fi
 `, 'fixture', initPath], {
       encoding: 'utf8',
-      env: { ...process.env, GATEWAY_IDENTITY_DEVICE_EUI: eui, TEST_PASSWORD: password },
+      env: {
+        ...process.env,
+        GATEWAY_IDENTITY_DEVICE_EUI: eui,
+        TEST_PASSWORD: password,
+        TEST_BOOT: boot ? '1' : '0',
+        TEST_BOOT_INIT: bootInit,
+        ...(failSync ? { NODE_OPTIONS: '--require=' + preload, FS_TRACE: trace, FAIL_SYNC: failSync } : {}),
+      },
     });
     assert.ifError(result.error);
+    if (failSync) return result;
     assert.equal(result.status, 0, result.stderr);
     return result.stdout + result.stderr;
   }
-  return { flows, creds, active, target, start };
+  return { flows, creds, active, target, start, trace, stamp: path.join(root, 'etc', 'osi-bootstrap.done') };
 }
 
 function quarantine(file) {
@@ -167,3 +224,36 @@ test('a restart with unchanged flows and credentials writes neither file', t => 
   fx.start();
   assert.deepEqual([snapshot(fx.flows), snapshot(fx.creds)], before);
 });
+
+test('boot recovery reaches the real bootstrap flow validator on the same boot', t => {
+  const nodePriority = init.match(/^START=(\d+)/m)[1];
+  const bootstrapPriority = bootstrapInit.match(/^START=(\d+)/m)[1];
+  assert.ok('S' + nodePriority + 'node-red' < 'S' + bootstrapPriority + 'osi-bootstrap');
+  const fx = fixture(t);
+  fs.writeFileSync(fx.flows, Buffer.alloc(Buffer.byteLength(seed)));
+  const log = fx.start({ boot: true });
+  assert.match(log, /flows.json portable communication contract verified/);
+  assert.match(log, /bootstrap completed successfully/);
+  assert.doesNotMatch(log, /bootstrap failed/);
+  assert.equal(fs.existsSync(fx.stamp), true);
+});
+
+for (const [failure, expected] of [
+  ['file', ['file']],
+  ['directory', ['file', 'rename', 'directory', 'rename', 'directory']],
+]) {
+  test(`a ${failure} fsync failure retains the previous flow file and is logged`, t => {
+    const fx = fixture(t, { linked: true });
+    fs.writeFileSync(fx.target, seed);
+    const previous = fs.statSync(fx.target);
+    const result = fx.start({ failSync: failure });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, new RegExp('injected ' + failure + ' fsync failure'));
+    assert.match(result.stderr, /logger .*Node-RED startup refused/);
+    assert.doesNotMatch(result.stdout, /procd start/);
+    assert.equal(fs.readFileSync(fx.target, 'utf8'), seed);
+    assert.equal(fs.statSync(fx.target).ino, previous.ino);
+    assert.equal(fs.realpathSync(fx.flows), fx.target);
+    assert.deepEqual(fs.readFileSync(fx.trace, 'utf8').trim().split('\n'), expected);
+  });
+}
