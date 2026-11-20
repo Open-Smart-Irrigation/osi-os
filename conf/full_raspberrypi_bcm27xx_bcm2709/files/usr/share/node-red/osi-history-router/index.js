@@ -858,21 +858,14 @@ async function portableAssertEnabledAccount(db, scope, auth) {
   await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });
 }
 
-// One all-zones export at a time per Node-RED process: an export near its row
+// One history export at a time per Node-RED process: an export near its row
 // bound holds about 100-140 MB of heap and seconds of event-loop time, and
 // its queries queue on the shared database connection ahead of ingest. The
 // slot is released when the export finishes, whatever the outcome; a client
 // that disconnects early frees it when the build it started completes.
 let portableExportInFlight = false;
 
-async function portableAllZonesExport(request, history, db, auth, scope) {
-  const query = request.query || {};
-  if (scope) {
-    await portableAssertEnabledAccount(db, scope, auth);
-  } else {
-    await portableAssertUserExists(db, auth);
-  }
-  if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
+async function withHistoryExportSlot(build) {
   if (portableExportInFlight) {
     const busy = new Error('export already running');
     busy.statusCode = 429;
@@ -882,10 +875,30 @@ async function portableAllZonesExport(request, history, db, auth, scope) {
   }
   portableExportInFlight = true;
   try {
-    return await portableBuildAllZonesExport(request, history, db, auth, scope, query);
+    return await build();
   } finally {
     portableExportInFlight = false;
   }
+}
+
+// The per-zone flow calls this after its existing authentication/scope checks.
+// Keep serialization inside the slot, just like the all-zones response.
+async function buildZoneExportCsv(db, options = {}) {
+  return withHistoryExportSlot(async () => {
+    const result = await historyHelper.buildZoneExportCsv(db, options);
+    return { ...result, csv: historyHelper.toCsv(result.columns, result.rows) };
+  });
+}
+
+async function portableAllZonesExport(request, history, db, auth, scope) {
+  const query = request.query || {};
+  if (scope) {
+    await portableAssertEnabledAccount(db, scope, auth);
+  } else {
+    await portableAssertUserExists(db, auth);
+  }
+  if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
+  return withHistoryExportSlot(() => portableBuildAllZonesExport(request, history, db, auth, scope, query));
 }
 
 async function portableBuildAllZonesExport(request, history, db, auth, scope, query) {
@@ -966,6 +979,8 @@ async function handlePortableHistoryRequest(request = {}) {
 }
 
 module.exports = {
+  withHistoryExportSlot,
+  buildZoneExportCsv,
   handlePortableHistoryRequest,
   safeFilenamePart,
   httpError,

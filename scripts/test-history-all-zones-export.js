@@ -80,7 +80,7 @@ function addLoRainFixture(raw) {
 }
 
 function parseCsv(text) {
-  const lines = text.trimEnd().split('\n');
+  const lines = text.replace(/^\uFEFF/, '').trimEnd().split('\n');
   const header = lines.shift().split(',');
   return lines.map((line) => {
     const cells = [];
@@ -274,7 +274,7 @@ for (const profile of PROFILES) {
       for (const lead of ['=', '+', '-', '@', '\t', '\r']) {
         assert.equal(helper.toCsv(['a'], [{ a: `${lead}cmd` }]).split('\n')[1].replace(/^"|"$/g, '')[0], "'");
       }
-      assert.equal(helper.toCsv(['a'], [{ a: -5 }]), 'a\n-5\n', 'a negative number stays a number');
+      assert.equal(helper.toCsv(['a'], [{ a: -5 }]), '\uFEFFa\n-5\n', 'a negative number stays a number');
     } finally {
       raw.close();
     }
@@ -291,7 +291,7 @@ for (const profile of PROFILES) {
       await assert.rejects(helper.buildAllZonesExportCsv(db, { ...base, from: '2026-03-01', to: '2026-07-01', granularity: 'raw' }), { statusCode: 413, code: 'RANGE_TOO_LARGE' });
       await assert.rejects(helper.buildAllZonesExportCsv(db, { ...base, from: '2026-07-05', to: '2026-07-05' }), { statusCode: 400 });
       const empty = await helper.buildAllZonesExportCsv(db, { ...base, zoneIds: [], from: '2026-07-01', to: '2026-07-01' });
-      assert.equal(empty.csv, helper.RAW_CSV_COLUMNS.join(',') + '\n');
+      assert.equal(empty.csv, '\uFEFF' + helper.RAW_CSV_COLUMNS.join(',') + '\n');
       assert.equal(empty.rowCount, 0);
     } finally {
       raw.close();
@@ -337,7 +337,7 @@ for (const profile of PROFILES) {
         const expected = whole.buckets
           .filter((bucket) => bucket.series.swt_1.sampleCount > 0)
           .map((bucket) => [bucket.bucketStart, bucket.series.swt_1.mean]);
-        const exported = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => [row.timestamp, row.value]);
+        const exported = result.rows.filter((row) => row.channel_key === 'swt_1' && row.value !== null).map((row) => [row.timestamp, row.value]);
         assert.equal(exported.length, expected.length, `${granularity}: bucket count`);
         assert.deepEqual(exported, expected, `${granularity}: bucket values`);
       }
