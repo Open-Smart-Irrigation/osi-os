@@ -193,3 +193,9 @@ Use the private-PID-namespace driver through osi-heavy as shown above. GitHub CI
 on the pushed head and the separate Sol re-review remain external gates. The
 PR's “Assumptions to confirm” records the conservative view/startup-script
 refusals, workstation-only hardware qualification and pending flows reservation.
+
+The CI launcher explicitly preserves `EB19_STOCK_NODE` and `TMPDIR` across
+sudo's environment reset. A launcher-construction check is red on `3cf0a90fb`
+and green with the correction. The stock-profile cases include that regression;
+the local qualification is rerun for the launcher follow-up. Recovery code is
+unchanged by this test-environment correction.

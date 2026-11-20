@@ -8,7 +8,7 @@ const test = path.join(__dirname, 'rehearse-legacy-catalog.test.js');
 let command = 'unshare';
 let args = ['--pid', '--fork', '--mount-proc', process.execPath, '--test', test];
 if (process.getuid() !== 0) {
-  if (process.env.GITHUB_ACTIONS === 'true') { command = 'sudo'; args = ['-n', 'unshare', ...args]; }
+  if (process.env.GITHUB_ACTIONS === 'true') { command = 'sudo'; args = ['-n', '--preserve-env=EB19_STOCK_NODE,TMPDIR', 'unshare', ...args]; }
   else args = ['--user', '--map-root-user', ...args];
 }
 const result = spawnSync(command, args, { stdio: 'inherit' });

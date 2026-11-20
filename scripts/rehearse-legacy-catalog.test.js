@@ -669,6 +669,19 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       const node = process.env.EB19_STOCK_NODE;
       assert.ok(node, 'set EB19_STOCK_NODE to the qualified Node 20.18.3 executable');
       assert.equal(execFileSync(node, ['--version'], { encoding: 'utf8' }).trim(), 'v20.18.3');
+      const ciHarness = spawnSync(process.execPath, ['-e', `
+        const assert=require('node:assert/strict');
+        process.getuid=()=>1000;process.env.GITHUB_ACTIONS='true';
+        require('node:child_process').spawnSync=(command,args)=>{
+          assert.equal(command,'sudo');
+          assert.ok(args.includes('--preserve-env=EB19_STOCK_NODE,TMPDIR'));
+          assert.ok(args.includes(process.execPath));
+          console.log('CI runtime environment is preserved');return {status:0};
+        };
+        require(process.argv[1]);`, path.join(ROOT, 'scripts/run-legacy-catalog-rehearsal.js')], { encoding: 'utf8' });
+      assert.equal(ciHarness.status, 0, ciHarness.stderr);
+      assert.match(ciHarness.stdout, /CI runtime environment is preserved/);
+
       const toolPath = path.join(ROOT, 'scripts/repair-legacy-device-fk.js');
       const run = args => {
         const r = spawnSync(node, [toolPath, ...args], { encoding: 'utf8' });
