@@ -17,6 +17,11 @@ Resume readiness: READY at `9e7e3c69a`, intended base `origin/main` at
 AGENTS line explicitly sanctions this copy-based offline recovery. The user
 instructed a fast-forward continuation of draft PR #699 and a later Sol review.
 
+The follow-up starts at `1906a3803`: resume readiness is WARN, one commit behind
+and four ahead of `origin/main` (`1a984f31f`), with AGENTS.md revision
+`1f9c2c4b8`. The newer main runbook guidance concerns ChirpStack recovery and was
+read without changing this PR's base or its repair-tool review surface.
+
 Deploy's read-only database check now refuses matching table, trigger and index
 SQL before its first live change, before checkpointing, and again at migration
 entry. The migration CLI refuses before creating backup directories, pruning or
@@ -77,6 +82,16 @@ zero-subprocess test failed (3 calls instead of 0). The correction uses native
 adapter reads and a dedicated forced-read-only CLI query method; the focused
 baseline test is covered by GitHub CI on the final head.
 
+The migrations job at `1906a3803` exposed a separate fresh-install regression:
+the CLI adapter's read-only preflight ran before the first database file existed.
+Seven unchanged add-column cases and the new absent-file test fail locally
+before the correction (32 passed, 8 failed). The corrected guard accepts only a
+missing path for the CLI adapter, without creating it. It still refuses a corrupt
+catalog, a dangling symlink, an existing-file read failure and an incomplete
+repair lock. Persistent adapters always query their existing handle, including
+an in-memory database or uncommitted catalog changes. All 40 focused runner and
+add-column tests then pass, with no skips or changes to existing assertions.
+
 The CTO's updated gate rule uses GitHub CI on the exact final head for the full
 migration, sync, smoke and shell suites. The queued full-suite wrapper was
 cancelled before it ran. Local populated repair, rebuild and interruption tests
@@ -84,6 +99,23 @@ remain required through `osi-heavy` regardless of CI status.
 Current command results are recorded by head SHA in [PR #699](https://github.com/Open-Smart-Irrigation/osi-os/pull/699).
 This report records the implementation and required validation; the PR body is
 updated after execution rather than retaining an obsolete queue status here.
+
+For this regression, the lead explicitly requires a complete local rerun of
+`.github/workflows/migrations.yml` as well as the 51 populated qualification
+checks. This overrides the earlier instruction to leave full suites to CI.
+The local replay uses every validation command and its workflow environment,
+including the cutover job, with logs and exit codes per step. Node 22 and the
+SQLite CLI are already installed; the server source is an isolated snapshot of
+its remote default branch because no matching EB19 branch exists. Each step
+gets fresh private scratch space through the same `osi-heavy` reservation.
+
+All 122 workflow command steps passed locally. The migration module batch passed
+205/205, the deploy/baseline/CLI batch 561/561, the populated repair qualification
+51/51 and the separate cutover job 15/15, each with no skips. The full workflow
+retained nine existing conditional skips (optional MQTT restart and benchmark,
+unavailable production columns, and six pending #520 composition cases). No
+existing test or skip condition was changed. Per-command logs and exit codes
+are retained in the package's local evidence directory.
 
 | Gate | Command or evidence |
 |---|---|
