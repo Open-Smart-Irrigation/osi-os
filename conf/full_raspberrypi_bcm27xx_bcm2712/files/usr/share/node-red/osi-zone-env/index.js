@@ -1100,6 +1100,8 @@ function overlayLocalWaterIrrigationSplit(sharedWater, localWater, todayIso) {
 }
 
 module.exports = {
+  ...require('./http-facade'),
+  ...require('./run-projection'),
   trimToNull,
   normalizeTimezone,
   toFiniteNumber,
