@@ -1533,7 +1533,7 @@ if (process.geteuid() !== 0) {
     assert.deepEqual(fs.readFileSync(INIT_A), fs.readFileSync(INIT_B));
     assert.match(fs.readFileSync(INIT_A, 'utf8'), /\/usr\/share\/node-red\/chirpstack-bootstrap\.js/);
     const deploy = fs.readFileSync(DEPLOY, 'utf8');
-    assert.match(deploy, /older ROM script/); assert.match(deploy, /updated \/srv\/node-red script/);
+    assert.match(deploy, /OSI_BOOTSTRAP_REVISION/); assert.match(deploy, /updated \/srv\/node-red script/);
     const fx = fixture();
     const raw = 'CHIRPSTACK_APP_SENSORS=app-from-env\nDEVICE_EUI=stale-identity\n';
     fs.writeFileSync(fx.envFile, raw);
