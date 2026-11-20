@@ -304,9 +304,8 @@ and retries on the next tick.
 Capture uses the same trusted clock check. The archive warns and skips
 transmissions received before the clock is trusted, while canonical ingest
 continues. On the first trusted maintenance tick, legacy epoch-dated receipts
-qualify for normal 365-day expiry. Once that work is caught up, maintenance
-also expires legacy receipts more than 24 hours ahead of the trusted clock
-in batches of eight. Receipts within 24 hours of the current time age normally.
+qualify for normal 365-day expiry. Future-stamped receipts remain until they
+qualify under the same receipt-age rule.
 
 | Storage profile | Minimum free space on the database filesystem |
 |---|---:|
@@ -316,10 +315,11 @@ in batches of eight. Receipts within 24 hours of the current time age normally.
 Below the floor, the archive pauses capture while canonical ingest continues.
 After expiry is caught up, maintenance prunes the oldest remaining receipts
 at least 30 days old. A low-space episode permits at most 32 pressure
-deletions. After a batch, the job requires a rise in measured filesystem
-free space before trying again. It resets the episode when it sees free
-space at or above the floor. The count and last pre-batch measurement
-commit with the deletion and survive Node-RED restarts.
+deletions. Each batch records its count and unconfirmed state in the same
+transaction as the deletion. Only the batch's immediate post-delete probe
+can confirm a rise in filesystem free space and allow another batch. A flat
+or failed probe, or a process exit before confirmation, leaves pressure
+pruning stopped. The episode resets at 1 GiB plus 64 MiB of free space.
 
 When a batch frees no filesystem space or the episode reaches its cap,
 maintenance reports `SDI12 archive cannot recover space` in the node status

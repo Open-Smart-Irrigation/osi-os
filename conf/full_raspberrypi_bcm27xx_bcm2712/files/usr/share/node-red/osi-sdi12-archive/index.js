@@ -4,16 +4,17 @@
 // Canonical telemetry remains the responsibility of osi-device-writer.
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 
 const MAX_ASCII = 1500;
 const MAX_JSON_BYTES = 256 * 1024;
 // Both maintained profiles support 16 GB-class cards and larger media.
 const MIB = 1024 ** 2;
 const ARCHIVE_MIN_FREE_BYTES = 1024 * MIB;
+const PRESSURE_RECOVERY_BYTES = ARCHIVE_MIN_FREE_BYTES + 64 * MIB;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = 365 * DAY_MS;
 const PRESSURE_MIN_AGE_MS = 30 * DAY_MS;
-const FUTURE_TOLERANCE_MS = DAY_MS;
 const EMERGENCY_FREE_BYTES = 16 * MIB;
 const PRESSURE_EPISODE_CAP = 32;
 const PRESSURE_KEY = 'sdi12_archive_pressure_v1';
@@ -218,9 +219,9 @@ function query(db, method, sql, params = []) {
   });
 }
 
-function deleteBatch(db, where, cutoff, limit = RETENTION_BATCH_SIZE) {
+function deleteBatch(db, cutoff, limit = RETENTION_BATCH_SIZE) {
   return query(db, 'run', `DELETE FROM sdi12_transmissions WHERE id IN (
-    SELECT id ${ORDERED_ROWS} ${where} ${RECEIPT_ORDER} LIMIT ?
+    SELECT id ${ORDERED_ROWS} WHERE received_at <= ? ${RECEIPT_ORDER} LIMIT ?
   )`, [cutoff, limit]);
 }
 
@@ -232,44 +233,45 @@ async function reusableBytes(db) {
 
 async function readPressureState(db) {
   const row = await query(db, 'get', READ_PRESSURE, [PRESSURE_KEY]);
-  if (!row) return { deleted: 0, freeBytes: 0 };
+  if (!row) return { deleted: 0, confirmed: true };
   const state = JSON.parse(row.value);
-  if (!state || !Number.isSafeInteger(state.deleted) || state.deleted < 1 || state.deleted > PRESSURE_EPISODE_CAP
-      || !Number.isSafeInteger(state.freeBytes) || state.freeBytes < EMERGENCY_FREE_BYTES
-      || state.freeBytes >= ARCHIVE_MIN_FREE_BYTES) {
+  if (!state || !Number.isSafeInteger(state.deleted) || state.deleted < 1 || state.deleted > PRESSURE_EPISODE_CAP) {
     throw new Error('invalid SDI12 archive pressure state');
   }
-  return state;
+  // An older state record contains only a pre-batch measurement. Treat it
+  // as unconfirmed because that measurement cannot establish recovery.
+  return { deleted: state.deleted, confirmed: typeof state.batchId === 'string' && state.confirmed === true };
 }
 
-function pressureStop(state, freeBytes) {
+function pressureStop(state) {
   if (state.deleted >= PRESSURE_EPISODE_CAP) return 'pressure_cap';
-  if (freeBytes <= state.freeBytes) return 'pressure_stalled';
+  if (!state.confirmed) return 'pressure_stalled';
   return null;
 }
 
-async function deleteUnderPressure(db, cutoff, freeBytes) {
+async function deleteUnderPressure(db, cutoff) {
+  const batchId = randomUUID();
   await query(db, 'run', 'BEGIN IMMEDIATE');
   try {
     // Re-read under the write lock. The batch and the episode receipt must
     // commit together, including if Node-RED stops before the second statfs.
     const state = await readPressureState(db);
-    const stopped = pressureStop(state, freeBytes);
+    const stopped = pressureStop(state);
     if (stopped) {
       await query(db, 'run', 'COMMIT');
       return { reason: stopped, deleted: 0 };
     }
     const limit = Math.min(RETENTION_BATCH_SIZE, PRESSURE_EPISODE_CAP - state.deleted);
-    const deleted = await deleteBatch(db, 'WHERE received_at <= ?', cutoff, limit);
-    const total = state.deleted + deleted;
+    const deleted = await deleteBatch(db, cutoff, limit);
+    const episode = { deleted: state.deleted + deleted, batchId, confirmed: false };
     if (deleted) {
       await query(db, 'run', `INSERT INTO app_settings(key, value, updated_at)
         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
-      [PRESSURE_KEY, JSON.stringify({ deleted: total, freeBytes })]);
+      [PRESSURE_KEY, JSON.stringify(episode)]);
     }
     await query(db, 'run', 'COMMIT');
-    return { reason: deleted ? 'pressure' : 'pressure_protected', deleted, total };
+    return { reason: deleted ? 'pressure' : 'pressure_protected', deleted, episode };
   } catch (error) {
     try {
       await query(db, 'run', 'ROLLBACK');
@@ -280,9 +282,43 @@ async function deleteUnderPressure(db, cutoff, freeBytes) {
   }
 }
 
+function isBusy(error) {
+  return error.code === 'SQLITE_BUSY' || error.code === 'SQLITE_LOCKED';
+}
+
+async function confirmPressure(db, episode, statFree, freeBytes) {
+  let afterFree;
+  try {
+    afterFree = statFree();
+  } catch (error) {
+    return { reason: 'pressure_stalled', freeBytes, detail: error.message };
+  }
+
+  const pending = JSON.stringify(episode);
+  try {
+    if (afterFree >= PRESSURE_RECOVERY_BYTES) {
+      await query(db, 'run', CLEAR_PRESSURE, [PRESSURE_KEY, pending]);
+      return { reason: 'pressure', freeBytes: afterFree };
+    }
+    if (episode.deleted >= PRESSURE_EPISODE_CAP) return { reason: 'pressure_cap', freeBytes: afterFree };
+    if (afterFree > freeBytes) {
+      // Only the process that measured this batch may confirm it. A
+      // conditional update prevents a stale confirmation after a reset.
+      const changes = await query(db, 'run', `UPDATE app_settings SET value = ?,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE key = ? AND value IS ?`,
+      [JSON.stringify({ ...episode, confirmed: true }), PRESSURE_KEY, pending]);
+      if (changes) return { reason: 'pressure', freeBytes: afterFree };
+    }
+  } catch (error) {
+    if (!isBusy(error)) throw error;
+    return { reason: 'pressure_stalled', freeBytes: afterFree, detail: error.message };
+  }
+  return { reason: 'pressure_stalled', freeBytes: afterFree };
+}
+
 async function prunePressure(db, cutoff, statFree, freeBytes) {
   const state = await readPressureState(db);
-  const stopped = pressureStop(state, freeBytes);
+  const stopped = pressureStop(state);
   if (stopped) return { reason: stopped, deleted: 0, freeBytes, reusableBytes: await reusableBytes(db) };
   const eligible = await query(db, 'get', `SELECT id ${ORDERED_ROWS} WHERE received_at <= ? LIMIT 1`, [cutoff]);
   if (!eligible) {
@@ -290,39 +326,21 @@ async function prunePressure(db, cutoff, statFree, freeBytes) {
     return { reason: any ? 'pressure_protected' : 'pressure_empty', deleted: 0, freeBytes, reusableBytes: await reusableBytes(db) };
   }
 
-  const { reason, deleted, total } = await deleteUnderPressure(db, cutoff, freeBytes);
-  const reusable = await reusableBytes(db);
-  if (!deleted) return { reason, deleted, freeBytes, reusableBytes: reusable };
-  let afterFree;
-  try {
-    afterFree = statFree();
-  } catch (error) {
-    return { reason: 'pressure_stalled', deleted, freeBytes, reusableBytes: reusable, detail: error.message };
-  }
-  const episode = { deleted: total, freeBytes };
-  if (afterFree >= ARCHIVE_MIN_FREE_BYTES) {
-    await query(db, 'run', CLEAR_PRESSURE, [PRESSURE_KEY, JSON.stringify(episode)]);
-    return { reason: 'pressure', deleted, freeBytes: afterFree, reusableBytes: reusable };
-  }
-  const afterReason = pressureStop(episode, afterFree) || 'pressure';
-  return { reason: afterReason, deleted, freeBytes: afterFree, reusableBytes: reusable };
+  const { reason, deleted, episode } = await deleteUnderPressure(db, cutoff);
+  const outcome = deleted ? await confirmPressure(db, episode, statFree, freeBytes) : { reason, freeBytes };
+  return { ...outcome, deleted, reusableBytes: await reusableBytes(db) };
 }
 
 async function prune(db, now, statFree, freeBytes) {
-  if (freeBytes >= ARCHIVE_MIN_FREE_BYTES) {
+  if (freeBytes >= PRESSURE_RECOVERY_BYTES) {
     const prior = await query(db, 'get', READ_PRESSURE, [PRESSURE_KEY]);
     if (prior) {
       await query(db, 'run', CLEAR_PRESSURE, [PRESSURE_KEY, prior.value]);
     }
   }
-  for (const [where, boundary, reason] of [
-    ['WHERE received_at <= ?', now - RETENTION_MS, 'expired'],
-    ['WHERE received_at > ?', now + FUTURE_TOLERANCE_MS, 'future_outlier'],
-  ]) {
-    const cutoff = new Date(boundary).toISOString();
-    const row = await query(db, 'get', `SELECT id ${ORDERED_ROWS} ${where} LIMIT 1`, [cutoff]);
-    if (row) return { reason, deleted: await deleteBatch(db, where, cutoff), freeBytes };
-  }
+  const cutoff = new Date(now - RETENTION_MS).toISOString();
+  const expired = await query(db, 'get', `SELECT id ${ORDERED_ROWS} WHERE received_at <= ? LIMIT 1`, [cutoff]);
+  if (expired) return { reason: 'expired', deleted: await deleteBatch(db, cutoff), freeBytes };
   if (freeBytes >= ARCHIVE_MIN_FREE_BYTES) return { reason: 'idle', deleted: 0 };
   return prunePressure(db, new Date(now - PRESSURE_MIN_AGE_MS).toISOString(), statFree, freeBytes);
 }
@@ -353,7 +371,7 @@ async function maintain(dbApi, {
     await query(db, 'get', 'PRAGMA synchronous=NORMAL');
     return await prune(db, now, statFree, freeBytes);
   } catch (error) {
-    if (error.code === 'SQLITE_BUSY' || error.code === 'SQLITE_LOCKED') return { reason: 'busy', deleted: 0 };
+    if (isBusy(error)) return { reason: 'busy', deleted: 0 };
     throw error;
   } finally {
     if (db) await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()));
@@ -368,7 +386,7 @@ async function liveMaintain({ node, osiLib }) {
     if (!loaded.ok) throw new Error(loaded.error);
     const result = await maintain(loaded.value);
     const lowDisk = result.freeBytes < ARCHIVE_MIN_FREE_BYTES;
-    const healthy = !lowDisk && ['idle', 'expired', 'future_outlier', 'pressure'].includes(result.reason);
+    const healthy = !lowDisk && ['idle', 'expired', 'pressure'].includes(result.reason);
     const blocked = ['pressure_cap', 'pressure_stalled', 'pressure_protected', 'pressure_empty'].includes(result.reason);
     const status = blocked ? 'SDI12 archive cannot recover space' : 'SDI12 retention';
     const text = `${status}: ${result.reason} (${result.deleted} removed)`;

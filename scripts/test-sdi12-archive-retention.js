@@ -17,10 +17,11 @@ const dayMs = 86400000;
 const now = Date.parse('2026-11-20T12:00:00Z');
 const cutoff = now - 365 * dayMs;
 const floor = 1024 ** 3;
+const recovery = floor + 64 * 1024 ** 2;
 const iso = ms => new Date(ms).toISOString();
-const goodClock = () => ({
+const goodClock = (at = now) => ({
   bootId: 'test-boot', uptime: 60000,
-  marker: { boot_id: 'test-boot', epoch_ms: now - 60000, uptime_ms: 0, stratum: 2 },
+  marker: { boot_id: 'test-boot', epoch_ms: at - 60000, uptime_ms: 0, stratum: 2 },
 });
 
 function maintenanceDbApi(filename, onOpen = () => {}, onDelete) {
@@ -57,24 +58,33 @@ function maintenanceDbApi(filename, onOpen = () => {}, onDelete) {
   };
 }
 
-function runAfterProcessRestart(filename, freeBytes) {
+function runAfterProcessRestart(filename, freeBytes, { exitAfterBatch = false } = {}) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  return JSON.parse(execFileSync(process.execPath, ['-e', `
+  const output = execFileSync(process.execPath, ['-e', `
     const assert = require('node:assert/strict');
     const { DatabaseSync } = require('node:sqlite');
     const createApi = ${maintenanceDbApi.toString()};
     const dbPath = ${JSON.stringify(filename)};
     const archive = require(${JSON.stringify(archivePath)});
+    let probes = 0;
     archive.maintain(createApi(dbPath), {
       now: ${now}, dbPath,
       clock: () => (${JSON.stringify(goodClock())}),
-      statfs: () => ({ bavail: ${freeBytes}, bsize: 1 }),
+      statfs: () => {
+        if (++probes === 2 && ${exitAfterBatch}) process.exit(0);
+        return { bavail: ${freeBytes}, bsize: 1 };
+      },
     }).then(result => process.stdout.write(JSON.stringify(result))).catch(error => {
       console.error(error);
       process.exitCode = 1;
     });
-  `], { env, encoding: 'utf8' }));
+  `], { env, encoding: 'utf8' });
+  if (exitAfterBatch) {
+    assert.equal(output, '', 'the first process exits at the post-batch probe');
+    return;
+  }
+  return JSON.parse(output);
 }
 
 function fixture(t, { beforeMigration = false } = {}) {
@@ -176,7 +186,10 @@ test('a flat filesystem stops pressure across restart even when the whole archiv
   assert.ok(pressure.reusableBytes > 0, 'SQLite page gains are visible');
   const remaining = f.ids();
   for (let i = 0; i < 4; i++) {
-    assert.equal(runAfterProcessRestart(f.filename, floor - 16 * 1024 ** 2).reason, 'pressure_stalled');
+    const reading = floor - 16 * 1024 ** 2 + i * 4096;
+    const restarted = runAfterProcessRestart(f.filename, reading);
+    assert.equal(restarted.reason, 'pressure_stalled');
+    assert.equal(restarted.deleted, 0);
   }
   assert.deepEqual(f.ids(), remaining);
   assert.equal(remaining.length, 25);
@@ -189,7 +202,75 @@ test('a flat filesystem stops pressure across restart even when the whole archiv
   f.free(floor - 17 * 1024 ** 2);
   assert.equal((await f.run()).deleted, 0);
   f.free(floor - 15 * 1024 ** 2);
-  assert.equal((await f.run()).deleted, 8);
+  assert.equal((await f.run()).deleted, 0);
+});
+
+test('oscillation near the floor keeps an episode stopped until the full recovery margin', async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 32; i++) f.add(now - 40 * dayMs);
+  assert.equal(runAfterProcessRestart(f.filename, floor - 8192).deleted, 8);
+
+  for (const reading of [floor, floor - 1, floor + 4096, floor - 4096, recovery - 1, floor - 1]) {
+    assert.equal(runAfterProcessRestart(f.filename, reading).deleted, 0);
+  }
+  assert.equal(f.ids().length, 24);
+  assert.equal(runAfterProcessRestart(f.filename, recovery).reason, 'idle');
+  assert.equal(runAfterProcessRestart(f.filename, floor - 4096).deleted, 8);
+  assert.equal(f.ids().length, 16);
+});
+
+test('a failed post-batch probe leaves pressure stopped across process restart', async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 16; i++) f.add(now - 40 * dayMs);
+  let probes = 0;
+  const first = await f.run({ statfs() {
+    if (++probes === 2) throw new Error('post-batch probe unavailable');
+    return { bavail: floor - 8192, bsize: 1 };
+  } });
+  assert.equal(first.deleted, 8);
+  assert.equal(first.reason, 'pressure_stalled');
+  assert.match(first.detail, /post-batch probe unavailable/);
+  const restarted = runAfterProcessRestart(f.filename, floor - 4096);
+  assert.equal(restarted.reason, 'pressure_stalled');
+  assert.equal(restarted.deleted, 0);
+  assert.equal(f.ids().length, 8);
+});
+
+test('a direct post-batch rise permits another batch in a fresh process', async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 24; i++) f.add(now - 40 * dayMs);
+  const before = floor - 8192;
+  const after = floor - 4096;
+  let probes = 0;
+  const result = await f.run({ statfs: () => ({ bavail: ++probes === 1 ? before : after, bsize: 1 }) });
+  assert.equal(result.reason, 'pressure');
+  assert.equal(result.deleted, 8);
+  const restarted = runAfterProcessRestart(f.filename, after);
+  assert.equal(restarted.deleted, 8);
+  assert.equal(restarted.reason, 'pressure_stalled');
+  assert.equal(f.ids().length, 8);
+});
+
+test('process exit after a committed batch and before its confirmation leaves pressure stopped', t => {
+  const f = fixture(t);
+  for (let i = 0; i < 16; i++) f.add(now - 40 * dayMs);
+  runAfterProcessRestart(f.filename, floor - 8192, { exitAfterBatch: true });
+  assert.equal(f.ids().length, 8);
+  const restarted = runAfterProcessRestart(f.filename, floor - 4096);
+  assert.equal(restarted.reason, 'pressure_stalled');
+  assert.equal(restarted.deleted, 0);
+  assert.equal(f.ids().length, 8);
+});
+
+test('pressure state from before confirmations fails closed until recovery', t => {
+  const f = fixture(t);
+  const row = f.add(now - 40 * dayMs);
+  f.db.prepare('INSERT INTO app_settings(key, value) VALUES (?, ?)').run(
+    'sdi12_archive_pressure_v1', JSON.stringify({ deleted: 8, freeBytes: floor - 8192 }));
+  assert.equal(runAfterProcessRestart(f.filename, floor - 4096).reason, 'pressure_stalled');
+  assert.deepEqual(f.ids(), [row]);
+  assert.equal(runAfterProcessRestart(f.filename, recovery).reason, 'idle');
+  assert.equal(runAfterProcessRestart(f.filename, floor - 4096).deleted, 1);
 });
 
 test('the maintenance adapter reports when the archive cannot recover space', async t => {
@@ -220,7 +301,9 @@ test('pressure protects the newest 30 days and caps an episode even when filesys
   for (let i = 0; i < 4; i++) assert.equal((await f.run({ statfs: risingSpace })).deleted, 8);
   assert.equal(runAfterProcessRestart(f.filename, freeBytes + 1).reason, 'pressure_cap');
   assert.equal(f.ids().length, 9);
-  assert.equal((await f.run()).reason, 'idle', 'an observed recovery ends the episode');
+  assert.equal((await f.run()).reason, 'idle', 'the floor alone is below the recovery threshold');
+  assert.equal(runAfterProcessRestart(f.filename, freeBytes + 1).reason, 'pressure_cap');
+  assert.equal(runAfterProcessRestart(f.filename, recovery).reason, 'idle');
   const next = await f.run({ statfs: risingSpace });
   assert.equal(next.deleted, 8);
   assert.deepEqual(f.ids(), [recent]);
@@ -272,29 +355,34 @@ test('empty, untrusted clocks, failed probe and emergency headroom', async t => 
   assert.equal(f.opens(), 2, 'safety skips do not touch SQLite');
   assert.equal(f.ids().length, 1);
   f.failProbe(null);
-  f.free(floor);
-
 });
 
-test('the first trusted maintenance tick uses the corrected clock for legacy outliers', async t => {
+test('the corrected clock expires legacy epoch receipts and preserves future stamps until ordinary expiry', async t => {
   const f = fixture(t);
   const epoch = f.add(0);
-  const future = f.add(now + 500 * dayMs);
+  const futureAt = now + 500 * dayMs;
+  const future = f.add(futureAt);
   const recent = f.add(now);
   const plausible = f.add(now + dayMs);
   assert.equal((await f.run({ clock: () => ({ ...goodClock(), uptime: 0 }) })).deleted, 0);
   assert.deepEqual(f.ids(), [epoch, future, recent, plausible]);
   assert.equal((await f.run()).reason, 'expired');
   assert.deepEqual(f.ids(), [future, recent, plausible]);
-  assert.equal((await f.run()).reason, 'future_outlier');
-  assert.deepEqual(f.ids(), [recent, plausible]);
+  assert.equal((await f.run()).reason, 'idle');
+  assert.deepEqual(f.ids(), [future, recent, plausible]);
+  const expiresAt = futureAt + 365 * dayMs;
+  assert.equal((await f.run({ now: expiresAt - 1, clock: () => goodClock(expiresAt - 1) })).reason, 'expired');
+  assert.deepEqual(f.ids(), [future]);
+  assert.equal((await f.run({ now: expiresAt, clock: () => goodClock(expiresAt) })).deleted, 1);
+  assert.deepEqual(f.ids(), []);
 });
 
 test('pressure maintenance yields to ingest and an ingest writer can commit during a pressure batch', async t => {
   const f = fixture(t);
   const maxContext = JSON.stringify('x'.repeat(256 * 1024 - 2));
   for (let i = 0; i < 16; i++) f.add(now - 31 * dayMs, 'TEST_SENSOR_A', 256 * 1024 - 4, null, maxContext);
-  f.free(floor - 1_000_000);
+  const initialFree = floor - 1_000_000;
+  f.free(initialFree);
   f.db.exec('BEGIN IMMEDIATE');
   try {
     f.db.exec('INSERT INTO canonical_readings VALUES (42)');
@@ -343,7 +431,9 @@ test('pressure maintenance yields to ingest and an ingest writer can commit duri
     worker.once('message', resolve);
     worker.once('error', reject);
   });
-  assert.equal((await f.run()).deleted, 8);
+  let probes = 0;
+  const statfs = () => ({ bavail: initialFree + 4096 * probes++, bsize: 1 });
+  assert.equal((await f.run({ statfs })).deleted, 8);
   const waitMs = await ingested;
   assert.ok(waitMs >= 40 && waitMs < 5000, `ingest waited ${waitMs} ms on the pruning write`);
   t.diagnostic(`canonical insert with overlapping maximum-payload batch: ${waitMs.toFixed(1)} ms`);
