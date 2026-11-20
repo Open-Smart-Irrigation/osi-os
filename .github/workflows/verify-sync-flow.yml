@@ -46,11 +46,7 @@ jobs:
       # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
       - name: X1 prepared adapters satisfy flow and source guards
-        run: |
-          node --require ./scripts/lib/daily-scheduler-prepared-flow-hook.js scripts/verify-sync-flow.js
-          node --require ./scripts/lib/daily-scheduler-prepared-flow-hook.js scripts/verify-request-context-isolation.js
-          node --require ./scripts/lib/daily-scheduler-prepared-flow-hook.js scripts/verify-lsn50-chameleon-swt.js
-          node --require ./scripts/lib/daily-scheduler-prepared-flow-hook.js scripts/test-conditional-irrigation-flow.js
+        run: node scripts/test-daily-scheduler-prepared-adapters.js guards
       - name: Shared facade transaction isolation
         run: node --test scripts/test-manual-facade-transactions.js scripts/test-sqlite-farm-shared-queue.js
       - name: Sync outbox JSON guard
