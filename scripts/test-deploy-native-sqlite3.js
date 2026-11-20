@@ -2236,7 +2236,8 @@ function r10DurabilityHooks(logFile, root) {
   const q = r2Quote(logFile);
   const nm = r2Quote(path.join(root, 'node_modules'));
   const files = ['.osi-sqlite3-*/.owner', '.osi-sqlite3-*/.candidate-id',
-    '.osi-sqlite3-*/.osi-sqlite3-candidate-owner', '.osi-sqlite3-*/candidate/.osi-sqlite3-candidate-owner']
+    '.osi-sqlite3-*/.osi-sqlite3-candidate-owner', '.osi-sqlite3-*/candidate/.osi-sqlite3-candidate-owner',
+    'sqlite3/.osi-sqlite3-candidate-owner']
     .map(g => `${nm}/${g}`).join(' ');
   return [
     `sync() { command sync "$@" || return $?; { printf 'sync'; for f in ${files}; do` +
@@ -2277,11 +2278,11 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   const r = r2SeedHarness(gw, { shellHooks: r10DurabilityHooks(log, gw.proj) });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /SEED_RC=0/);
-  assert.doesNotMatch(r.stderr, /WARN: sync failed/);
+  assert.doesNotMatch(r.stderr, /ERROR: could not sync/);
   const b = String.raw`\S*/\.osi-sqlite3-seed-rollback\.[^/ ]+`;
   const s = String.raw`\S*/\.osi-sqlite3-seed-stage\.[^/ ]+`;
   const lines = r9Lines(log);
-  assert.equal(lines.length, 6, lines.join('\n'));
+  assert.equal(lines.length, 7, lines.join('\n'));
   assert.equal(lines[0], 'sync .owner=osi-sqlite3-seed-stage-v2');
   assert.match(lines[1], new RegExp(`^cp -a \\S+ ${s}/candidate$`));
   assert.equal(lines[2], 'sync .owner=osi-sqlite3-seed-v2 .owner=osi-sqlite3-seed-stage-v2');
@@ -2292,6 +2293,8 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   assert.match(lines[3], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
   assert.match(lines[4], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
   assert.match(lines[5], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
+  assert.match(lines[6], /^sync /);
+  assert.match(lines[6], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
 });
 
 // R11: the whole seed script, booted the way OpenWrt runs a uci-defaults
@@ -2324,7 +2327,7 @@ function r11Script(gw, opts = {}) {
   for (const [from, to, n] of [
     ['\nSRC=/usr/share/node-red\n', '\nSRC=' + r2Quote(img) + '\n', 1],
     ['\nDST=/srv/node-red\n', '\nDST=' + r2Quote(gw.proj) + '\n', 1],
-    ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 2],
+    ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 1],
     ['\n    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3\n',
       '\n    SQLITE_SRC=' + r2Quote(fw) + '\n', 1],
     ['\nSEED_COPIED=/etc/osi-node-red-seed.copied\n',
