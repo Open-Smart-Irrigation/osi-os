@@ -784,8 +784,7 @@ test('native sqlite3 isolated archive transaction waits through a 6.5 second wri
   }
 });
 
-// Free-disk floor: the archive has no retention rule yet, so it stops inserting
-// below ARCHIVE_MIN_FREE_BYTES and never lets the probe itself stop a write.
+// The archive pauses capture below the floor and continues if the probe fails.
 const MIB = 1024 * 1024;
 const freeBytes = bytes => () => ({bavail: bytes / 4096, bsize: 4096});
 const lowDiskInfo = {deveui:EUI,fPort:2,decoded:{Payver:1,data_sum:RAW},frames:[]};

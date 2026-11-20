@@ -1287,6 +1287,7 @@ test('the recipe poll, apply and rollback close the real ChirpStack client witho
   };
   const commissioning = {
     pollDeployments: async () => ({ checked: 0 }),
+    recipePollHasDevices: COMMISSIONING.recipePollHasDevices,
     applyDesiredRecipe: async () => ({ deployment: { status: 'PENDING' } }),
     rollbackCompatibleRecipe: async () => ({ deployment: { status: 'PENDING' } }),
   };

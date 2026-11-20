@@ -7,12 +7,21 @@ const path = require('node:path');
 
 const MAX_ASCII = 1500;
 const MAX_JSON_BYTES = 256 * 1024;
-// The archive has no retention rule yet. Below this much free space on the
-// database filesystem it stops inserting so it cannot fill the gateway disk.
-const ARCHIVE_MIN_FREE_BYTES = 1073741824;
+// Both maintained profiles support 16 GB-class cards and larger media.
+const MIB = 1024 ** 2;
+const ARCHIVE_MIN_FREE_BYTES = 1024 * MIB;
+const RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
+const EMERGENCY_FREE_BYTES = 16 * MIB;
+const MAX_REUSABLE_TARGET_BYTES = 64 * MIB;
+// One bounded WAL write per tick. Each row can hold two 256 KiB JSON fields.
+const RETENTION_BATCH_SIZE = 8;
+const ORDERED_ROWS = 'FROM sdi12_transmissions INDEXED BY idx_sdi12_transmissions_receipt_time';
+const RECEIPT_ORDER = 'ORDER BY received_at, id';
 const DISK_WARN_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_DB_PATH = '/data/db/farming.db';
 const lastDiskWarnAt = new Map();
+const livePressure = {};
+let maintenanceRunning = false;
 
 function warnClassification(warn, message) {
   if (typeof warn !== 'function') return false;
@@ -36,6 +45,13 @@ function warnDiskOncePerHour(kind, warn, message, nowMs) {
   return warnClassification(warn, message);
 }
 
+function filesystemFreeBytes(dbPath, statfs) {
+  const { bavail, bsize } = statfs(path.dirname(dbPath));
+  const bytes = Number(bavail) * Number(bsize);
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || !(bsize > 0)) throw new Error('unusable statfs result');
+  return bytes;
+}
+
 // Returns true when archiving may proceed. A failing probe never stops the archive.
 function hasFreeSpace(options, warn, nowMs) {
   const opts = options || {};
@@ -43,9 +59,7 @@ function hasFreeSpace(options, warn, nowMs) {
   let freeBytes;
   try {
     const statfs = typeof opts.statfs === 'function' ? opts.statfs : fs.statfsSync;
-    const stats = statfs(path.dirname(dbPath));
-    freeBytes = Number(stats.bavail) * Number(stats.bsize);
-    if (!Number.isFinite(freeBytes) || freeBytes < 0) throw new Error('unusable statfs result');
+    freeBytes = filesystemFreeBytes(dbPath, statfs);
   } catch (error) {
     warnDiskOncePerHour('probe', warn,
       'SDI12 archive disk probe failed: ' + String(error && error.message ? error.message : error), nowMs);
@@ -160,4 +174,129 @@ function report(node, info, saved) {
   return notifyNode(node, 'status', {fill:'grey',shape:'ring',text:'SDI12 no transmission'});
 }
 
-module.exports = { record, store, report, ARCHIVE_MIN_FREE_BYTES, resetDiskWarnings };
+function openMaintenanceDb(dbApi) {
+  return new Promise((resolve, reject) => {
+    const db = dbApi.openNativeFarming(dbApi.OPEN_READWRITE, error => {
+      if (error) reject(error);
+      else resolve(db);
+    });
+  });
+}
+
+function query(db, method, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db[method](sql, params, function onQuery(error, row) {
+      if (error) reject(error);
+      else resolve(method === 'run' ? this.changes : row);
+    });
+  });
+}
+
+function deleteBatch(db, where = '', params = []) {
+  return query(db, 'run', `DELETE FROM sdi12_transmissions WHERE id IN (
+    SELECT id ${ORDERED_ROWS} ${where} ${RECEIPT_ORDER} LIMIT ?
+  )`, [...params, RETENTION_BATCH_SIZE]);
+}
+
+async function reusableBytes(db) {
+  const { freelist_count: pages } = await query(db, 'get', 'PRAGMA freelist_count');
+  const { page_size: bytes } = await query(db, 'get', 'PRAGMA page_size');
+  return pages * bytes;
+}
+
+async function prune(db, cutoff, statFree, freeBytes, pressureState) {
+  const expired = await query(db, 'get', `SELECT id ${ORDERED_ROWS} WHERE received_at <= ? LIMIT 1`, [cutoff]);
+  if (expired) {
+    const deleted = await deleteBatch(db, 'WHERE received_at <= ?', [cutoff]);
+    return { reason: 'expired', deleted, freeBytes };
+  }
+  if (freeBytes >= ARCHIVE_MIN_FREE_BYTES) {
+    delete pressureState.stalled;
+    return { reason: 'idle', deleted: 0 };
+  }
+  const oldest = await query(db, 'get', `SELECT id ${ORDERED_ROWS} ${RECEIPT_ORDER} LIMIT 1`);
+  if (!oldest) return { reason: 'pressure_empty', deleted: 0, freeBytes };
+  const reusable = await reusableBytes(db);
+  const target = Math.min(ARCHIVE_MIN_FREE_BYTES - freeBytes, MAX_REUSABLE_TARGET_BYTES);
+  const stalled = pressureState.stalled;
+  if (reusable >= target || (stalled && freeBytes <= stalled.freeBytes && reusable <= stalled.reusableBytes)) {
+    return { reason: 'pressure_limited', deleted: 0, freeBytes, reusableBytes: reusable };
+  }
+
+  const deleted = await deleteBatch(db);
+  const afterReusable = await reusableBytes(db);
+  let afterFree;
+  try {
+    afterFree = statFree();
+  } catch (error) {
+    pressureState.stalled = { freeBytes, reusableBytes: afterReusable };
+    return { reason: 'disk_probe_failed', deleted, detail: error.message };
+  }
+  if (afterFree <= freeBytes && afterReusable <= reusable) {
+    pressureState.stalled = { freeBytes, reusableBytes: reusable };
+  } else {
+    delete pressureState.stalled;
+  }
+  return { reason: 'pressure', deleted, freeBytes: afterFree, reusableBytes: afterReusable };
+}
+
+async function maintain(dbApi, {
+  now = Date.now(), clock, statfs = fs.statfsSync, dbPath = DEFAULT_DB_PATH, pressureState = {},
+} = {}) {
+  // Use the boot's last successful NTP sample and elapsed uptime. A wall-clock
+  // step can otherwise make a recent archive look a year old.
+  const { clockStatus, readRuntimeClock } = require('../osi-irrigation-policy/clock');
+  const time = clockStatus({ ...(clock || readRuntimeClock)(), now });
+  if (!time.trusted) return { reason: time.reason, deleted: 0 };
+  const cutoff = new Date(now - RETENTION_MS).toISOString();
+  const statFree = () => filesystemFreeBytes(dbPath, statfs);
+  let freeBytes;
+  try {
+    freeBytes = statFree();
+  } catch (error) {
+    return { reason: 'disk_probe_failed', deleted: 0, detail: error.message };
+  }
+  if (freeBytes < EMERGENCY_FREE_BYTES) return { reason: 'disk_critical', deleted: 0, freeBytes };
+
+  let db;
+  try {
+    db = await openMaintenanceDb(dbApi);
+    await query(db, 'get', 'PRAGMA busy_timeout=0');
+    // The regular writers checkpoint. Maintenance leaves checkpoint work off
+    // its short write path and yields immediately if a writer has the lock.
+    await query(db, 'get', 'PRAGMA wal_autocheckpoint=0');
+    await query(db, 'get', 'PRAGMA synchronous=NORMAL');
+    return await prune(db, cutoff, statFree, freeBytes, pressureState);
+  } catch (error) {
+    if (error.code === 'SQLITE_BUSY' || error.code === 'SQLITE_LOCKED') return { reason: 'busy', deleted: 0 };
+    throw error;
+  } finally {
+    if (db) await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()));
+  }
+}
+
+async function liveMaintain({ node, osiLib }) {
+  if (maintenanceRunning) return null;
+  maintenanceRunning = true;
+  try {
+    const loaded = osiLib.require('osi-db-helper');
+    if (!loaded.ok) throw new Error(loaded.error);
+    const result = await maintain(loaded.value, { pressureState: livePressure });
+    const lowDisk = result.freeBytes < ARCHIVE_MIN_FREE_BYTES;
+    const healthy = !lowDisk && ['idle', 'expired', 'pressure'].includes(result.reason);
+    const text = `SDI12 retention: ${result.reason} (${result.deleted} removed)`;
+    notifyNode(node, 'status', { fill: healthy ? 'green' : 'yellow', shape: 'dot', text });
+    if (!healthy && result.reason !== 'busy') {
+      const storage = lowDisk ? `, filesystem free ${result.freeBytes} bytes, SQLite reusable ${result.reusableBytes ?? 'unknown'} bytes` : '';
+      warnDiskOncePerHour(`maintenance:${result.reason}`, message => node.warn(message),
+        text + storage + (result.detail ? `: ${result.detail}` : ''), performance.now());
+    }
+  } catch (error) {
+    node.error('SDI12 retention failed: ' + error.message);
+  } finally {
+    maintenanceRunning = false;
+  }
+  return null;
+}
+
+module.exports = { record, store, report, maintain, liveMaintain, ARCHIVE_MIN_FREE_BYTES, resetDiskWarnings };
