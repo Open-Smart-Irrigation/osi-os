@@ -3062,6 +3062,26 @@ fetch_required "osi-local-password-reset index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-local-password-reset/index.js" \
     "$MODULE_STAGE/osi-local-password-reset/index.js"
 
+fetch_required "osi-daily-scheduler package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/package.json" \
+    "$MODULE_STAGE/osi-daily-scheduler/package.json"
+
+fetch_required "osi-daily-scheduler index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/index.js" \
+    "$MODULE_STAGE/osi-daily-scheduler/index.js"
+
+fetch_required "osi-daily-scheduler queries.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/queries.js" \
+    "$MODULE_STAGE/osi-daily-scheduler/queries.js"
+
+fetch_required "osi-daily-scheduler decision.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/decision.js" \
+    "$MODULE_STAGE/osi-daily-scheduler/decision.js"
+
+fetch_required "osi-daily-scheduler schedule-save.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/schedule-save.js" \
+    "$MODULE_STAGE/osi-daily-scheduler/schedule-save.js"
+
 fetch_required "osi-scheduler-mean-query package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query/package.json" \
     "$MODULE_STAGE/osi-scheduler-mean-query/package.json"

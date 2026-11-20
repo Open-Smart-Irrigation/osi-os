@@ -204,10 +204,11 @@ const APPEND_EVENTS_SQL = "SELECT COUNT(*) AS n FROM sync_outbox WHERE upper(op)
 async function schedule(profile, dbPath, metric = 'SWT_1') {
   const flowsPath = profilePaths(profile).flows;
   const meanQuery = require(path.join(profilePaths(profile).nodeRed, 'osi-scheduler-mean-query'));
-  const osiLib = { require: (name) => (name === 'scheduler-mean-query' ? { ok: true, value: meanQuery } : { ok: false, error: name }) };
+  const scheduler = require(path.join(profilePaths(profile).nodeRed, 'osi-daily-scheduler'));
+  const osiLib = { require: name => name === 'daily-scheduler' ? { ok: true, value: scheduler } : (name === 'scheduler-mean-query' ? { ok: true, value: meanQuery } : { ok: false, error: name }) };
   const node = { error(m) { throw new Error('query node error: ' + m); } };
-  const queryFn = new Function('msg', 'node', 'osiLib', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
-  const buildQuery = (msg) => queryFn(msg, node, osiLib);
+  const queryFn = new Function('msg', 'node', 'osiLib', 'env', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
+  const buildQuery = (msg) => queryFn(msg, node, osiLib, { get() {} });
   const zone = {
     zone_id: 1, zone_name: 'Z One', user_id: 1, scheduling_mode: 'local', trigger_metric: metric,
     threshold_kpa: 50, duration_minutes: 10, enabled: 1, last_triggered_at: null,
