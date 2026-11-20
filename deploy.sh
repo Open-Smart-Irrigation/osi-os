@@ -3410,6 +3410,14 @@ fetch_required "osi-lsn50-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.js" \
     "$MODULE_STAGE/osi-lsn50-normalize/index.js"
 
+fetch_required "osi-clover-soil package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-clover-soil/package.json" \
+    "$MODULE_STAGE/osi-clover-soil/package.json"
+
+fetch_required "osi-clover-soil index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-clover-soil/index.js" \
+    "$MODULE_STAGE/osi-clover-soil/index.js"
+
 fetch_required "osi-watermark-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/package.json" \
     "$MODULE_STAGE/osi-watermark-helper/package.json"
