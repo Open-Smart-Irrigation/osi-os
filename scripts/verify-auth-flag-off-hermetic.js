@@ -69,7 +69,7 @@ const SCOPE_CALL_RE = /osiLib\.require\(\s*['"]scope['"]\s*\)/;
 
 function findAuthGatedNodes(flows) {
   return flows.filter(
-    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(n.func)
+    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(require('./lib/valve-ingress-x2-source').resolvedNode(n).func)
   );
 }
 
@@ -140,10 +140,15 @@ class ScopeHelperTouchedError extends Error {}
 // present. Every other module name resolves to a benign
 // { ok: true, value: <auto-stub> }, matching osiLib.require's real
 // { ok, value | error } contract shape.
-function makeOsiLibStub() {
+function makeOsiLibStub(ingressOverride) {
+  let scopeTouched=false, entryInvoked=false;
   return {
+    get scopeTouched(){return scopeTouched;},
+    get entryInvoked(){return entryInvoked;},
     require(name) {
+      if (name === 'command-ingress') { entryInvoked=true; return {ok:true,value:ingressOverride || require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress')}; }
       if (name === 'scope') {
+        scopeTouched=true;
         throw new ScopeHelperTouchedError(
           `osiLib.require('scope') was reached on the flag-off (OSI_SCOPED_ACCESS unset) code path`
         );
@@ -234,12 +239,12 @@ function makeNodeStub() {
 // (never via `libs`).
 const RESERVED_PARAM_NAMES = new Set(['msg', 'node', 'env', 'global', 'context', 'flow', 'RED']);
 
-function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub) {
+function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub, ingressOverride) {
   const paramNames = ['msg', 'node', 'env', 'global', 'context', 'flow', 'RED', 'osiLib'];
   const paramValues = [
     msgStub, nodeStub, envStub, globalStub,
     makeAutoStub('context'), makeAutoStub('flow'), makeAutoStub('RED'),
-    makeOsiLibStub(), // bound (not omitted): see makeOsiLibStub for why
+    makeOsiLibStub(ingressOverride), // bound (not omitted): see makeOsiLibStub for why
   ];
   for (const lib of libs || []) {
     if (!lib || typeof lib.var !== 'string') continue;
@@ -254,10 +259,11 @@ function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub) {
 
 // Runs one (node, env/global variant) combination. Returns
 // { outcome: 'pass' | 'scope-helper-touched' | 'unscannable', detail }.
-async function runOnce(node, envStub, globalStub) {
+async function runOnce(node, envStub, globalStub, ingressOverride) {
   const msgStub = makeMsg();
   const nodeStub = makeNodeStub();
-  const { paramNames, paramValues } = buildSandboxParams(node.libs, envStub, globalStub, msgStub, nodeStub);
+  const { paramNames, paramValues } = buildSandboxParams(node.libs, envStub, globalStub, msgStub, nodeStub, ingressOverride);
+  const loader=paramValues[paramNames.indexOf('osiLib')];
 
   let fn;
   try {
@@ -285,8 +291,10 @@ async function runOnce(node, envStub, globalStub) {
         clearTimeout(timer);
       }
     }
+    if(loader.entryInvoked && loader.scopeTouched)return {outcome:'scope-helper-touched',detail:"osiLib.require('scope') was reached inside an extracted entry"};
     return { outcome: 'pass', detail: 'completed without resolving the scope helper' };
   } catch (error) {
+    if(loader.entryInvoked && loader.scopeTouched)return {outcome:'scope-helper-touched',detail:"osiLib.require('scope') was reached inside an extracted entry"};
     if (error instanceof ScopeHelperTouchedError) {
       return { outcome: 'scope-helper-touched', detail: error.message };
     }
@@ -309,12 +317,12 @@ async function runOnce(node, envStub, globalStub) {
   }
 }
 
-async function checkNode(node) {
-  const secretVariant = await runOnce(node, makeEnv(HERMETIC_TEST_SECRET), makeGlobalStub('fs-configured'));
+async function checkNode(node, ingressOverride) {
+  const secretVariant = await runOnce(node, makeEnv(HERMETIC_TEST_SECRET), makeGlobalStub('fs-configured'), ingressOverride);
   if (secretVariant.outcome !== 'pass') {
     return { id: node.id, name: node.name, ...secretVariant, variant: 'AUTH_TOKEN_SECRET configured' };
   }
-  const fsFallbackVariant = await runOnce(node, makeEnv(''), makeGlobalStub('fs-fallback'));
+  const fsFallbackVariant = await runOnce(node, makeEnv(''), makeGlobalStub('fs-fallback'), ingressOverride);
   if (fsFallbackVariant.outcome !== 'pass') {
     return { id: node.id, name: node.name, ...fsFallbackVariant, variant: 'AUTH_TOKEN_SECRET unset (fs fallback)' };
   }
@@ -334,7 +342,8 @@ async function verifyProfile(relativePath) {
   }
 
   for (const node of targets) {
-    const result = await checkNode(node);
+    const ingress = require(path.join(ROOT, path.dirname(relativePath), 'node-red/osi-command-ingress'));
+    const result = await checkNode(node, ingress);
     if (result.outcome !== 'pass') {
       failures.push(
         `${relativePath}: ${node.id} (${node.name || 'unnamed'}) [${result.variant}] -- ${result.outcome}: ${result.detail}`

@@ -71,6 +71,7 @@ const NAME_TO_PATH = {
   'agronomy-daily': 'osi-agronomy-daily',
   'osi-irrigation-policy': 'osi-irrigation-policy',
   'osi-valve-control': 'osi-valve-control',
+  'command-ingress': 'osi-command-ingress',
   'osi-system-settings': 'osi-system-settings',
   'watermark-helper': 'osi-watermark-helper',
   'agroscope-uplink-transform': 'codecs/agroscope_uplink_transform',

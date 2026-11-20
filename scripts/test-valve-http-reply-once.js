@@ -149,10 +149,11 @@ async function send(p, db, startId, fields, options = {}) {
   return { answers: http.answers, enqueued: chirpstack.enqueued, ...result };
 }
 
-// osiLib as it answers when osi-valve-control did not load: every other name
-// is still unregistered here, as the nodes on this path stop at the first refusal.
+// Fail the valve dependency while the independent ingress remains available.
 function missingValveControl() {
-  return { require: (name) => ({ ok: false, error: 'Cannot find module ' + name }) };
+  return { require: (name) => name === 'command-ingress'
+    ? { ok: true, value: require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress') }
+    : { ok: false, error: 'Cannot find module ' + name } };
 }
 
 function wiresWithLinkIn(receivers) {
@@ -274,7 +275,7 @@ for (const name of PROFILES) {
       const db = seedDb();
       try {
         const out = await send(p, db, builder, fields(), { valveControlMissing: true });
-        if (process.env.OSI_VALVE_X2_ADAPTERS !== '1') assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
+        assert.ok(out.trace.includes('cdbaa3891d40d7a1'), 'command must reach the encoder: ' + out.trace.join(' > '));
         assert.equal(out.enqueued.length, 0);
         assert.deepEqual(out.answers, [{ statusCode: 503, payload: { error: 'valve_control_unavailable' } }],
           'errors: ' + out.errors.join('; '));

@@ -1,23 +1,17 @@
 #!/usr/bin/env node
 'use strict';
-// Dry-run by default. Only the dispatcher may grant the flows reservation.
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { adaptFlows } = require('./lib/valve-ingress-x2-adapters');
-const args = process.argv.slice(2);
-const allowed = ['--write-with-dispatcher-reservation'];
-assert.ok(args.every(arg => allowed.includes(arg)) && args.length <= 1, 'usage: node scripts/apply-valve-ingress-x2-adapters.js [--write-with-dispatcher-reservation]');
-const results = ['bcm2712', 'bcm2709'].map(profile => {
-  const file = path.resolve(__dirname, '..', `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
-  const original = fs.readFileSync(file, 'utf8');
-  const flows = JSON.parse(original);
-  assert.equal(JSON.stringify(flows, null, 2) + '\n', original, profile + ': no-op roundtrip changed bytes');
-  return { file, original, next: JSON.stringify(adaptFlows(flows), null, 2) + '\n' };
-});
-assert.equal(results[0].original, results[1].original, 'original profile flows differ');
-assert.equal(results[0].next, results[1].next, 'proposed profile flows differ');
-for (const { file, original, next } of results) {
-  if (args.length) fs.writeFileSync(file, next);
-  console.log(`${args.length ? 'APPLIED' : 'DRY RUN'} ${file}: ${Buffer.byteLength(original)} -> ${Buffer.byteLength(next)} bytes`);
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const h=require('./lib/valve-ingress-x2-handoff');
+const args=process.argv.slice(2);
+assert.ok(args.length<=1&&args.every(a=>['--refresh-handoff','--write-with-dispatcher-reservation'].includes(a)),'unknown handoff option');
+if(args[0]==='--refresh-handoff'){
+ const files=h.canonicalHandoff();
+ for(const f of files)assert.equal(fs.readFileSync(path.join(h.ROOT,f.rel),'utf8'),f.before,'refresh requires untouched source flows/baselines');
+ fs.writeFileSync(path.join(h.ROOT,h.PATCH),h.canonicalPatch(files));
+ fs.writeFileSync(path.join(h.ROOT,h.RECEIPT),JSON.stringify(h.receipt(files),null,2)+'\n');
+ console.log('Refreshed independent patch and staged baseline receipt; flows untouched');
+}else{
+ const {files,state}=h.verifyHandoff();
+ if(args.length)h.writeHandoff(h.ROOT);
+ console.log(`${args.length?'APPLIED':'DRY RUN'}: ${state}; ${files.length} flow/baseline files match the checked-in patch and canonical renderer`);
 }

@@ -1,34 +1,24 @@
 'use strict';
-const assert = require('node:assert/strict');
-const { createHash } = require('node:crypto');
-const baseline = require('../fixtures/valve-ingress-x2/baseline.json');
-function adaptFlows(flows) {
-  const manifest = require('../fixtures/valve-ingress-x2/adapters.json');
-  const byId = new Map(manifest.nodes.map(node => [node.id, node]));
-  const found = new Set();
-  const result = flows.map(node => {
-    const patch = byId.get(node.id);
-    if (!patch) return node;
-    assert.ok(!found.has(node.id), 'duplicate X2 node: ' + node.id);
-    found.add(node.id);
-    const original = baseline.nodes.find(candidate => candidate.id === node.id);
-    // Any intervening change needs a new characterization and reviewed handoff.
-    assert.equal(createHash('sha256').update(node.func).digest('hex'), original.originalFuncSha256, 'X2 original body changed: ' + node.id);
-    for (const key of ['type','z','outputs','wires','libs','initialize','finalize']) assert.deepEqual(node[key], original[key], 'X2 node contract changed: ' + node.id + '/' + key);
-    return { ...node, ...patch.replacement };
-  });
-  assert.equal(found.size, byId.size, 'not every X2 node exists');
-  return result;
-}
-function entryBridge(vc, original) {
-  // Only the new adapter's outer package lookup differs from the baseline.
-  // Restore its supplied dependency loader when entering the copied body.
+const { adaptFlows } = require('./valve-ingress-x2-renderer');
+function entryBridge(ingress, original) {
+  // Only the independent ingress lookup is supplied here. Valve failures,
+  // quarantine and scope resolution continue through the caller's loader.
   return { require(name) {
-    if (name !== 'osi-valve-control') return original.require(name);
-    return { ok: true, value: new Proxy(vc, { get(target, key) {
-      const value = target[key];
-      return typeof value === 'function' ? (msg, deps) => value(msg, { ...deps, osiLib: original }) : value;
-    } }) };
+    if (name !== 'command-ingress') return original.require(name);
+    return { ok:true, value:ingress };
   } };
 }
-module.exports = { adaptFlows, entryBridge };
+const DIAGNOSTICS = /^X2 (?:fan (?:hwmon name|hwmon list|PWM detection|PWM period|PWM disable)|cancel close): /;
+function comparable(result) {
+  const copy = JSON.parse(JSON.stringify(result));
+  copy.effects = copy.effects.filter(effect => !(effect[0] === 'warn' && DIAGNOSTICS.test(effect[1])));
+  // The only approved response change is unavailable/quarantined valve control.
+  function normalize(value) {
+    if (!value || typeof value !== 'object') return;
+    if (value.statusCode === 503 && /^valve control module unavailable: /.test(value.payload?.message || '')) value.statusCode = 500;
+    for (const child of Object.values(value)) normalize(child);
+  }
+  normalize(copy);
+  return copy;
+}
+module.exports = { adaptFlows, entryBridge, comparable, DIAGNOSTICS };

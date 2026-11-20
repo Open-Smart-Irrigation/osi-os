@@ -1,59 +1,80 @@
-# X2 preparation evidence
+# X2 extraction evidence
 
-X2 adds thirteen entry points to `osi-valve-control`. Neither maintained `flows.json` is edited. The exact adapter replacements are in `scripts/fixtures/valve-ingress-x2/adapters.json`; `scripts/apply-valve-ingress-x2-adapters.js` checks the original source hashes and node contracts and defaults to a dry run.
+X2 retains thirteen `osi-valve-control` ingress exports and puts their implementation in an independent `osi-command-ingress` package. The proposed Function adapters load that independent package. Non-valve routing, early authentication and refusals, accepted-response formatting and run-log shaping therefore do not enter the valve package. Physical dispatch, queue ownership, ACK workers and cancellation logic remain unchanged.
 
-The source fixture is pinned to ec822b556. The branch was later fast-forwarded to 1a984f31f, whose only change is the restore runbook. No executable source or test changed in that base update. Startup was READY at ec822b556, behind 0/ahead 0 against `origin/main`, with AGENTS.md revision c63103827.
+Neither maintained `flows.json` is edited. X1 comes first; X2 still has no reservation. The five reviewed `osiLib` additions remain exactly one named binding each, with all other libraries unchanged.
 
-## Behavior comparison
+The frozen source is ec822b556. The original task started READY there, behind 0/ahead 0, with AGENTS.md revision c63103827; the preparation base later advanced to 1a984f31f for a runbook-only change. This fix round resumed the reviewed head 3825a576 against that same intended base: WARN for NO_FAST_CHECK, behind 0/ahead 1, clean. It deliberately keeps the reviewed branch and base.
 
-The frozen corpus has 554 cases per profile. Every case compares the original node, the currently shipped node, and the proposed adapter plus module. It records all returned ports, the mutated message, exact SQL and JSON payload strings, dependency calls in order, thrown error name/message/status, diagnostics and cloned request/response identities. The clock is fixed. A comment naming a customer is normalized in the new copies; original-body SHA-256 pins still detect any change to the shipped source.
+## Preserved behavior and approved exceptions
 
-The router's 22 top-level branches are copied whole. Its non-valve branches live in `command-routing.js`. The remaining copied bodies are checked verbatim, including their original directive mode. Existing silent fan-probe and cancel-close catches remain because changing their diagnostics would break this extraction's parity rule. K3 PR #697 supplies case names only.
+The 554-case frozen corpus and its 1,108 hashes are untouched. Each case compares the frozen node, the shipped node and the proposed adapter on both profiles, including ordered dependency effects, exact SQL/JSON strings, error markers and HTTP handle identity. The renderer also accepts a fully applied, verified adapter set, so the same comparison runs after application.
 
-| Observed case | Before | After |
-| --- | --- | --- |
-| Cloud open, 61 seconds with competing minute fields | Port 0, `OPEN_FOR_DURATION`, 2 minutes | Identical |
-| Cloud timed CLOSE | Port 2 ACK, `REJECTED_PERMANENT`, `valve_action_not_allowed` | Identical |
-| UC512 open | Port 2 ACK, `no_dispatcher_on_gateway` | Identical |
-| SDI-12 identify | Ports 1 and 6 | Identical |
-| Valve schedule bridge | Port 5 | Identical |
-| Manual builder | Command on port 0; other ports null; 202 reply deferred; top-level HTTP handles retained | Identical |
-| Cancel after possible handoff | 409, `actuation_handed_off`, outcome `handed_off`, collateral retained | Identical |
-| Cancel with uncertain transport | 503, `transport_uncertain`, uncertainty retained | Identical |
-| Reboot process failure after return | Success ACK already built; queued callback error remains separate | Identical |
-| Run-log SQL, including percentage and return position | Exact SQL text and escaping retained | Identical |
+Only two behavior differences are authorized: six formerly empty catches now emit contextual warnings while retaining their fallback and operation order; a failed or quarantined valve load on a path that needs it returns 503. The original oracle retains its original warnings and statuses. Comparators remove only the six named diagnostic additions and normalize the specific valve-unavailable 503 back to its legacy 500 for comparison. Source tests pin all other executable text.
 
-The HTTP characterization also follows the shipped downstream graph through Node-RED-style cloning. Its 204 cases pass with the original functions and again with the proposed adapters. They distinguish 202 acceptance, 422 definite enqueue rejection, 503 local-preflight or unknown outcomes, missing queue IDs and failures after a transport attempt. Refusals do not write success logs or target state. An earlier ordinary open still permits another ordinary open without a gateway-added expiry; an unresolved conditional occurrence still refuses it as busy. Cancellation adds no physical CLOSE command; existing collateral requeue behavior remains.
-
-The new outer loader guard has separate failure tests. HTTP adapters return one refusal on their existing response port. Its diagnostic omits the message argument so it does not also enter the HTTP catch lane. Existing internal loader failures retain their original results. Cancel keeps one lazily created client per request, reused by its callbacks, with the handler's existing lack of disposal. The separate cached valve-router client and its disposal code are untouched.
-
-## Runs
-
-| Check | Result |
+| Path | Result retained by the extraction |
 | --- | --- |
-| Frozen baseline, before module creation | 554 cases x 2 profiles, identical; Node 22.23.1 |
-| Original versus module and proposed adapter | 554 cases x 2 profiles, identical; Node 22.23.1 |
-| Comparator negative control | Expected exit 1 when a routed duration is changed to 999 |
-| Entry-point API before extraction | Expected failure: `routeCommand` absent |
-| New entry-point tests after extraction | 16 passed across both profiles |
-| Real Function nodes, Node 20.18.3 / Node-RED 3.1.15 | 554 cases x 2 profiles x before/after, identical; emitted ports and HTTP identities checked with two receivers per port |
-| Real Function nodes, Node 20.18.3 / Node-RED 4.0.9 | Same corpus and result |
-| Valve module tests, including both new profile tests | 935 passed, 0 failed |
-| HTTP characterization with shipped functions | 204 passed, 0 failed |
-| HTTP characterization with proposed adapters in memory | 204 passed, 0 failed |
-| Profile parity | Passed |
-| Helper registration | Passed |
-| Adapter dry run | Both profiles: 1,919,901 to 1,828,280 bytes; no file written |
-| `bash -n deploy.sh` | Passed |
-| Documentation hygiene | Passed with built-in patterns; private name list not supplied |
+| REGISTER_DEVICE, linked auth, force-sync | Original routing port; no valve lookup |
+| SDI-12 identify | Original ports 1 and 6 and SUCCESS ACK |
+| Fan and reboot | Original ACKs and OS operation order; reboot callback runs after the ACK is observed |
+| Missing bearer | Native thrown 401 and MISSING_BEARER marker, except cancel's original returned refusal |
+| Cancel validation and ownership | Original 400/404/409/403, device lookup and DB close before any valve lookup |
+| Ownership and builder refusal | Original 401 and 404 before any valve lookup |
+| Advanced formatter and run-log builder | Original 202 after the upstream state update, and exact INSERT message, even with a failed valve package |
+| Manual command acceptance | Deferred 202 after transport acceptance; top-level request/response handles retained |
+| Definite enqueue refusal | 422; no success log or target-state write |
+| Preflight or uncertain transport | 503 with the existing uncertainty fields and reservation behavior |
+| Conditional open cancelled after possible handoff | 409, handed_off; queue flushed, collateral reported, unresolved reservation remains and refuses another reservation as valve_busy |
+| Ordinary cancel queue-read failure | Legacy full flush and 200; target marked CANCELLED |
+| Ordinary cancel flush failure or timeout | Legacy 500; target remains PENDING_OBSERVATION |
+| Conditional cancel flush failure or timeout | 503, uncertain; target remains PENDING_OBSERVATION |
+| Ordinary collateral requeue failure | Legacy 200 with transport_uncertain false; lost item diagnosed, target CANCELLED, setting no longer queued |
+| Close callback reports an error | Legacy callback error remains ignored; a thrown close error now also emits the approved diagnostic |
 
-The image Node-RED version comes from its feed Makefile. Both profiles enable Node and Node-RED. The packages-feed commit in `feeds.conf.default` specifies Node 20.18.3. Release Runtime Smoke pins that same Node version, Node-RED 3.1.15 for images and 4.0.9 for the stock deploy path. These were local software-runtime tests, with fake filesystem/process/radio adapters and no live commands.
+Unknown command types still return null; malformed cloud JSON still throws. These legacy cases remain pinned. Every recognized non-valve command keeps its output or ACK when valve loading fails. No physical CLOSE was added to cancellation. K3 PR #697 supplies case names only.
 
-Full sync, migrations, smoke and shell-fixture results come from GitHub CI on the exact PR head, per the CTO's updated gate rule. The queued local wrapper containing those suites was cancelled before running. Existing command-safety/equivalence checks run with the proposed adapters in the new CI workflow; existing deployment tests check the eleven added fetch entries. The staging list changes no deployment pins or activation logic.
+## Review-fix coverage
 
-Full side-by-side JSON traces and command logs are retained locally under `/home/phil/builds/osi-v082-fix-20261112/plan-0.9/evidence-X2/`. `before.json`, `differential.json`, `runtime-image.json` and `runtime-stock.json` carry the comparison outputs. `regression-results.json` lists the exact focused commands and exit codes. CI uploads its own comparison JSON as artifacts. Two harness issues were corrected before acceptance: duplicate case names overwrote a hash, and Node-RED `setFlows` returns before asynchronous startup, so the real-runtime harness now waits for `flows:started`.
+Real-loader tests compile the shipped `osi-lib` loader and use an actual missing package directory, then its quarantine state. They compare both profiles against the frozen bodies at each early-reply and non-valve seam. The independent ingress package is present; the valve package is absent. Tests assert that pure ingress never consults the valve loader.
 
-## Time record
+The additive fixture has 22 cases per profile: snake-case and absent ACK metadata, missing gateway identity, VALVE_COMMAND minute fallbacks, interval defaults and explicit wire fields, numeric LSN50 mode, JWT_SECRET-only auth on all eight handlers, absent builder actor/zone, scope-resolver warnings, missing/non-numeric/null fan speed and callback-delivered close errors. Each has branch assertions as well as a frozen output hash. Capture validates the pinned source and uses a separate, write-once file. The old oracle-overwrite option is rejected.
+
+Another 28 tests compare the immediate predecessor's frozen ingress with the proposed adapters over the shipped database and real valve/scope helpers. They record every SQL operation and result, queue RPC, node output, outbox row, run-log row and ACK in order. Scenarios cover all five command lanes, duplicate uplinks, restart while observed running, cancellation during reservation, downstream run-log INSERT failure, actual queue-read/flush/timeout/requeue failures, a scoped device lookup failure after successful access, and close callback errors. SQLite clock and random functions are deterministic. The separate UC512 dispatch tests remain in the existing safety lane.
+
+The native matrix runs unwrapped Function bodies with their declared libraries on Node 20.18.3 and Node-RED 3.1.15/4.0.9. It observes native completion, Catch delivery, diagnostics and both receivers on every output port. IO doubles sit behind the declared bindings. A native extra-port mutant and a thrown-auth-error-to-returned-reply mutant must fail in each runtime. Reboot callbacks advance only after the SUCCESS ACK reaches the receivers. Native-generated message IDs are deterministic; only phase labels and incidental stack frames are removed from native comparisons.
+
+Auth discovery follows verified adapters into the exact entry implementation and retains all eight X2 handlers per profile: 200 total handlers. Configured-secret and filesystem variants remain. Extracted entries use a sticky scope sentinel, including when the code catches it; an internal mutation proves detection on both profiles. Existing inline handlers retain their previous sentinel classification.
+
+## Handoff and staged CI
+
+The manifest permits only `func` and the five approved `libs` appends. The independent renderer validates the manifest, full node contract and source hash, refuses partial application, and is idempotent on the exact rendered set. A checked-in binary Git patch must equal its canonical diff byte for byte. The disposable staged tree checks forward and reverse application and every resulting file byte.
+
+The patch includes the silent-catch baseline update from 65 to 59 per profile. Its receipt also records the DDL recount: 694, unchanged. These are staged with the flow replacement, never applied to the reserved files in this checkout. `node scripts/apply-valve-ingress-x2-adapters.js` validates the handoff without writing it. After X1 and the reservation, refresh the handoff against the approved base; the current whole-file pins deliberately refuse unrelated base drift.
+
+The staged workflow checks the exact PR head, applies both proposed flow files in a disposable clone, then runs parity, the existing SDI-12, conditional-writer, request-context and missing-module HTTP checks. Their command, wire, isolation-mutant and encoder-visit assertions remain. Full sync, migrations, smoke and shell suites are GitHub CI gates on the exact head, per the CTO rule; none was queued locally in this fix round. New tests are registered in the X2 workflow, including both runtime negative controls. The deploy staging list and both profile package registrations include the independent ingress package; activation and SHA pins are unchanged.
+
+## Local verification
+
+| Check | Fix-round result |
+| --- | --- |
+| Frozen VM comparison, including staged rerun | 554 cases x 2 profiles passed |
+| Additive legacy comparison | 22 branch-asserted cases x 2 profiles passed |
+| Focused staged integration tests | 880 passed, 0 failed before expanding real-loader coverage |
+| Expanded real-loader and capture controls | 2,219 passed, including all 2,216 missing/quarantined comparisons |
+| Staged entry-point tests | 16 passed, 0 failed |
+| Valve and loader module tests | 947 passed, 0 failed |
+| Existing safety, HTTP and release-equivalence regressions | 282 passed, 0 failed with proposed adapters |
+| Native Function/Catch matrix and both negative controls | 576 cases x 2 profiles on both pinned runtimes; see retained logs |
+| Adapter/patch and write-once controls | Passed in the staged gate |
+| Profile parity and helper registration | Passed |
+| Deployment shell syntax | Passed |
+
+The review supplies the initial red evidence. Local development also caught and corrected missing staged guard dependencies, native harness startup/binding errors, a native-generated error-message ID difference and incorrect expectations about legacy cancellation replies. Negative controls remain checked in and run in CI.
+
+Logs and side-by-side traces are retained under `/home/phil/builds/osi-v082-fix-20261112/plan-0.9/evidence-X2/`: `round2-staged.log`, `round2-modules.log`, `round2-regressions.log`, `round2-stateful.json`, `round2-additive.json` and `round2-native-{image,stock}.{log,json}`. CI uploads its own traces. These are local software fixtures; no gateway or live valve was accessed. This implementation child leaves the draft for the lead's exact-head CI gate and independent review.
+
+## Original preparation time
+
 
 These are measured elapsed windows from timestamped work and gate artifacts. Preparation was interleaved, and admission waits are included, so the rows overlap and must not be added as focused engineering hours. A separate active-hour split was not captured.
 
@@ -66,8 +87,17 @@ These are measured elapsed windows from timestamped work and gate artifacts. Pre
 
 The total preparation/validation window was 1.35 hours. Module files were generated at 00:58:02 after the corrected pre-extraction baseline passed; the first new-entry gates completed at 00:58:03. This preparation does not measure exclusive flows occupancy or validate the proposed reservation-duration estimate.
 
-## Dispatcher handoff
 
-X1 must merge and the dispatcher must grant X2 the reservation before applying adapters. Five nodes need an added `osiLib` binding; all existing bindings remain. The manifest lists every node ID and exact replacement body and `libs` value. IDs, output counts and wires are preserved. Reconcile this necessary binding addition with the extraction brief's stable-libs wording during the adapter review.
 
-After updating to the X1 base, rerun the source-pinned dry run. It refuses changed bodies, tabs, node types, ports, wiring or bindings. During the granted window, apply both profiles and rerun the parity and flow-editing gates. No migration, schema change, K3 behavior change or registry/fallback consolidation is included. Independent Sol review of dispatch order, queue state and refusal paths remains pending; this implementation sub-agent does not request it or mark the draft ready.
+## Review fix-round timing
+
+Round start: 2026-11-20T01:26:15Z. Round stop: 2026-11-20T02:17:14Z.
+
+| Sub-step | UTC start | UTC stop | Hours |
+| --- | --- | --- | ---: |
+| Independent ingress, early replies and diagnostics | 2026-11-20T01:28:06Z | 2026-11-20T01:37:13Z | 0.1519 |
+| Renderer, patch and staged CI guard integration | 2026-11-20T01:37:13Z | 2026-11-20T01:59:49Z | 0.3767 |
+| Native Function lifecycle and additive stateful characterization | 2026-11-20T01:59:49Z | 2026-11-20T02:10:00Z | 0.1697 |
+| Focused staged verification, module regressions and handoff evidence | 2026-11-20T02:10:00Z | 2026-11-20T02:17:14Z | 0.1206 |
+
+Total fix-round elapsed time: 0.8497 hours. Reservation time remains 0.0000 hours.

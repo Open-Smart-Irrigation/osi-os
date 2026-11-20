@@ -84,7 +84,9 @@ function checkProfile(file) {
   for (const node of flows) {
     if (!node || node.type !== 'function') continue;
     functionNodes += 1;
-    const sources = [node.func, node.initialize, node.finalize].filter(Boolean).join('\n');
+    let implementation=node;
+    try { implementation=require('./lib/valve-ingress-x2-source').resolvedNode(node); } catch(error) { failures.push(label+': '+error.message); }
+    const sources = [...new Set([node.func,implementation.func,node.initialize,node.finalize])].filter(Boolean).join('\n');
     const calls = contextCalls(sources);
     for (const call of calls) {
       if (call.key && REQUEST_SCRATCH_KEY.test(call.key)) {
@@ -101,7 +103,7 @@ function checkProfile(file) {
         failures.push(label + ': ' + node.id + ' (' + node.name + ') touches shared context outside its allowlist: ' + call.text);
       }
     }
-    if (converted.kind && !node.func.includes("'" + converted.kind + "'")) {
+    if (converted.kind && !implementation.func.includes("'" + converted.kind + "'")) {
       failures.push(label + ': ' + node.id + ' (' + node.name + ") no longer handles the '" + converted.kind + "' request envelope");
     }
   }

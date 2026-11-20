@@ -14,14 +14,15 @@ test('X2 exposes all thirteen request/router/log entry points beside existing di
   for (const name of ['routeCommand','authenticateValveCommand','checkValveOwnership','buildValveCommand','cancelValveRequest','parseStregaIntervalRequest','parseStregaModelRequest','parseStregaTimedRequest','parseStregaMagnetRequest','parseStregaPartialRequest','parseStregaFlushRequest','formatStregaResponse','buildActuatorLog','executeValveAttempt','cancelActuation','cancelHttpResponse']) assert.equal(typeof VC[name], 'function', name);
 });
 
-test('copied bodies stay verbatim; the router splits only whole top-level branches', () => {
+test('copied bodies allow only the six approved diagnostics and valve-unavailable 503; the router splits only whole top-level branches', () => {
   const manifest = require(manifestPath);
   for (const patch of manifest.nodes) {
     const original = baseline.nodes.find(node => node.id === patch.id).func;
-    const source = VC[patch.entry].toString();
+    const restore = source => source.replace(/catch\((e[23467])\) \{ node.warn\('X2 fan [^']+: ' \+ String\(\1 && \1.message \|\| \1\)\); \}/g, 'catch($1) {}').replace("catch (error) { node.warn('X2 cancel close: ' + String(error && error.message || error)); }", 'catch (_) {}').replace('err.statusCode = 503;', 'err.statusCode = 500;');
+    const source = restore(VC[patch.entry].toString());
     if (patch.id !== ROUTER) assert.ok(source.includes(original), patch.entry + ': body changed');
     else {
-      const nonValve = require('./command-routing').routeNonValveCommand.toString();
+      const nonValve = restore(require('./command-routing').routeNonValveCommand.toString());
       const branches = [...original.matchAll(/^if \([\s\S]*?^\}/gm)].map(match => match[0]);
       assert.equal(branches.length, 22, 'every original top-level branch is accounted for');
       for (const branch of branches) assert.equal(Number(source.includes(branch)) + Number(nonValve.includes(branch)), 1, 'branch copied once: ' + branch.slice(0, 70));
@@ -86,7 +87,7 @@ test('a missing outer module returns exactly one HTTP refusal and never invokes 
     assert.equal(out.error, null, patch.entry);
     const messages = (Array.isArray(out.value) ? out.value : [out.value]).filter(Boolean);
     assert.equal(messages.length, 1, patch.entry);
-    assert.equal(messages[0].statusCode, patch.entry === 'cancelValveRequest' ? 500 : 503);
+    assert.equal(messages[0].statusCode, 503);
     assert.deepEqual(out.effects.map(effect => effect[0]), ['error']);
     assert.deepEqual(out.effects[0][2], { $undefined: true }, 'logging must not also send msg into the HTTP catch lane');
   }
@@ -112,6 +113,7 @@ test('adapter handoff refuses changed source, ports, wiring and libs without mut
   const adapted = adaptFlows(flows);
   assert.equal(JSON.stringify(flows), original);
   assert.equal(adapted.length, flows.length);
+  assert.deepEqual(adaptFlows(adapted), adapted, "verified staged rendering is idempotent");
   for (const field of ['func','wires','outputs','libs']) {
     const changed = JSON.parse(original);
     const node = changed.find(node => node.id === AUTH);

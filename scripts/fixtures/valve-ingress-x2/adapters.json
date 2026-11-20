@@ -6,7 +6,7 @@
       "entry": "routeCommand",
       "file": "command-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); return; }\nreturn x2Load.value.routeCommand(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); return; }\nreturn x2Load.value.routeCommand(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
         "libs": [
           {
             "var": "osiLib",
@@ -20,7 +20,7 @@
       "entry": "authenticateValveCommand",
       "file": "manual-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.authenticateValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.authenticateValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
         "libs": [
           {
             "var": "crypto",
@@ -42,7 +42,7 @@
       "entry": "checkValveOwnership",
       "file": "manual-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.checkValveOwnership(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.checkValveOwnership(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
         "libs": [
           {
             "var": "osiLib",
@@ -56,7 +56,7 @@
       "entry": "buildValveCommand",
       "file": "manual-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, null, msg]; }\nreturn x2Load.value.buildValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, null, msg]; }\nreturn x2Load.value.buildValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -74,7 +74,7 @@
       "entry": "cancelValveRequest",
       "file": "cancel-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 500; msg.payload = { message: 'valve control module unavailable: ' + x2Load.error }; return msg; }\nreturn x2Load.value.cancelValveRequest(msg, { env, global, node, Date, Buffer, setTimeout, osiDb, crypto, chirpstack, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return msg; }\nreturn x2Load.value.cancelValveRequest(msg, { env, global, node, Date, Buffer, setTimeout, osiDb, crypto, chirpstack, osiLib });",
         "libs": [
           {
             "var": "osiDb",
@@ -100,7 +100,7 @@
       "entry": "parseStregaIntervalRequest",
       "file": "service-interval-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaIntervalRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaIntervalRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -118,7 +118,7 @@
       "entry": "parseStregaModelRequest",
       "file": "service-model-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaModelRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaModelRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -136,7 +136,7 @@
       "entry": "parseStregaTimedRequest",
       "file": "service-timed-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaTimedRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaTimedRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
         "libs": [
           {
             "var": "crypto",
@@ -158,7 +158,7 @@
       "entry": "parseStregaMagnetRequest",
       "file": "service-magnet-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaMagnetRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaMagnetRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -176,7 +176,7 @@
       "entry": "parseStregaPartialRequest",
       "file": "service-partial-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaPartialRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaPartialRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -194,7 +194,7 @@
       "entry": "parseStregaFlushRequest",
       "file": "service-flush-ingress.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaFlushRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return [null, msg]; }\nreturn x2Load.value.parseStregaFlushRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
         "libs": [
           {
             "var": "crypto",
@@ -212,7 +212,7 @@
       "entry": "formatStregaResponse",
       "file": "run-log-adapters.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable' }; return msg; }\nreturn x2Load.value.formatStregaResponse(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return msg; }\nreturn x2Load.value.formatStregaResponse(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
         "libs": [
           {
             "var": "osiLib",
@@ -226,7 +226,7 @@
       "entry": "buildActuatorLog",
       "file": "run-log-adapters.js",
       "replacement": {
-        "func": "const x2Load = osiLib.require('osi-valve-control');\nif (!x2Load.ok) { node.error('X2 valve adapter unavailable: ' + x2Load.error); return; }\nreturn x2Load.value.buildActuatorLog(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); return; }\nreturn x2Load.value.buildActuatorLog(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
         "libs": [
           {
             "var": "osiLib",

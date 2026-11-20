@@ -42,7 +42,7 @@ function environment(testCase, moduleRoot) {
       if (/SELECT user_uuid/.test(sql)) return options.mode === 'missing-actor' ? null : { user_uuid: 'actor-1' };
       return options.mode === 'not-found' ? null : { deveui: EUI, type_id: options.mode === 'wrong-type' ? 'MILESIGHT_UC512' : 'STREGA_VALVE', user_id: options.mode === 'other-owner' ? 2 : 1 };
     },
-    close(callback) { effects.push(['db.close']); if (options.mode === 'close-error') throw failure('fixture close failed'); callback(); },
+    close(callback) { effects.push(['db.close']); if (options.mode === 'close-error') throw failure('fixture close failed'); callback(options.mode === 'close-callback-error' ? failure('fixture callback close failed') : undefined); },
   };
   const client = {
     async flushDeviceQueue(eui) { effects.push(['flush', eui]); return { statusCode: 200 }; },
@@ -50,7 +50,7 @@ function environment(testCase, moduleRoot) {
     async enqueueDownlink(item) { effects.push(['enqueue', item]); return { id: 'queue-1' }; },
   };
   const scope = {
-    resolveAuthSecret(args) { effects.push(['scope.secret', args.configuredSecret]); if (options.scopeSecretError) throw failure('fixture scope secret failed', 500); return SECRET; },
+    resolveAuthSecret(args) { effects.push(['scope.secret', args.configuredSecret]); if (options.scopeSecretError) throw failure('fixture scope secret failed', 500); if (options.scopeWarn) args.warn('fixture scope resolver warning'); return SECRET; },
     async assertFreshDeviceAccess(dbArg, actor, eui, config) { effects.push(['scope.access', dbArg === db, actor, eui, config]); if (/^scope-\d/.test(options.mode || '')) throw failure('fixture scope denied', Number(options.mode.slice(6))); return { role: options.mode === 'viewer' ? 'viewer' : 'admin' }; },
     canMutate(role) { effects.push(['scope.mutate', role]); return role !== 'viewer'; },
   };
@@ -70,7 +70,7 @@ function environment(testCase, moduleRoot) {
   let scopeLoads = 0;
   const deps = {
     msg,
-    env: { get(key) { const values = { DEVICE_EUI: GATEWAY, AUTH_TOKEN_SECRET: options.secret ? undefined : SECRET, OSI_SCOPED_ACCESS: options.scoped ? '1' : '0' }; effects.push(['env', key]); return values[key]; } },
+    env: { get(key) { const values = { DEVICE_EUI: GATEWAY, AUTH_TOKEN_SECRET: options.secret ? undefined : SECRET, OSI_SCOPED_ACCESS: options.scoped ? '1' : '0' }; effects.push(['env', key]); return Object.hasOwn(options.env || {},key) ? options.env[key] : values[key]; } },
     global: { get(key) { effects.push(['global', key]); return key === 'fs' ? (options.secret === 'no-fs' || options.secret === 'absent' ? undefined : fakeFs) : key === 'cp' ? { exec(cmd) { effects.push(['exec', cmd]); if (options.execError) throw failure('fixture reboot process failed'); } } : undefined; } },
     node: { warn(...args) { effects.push(['warn', ...args]); }, error(message, errorMsg) { effects.push(['error', message, errorMsg === msg ? { $identity: 'msg' } : errorMsg]); } },
     flow: { get() { throw failure('request data must not use flow context'); }, set() { throw failure('request data must not use flow context'); } },
