@@ -244,7 +244,7 @@ test('option B refuses unknown columns, surviving old parent, live handles, abse
   }
 });
 
-for (const phase of ['child-copied', 'before-commit', 'verified', 'prepared', 'published']) {
+for (const phase of ['child-copied', 'before-commit', 'verified', 'prepared', 'published', 'before-unlock']) {
   test(`option B SIGKILL at ${phase} keeps the original, and only verified copies can occupy the DB path`, async () => {
     await withFixture('quoted', async (file, dir) => {
       const before = digest(file);
@@ -252,7 +252,7 @@ for (const phase of ['child-copied', 'before-commit', 'verified', 'prepared', 'p
       const r = spawnSync(process.execPath, ['-e', script, path.join(ROOT, 'scripts/repair-legacy-device-fk.js'), file, path.join(dir, 'backups'), phase], { encoding: 'utf8' });
       assert.equal(r.signal, 'SIGKILL', r.stdout + r.stderr);
       assert.ok(fs.existsSync(file + '.legacy-device-fk-repair.lock'));
-      if (phase !== 'published') assert.equal(digest(file), before);
+      if (!['published', 'before-unlock'].includes(phase)) assert.equal(digest(file), before);
       else {
         const stage = fs.readFileSync(path.join(file + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
         assert.equal(digest(path.join(stage, 'original.db')), before);
@@ -422,4 +422,59 @@ test('option B repairs a proven trigger-only legacy reference without rebuilding
     assert.deepEqual(repaired.tables, []);
     assert.equal((await tool().repair({ dbPath: file })).needed, false);
   });
+});
+
+test('option B post-commit cleanup failure keeps the verified replacement and retained original', async () => {
+  await withFixture('quoted', async (file, dir) => {
+    const before = digest(file);
+    await assert.rejects(tool().repair({ ...options(file, dir), checkpoint: async phase => {
+      if (phase === 'before-unlock') throw new Error('injected cleanup failure');
+    } }), /Verified repair is published; cleanup is incomplete/);
+    const stage = fs.readFileSync(path.join(file + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
+    const receipt = JSON.parse(fs.readFileSync(path.join(stage, 'receipt.json'), 'utf8'));
+    assert.equal(receipt.phase, 'published');
+    assert.equal(digest(path.join(stage, 'original.db')), before);
+    assert.equal(digest(file), receipt.candidateSha256);
+    const db = new DatabaseSync(file);
+    try { assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []); }
+    finally { db.close(); }
+  });
+});
+
+test('option B rejects replacement of the verified staging inode even with identical bytes', async () => {
+  await withFixture('quoted', async (file, dir) => {
+    const before = digest(file);
+    await assert.rejects(tool().repair({ ...options(file, dir), checkpoint: async phase => {
+      if (phase !== 'prepared') return;
+      const stage = fs.readFileSync(path.join(file + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
+      const candidate = path.join(stage, 'candidate.db');
+      fs.copyFileSync(candidate, candidate + '.replacement');
+      fs.renameSync(candidate + '.replacement', candidate);
+    } }), /candidate changed before atomic swap/);
+    assert.equal(digest(file), before);
+  });
+});
+
+test('option B named-service gate accepts stopped services and refuses running or unknown procd state', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-procd-'));
+  try {
+    // Simulated gateway path and fixture ubus executable; no gateway is opened.
+    fs.writeFileSync(path.join(dir, 'ubus'), '#!/bin/sh\nprintf "%s\\n" "$EB19_PROCD_FIXTURE"\n', { mode: 0o700 });
+    const cases = [
+      [{}, true],
+      [{ 'node-red': { instances: {} }, 'osi-identityd': { instances: { main: { running: false } } } }, true],
+      [{ 'node-red': { instances: { main: { running: true } } } }, false],
+      [{ 'node-red': { instances: {} }, 'osi-identityd': { instances: { main: { running: true } } } }, false],
+      [{ 'node-red': { instances: { main: {} } } }, false],
+      [{ 'node-red': { instances: [] } }, false],
+      [{ 'node-red': {} }, false],
+      [[], false],
+    ];
+    for (const [state, accepted] of cases) {
+      const r = spawnSync(process.execPath, ['-e', "require(process.argv[1]).assertGatewayStopped('/data/db/farming.db')", path.join(ROOT, 'scripts/repair-legacy-device-fk.js')], {
+        encoding: 'utf8', env: { ...process.env, PATH: dir + ':' + process.env.PATH, EB19_PROCD_FIXTURE: JSON.stringify(state) },
+      });
+      assert.equal(r.status === 0, accepted, JSON.stringify(state) + ': ' + r.stderr);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -64,7 +64,10 @@ The suite covers report/apply CLI paths, all supported FK spellings, both profil
 boot functions after repair, divergent-catalog refusal, source/candidate races,
 64-bit IDs and AUTOINCREMENT high-water values, ledger/fingerprint agreement,
 and SIGKILL before commit, after verification, before publication and after
-publication. Caught errors additionally inspect FK ON/legacy OFF on the actual
+publication. Self-review added an explicit durable-publication boundary: a late
+cleanup error retains the verified replacement rather than restoring the old
+catalog after its exclusion lock may have been released. Candidate identity as
+well as content is checked before the swap. Caught errors additionally inspect FK ON/legacy OFF on the actual
 repair connection before close. A killed connection cannot run `finally`; the
 original remains intact and an unverified candidate cannot be published.
 
@@ -72,8 +75,24 @@ CI caught a preflight transport regression at `dbe85aaeb`: the guard spawned
 SQLite CLI readers for the persistent reference-chain adapter. The adapter's
 zero-subprocess test failed (3 calls instead of 0). The correction uses native
 adapter reads and a dedicated forced-read-only CLI query method; the focused
-baseline test is included in the queued verification set.
+baseline test is covered by GitHub CI on the final head.
 
-Verification results are recorded below after the queued runs complete. The
+The CTO's updated gate rule uses GitHub CI on the exact final head for the full
+migration, sync, smoke and shell suites. The queued full-suite wrapper was
+cancelled before it ran. Local populated repair, rebuild and interruption tests
+remain required through `osi-heavy` regardless of CI status.
+Current command results are recorded by head SHA in [PR #699](https://github.com/Open-Smart-Irrigation/osi-os/pull/699).
+This report records the implementation and required validation; the PR body is
+updated after execution rather than retaining an obsolete queue status here.
+
+| Gate | Command or evidence |
+|---|---|
+| Local populated repair, rebuild and interruption qualification | `node scripts/run-legacy-catalog-rehearsal.js` through `osi-heavy` with private tmpfs |
+| Full suites | GitHub CI on the exact reviewed head: migration/seed checks, sync, smoke, shell fixtures, and `scripts/deploy-command-ledger-dependency.test.js` |
+| Lightweight source checks | `node scripts/verify-agents-size.js`, `node scripts/verify-doc-hygiene.js`, the prose checker, test inventory, JS/shell syntax, and `git diff --check` |
+
+The source checks passed during implementation. Full-suite results from a parent
+head are not accepted for a later head. Local repair qualification remains
+mandatory even when the CI runner also exercises its test driver. The
 existing boot-node suite's production-column-capture skip is not a field
 rehearsal. All new fixtures are synthetic.

@@ -38,7 +38,7 @@ function safeDirectory(dir) {
 function sourceState(file) {
   const s = fs.lstatSync(file, { bigint: true });
   if (!s.isFile() || s.isSymbolicLink()) throw new Error('refusing non-regular database');
-  return [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].join(':') + ':' + hashFile(file);
+  return { identity: [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs, s.mode, s.uid, s.gid].join(':'), sha256: hashFile(file) };
 }
 function assertNoSidecars(file) {
   for (const suffix of ['-wal', '-shm', '-journal']) {
@@ -229,7 +229,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
   if (apply) { assertGatewayStopped(file); assertNoOpenHandles(file); }
   const originalState = sourceState(file);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-report-'));
-  let db, stage, lock, published = false;
+  let db, stage, lock, published = false, publicationCommitted = false;
   try {
     let candidate = path.join(scratch, 'copy.db');
     fs.copyFileSync(file, candidate, fs.constants.COPYFILE_EXCL);
@@ -246,7 +246,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     fs.mkdirSync(lock, { mode: 0o700 }); // EEXIST refuses interrupted/concurrent attempts
     sync(path.dirname(file));
     stage = fs.mkdtempSync(path.join(path.dirname(file), '.legacy-device-fk-repair-'));
-    const record = { source: file, originalSha256: hashFile(file), phase: 'copying', fieldCount: 'unknown' };
+    const record = { source: file, originalSha256: originalState.sha256, phase: 'copying', fieldCount: 'unknown' };
     const receipt = () => {
       const next = path.join(stage, 'receipt.json.next');
       fs.writeFileSync(next, JSON.stringify(record, null, 2) + '\n', { mode: 0o600 });
@@ -280,7 +280,8 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     fs.chmodSync(candidate, stat.mode & 0o777);
     fs.chownSync(candidate, stat.uid, stat.gid);
     sync(candidate);
-    record.candidateSha256 = hashFile(candidate);
+    const candidateState = sourceState(candidate);
+    record.candidateSha256 = candidateState.sha256;
     record.preservation = Object.fromEntries(Object.entries(before).map(([name, w]) => [name, { rows: w.count, digest: w.digest }]));
     record.phase = 'verified'; receipt();
     await checkpoint('verified');
@@ -308,16 +309,20 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     assertEqual(sourceState(file), linkedState, 'source changed before atomic swap');
     assertEqual(hashFile(file), record.originalSha256, 'source bytes changed before atomic swap');
     assertNoSidecars(candidate);
-    assertEqual(hashFile(candidate), record.candidateSha256, 'verified candidate changed before atomic swap');
+    assertEqual(sourceState(candidate), candidateState, 'verified candidate changed before atomic swap');
     fs.renameSync(candidate, file); published = true;
     sync(path.dirname(file));
     await checkpoint('published');
     record.phase = 'published'; receipt();
+    // Publication and its receipt are durable. Cleanup failures must never
+    // roll a committed repair back after its exclusion lock may be released.
+    publicationCommitted = true;
+    await checkpoint('before-unlock');
     fs.unlinkSync(path.join(lock, 'stage')); fs.rmdirSync(lock); lock = null;
     sync(path.dirname(file));
     return { applied: true, tables: proposal.tables, backup, original: path.join(stage, 'original.db'), receipt: path.join(stage, 'receipt.json'), foreignKeys: 1, fieldCount: 'unknown' };
   } catch (e) {
-    if (published) {
+    if (published && !publicationCommitted) {
       try {
         fs.linkSync(file, path.join(stage, 'verified.db'));
         fs.linkSync(path.join(stage, 'original.db'), path.join(stage, 'restore.db'));
@@ -325,6 +330,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
         sync(path.dirname(file));
       } catch (restoreError) { e.message += '; automatic restore failed: ' + restoreError.message; }
     }
+    if (publicationCommitted) e.message = 'Verified repair is published; cleanup is incomplete: ' + e.message;
     if (stage) e.message += `; original/candidate evidence retained at ${stage}; inspect ${lock || 'receipt.json'} before retry`;
     throw e;
   } finally {
@@ -349,4 +355,4 @@ function parseArgs(argv) {
 }
 if (require.main === module) Promise.resolve().then(() => repair(parseArgs(process.argv.slice(2))))
   .then(r => console.log(JSON.stringify(r))).catch(e => { console.error('Legacy device FK repair refused/failed: ' + e.message); process.exitCode = 1; });
-module.exports = { repair, parseArgs, correctedSql, witness, assertNoOpenHandles };
+module.exports = { repair, parseArgs, correctedSql, witness, assertNoOpenHandles, assertGatewayStopped };

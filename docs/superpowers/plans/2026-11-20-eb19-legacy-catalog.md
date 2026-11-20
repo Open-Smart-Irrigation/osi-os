@@ -133,9 +133,10 @@ the handoff makes those existing restore catches warn independently.
    `original.db` in the repair directory, and write a durable receipt. Recheck
    source identity/hash and open handles, then atomically rename the candidate
    over the source. The original stays retained across every publication phase.
-   A caught post-publication failure restores that original atomically; a power
+   A caught failure before the durable published receipt restores the original; a power
    cut can leave either the original or the verified candidate at the DB path,
-   with the original retained. Incomplete attempts keep their lock and receipt
+   with the original retained. After the durable commit point, cleanup errors keep
+   the verified replacement and report the remaining cleanup. Incomplete attempts keep their lock and receipt
    for operator inspection and prevent an automatic retry.
 6. Extend the fixture suite for dry-run immutability, successful repair followed
    by the retired full boot, unknown-shape refusal, live-handle/sidecar refusal,
@@ -219,7 +220,9 @@ rows, successful telemetry writes, zero FK violations, and FK ON/legacy OFF/
 writable-schema OFF on the same connection after every tested exit. Add cases
 for the repair's own failures before calling that disposition safe.
 
-The final flows branch must pass:
+The final flows branch must pass the following gates. Under the CTO gate rule,
+use GitHub CI on the exact final head for the full suites; keep the populated
+repair/rebuild/interruption qualification local through `osi-heavy`:
 
 ```sh
 node scripts/verify-runtime-schema-parity.js

@@ -398,8 +398,10 @@ An interrupted attempt retains `/data/db/farming.db.legacy-device-fk-repair.lock
 Its `stage` file names a private directory with a receipt and any candidate or
 original. Keep writers stopped. Before publication the DB path retains the
 original bytes; after publication it holds either the original or the verified
-candidate. A caught publication error attempts an atomic restoration, retaining
-both versions. A power cut never requires trusting an unverified candidate.
+candidate. A caught error before the published receipt is durable attempts an atomic
+restoration, retaining both versions. After that commit point, cleanup errors
+keep the verified replacement and retained original, and exit nonzero for
+operator inspection. A power cut never requires trusting an unverified candidate.
 
 Inspect the receipt's phase, original/candidate SHA-256 values, persistent backup
 and actual file hashes with `sha256sum`. Verify integrity and FKs on the candidate
