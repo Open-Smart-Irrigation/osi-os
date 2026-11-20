@@ -264,7 +264,7 @@ echo "stub deploy.sh starting against \$base"
 wget -q -O /dev/null --spider "\$base/deploy.sh?fixture_stub=\$STUB_REQUEST_TAG"
 echo "stub deploy.sh confirmed local server reachable"
 if [ "\${STUB_DELAY_SECONDS:-0}" -gt 0 ]; then
-    node "\$(dirname "\$0")/scripts/fixture-delay.js" "\$STUB_DELAY_SECONDS"
+    node "\$(dirname "\$2")/scripts/fixture-delay.js" "\$STUB_DELAY_SECONDS"
 fi
 exit $exit_code
 EOF

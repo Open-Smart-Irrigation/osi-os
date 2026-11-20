@@ -293,3 +293,14 @@ test('a dead supervisor cannot strand --wait or fabricate success', { timeout: 2
   assert.equal(await new Promise(resolve => runner.once('exit', resolve)), 125);
   assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
 });
+
+test('the deploy shell retains the sh applet name and identifies its verified source separately', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  const marker = path.join(f.root, 'shell-name');
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `printf '%s\\n' "$0" > ${quote(marker)}\ntest -f "$2"\ntouch `));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  const result = await run(f);
+  assert.equal(result.code, 0, result.output);
+  assert.equal(path.basename(fs.readFileSync(marker, 'utf8').trim()), 'sh');
+});

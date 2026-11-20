@@ -159,8 +159,9 @@ async function supervise(cfg, hooks = {}) {
     else {
       durableWrite(cfg.result, encode({ state: 'running', verdict: 'pending', exit_code: 125, bundle_sha256: bundleHash, reason_code: 'pending' }));
       // The deploy's stdin is the very deploy.sh buffer already verified. Its
-      // $0 names the materialized tree for diagnostics/fixture helper lookups.
-      child = spawn('sh', ['-s', '--', String(cfg.port)], { argv0: path.join(cfg.extract, 'deploy.sh'), detached: true, stdio: ['pipe', process.stdout, process.stderr], env: { ...process.env, DEPLOY_OUTCOME_FILE: outcomeFile, DEPLOY_LOGFILE: cfg.log, DEPLOY_BUNDLE_SHA256: bundleHash } });
+      // Keep argv[0] as sh: BusyBox selects its applet from that name. The
+      // second positional argument identifies this run in /proc for operators.
+      child = spawn('sh', ['-s', '--', String(cfg.port), path.join(cfg.extract, 'deploy.sh')], { detached: true, stdio: ['pipe', process.stdout, process.stderr], env: { ...process.env, DEPLOY_OUTCOME_FILE: outcomeFile, DEPLOY_LOGFILE: cfg.log, DEPLOY_BUNDLE_SHA256: bundleHash } });
       child.stdin.on('error', e => { if (e.code !== 'EPIPE') console.error(e); });
       child.stdin.end(tree.files.get('deploy.sh'));
       notify({ launched: true });
