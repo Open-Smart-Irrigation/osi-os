@@ -1419,8 +1419,11 @@ function verifiedFlowSeed(root, stamp) {
   const dir = payloadDir(root, stamp);
   const sealPath = path.join(dir, 'flows-seed.json');
   const pristine = path.join(dir, 'flows.pristine.json');
-  if (!lstatOrNull(sealPath) && !lstatOrNull(pristine)) return null;
-  if (!fs.lstatSync(sealPath).isFile() || !fs.lstatSync(pristine).isFile()) {
+  const sealStat = lstatOrNull(sealPath);
+  const pristineStat = lstatOrNull(pristine);
+  if (!sealStat && !pristineStat) return null;
+  if (!sealStat || !pristineStat) throw new Error('pristine flows file or its seal is missing');
+  if (!sealStat.isFile() || !pristineStat.isFile()) {
     throw new Error('pristine flows or seal are not regular files');
   }
   const seal = JSON.parse(fs.readFileSync(sealPath, 'utf8'));
