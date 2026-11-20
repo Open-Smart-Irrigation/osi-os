@@ -27,6 +27,7 @@ jobs:
         run: |
           shfmt -ln posix -i 2 -d \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-rootfs-resize \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-rootfs-grow-reboot \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/90_osi_rootfs_grow \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-rootfs-grow.sh
       - name: Verify image profile parity

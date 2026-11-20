@@ -16,35 +16,94 @@ if (find('dash')) shells.push([find('dash'), []]);
 assert.ok(shells.length, 'install BusyBox ash or dash');
 if (process.env.CI) assert.equal(shells.length, 2, 'CI must exercise BusyBox ash and dash');
 const q = s => "'" + s.replaceAll("'", "'\\''") + "'";
+let lifecycleBinary;
+function fstoolsLifecycle() {
+  if (lifecycleBinary) return lifecycleBinary;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-fstools-lifecycle-'));
+  process.on('exit', () => fs.rmSync(root, { recursive: true, force: true }));
+  // These are the pinned cleanup and state functions, with real directory I/O.
+  const source = fs.readFileSync(path.join(repo, 'scripts/fixtures/image-boot-growth/overlay-lifecycle.c'), 'utf8');
+  fs.writeFileSync(path.join(root, 'lifecycle.c'), source + `
+int main(int argc, char **argv) {
+  if (argc != 3) return 2;
+  if (!strcmp(argv[1], "done")) return fs_state_set(argv[2], FS_STATE_READY);
+  enum fs_state state = fs_state_get(argv[2]);
+  printf("preinit state=%d\\n", state);
+  switch (state) {
+  case FS_STATE_UNKNOWN:
+    fs_state_set(argv[2], FS_STATE_PENDING);
+    if (fs_state_get(argv[2]) != FS_STATE_PENDING) return 3;
+    /* fall through, as in mount_overlay() */
+  case FS_STATE_PENDING:
+    overlay_delete(argv[2], true);
+    break;
+  case FS_STATE_READY:
+    break;
+  }
+  return 0;
+}
+`);
+  lifecycleBinary = path.join(root, 'lifecycle');
+  const result = spawnSync('cc', ['-std=gnu99', '-o', lifecycleBinary, path.join(root, 'lifecycle.c')], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  return lifecycleBinary;
+}
 for (const [shell, args] of shells) {
-  function fixture(t) {
+  function fixture(t, lifecycle = false) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-image-grow-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const p = f => path.join(root, f);
     fs.mkdirSync(p('bin'));
+    if (lifecycle) for (const dir of ['etc', 'data', 'srv']) {
+      fs.mkdirSync(p(`overlay/upper/${dir}`), { recursive: true });
+      fs.symlinkSync(p(`overlay/upper/${dir}`), p(dir));
+    }
+
     const put = (f, data = '') => { fs.mkdirSync(path.dirname(p(f)), { recursive: true }); fs.writeFileSync(p(f), data); };
     const exe = (name, body) => { put(`bin/${name}`, `#!${shell}${args.length ? ' ' + args[0] : ''}\n${body}\n`); fs.chmodSync(p(`bin/${name}`), 0o755); };
     // Rewrite absolute target paths into a disposable tree. Never run block tools
     // or reboot on the workstation. Dispatch remains the vendored rc.common.
-    const rewrite = source => source.replace(/\/(etc|usr|data|srv|proc|sys|dev)\//g, `${root}/$1/`);
-    for (const f of ['etc/init.d/osi-rootfs-resize', 'etc/uci-defaults/90_osi_rootfs_grow', 'usr/libexec/osi-rootfs-grow.sh']) {
-      if (fs.existsSync(path.join(payload, f))) put(f, rewrite(fs.readFileSync(path.join(payload, f), 'utf8')));
-    }
+    const rewrite = source => source.replace(/\/(etc|usr|data|srv|proc|sys|dev|var|lib|overlay)\//g, `${root}/$1/`)
+      .replaceAll('/sysupgrade.tgz', p('sysupgrade.tgz'));
+    const whiteout = 'etc/uci-defaults/.growth-whiteout';
+    const hydrate = () => {
+      if (lifecycle) for (const dir of ['etc', 'data', 'srv']) fs.mkdirSync(p(`overlay/upper/${dir}`), { recursive: true });
+      for (const f of ['etc/init.d/osi-rootfs-resize', 'etc/init.d/osi-rootfs-grow-reboot', 'etc/uci-defaults/90_osi_rootfs_grow', 'usr/libexec/osi-rootfs-grow.sh']) {
+        if (f.includes('uci-defaults') && fs.existsSync(p(whiteout))) continue;
+        if (fs.existsSync(path.join(payload, f))) put(f, rewrite(fs.readFileSync(path.join(payload, f), 'utf8')));
+      }
+      put('etc/init.d/done', rewrite(fs.readFileSync(path.join(repo, 'openwrt/package/base-files/files/etc/init.d/done'), 'utf8')));
+      put('etc/diag.sh', 'set_state() { :; }\n');
+    };
+    hydrate();
+    const boot = fs.readFileSync(path.join(repo, 'openwrt/package/base-files/files/etc/init.d/boot'), 'utf8');
+    put('defaults-dispatch.sh', rewrite(boot.slice(0, boot.indexOf('\nboot() {'))));
+    put('lib/functions/system.sh');
+    put('overlay/sysupgrade.tgz', 'kept archive');
+    if (!lifecycle) fs.symlinkSync('2', p('overlay/.fs_state'));
+    fs.mkdirSync(p('var/run'), { recursive: true });
     put('rc.common', fs.readFileSync(path.join(repo, 'openwrt/package/base-files/files/etc/rc.common'), 'utf8'));
     put('lib/functions.sh', 'list_contains() { case " $(eval "echo \\$$1") " in *" $2 "*) return 0;; *) return 1;; esac; }\n');
     put('lib/functions/service.sh');
     put('lib/functions/procd.sh', 'procd_open_service() { :; }; procd_close_service() { :; }\n');
-    for (const cmd of ['awk', 'cat', 'readlink']) fs.symlinkSync(find('busybox') || find(cmd), p(`bin/${cmd}`));
+    for (const cmd of ['awk', 'cat', 'readlink', 'ls', 'basename']) fs.symlinkSync(find('busybox') || find(cmd), p(`bin/${cmd}`));
     exe('sync', 'echo sync >> "$FIXTURE/calls"\n[ "${FAIL_COMMAND:-}" != sync ]');
     for (const cmd of ['touch', 'rm']) {
-      exe(cmd, `echo ${cmd} "$@" >> "$FIXTURE/calls"\n[ "\${FAIL_COMMAND:-}" != ${cmd} ] || exit 1\nexec ${q(find(cmd))} "$@"`);
+      exe(cmd, `echo ${cmd} "$@" >> "$FIXTURE/calls"\n[ "\${FAIL_COMMAND:-}" != ${cmd} ] || exit 1\nif [ "${cmd}" = rm ] && [ "$*" = '-f 90_osi_rootfs_grow' ]; then
+  echo whiteout > "$FIXTURE/etc/uci-defaults/.growth-whiteout"
+fi
+exec ${q(find(cmd))} "$@"`);
     }
     exe('logger', 'echo "log $*" >> "$FIXTURE/calls"');
     exe('findmnt', 'echo "$FIXTURE/dev/mmcblk0p2"');
     exe('partprobe', ':');
     exe('parted', 'echo "parted $*" >> "$FIXTURE/calls"\ninput=$(cat); echo "$input" >> "$FIXTURE/calls"\n# Model GNU Parted refusing the mounted-partition question in script mode.\ncase " $* " in *" -s "*) exit 1;; esac\n[ "$input" = yes ] || exit 1\n[ "${PARTED_FAIL:-0}" = 0 ] || exit 1\necho grown > "$FIXTURE/partition-grown"\n[ "${CUT_AFTER_PARTED:-0}" = 0 ] || kill -KILL "$PPID"');
     exe('resize2fs', 'echo "resize2fs $*" >> "$FIXTURE/calls"\n[ "${RESIZE_FAIL:-0}" = 0 ] || exit 1\n[ "${CUT_AFTER_RESIZE:-0}" = 0 ] || kill -KILL "$PPID"');
-    exe('reboot', 'echo reboot >> "$FIXTURE/calls"\n[ "${REBOOT_FAIL:-0}" = 0 ]');
+    exe('reboot', 'echo reboot >> "$FIXTURE/calls"\necho "reboot-state=$(readlink "$FIXTURE/overlay/.fs_state" 2>/dev/null)" >> "$FIXTURE/calls"\n[ "${REBOOT_FAIL:-0}" = 0 ]');
+    exe('uci', ':');
+    if (lifecycle) exe('mount_root', `[ "\${READY_FAIL:-0}" = 0 ] || exit 1
+exec ${q(fstoolsLifecycle())} done "$FIXTURE/overlay"`);
+
     function mounts(source = '/dev/mmcblk0p2', type = 'ext4', point = '/overlay', opts = 'rw,relatime') {
       put('proc/mounts', rewrite(`${source} ${point} ${type} ${opts} 0 0\n/dev/mmcblk0p2 /rom squashfs ro 0 0\n`));
       put('proc/self/mountinfo', rewrite('1 0 179:2 / /rom ro - squashfs /dev/root ro\n'));
@@ -58,13 +117,21 @@ for (const [shell, args] of shells) {
     const run = (kind = 'boot', extra = {}) => {
       // A new boot rereads the on-disk partition table; a same-boot start does not.
       if (kind === 'boot' && fs.existsSync(p('partition-grown'))) put('sys/class/block/mmcblk0p2/size', '37952\n');
-      return spawnSync(shell, [...args, ...(kind === 'defaults'
-        ? ['-c', '. "$1"', 'uci-defaults', p('etc/uci-defaults/90_osi_rootfs_grow')]
-        : [p('rc.common'), p('etc/init.d/osi-rootfs-resize'), kind])], {
+      const invocation = kind === 'defaults' ? ['-c', '. "$1"', 'uci-defaults', p('etc/uci-defaults/90_osi_rootfs_grow')]
+        : kind === 's10' ? ['-c', '. "$1"; uci_apply_defaults', 'S10boot', p('defaults-dispatch.sh')]
+        : [p('rc.common'), p(kind === 'late' ? 'etc/init.d/osi-rootfs-grow-reboot' : kind === 'done' ? 'etc/init.d/done' : 'etc/init.d/osi-rootfs-resize'),
+          kind === 'late' || kind === 'done' ? 'boot' : kind];
+      return spawnSync(shell, [...args, ...invocation], {
         encoding: 'utf8', timeout: 5000, env: { ...process.env, PATH: p('bin'), FIXTURE: root, IPKG_INSTROOT: root, ...extra },
       });
     };
-    return { root, p, put, mounts, run, calls: () => fs.existsSync(p('calls')) ? fs.readFileSync(p('calls'), 'utf8') : '',
+    const state = () => { try { return fs.readlinkSync(p('overlay/.fs_state')); } catch (e) { if (e.code === 'ENOENT') return ''; throw e; } };
+    const preinit = () => {
+      fs.rmSync(p('var/run'), { recursive: true, force: true }); fs.mkdirSync(p('var/run'), { recursive: true });
+      const r = spawnSync(fstoolsLifecycle(), ['preinit', p('overlay')], { encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stdout + r.stderr); hydrate(); return r.stdout;
+    };
+    return { root, p, put, mounts, run, state, preinit, whiteout: () => fs.existsSync(p(whiteout)), calls: () => fs.existsSync(p('calls')) ? fs.readFileSync(p('calls'), 'utf8') : '',
       pending: () => fs.existsSync(p('etc/osi-rootfs-grow-needs-resize')),
       stamped: () => fs.existsSync(p('etc/osi-rootfs-grow.partitioned')) };
   }
@@ -76,7 +143,8 @@ for (const [shell, args] of shells) {
   });
   test(`${path.basename(shell)} sourced uci-defaults dispatches partition growth and next boot completes`, t => {
     const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); ok(g.run('defaults')); assert.match(g.calls(), /parted /); assert.ok(g.pending());
-    assert.match(g.calls(), /resizepart 2 100%/); assert.match(g.calls(), /^yes$/m); assert.match(g.calls(), /reboot/);
+    assert.match(g.calls(), /resizepart 2 100%/); assert.match(g.calls(), /^yes$/m); assert.doesNotMatch(g.calls(), /^reboot$/m);
+    ok(g.run('late')); assert.match(g.calls(), /reboot-state=2/);
     ok(g.run('defaults')); assert.equal(g.calls().match(/parted /g).length, 1);
     ok(g.run()); assert.ok(g.stamped()); assert.ok(!g.pending());
   });
@@ -89,11 +157,11 @@ for (const [shell, args] of shells) {
     g.put('etc/osi-rootfs-grow-needs-resize'); ok(g.run());
     assert.match(g.calls(), /resize2fs .*\/dev\/loop0/); assert.ok(g.stamped());
   });
-  for (const failure of ['parted', 'touch', 'sync', 'reboot']) test(`${path.basename(shell)} ${failure} failure retains first-boot retry`, t => {
-    const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); const env = failure === 'parted' ? { PARTED_FAIL: '1' } : failure === 'reboot' ? { REBOOT_FAIL: '1' } : { FAIL_COMMAND: failure };
+  for (const failure of ['parted', 'touch', 'sync']) test(`${path.basename(shell)} ${failure} failure retains first-boot retry`, t => {
+    const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); const env = failure === 'parted' ? { PARTED_FAIL: '1' } : { FAIL_COMMAND: failure };
     const r = g.run('defaults', env); assert.notEqual(r.status, 0); assert.ok(!g.stamped());
-    if (failure !== 'reboot') assert.doesNotMatch(g.calls(), /^reboot$/m);
-    ok(g.run('defaults')); assert.ok(g.pending()); ok(g.run()); assert.ok(g.stamped());
+    assert.doesNotMatch(g.calls(), /^reboot$/m);
+    ok(g.run('defaults')); assert.ok(g.pending()); ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
   });
   for (const failure of ['resize2fs', 'touch', 'sync', 'rm']) test(`${path.basename(shell)} ${failure} failure keeps resize recoverable`, t => {
     const g = fixture(t); g.put('etc/osi-rootfs-grow-needs-resize');
@@ -103,7 +171,7 @@ for (const [shell, args] of shells) {
   for (const cut of ['CUT_AFTER_PARTED', 'CUT_AFTER_RESIZE']) test(`${path.basename(shell)} restart after ${cut}`, t => {
     const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); if (cut === 'CUT_AFTER_RESIZE') { g.put('etc/osi-rootfs-grow-needs-resize'); g.put('sys/class/block/mmcblk0p2/size', '37952\n'); }
     const r = g.run(cut === 'CUT_AFTER_PARTED' ? 'defaults' : 'boot', { [cut]: '1' }); assert.equal(r.signal, 'SIGKILL');
-    assert.ok(!g.stamped()); ok(g.run('defaults')); ok(g.run()); assert.ok(g.stamped());
+    assert.ok(!g.stamped()); ok(g.run('defaults')); ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
   });
   for (const name of ['farming.db', 'farming.db-wal', 'farming.db-shm', 'farming.db-journal']) test(`${path.basename(shell)} refuses partition changes on provisioned media: ${name}`, t => {
     const g = fixture(t); g.put(`data/db/${name}`, 'history-canary'); ok(g.run('defaults'));
@@ -126,12 +194,12 @@ for (const [shell, args] of shells) {
   });
   test(`${path.basename(shell)} an already full partition only queues the filesystem pass`, t => {
     const g = fixture(t); ok(g.run('defaults')); assert.ok(g.pending());
-    assert.doesNotMatch(g.calls(), /parted /); ok(g.run()); assert.ok(g.stamped());
+    assert.doesNotMatch(g.calls(), /parted /); assert.doesNotMatch(g.calls(), /^reboot$/m); ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
   });
   test(`${path.basename(shell)} a same-boot start cannot stamp stale kernel geometry`, t => {
     const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); ok(g.run('defaults'));
     assert.notEqual(g.run('start').status, 0); assert.ok(g.pending()); assert.ok(!g.stamped());
-    ok(g.run()); assert.ok(g.stamped());
+    ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
   });
   test(`${path.basename(shell)} an extra partition prevents automatic repartition`, t => {
     const g = fixture(t); g.put('sys/class/block/mmcblk0/mmcblk0p3');
@@ -172,10 +240,96 @@ for (const [shell, args] of shells) {
   test(`${path.basename(shell)} existing F2FS is a logged no-op with its media and pending state intact`, t => {
     const g = fixture(t); g.mounts('/dev/loop0', 'f2fs'); g.put('data/db/farming.db', 'existing-history');
     ok(g.run('defaults')); assert.match(g.calls(), /f2fs/);
-    g.put('etc/osi-rootfs-grow-needs-resize'); ok(g.run());
+    g.put('etc/osi-rootfs-grow-needs-resize'); g.put('var/run/osi-rootfs-grow-reboot'); ok(g.run()); ok(g.run('late'));
     assert.ok(g.pending()); assert.ok(!g.stamped()); assert.match(g.calls(), /f2fs/);
-    assert.doesNotMatch(g.calls(), /parted |resize2fs |reboot|^rm /m);
+    assert.ok(fs.existsSync(g.p('var/run/osi-rootfs-grow-reboot')));
+    assert.doesNotMatch(g.calls(), /^(?:parted |resize2fs |reboot$|rm )/m);
     assert.equal(fs.readFileSync(g.p('data/db/farming.db'), 'utf8'), 'existing-history');
+  });
+
+  for (const state of ['', '1']) test(`${path.basename(shell)} readiness guard defers late reboot until S95 owns READY`, t => {
+    const g = fixture(t, true);
+    if (state) fs.symlinkSync(state, g.p('overlay/.fs_state'));
+    g.put('etc/osi-rootfs-grow-needs-resize'); g.put('var/run/osi-rootfs-grow-reboot');
+    assert.notEqual(g.run('late').status, 0); assert.equal(g.state(), state);
+    assert.doesNotMatch(g.calls(), /^reboot$/m); assert.match(g.calls(), /not READY/);
+    ok(g.run('done')); assert.equal(g.state(), '2'); ok(g.run('late')); ok(g.run('late'));
+    assert.equal((g.calls().match(/^reboot$/gm) || []).length, 1);
+    assert.ok(g.pending()); assert.ok(!fs.existsSync(g.p('var/run/osi-rootfs-grow-reboot')));
+  });
+  test(`${path.basename(shell)} readiness failure in S95 never forces a READY transition from S96`, t => {
+    const g = fixture(t, true); ok(g.run('defaults'));
+    ok(g.run('done', { READY_FAIL: '1' })); assert.equal(g.state(), '');
+    assert.notEqual(g.run('late').status, 0); assert.equal(g.state(), '');
+    assert.ok(g.pending()); assert.doesNotMatch(g.calls(), /^reboot$/m);
+    ok(g.run('done')); ok(g.run('late')); assert.match(g.calls(), /reboot-state=2/);
+  });
+  for (const failure of ['sync', 'reboot']) test(`${path.basename(shell)} late reboot ${failure} failure keeps the queued request`, t => {
+    const g = fixture(t); ok(g.run('defaults'));
+    assert.notEqual(g.run('late', failure === 'sync' ? { FAIL_COMMAND: 'sync' } : { REBOOT_FAIL: '1' }).status, 0);
+    assert.ok(g.pending()); assert.ok(fs.existsSync(g.p('var/run/osi-rootfs-grow-reboot')));
+    if (failure === 'sync') assert.doesNotMatch(g.calls(), /^reboot$/m);
+    ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
+  });
+  test(`${path.basename(shell)} late reboot ignores inherited resize-failure pending state`, t => {
+    const g = fixture(t); g.put('etc/osi-rootfs-grow-needs-resize');
+    assert.notEqual(g.run('boot', { RESIZE_FAIL: '1' }).status, 0);
+    ok(g.run('defaults')); ok(g.run('late')); assert.ok(g.pending());
+    assert.doesNotMatch(g.calls(), /^reboot$/m); ok(g.run('boot')); assert.ok(g.stamped());
+  });
+
+  function bootCycle(g, { cutBeforeReady = false, cutAfterReady = false } = {}) {
+    const preinit = g.preinit();
+    const receipt = { preinit, pendingAtS08: g.pending(), whiteoutAtS10: g.whiteout() };
+    const reboots = () => (g.calls().match(/^reboot$/gm) || []).length;
+    const before = reboots();
+    ok(g.run('boot')); ok(g.run('s10'));
+    // Model a later defaults writer with a disposable initialization canary.
+    if (!fs.existsSync(g.p('data/db/farming.db'))) g.put('data/db/farming.db', preinit);
+    if (reboots() !== before) return { ...receipt, outcome: 'early reboot' };
+    if (cutBeforeReady) return { ...receipt, outcome: 'cut before READY' };
+    ok(g.run('done'));
+    if (cutAfterReady) return { ...receipt, outcome: 'cut after READY' };
+    ok(g.run('late'));
+    return { ...receipt, outcome: reboots() !== before ? 'growth reboot' : 'complete' };
+  }
+  for (const initial of ['UNKNOWN', 'PENDING']) for (const full of [false, true]) {
+    test(`${path.basename(shell)} preinit ${initial} with ${full ? 'full' : 'small'} partition preserves READY reboot state through S08/S10`, t => {
+      const g = fixture(t, true);
+      if (initial === 'PENDING') fs.symlinkSync('1', g.p('overlay/.fs_state'));
+      if (!full) g.put('sys/class/block/mmcblk0p2/size', '10000\n');
+      const first = bootCycle(g);
+      const canary = fs.readFileSync(g.p('data/db/farming.db'), 'utf8');
+      const second = bootCycle(g);
+      assert.ok(second.pendingAtS08, JSON.stringify({ first, second, calls: g.calls() }));
+      assert.ok(second.whiteoutAtS10); assert.ok(g.stamped()); assert.ok(!g.pending());
+      assert.equal(g.state(), '2'); assert.equal(first.outcome, 'growth reboot'); assert.equal(second.outcome, 'complete');
+      assert.equal((g.calls().match(/^reboot$/gm) || []).length, 1);
+      assert.match(g.calls(), /reboot-state=2/); assert.equal((g.calls().match(/^parted /gm) || []).length, full ? 0 : 1);
+      assert.equal(fs.readFileSync(g.p('data/db/farming.db'), 'utf8'), canary);
+      assert.equal(bootCycle(g).outcome, 'complete');
+    });
+    test(`${path.basename(shell)} preinit ${initial} interruption before READY recovers with ${full ? 'full' : 'small'} partition`, t => {
+      const g = fixture(t, true);
+      if (initial === 'PENDING') fs.symlinkSync('1', g.p('overlay/.fs_state'));
+      if (!full) g.put('sys/class/block/mmcblk0p2/size', '10000\n');
+      const cut = bootCycle(g, { cutBeforeReady: true });
+      assert.equal(cut.outcome, 'cut before READY'); assert.doesNotMatch(g.calls(), /^reboot$/m);
+      const recovered = bootCycle(g);
+      assert.ok(!recovered.pendingAtS08); assert.ok(!recovered.whiteoutAtS10);
+      assert.equal(recovered.outcome, 'growth reboot');
+      const next = bootCycle(g); assert.ok(next.pendingAtS08); assert.ok(next.whiteoutAtS10);
+      assert.ok(g.stamped()); assert.equal((g.calls().match(/^reboot$/gm) || []).length, 1);
+      assert.equal((g.calls().match(/^parted /gm) || []).length, full ? 0 : 1);
+    });
+  }
+  test(`${path.basename(shell)} preinit interruption after READY preserves pending state without another growth reboot`, t => {
+    const g = fixture(t, true); g.put('sys/class/block/mmcblk0p2/size', '10000\n');
+    assert.equal(bootCycle(g, { cutAfterReady: true }).outcome, 'cut after READY');
+    const canary = fs.readFileSync(g.p('data/db/farming.db'), 'utf8');
+    const next = bootCycle(g); assert.ok(next.pendingAtS08); assert.ok(next.whiteoutAtS10); assert.ok(g.stamped());
+    assert.equal(fs.readFileSync(g.p('data/db/farming.db'), 'utf8'), canary);
+    assert.doesNotMatch(g.calls(), /^reboot$/m);
   });
 
 }
@@ -194,6 +348,17 @@ test('image init scripts have matching rc.common entry points, with NEW-16 reser
     }
   }
 });
+test('readiness service is executable and ordered after S95done and before Node-RED', () => {
+  const done = fs.readFileSync(path.join(repo, 'openwrt/package/base-files/files/etc/init.d/done'), 'utf8');
+  assert.match(done, /^START=95$/m); assert.match(done, /mount_root done/);
+  for (const profile of ['bcm2712', 'bcm2709']) {
+    const file = path.join(repo, `conf/full_raspberrypi_bcm27xx_${profile}/files/etc/init.d/osi-rootfs-grow-reboot`);
+    assert.ok(fs.statSync(file).mode & 0o111, profile + ' boots the executable service');
+    assert.match(fs.readFileSync(file, 'utf8'), /^START=96$/m);
+  }
+  assert.match(fs.readFileSync(path.join(repo, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'), 'utf8'), /^START=99$/m);
+});
+
 test('both full images explicitly pin blank-media ext4 formatting without enabling the F2FS module', () => {
   for (const profile of ['bcm2712', 'bcm2709']) {
     const config = fs.readFileSync(path.join(repo, `conf/full_raspberrypi_bcm27xx_${profile}/.config`), 'utf8');

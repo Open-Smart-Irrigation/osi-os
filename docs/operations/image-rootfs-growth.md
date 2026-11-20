@@ -53,14 +53,35 @@ checks; the scripts never open or modify `farming.db` or its sidecars.
 A provisioned gateway without pending growth is left alone.
 
 After partition growth, the defaults script persists
-`/etc/osi-rootfs-grow-needs-resize` before requesting a reboot. A card whose
-partition already spans the disk skips the partition command and follows
-the same filesystem pass. Defaults failures return nonzero so OpenWrt
-retains the script. An interruption before pending state is written retries
-the same extension on the next boot while the card is still unprovisioned.
-If provisioning proceeds after a partition-step failure, a later run refuses
-partition changes and requires operator diagnosis. It never changes the
-partition start.
+`/etc/osi-rootfs-grow-needs-resize` and queues a volatile
+`/var/run/osi-rootfs-grow-reboot` request. It does not reboot from S10.
+Fstools can erase an UNKNOWN/PENDING overlay on the next preinit mount,
+including this marker and defaults whiteouts. Sync alone does not prevent
+that cleanup.
+
+`S95done` performs the existing `mount_root done` transition. The new
+`S96osi-rootfs-grow-reboot` service accepts the queued request only when
+`readlink /overlay/.fs_state` returns `2` (READY). It syncs that state and
+the pending marker before requesting the growth reboot. It never sets
+`.fs_state` or calls `mount_root done` itself. This preserves fstools'
+initialization protocol and leaves failed readiness visible without forcing
+unrelated provisioning to succeed.
+
+The volatile request limits automatic rebooting to the boot that queued
+partition growth. A later filesystem-resize failure retains the persistent
+marker for a natural boot without requesting another automatic reboot.
+A card whose partition already spans the disk skips the partition command
+and follows the same READY-gated reboot. Defaults failures return nonzero
+so OpenWrt retains the script. An interruption before READY may reset the
+uninitialized overlay under fstools' existing protocol; the next mount
+restores defaults from ROM and retries against the already enlarged
+partition. An interruption after READY preserves the pending marker and
+whiteouts. That power cycle already refreshes kernel/loop capacity, so S08
+can finish without another automatic growth reboot.
+
+If provisioning proceeds after a partition-step failure without pending
+state, a later run refuses partition changes and requires operator
+diagnosis. Growth never changes the partition start.
 
 The early `S08osi-rootfs-resize` pass only runs with pending state. It checks
 that the kernel sees the full partition and that any overlay loop covers
@@ -94,7 +115,10 @@ change this service or its database helper.
 ## TF3 real-card qualification
 
 Shell fixtures establish dispatch, command selection and retry behavior.
-They stub partitioning, filesystem growth, sync and reboot. They do not
+They stub partitioning, filesystem growth, sync and reboot. The lifecycle
+regression compiles the pinned fstools cleanup and state functions, runs
+real directory cleanup, and exercises the vendored S10 defaults dispatcher,
+S95done and the S08/S96 services. It does not emulate a kernel mount or
 prove storage behavior during a power cut. TF3 must qualify the final image
 pin on disposable larger cards for both Pi 4 and Pi 5:
 
@@ -104,21 +128,39 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    Check that the shipped utilities and init enablement match the fixtures.
 2. Flash the smaller image onto a larger card. Verify that partition 2 grows,
    its start and partition 1 remain unchanged, and exactly one growth reboot
-   occurs. Confirm GNU Parted handles the mounted-partition confirmation
+   occurs after S95done. Record `/overlay/.fs_state` before the requested
+   reboot: its symlink target must be `2`. Capture pending state, the
+   volatile request and defaults whiteouts at that point. Confirm GNU Parted handles the mounted-partition confirmation
    with the image's actual package version.
-3. After the next boot, measure partition sectors, overlay loop offset and
+3. Use disposable-image serial/preinit tracing to capture `.fs_state`, the
+   pending marker and defaults whiteouts after the next preinit mount and
+   before S08. READY and both persistent artifacts must survive; the volatile
+   request must be absent. Confirm S08 consumes the marker, S10 does not
+   repartition or requeue, and S96 does not request another reboot.
+   After the next boot, measure partition sectors, overlay loop offset and
    capacity, and ext4 capacity independently. Allow for the squashfs offset
    and ext4 metadata. Check that pending state is gone, the completion stamp
    exists and available writable capacity has increased. Exercise writes
-   beyond the original filesystem boundary.
+   beyond the original filesystem boundary. As an explicit persistence case,
+   place known configuration/data canaries and synthetic application rows
+   on disposable ext4 media before S95, capture them after READY, then verify
+   them after the growth reboot and a further normal reboot. Collect early
+   receipts before application writers change the files.
 4. Reboot again and invoke both scripts again. Expect no partition command,
    no growth reboot and no loss of capacity. Repeat with an already full
    partition whose ext4 filesystem is smaller, and with an already grown
    filesystem plus pending state. Both must finish without shrinking.
-5. Cut power before, during and after the partition command; after pending
-   state is written; during `resize2fs`; after stamp creation; and before
-   pending-state removal. Record surviving markers and geometry. Each
-   recoverable case must finish on a later boot without a reboot loop.
+5. Start both UNKNOWN (missing state link) and PENDING (`1`) cases. Cut
+   power before, during and after the partition command; after pending state
+   is written but before S95; after READY but before S96; during `resize2fs`;
+   after stamp creation; and before pending-state removal. Repeat with an
+   already full partition. Capture state links, markers, whiteouts and
+   geometry before each cut and after preinit. Before READY, record the
+   expected fstools cleanup and defaults restoration. After READY, require
+   marker/whiteout and canary persistence. Each recoverable case must finish
+   without an automatic reboot loop. A cut after READY may replace the growth
+   reboot, yielding zero automatic requests; the uninterrupted path still
+   requires exactly one on each board.
    Preserve any unreadable card and stop qualification on a failed recovery.
 6. On disposable provisioned media, verify that first-boot partition growth
    is refused, including when only a database sidecar survives. Separately
@@ -126,7 +168,14 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    preserve baseline rows and sidecars, then verify committed rows and
    database integrity after reboot. Confirm the scripts issue no database,
    reseed, unmount or service-stop command. No production farm is a test rig.
-7. Inject missing tools, failed marker writes and a full/read-only overlay.
+7. As an explicit disposable-media case, boot an existing F2FS overlay to
+   READY with synthetic database/configuration canaries and any prepared
+   pending marker. Invoke defaults, S08 and S96, including a prepared volatile
+   request. Require an F2FS no-op message in `logread`, no automatic reboot,
+   and unchanged filesystem type, partition geometry, capacity and persistent
+   contents. Reboot normally and verify the same canaries and pending state
+   persist. No formatter, conversion or filesystem-growth command may run.
+8. Inject missing tools, failed marker writes and a full/read-only overlay.
    Expect visible errors, retained retry state and no completion claim.
    Check unsupported backing devices and filesystem types without changing
    those devices. Recheck bootability and filesystem integrity offline after

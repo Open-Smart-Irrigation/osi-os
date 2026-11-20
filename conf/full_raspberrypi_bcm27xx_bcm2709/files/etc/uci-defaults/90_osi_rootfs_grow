@@ -1,6 +1,7 @@
 #!/bin/sh
 STAMP=/etc/osi-rootfs-grow.partitioned
 NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
+REBOOT_REQUEST=/var/run/osi-rootfs-grow-reboot
 
 # Exit cleanly when partition growth has completed, or while resize2fs is
 # pending after a successful partition resize. This avoids repeated repartition
@@ -46,13 +47,12 @@ EOF
   fi
 fi
 
-# Reboot, rather than relying on the kernel to reread a mounted partition (or
-# on partprobe, which the images do not ship). fstools recreates the overlay
-# loop with the new capacity on the next boot.
-touch "$NEEDS_RESIZE" && sync || {
+# Queue a reboot after S95done establishes fstools READY. Rebooting here in
+# S10 can make preinit erase this marker and the defaults whiteouts. The
+# volatile request prevents a later resize failure from causing reboot loops.
+touch "$REBOOT_REQUEST" && touch "$NEEDS_RESIZE" && sync || {
   logger -t osi-rootfs-grow "pending marker could not be persisted; will retry"
   exit 1
 }
-logger -t osi-rootfs-grow "partition resized; rebooting to grow filesystem"
-reboot || exit 1
+logger -t osi-rootfs-grow "filesystem resize pending; growth reboot queued until overlay READY"
 exit 0

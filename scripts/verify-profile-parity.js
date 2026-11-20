@@ -24,6 +24,7 @@ const CANONICAL_PAYLOAD = [
   'files/etc/board.d/02_network',
   'files/etc/config',
   'files/etc/init.d/osi-rootfs-resize',
+  'files/etc/init.d/osi-rootfs-grow-reboot',
   'files/etc/init.d/osi-bootstrap',
   'files/etc/init.d/osi-identityd',
   'files/etc/nginx',
