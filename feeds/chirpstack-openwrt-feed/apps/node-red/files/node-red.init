@@ -607,14 +607,32 @@ function syncDirectory(file) {
   }
 }
 
+function quarantineName(file) {
+  return file + '.corrupt-' + new Date().toISOString().replace(/:/g, '-') + '-' + randomUUID();
+}
+
+function syncPublishedFile(file, rollback) {
+  try {
+    syncDirectory(file);
+  } catch (error) {
+    try {
+      rollback();
+      syncDirectory(file);
+    } catch (rollbackError) {
+      throw new Error(error.message + '. Rollback could not be synced: ' + rollbackError.message);
+    }
+    throw error;
+  }
+}
+
 function quarantine(file) {
-  const saved = file + '.corrupt-' + new Date().toISOString().replace(/:/g, '-') + '-' + randomUUID();
+  const saved = quarantineName(file);
   fs.renameSync(file, saved);
-  syncDirectory(file);
+  syncPublishedFile(file, () => fs.renameSync(saved, file));
   return saved;
 }
 
-function writeAtomic(file, content, { mode, uid, gid }) {
+function writeAtomic(file, content, { mode, uid, gid }, previous, archive) {
   const temp = file + '.tmp-' + randomUUID();
   const fd = fs.openSync(temp, 'wx', 0o600);
   try {
@@ -626,8 +644,23 @@ function writeAtomic(file, content, { mode, uid, gid }) {
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(temp, file);
-    syncDirectory(file);
+
+    // Keep the previous inode reachable until the directory sync succeeds.
+    // For recovery, leave that inode under its timestamped quarantine name.
+    const saved = previous && (archive ? quarantineName(file) : temp + '.previous');
+    if (saved) fs.linkSync(file, saved);
+    try {
+      fs.renameSync(temp, file);
+    } catch (error) {
+      if (saved) fs.unlinkSync(saved);
+      throw error;
+    }
+    syncPublishedFile(file, () => {
+      if (saved) fs.renameSync(saved, file);
+      else fs.unlinkSync(file);
+    });
+    if (saved && !archive) fs.unlinkSync(saved);
+    return archive ? saved : null;
   } finally {
     fs.rmSync(temp, { force: true });
   }
@@ -659,10 +692,6 @@ try {
     }
     if ((credentials.stat.mode & 0o7777) !== credentialMode.mode) {
       fs.chmodSync(credTarget, credentialMode.mode);
-    }
-    if (credentials.problem) {
-      const saved = quarantine(credTarget);
-      console.log('WARN: quarantined flows_cred.json (' + credentials.problem + ') at ' + saved);
     }
   }
   const creds = credentials.value || {};
@@ -713,21 +742,24 @@ try {
     }
   }
 
-  if (credsChanged) writeAtomic(credTarget, JSON.stringify(creds), credentialMode);
-  if (live.problem && live.stat) {
-    const saved = quarantine(flowTarget);
-    console.log('WARN: quarantined flows.json (' + live.problem + ') at ' + saved);
+  const corruptCredentials = credentials.stat && credentials.problem;
+  const savedCredentials = credsChanged
+    ? writeAtomic(credTarget, JSON.stringify(creds), credentialMode, credentials.stat, corruptCredentials)
+    : corruptCredentials && quarantine(credTarget);
+  if (savedCredentials) {
+    console.log('WARN: quarantined flows_cred.json (' + credentials.problem + ') at ' + savedCredentials);
   }
   if (live.problem || flowsChanged) {
     const bytes = flowsChanged ? JSON.stringify(flows, null, 2) + '\n' : source.bytes;
     // Restore inside the selected payload if deployed. The public and active
     // symlinks still point to the same payload after recovery.
-    writeAtomic(flowTarget, bytes, live.stat || source.stat);
+    const saved = writeAtomic(flowTarget, bytes, live.stat || source.stat, live.stat, live.problem);
+    if (saved) console.log('WARN: quarantined flows.json (' + live.problem + ') at ' + saved);
     if (live.problem) console.log('WARN: restored flows.json (' + live.problem + ') from ' + bundledFile + ' to ' + flowTarget);
   }
   if (restoreLink) {
     fs.symlinkSync(flowVia, flowFile);
-    syncDirectory(flowFile);
+    syncPublishedFile(flowFile, () => fs.unlinkSync(flowFile));
     console.log('WARN: recreated the public flows.json symlink');
   }
   if (live.problem || flowsChanged) console.log('INFO: committed flows.json MQTT runtime settings');

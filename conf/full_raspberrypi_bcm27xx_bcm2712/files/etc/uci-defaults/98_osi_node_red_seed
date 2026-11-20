@@ -34,12 +34,19 @@ try {
       try {
         fs.linkSync(temporary, target);
       } catch (error) {
-        if (error.code !== 'EEXIST') throw error;
+        if (error.code === 'EEXIST') continue;
+        throw error;
+      }
+      try {
+        fs.fsyncSync(dir);
+      } catch (error) {
+        fs.unlinkSync(target);
+        fs.fsyncSync(dir);
+        throw error;
       }
     } finally {
       fs.unlinkSync(temporary);
     }
-    fs.fsyncSync(dir);
   }
 } finally {
   fs.closeSync(dir);
@@ -539,7 +546,8 @@ seed_native_sqlite3() {
     # The stage scan refuses a payload beside an incomplete owner line, so the
     # line must be on disk before the copy starts.
     if ! sync; then
-        echo 'WARN: sync failed; the seed stage owner may not survive a power loss' >&2
+        echo 'ERROR: could not sync the seed stage owner' >&2
+        return 1
     fi
     seed_candidate="$seed_s/candidate"
     seed_copy_ok=0
@@ -579,7 +587,8 @@ seed_native_sqlite3() {
     # The rollback scan refuses a candidate identity beside an incomplete
     # owner line, so the line must be on disk before the identity is written.
     if ! sync; then
-        echo 'WARN: sync failed; the seed rollback owner may not survive a power loss' >&2
+        echo 'ERROR: could not sync the seed rollback owner' >&2
+        return 1
     fi
     if ! seed_sqlite3_id "$seed_candidate" > "$seed_b/.candidate-id"; then
         echo "ERROR: seed ownership metadata failed; inspect $seed_b and $seed_s" >&2
@@ -595,7 +604,8 @@ seed_native_sqlite3() {
     # files after the renames below. Without a flush, power loss can keep a
     # committed rename while those bytes are still unwritten.
     if ! sync; then
-        echo 'WARN: sync failed; the seed sqlite3 swap may not survive a power loss' >&2
+        echo 'ERROR: could not sync the seed sqlite3 candidate before promotion' >&2
+        return 1
     fi
     if seed_sqlite3_present "$seed_d"; then
         if [ ! -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
@@ -628,6 +638,11 @@ seed_native_sqlite3() {
     if [ "$(seed_sqlite3_version "$seed_d")" != "$SEED_PIN" ] ||
        ! seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
         echo "ERROR: seed final pin/load failed; rollback retained at $seed_b" >&2
+        seed_sqlite3_rollback_failed_final "$seed_b"
+        return 1
+    fi
+    if ! sync; then
+        echo "ERROR: could not sync the promoted sqlite3; rollback retained at $seed_b" >&2
         seed_sqlite3_rollback_failed_final "$seed_b"
         return 1
     fi

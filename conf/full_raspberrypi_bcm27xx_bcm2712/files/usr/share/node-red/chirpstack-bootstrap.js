@@ -655,6 +655,13 @@ function decodeEnvUtf8(bytes) {
   return text;
 }
 
+// Both publishers flush a fully written staging inode before publication.
+function writeAndSyncStage(fd, content, verifyWritten = () => {}) {
+  fs.writeFileSync(fd, content);
+  verifyWritten();
+  fs.fsyncSync(fd);
+}
+
 function publishEnvContent(directory, name, content, snapshot, publication) {
   const operation = 'publishEnvContent';
   const state = directory.state;
@@ -716,11 +723,11 @@ function publishEnvContent(directory, name, content, snapshot, publication) {
       || initial.uid !== 0 || initial.gid !== 0 || (initial.mode & 0o7777) !== 0o600) {
       throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
     }
-    fs.writeFileSync(stageFd, candidateBytes);
-    const written = fs.fstatSync(stageFd);
-    if (written.size !== candidateBytes.length) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'BYTE_COUNT_MISMATCH', published: state.published, publication: state.publication });
-    phase = 'flush';
-    fs.fsyncSync(stageFd);
+    writeAndSyncStage(stageFd, candidateBytes, () => {
+      const written = fs.fstatSync(stageFd);
+      if (written.size !== candidateBytes.length) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'BYTE_COUNT_MISMATCH', published: state.published, publication: state.publication });
+      phase = 'flush';
+    });
     stageFileIdentity = fs.fstatSync(stageFd);
     if (!checkedEnvStat(stageFileIdentity) || stageFileIdentity.size !== candidateBytes.length) {
       throw new CredentialEnvError({ operation, phase: 'verify', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
@@ -959,15 +966,32 @@ try {
     try {
       fs.fchownSync(fd, uid, gid);
       fs.fchmodSync(fd, mode & 0o7777);
-      fs.writeFileSync(fd, src);
-      fs.fsyncSync(fd);
+      writeAndSyncStage(fd, src);
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(temporary, target);
+    const previous = temporary + '.previous';
+    fs.linkSync(target, previous);
     const dir = fs.openSync(path.dirname(target), 'r');
     try {
-      fs.fsyncSync(dir);
+      try {
+        fs.renameSync(temporary, target);
+      } catch (error) {
+        fs.unlinkSync(previous);
+        throw error;
+      }
+      try {
+        fs.fsyncSync(dir);
+      } catch (error) {
+        try {
+          fs.renameSync(previous, target);
+          fs.fsyncSync(dir);
+        } catch (rollbackError) {
+          throw new Error(error.message + '; settings rollback could not be synced: ' + rollbackError.message);
+        }
+        throw error;
+      }
+      fs.unlinkSync(previous);
     } finally {
       fs.closeSync(dir);
     }
