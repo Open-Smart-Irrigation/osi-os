@@ -301,6 +301,20 @@ cp -a web/react-gui/build/. feeds/chirpstack-openwrt-feed/apps/node-red/files/gu
 grep -rl "OSI OS v<NEW>" feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/assets/ | head -1
 ```
 
+Before publishing, run the package smoke with the upgrade tarball and the exact
+offline bundle produced by `scripts/deploy-bundle.sh`. Use absolute paths for
+both archives. The smoke compares the firmware feed and upgrade assets with the
+production build, verifies the upgrade archive inside the offline bundle, and
+opens the installed GUI from both package sources.
+
+```bash
+cd web/react-gui
+REACT_GUI_TARBALL=/absolute/path/to/react_gui.tar.gz \
+OSI_OFFLINE_BUNDLE=/absolute/path/to/deploy-bundle.tar.gz \
+  npm run test:browser:mobile-history -- --release-only
+cd ../..
+```
+
 `react_gui.tar.gz` is gitignored (large binary) — do not commit it.
 
 ---

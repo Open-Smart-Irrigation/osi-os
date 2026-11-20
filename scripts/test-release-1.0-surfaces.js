@@ -199,6 +199,68 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
   });
 
+  test(`${profile}: basic card summaries and preference writes protect a stored Advanced view`, async () => {
+    const db = seedScopedDb(EUI);
+    try {
+      db.prepare('UPDATE irrigation_zones SET gateway_device_eui = ? WHERE id = 1').run(GATEWAY);
+      const scopes = [
+        { scope: 'zone', base: '/api/history/zones/1', zoneId: 1, params: { zoneId: '1' }, gatewayEui: null },
+        { scope: 'gateway', base: `/api/history/gateways/${GATEWAY}`, zoneId: null, params: { gatewayEui: GATEWAY }, gatewayEui: GATEWAY },
+      ];
+
+      for (const { scope, base, zoneId, params, gatewayEui } of scopes) {
+        const summary = await http(staged, db, request('GET', `${base}/cards`, params));
+        assert.equal(summary.statusCode, 200);
+        assert.ok(summary.payload.cards.length);
+        for (const card of summary.payload.cards) {
+          assert.ok(card.views.includes(card.defaultView), card.cardId);
+          assert.ok(!card.views.includes('advanced'), card.cardId);
+        }
+        const [card] = summary.payload.cards;
+        const cardParams = { ...params, cardId: card.cardId };
+        const cardPath = `${base}/cards/${card.cardId}`;
+
+        // A new mixed write applies the pin while ignoring the deferred view.
+        const newPin = await http(staged, db, request('PUT', `${cardPath}/preferences`, cardParams, {},
+          { pinned: true, last_view_mode: 'advanced' }));
+        assert.equal(newPin.statusCode, 200);
+        assert.equal(newPin.payload.pinned, true);
+        assert.equal(newPin.payload.lastViewMode, null);
+
+        const getPreference = db.prepare(`
+          SELECT pinned, open_count, last_view_mode FROM history_card_preferences
+          WHERE user_id = 2 AND scope_type = ? AND card_id = ?
+        `);
+        assert.equal(getPreference.get(scope, card.cardId).last_view_mode, null);
+        db.prepare(`
+          UPDATE history_card_preferences SET last_view_mode = 'advanced'
+          WHERE user_id = 2 AND scope_type = ? AND zone_id IS ? AND gateway_eui IS ? AND card_id = ?
+        `).run(scope, zoneId, gatewayEui, card.cardId);
+
+        const pin = await http(staged, db, request('PUT', `${cardPath}/preferences`, cardParams, {},
+          { pinned: false, lastViewMode: ' advanced ' }));
+        assert.equal(pin.statusCode, 200);
+        assert.equal(pin.payload.pinned, false);
+        assert.equal(pin.payload.lastViewMode, null);
+        const opened = await http(staged, db, request('POST', `${cardPath}/opened`, cardParams, {},
+          { last_view_mode: card.defaultView }));
+        assert.equal(opened.statusCode, 200);
+        assert.equal(opened.payload.openCount, 1);
+        assert.ok(opened.payload.lastOpenedAt);
+        assert.equal(opened.payload.lastViewMode, null);
+        assert.deepEqual({ ...getPreference.get(scope, card.cardId) },
+          { pinned: 0, open_count: 1, last_view_mode: 'advanced' });
+
+        const updatedSummary = await http(staged, db, request('GET', `${base}/cards`, params));
+        const updatedCard = updatedSummary.payload.cards.find((item) => item.cardId === card.cardId);
+        assert.equal(updatedCard.ordering.pinned, false);
+        assert.ok(!updatedCard.views.includes('advanced'));
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   test(`${profile}: staged GX4 cut refuses deferred HTTP requests and keeps the ordinary paths`, async () => {
     assert.equal(staged.find((entry) => entry.id === editFunction.id).type, 'function');
     for (const entry of staged.filter((candidate) => candidate.type === 'http in')) {

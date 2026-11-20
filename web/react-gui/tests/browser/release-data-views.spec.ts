@@ -29,7 +29,7 @@ const features = {
 };
 
 test('1.0 packaged GUI keeps the legacy phone route and desktop data chart', async ({ page }, testInfo) => {
-  const desktop = testInfo.project.name === 'release-feed';
+  const desktop = !testInfo.project.use.isMobile;
   const unavailableRequests: string[] = [];
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));

@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const path = require('node:path');
 const { removeRoutes, editFunction } = require('./gx4-flows.patch.json');
 
 function stageGx4Flows(source) {
@@ -29,11 +31,30 @@ function stageGx4Flows(source) {
   return staged;
 }
 
+function applyGx4Cut(root) {
+  const candidateFlows = ['bcm2712', 'bcm2709'].map((profile) => {
+    const file = path.join(root, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
+    const source = fs.readFileSync(file, 'utf8');
+    return { file, bytes: JSON.stringify(stageGx4Flows(source), null, 2) + '\n' };
+  });
+  assert.equal(candidateFlows[0].bytes, candidateFlows[1].bytes, 'staged profiles must match byte-for-byte');
+
+  // Check both flow inputs and the gate changes before writing any output.
+  const patch = path.join(__dirname, 'gx4-gates.patch');
+  execFileSync('git', ['apply', '--check', patch], { cwd: root, stdio: 'inherit' });
+  execFileSync('git', ['apply', patch], { cwd: root, stdio: 'inherit' });
+  for (const { file, bytes } of candidateFlows) fs.writeFileSync(file, bytes);
+}
+
 if (require.main === module) {
-  const source = fs.readFileSync(process.argv[2], 'utf8');
-  // The lead can render a proposed flow to a scratch file, then review and
-  // activate it after the reservation is granted.
-  process.stdout.write(JSON.stringify(stageGx4Flows(source), null, 2) + '\n');
+  const [input, root] = process.argv.slice(2);
+  if (input === '--apply') {
+    assert.ok(root, '--apply requires an explicit target checkout');
+    applyGx4Cut(path.resolve(root));
+  } else {
+    const source = fs.readFileSync(input, 'utf8');
+    process.stdout.write(JSON.stringify(stageGx4Flows(source), null, 2) + '\n');
+  }
 }
 
 module.exports = { stageGx4Flows };

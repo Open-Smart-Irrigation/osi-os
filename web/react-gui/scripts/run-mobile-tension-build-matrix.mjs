@@ -1,4 +1,5 @@
-import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -12,9 +13,8 @@ const serverScript = path.join(guiRoot, 'scripts', 'serve-mobile-history-build.m
 const buildRoot = await mkdtemp(path.join(os.tmpdir(), 'osi-mobile-history-edge-build-'));
 const offDir = path.join(buildRoot, 'off');
 const onDir = path.join(buildRoot, 'on');
-const feedDir = path.join(buildRoot, 'feed-gui');
+const feedDir = path.join(repoRoot, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/gui');
 const tarDir = path.join(buildRoot, 'upgrade-gui');
-const guiTarball = path.join(buildRoot, 'react_gui.tar.gz');
 const evidenceDir = process.env.MOBILE_HISTORY_PLAYWRIGHT_OUTPUT
   ? path.resolve(process.env.MOBILE_HISTORY_PLAYWRIGHT_OUTPUT)
   : await mkdtemp(path.join(os.tmpdir(), 'osi-mobile-history-edge-results-'));
@@ -53,6 +53,45 @@ async function build(outDir, enabled) {
     VITE_HISTORY_UPLOT_SOIL_ENABLED: 'true',
   });
   if (!enabled) await run(process.execPath, ['scripts/verify-release-phone-chunks.mjs', outDir]);
+}
+
+async function preparePackages() {
+  const suppliedUpgrade = process.env.REACT_GUI_TARBALL;
+  const suppliedOffline = process.env.OSI_OFFLINE_BUNDLE;
+  assert.ok(Boolean(suppliedUpgrade) === Boolean(suppliedOffline),
+    'Provide REACT_GUI_TARBALL and OSI_OFFLINE_BUNDLE together to verify release artifacts');
+
+  let upgrade = suppliedUpgrade && path.resolve(suppliedUpgrade);
+  let offline = suppliedOffline && path.resolve(suppliedOffline);
+  if (!upgrade) {
+    upgrade = path.join(buildRoot, 'react_gui.tar.gz');
+    await run('tar', ['-czf', upgrade, '-C', offDir, '.']);
+    const packages = path.join(buildRoot, 'packages');
+    await run('bash', [path.join(repoRoot, 'scripts/deploy-bundle.sh'), upgrade], {
+      REPO_ROOT: repoRoot,
+      REACT_GUI_TARBALL: upgrade,
+      OUT_DIR: packages,
+    });
+    const bundles = (await readdir(packages)).filter((file) => /^deploy-bundle-.*\.tar\.gz$/.test(file));
+    assert.equal(bundles.length, 1, 'deploy-bundle.sh must produce one offline bundle');
+    offline = path.join(packages, bundles[0]);
+  } else {
+    // Release packaging refreshes the feed alongside the published upgrade tarball.
+    await run(process.execPath, ['scripts/verify-release-gui-packages.mjs', offDir, feedDir, upgrade]);
+  }
+
+  const offlinePayload = path.join(buildRoot, 'offline-payload');
+  await mkdir(offlinePayload);
+  await run('tar', ['-xzf', offline, '-C', offlinePayload, './react_gui.tar.gz']);
+  const embeddedUpgrade = path.join(offlinePayload, 'react_gui.tar.gz');
+  assert.ok((await readFile(embeddedUpgrade)).equals(await readFile(upgrade)),
+    'The offline payload must carry the exact upgrade archive');
+  console.log('Offline deploy bundle contains the supplied upgrade archive byte-for-byte.');
+  await mkdir(tarDir);
+  await run('tar', ['-xzf', embeddedUpgrade, '-C', tarDir]);
+  for (const directory of [feedDir, tarDir]) {
+    await run(process.execPath, ['scripts/verify-release-phone-chunks.mjs', directory, '--packaged']);
+  }
 }
 
 async function startServer(root, port) {
@@ -97,18 +136,15 @@ let failure = null;
 try {
   await build(offDir, false);
   if (!releaseOnly) await build(onDir, true);
-  await cp(offDir, feedDir, { recursive: true });
-  await mkdir(tarDir);
-  await run('tar', ['-czf', guiTarball, '-C', offDir, '.']);
-  await run('tar', ['-xzf', guiTarball, '-C', tarDir]);
-  await run(process.execPath, ['scripts/verify-release-gui-packages.mjs', offDir, feedDir, guiTarball]);
+  await preparePackages();
   offServer = await startServer(tarDir, 4381);
   if (!releaseOnly) onServer = await startServer(onDir, 4382);
   feedServer = await startServer(feedDir, 4383);
   const playwrightArgs = [
     'test', '--config', 'playwright.mobile-history.config.ts',
     ...(releaseOnly
-      ? ['--project=edge-off', '--project=release-feed', 'mobile-tension-real-data.spec.ts', 'release-data-views.spec.ts']
+      ? ['--project=edge-off', '--project=release-feed', '--project=release-feed-phone', '--project=release-upgrade-desktop',
+        'mobile-tension-real-data.spec.ts', 'release-data-views.spec.ts']
       : []),
     ...forwardedArgs.filter((arg) => arg !== '--release-only'),
   ];
