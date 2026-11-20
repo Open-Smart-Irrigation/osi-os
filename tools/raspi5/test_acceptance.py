@@ -38,6 +38,12 @@ class FlowTests(unittest.TestCase):
         self.assertIsNone(re.search(FLOWS_COMMITTED, COMMIT.replace(DIGEST, b'X')))
         self.assertIsNone(re.search(FLOWS_COMMITTED, COMMIT.replace(b' stamp=', b' payload=')))
 
+    def test_factory_image_and_offline_tree_must_agree(self):
+        with patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY):
+            with self.assertRaisesRegex(RuntimeError, 'disagree on flows recovery'):
+                acceptance.check_image_capability(None, False)
+            acceptance.check_image_capability(None, True)
+
     def test_first_boot_rejects_deployed_stamp(self):
         vm = Mock()
         vm.start.return_value = (DIGEST, b'deployed')

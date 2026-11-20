@@ -12,13 +12,20 @@ from suite_vm import FLOWS_COMMITTED, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 
 HERE = Path(__file__).resolve().parent
+FLOWS_CAPABILITY = 'function persistFlowHold('
 FLOWS_CASES = ('Flows cut on first boot', 'Flows cut on later boot', 'Flows cut after upgrade')
 
 
 def has_flows_recovery(init_source):
     # Capability added by #714. Keep selection independent of the receipt
     # wording so a broken emitter fails the required cases.
-    return re.search(r'^function persistFlowHold\(', init_source, re.MULTILINE) is not None
+    return any(line.startswith(FLOWS_CAPABILITY) for line in init_source.splitlines())
+
+
+def check_image_capability(vm, expected):
+    observed = checked(vm, f"sed -n '/^{FLOWS_CAPABILITY}/p' /etc/init.d/node-red")
+    if has_flows_recovery(observed) != expected:
+        raise RuntimeError('factory image and offline tree disagree on flows recovery capability')
 
 
 def ready(vm):
@@ -238,7 +245,7 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
 
     if not args.flows_power_cut_only and not args.customer_fixture_only:
         vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram, receipts=run/'candidate')
-        stock_cases(vm, args, test)
+        stock_cases(vm, args, test, flows_cuts)
         for old in ['0.8.0', '0.8.1']:
             test(f'Upgrade {old}', lambda: verify_upgrade(old))
     required = FLOWS_CASES if flows_cuts and not args.customer_fixture_only else ()
@@ -275,11 +282,12 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
     return int(failed)
 
 
-def stock_cases(vm, args, test):
+def stock_cases(vm, args, test, flows_cuts):
     try:
         def boot():
             vm.start()
             ready(vm)
+            check_image_capability(vm, flows_cuts)
             versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
             if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
                 raise RuntimeError('unexpected versions '+versions)

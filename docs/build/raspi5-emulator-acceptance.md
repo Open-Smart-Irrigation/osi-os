@@ -54,8 +54,9 @@ a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
 The init script's `persistFlowHold` function identifies candidates with the
-recovery code from PR #714. These candidates must pass cuts on first boot, a later
-boot and first Node-RED start during the 0.8.1 upgrade. Each cut requires a serial
+recovery code from PR #714. The cold boot checks that the guest image and the
+offline tree agree on this capability. These candidates must pass cuts on first
+boot, a later boot and first Node-RED start during the 0.8.1 upgrade. Each cut requires a serial
 commit receipt with the flows SHA-256 and payload stamp, then compares both with
 the recovered files. Candidates without the fix report each case as
 `not applicable to this candidate`. Use `--flows-power-cut-only` to rerun the
