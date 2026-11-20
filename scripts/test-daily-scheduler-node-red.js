@@ -16,6 +16,7 @@ const { PROFILES, ROOT, dependencies, normalize } = require('./lib/daily-schedul
 const { runtimeConfig } = require('./lib/release-smoke-runtimes');
 const legacy = require('./fixtures/daily-scheduler/legacy-nodes.json');
 const adapters = require('./fixtures/daily-scheduler/adapters.json');
+const { createExclusive } = require('./lib/daily-scheduler-oracles');
 const immediate = () => new Promise(resolve => setImmediate(resolve));
 function clean(value) {
   if (value instanceof Error || (value && value.message && value.stack)) {
@@ -129,7 +130,7 @@ async function child(profile, variant, output, negative) {
       const trace = active.deps.trace.filter(t => !(t[0] === 'require' && t[1] === 'daily-scheduler'));
       results[c.name] = normalize(clean({ ...state, trace }));
     }
-    fs.writeFileSync(output, JSON.stringify(results));
+    createExclusive(output, results);
   } finally {
     active = null; clearTimeout(timeout); await RED.stop(); server.close();
     crypto.randomBytes = realRandom; delete global.__x1NativeIO;
@@ -154,7 +155,7 @@ async function main() {
     for (const profile of PROFILES) {
       const observations = {};
       for (const variant of ['legacy', 'shipped', 'adapter']) {
-        const output = path.join(dir, variant + '.json');
+        const output = path.join(dir, profile + '-' + variant + '.json');
         const run = spawnSync(process.execPath, [__filename, '--child', profile, variant, output, negative], { env: process.env, encoding: 'utf8', timeout: 90000, maxBuffer: 4 * 1024 * 1024 });
         assert.ifError(run.error); assert.equal(run.status, 0, run.stdout + run.stderr);
         observations[variant] = JSON.parse(fs.readFileSync(output));

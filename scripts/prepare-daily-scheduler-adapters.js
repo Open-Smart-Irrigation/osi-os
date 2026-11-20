@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const { ROOT, PROFILES } = require('./lib/daily-scheduler-harness');
 const originals = require('./fixtures/daily-scheduler/legacy-nodes.json');
 const adapters = require('./fixtures/daily-scheduler/adapters.json');
+const { writeExclusive } = require('./lib/daily-scheduler-oracles');
 function adaptFlows(flows) {
   const result = structuredClone(flows);
   for (const adapter of adapters) {
@@ -42,7 +43,7 @@ function main() {
     const file = path.join(output, relative);
     const source = JSON.stringify(adaptFlows(flows), null, 2) + '\n';
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, source);
+    writeExclusive(file, source);
     assert.equal(JSON.stringify(JSON.parse(fs.readFileSync(file)), null, 2) + '\n', source);
     console.log('byte-identical: true (output ' + relative + ')');
   }

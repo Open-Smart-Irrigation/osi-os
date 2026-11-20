@@ -10,8 +10,11 @@ function verifyFrozen(sourceOnly = false) {
   for (const [name, expected] of Object.entries(pins).filter(([name]) => !sourceOnly || name === 'legacy-nodes.json')) assert.equal(sha(fs.readFileSync(path.join(fixture, name))), expected, 'frozen oracle/source changed: ' + name);
   return pins;
 }
+function writeExclusive(file, bytes) {
+  fs.writeFileSync(file, bytes, { flag: 'wx' });
+}
 function createExclusive(file, value) {
   verifyFrozen();
-  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+  writeExclusive(file, JSON.stringify(value, null, 2) + '\n');
 }
-module.exports = { verifyFrozen, createExclusive, sha, fixture };
+module.exports = { verifyFrozen, createExclusive, writeExclusive, sha, fixture };

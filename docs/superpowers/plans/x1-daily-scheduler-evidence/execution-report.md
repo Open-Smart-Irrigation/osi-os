@@ -6,13 +6,13 @@ The module and exact offline adapters are prepared. Neither shipped `flows.json`
 
 Startup readiness: READY, HEAD and intended base `origin/main` at `ec822b556`, behind/ahead 0/0, AGENTS revision `c63103827`. The branch was later rebased onto the docs-only main commit `1a984f31f`; module/test code did not change. The stale initial checkout was replaced by a fresh branch from the remote base in this isolated worktree, as the implementer brief requires.
 
-Commit `9357c0db6` (originally `3b3a7f879` before the docs-only rebase) records the baseline tests and outputs before module generation. Six bodies move into `osi-daily-scheduler`, mirrored across both profiles: query builders in `queries.js`, evaluation in `decision.js`, and auth/validation/save in `schedule-save.js`. The existing UTC-window helper is exported. SWT eligibility SQL remains owned by `osi-scheduler-mean-query`.
+The committed `legacy-nodes.json` and `expected.json` record the baseline tests and outputs from before module generation. Their hashes are pinned in the committed `oracle-pins.json`; checks read those tree files without consulting PR history. Six bodies move into `osi-daily-scheduler`, mirrored across both profiles: query builders in `queries.js`, evaluation in `decision.js`, and auth/validation/save in `schedule-save.js`. The existing UTC-window helper is exported. SWT eligibility SQL remains owned by `osi-scheduler-mean-query`.
 
 The module preserves the existing outputs, including early IRRIGATE/event/update emission despite downstream refusal, UTC-day suppression, server-preferred DENDRO selection and the first-save schedule-event defect. The real seed-schema persistence characterization records schedule event counts `0 → 1 → 2` for first save, edit and disable. Request state stays on `msg.osi.request`.
 
 ## Review fix round, 20 November
 
-All seven findings in the Sol review of `799b2469` have fixes on the same branch. Startup resume was READY at 01:25:52 UTC: HEAD `799b2469`, intended base `origin/main` at `1a984f31f`, behind/ahead 0/3, AGENTS revision `c63103827`. The reservation queue remains EB2 → EB12 → EB19 → X1. Both shipped flow files and the original `legacy-nodes.json` and `expected.json` are unchanged.
+All seven findings in the first Sol review have fixes on the same branch. Startup resume at the reviewed head was READY at 01:25:52 UTC: intended base `origin/main` at `1a984f31f`, behind/ahead 0/3, AGENTS revision `c63103827`. The reservation queue remains EB2 → EB12 → EB19 → X1. Both shipped flow files and the original `legacy-nodes.json` and `expected.json` are unchanged.
 
 The existing SWT and Chameleon link-ingest suites load each profile's real scheduler while retaining selective mean-helper failure injection and every original assertion. Their staged results are 91/91 and 49/49. The request-context mutation copies carry their matching module roots. Chameleon link-ingest is now part of the prepared CI gate.
 
@@ -101,3 +101,13 @@ All times are UTC on 20 November 2026. The round began at 01:25:43. Code-fix and
 | local-gates | 01:43:48 | 02:06:19 | 0.375278 |
 
 The completed handoff-preparation, push and CI-observation windows, exact head, final round stop and total measured hours are appended after push in the lead's execution receipt: `/home/phil/builds/osi-v082-fix-20261112/reviews/705-x1-fix-execution-report.md`. That receipt accompanies the PR handoff; it avoids changing the head merely to record its post-push timing.
+
+## Squash portability and evidence boundaries
+
+The follow-up audit removes PR-commit provenance references from this report. Frozen-source verification reads committed fixtures and their tree-resident hash pins. Parity and the handoff renderer have no dependency on PR history. The only Git command in the handoff check applies the committed patch to scratch files.
+
+All X1 artifact writers now create files exclusively, including the native harness child's output and the scratch adapter preparer. Native result names include the profile to avoid reusing an output path. Existing oracle bytes remain fixed. Five focused boundary tests cover existing files, symlink targets, repeated preparation and capture flags with inherited output variables. The native control also attempts to replace a copy of the original oracle and requires EEXIST with unchanged bytes.
+
+The real per-profile loader remains available when the extraction package has a broken dependency. Existing mean-query and scope packages still load; an eager-import mutant must fail. Conversely, a broken mean-query helper is loaded only when evaluation needs it, leaving the scheduler package and unrelated packages available. No existing package index eagerly imports an extraction adapter. These checks are registered in migrations CI, and the native overwrite control runs in both pinned runtime jobs.
+
+The fresh-clone proof constructs a local commit with the candidate tree and a main-ancestry parent, then clones only its squash branch through Git's transport with no PR refs or object alternates. It checks that every PR-only commit object is absent, then runs original and additive parity, SQLite sequence parity, handoff and evidence/dependency boundary tests from that clone. Its commit identifiers, exact commands, results and measured follow-up windows are recorded after the run in `/home/phil/builds/osi-v082-fix-20261112/reviews/705-x1-portability-execution-report.md`.
