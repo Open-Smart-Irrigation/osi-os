@@ -3839,8 +3839,8 @@ if (fs.existsSync(osiNodeRedSeedPath)) {
 } else {
   fail(`missing 98_osi_node_red_seed at ${osiNodeRedSeedPath}`);
 }
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package.json" "$DST/package.json"', 'seeds Node-RED package manifest before runtime startup');
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package-lock.json" "$DST/package-lock.json"', 'seeds Node-RED package lock before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, "'package.json', 'package-lock.json'", 'seeds both Node-RED package manifests before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'fs.linkSync(temporary, target)', 'publishes complete Node-RED files only when the destination is absent');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/$module"', 'seeds local helper package directories for file dependencies');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/node_modules/$module"', 'seeds local helper packages into runtime node_modules');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'rm -rf "$DST/$module" "$DST/node_modules/$module"', 'replaces stale helper copies in both package locations');

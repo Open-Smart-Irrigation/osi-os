@@ -82,6 +82,26 @@ test('corrupt DB + passing backup: recovered', async () => {
   assert.ok(stamp_data.quarantinedTo);
 });
 
+test('an interrupted restore copy cannot publish a partial database', async t => {
+  const dir = scratch();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = makeDb(dir);
+  const backup = makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
+  corrupt(dbPath);
+  const original = fs.readFileSync(dbPath);
+  t.mock.method(fs, 'copyFileSync', (source, target) => {
+    assert.equal(source, backup);
+    fs.writeFileSync(target, Buffer.alloc(512));
+    throw new Error('injected copy failure');
+  });
+  await assert.rejects(runBootIntegrityCheck(dbPath), /injected copy failure/);
+  assert.equal(fs.existsSync(dbPath), false);
+  const saved = fs.readdirSync(dir).filter(name => name.startsWith('farming.db.corrupt-'));
+  assert.equal(saved.length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(dir, saved[0])), original);
+  assert.equal(fs.readdirSync(dir).some(name => name.startsWith('.integrity-stage-')), false);
+});
+
 test('corrupt DB + newest backup also corrupt, older one passes: restores older', async () => {
   const dir = scratch();
   const dbPath = makeDb(dir);

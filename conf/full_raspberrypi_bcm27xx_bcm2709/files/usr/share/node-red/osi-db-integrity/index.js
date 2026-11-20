@@ -41,9 +41,11 @@ function backupDb(dbPath, { keep = 5 } = {}) {
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupPath = `${dbPath}.bak-${stamp}`;
-  execFileSync('sqlite3', [dbPath, `.backup ${sqliteDotQuote(backupPath)}`], SQLITE_EXEC_OPTIONS);
-  const check = execFileSync('sqlite3', [backupPath, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
-  if (check !== 'ok') throw new Error(`backup integrity_check failed: ${check}`);
+  publishAtomic(backupPath, file => {
+    execFileSync('sqlite3', [dbPath, `.backup ${sqliteDotQuote(file)}`], SQLITE_EXEC_OPTIONS);
+    const check = execFileSync('sqlite3', [file, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+    if (check !== 'ok') throw new Error(`backup integrity_check failed: ${check}`);
+  }, { exclusive: true });
   try {
     pruneBackups(dbPath, keep);
   } catch (err) {
@@ -94,9 +96,39 @@ function findPassingBackup(dbPath) {
   return null;
 }
 
+// The boot check always derives a new file from a complete source. Keep
+// partial copies private so neither startup nor the next check can use one.
+function publishAtomic(target, write, { exclusive = false } = {}) {
+  const dir = path.dirname(target);
+  const staging = fs.mkdtempSync(path.join(dir, '.integrity-stage-'));
+  const file = path.join(staging, 'candidate');
+  try {
+    write(file);
+    const fd = fs.openSync(file, 'r');
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (exclusive) {
+      fs.linkSync(file, target);
+    } else {
+      fs.renameSync(file, target);
+    }
+    const directory = fs.openSync(dir, 'r');
+    try {
+      fs.fsyncSync(directory);
+    } finally {
+      fs.closeSync(directory);
+    }
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
+}
+
 function writeStamp(dbPath, data) {
   const stampPath = path.join(path.dirname(dbPath), '.integrity-recovery.json');
-  fs.writeFileSync(stampPath, JSON.stringify(data, null, 2) + '\n');
+  publishAtomic(stampPath, file => fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n'));
   return stampPath;
 }
 
@@ -122,7 +154,7 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
 
   const goodBackup = findPassingBackup(dbPath);
   if (goodBackup) {
-    fs.copyFileSync(goodBackup, dbPath);
+    publishAtomic(dbPath, file => fs.copyFileSync(goodBackup, file), { exclusive: true });
     const stampPath = writeStamp(dbPath, {
       event: 'recovered',
       restoredFrom: goodBackup,

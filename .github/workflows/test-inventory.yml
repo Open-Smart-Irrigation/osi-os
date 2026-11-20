@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, release/0.8.3 ]
 jobs:
   test-inventory:
     runs-on: ubuntu-latest
@@ -49,6 +49,8 @@ jobs:
             scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
+      - name: Recover Node-RED startup files
+        run: node --test scripts/test-node-red-init-flows.js
       - name: Shell tests
         run: |
           sh scripts/test-gateway-identity-helper.sh
