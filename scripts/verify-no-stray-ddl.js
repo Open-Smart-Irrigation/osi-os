@@ -328,6 +328,7 @@ function writeBaseline(options) {
   return baseline;
 }
 
+function main() {
 try {
   const options = parseArgs(process.argv.slice(2));
 
@@ -362,3 +363,7 @@ try {
   console.error(`verify-no-stray-ddl: FAIL — ${e.message}`);
   process.exit(1);
 }
+
+}
+if (require.main === module) main();
+module.exports = { countMarkers, textSourcesFromContent };

@@ -1,6 +1,6 @@
 'use strict';
 // Schedule persistence is separate from runtime decision evaluation.
-function decodeToken(msg, { env, node, osiLib, crypto, osiDb, global, Date = globalThis.Date } = {}) {
+function decodeToken(msg, { env, node, osiLib, crypto, osiDb, global, Date = globalThis.Date, verifiedAuth = null } = {}) {
 return (async () => {
 function getAuthSecret() {
   // Recomputed locally (not closing over an outer scopedOn) -- keeps this
@@ -108,7 +108,7 @@ function verifyBearer(authHeader) { delete msg._osiAuthFailure;
   return { userId, username };
 }
 msg.req_body = msg.payload;
-const auth = verifyBearer(msg.req?.headers?.authorization);
+const auth = verifiedAuth || verifyBearer(msg.req?.headers?.authorization);
 msg.authUserId = auth.userId;
 msg.authUsername = auth.username;
 if (String(env.get('OSI_SCOPED_ACCESS') || '') === '1') {

@@ -121,6 +121,9 @@ jobs:
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
       - run: node scripts/test-daily-scheduler-parity.js
+      - run: node scripts/test-daily-scheduler-additional.js
+      - run: node scripts/test-daily-scheduler-sequences.js
+      - run: node scripts/test-daily-scheduler-handoff.js
       - name: X1 prepared adapters preserve authorization and request isolation
         run: node scripts/test-daily-scheduler-prepared-adapters.js tests
       - run: node --test scripts/test-scheduler-clock-jump.js

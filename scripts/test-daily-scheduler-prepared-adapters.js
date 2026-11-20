@@ -10,11 +10,13 @@ const modes = {
     'scripts/test-scoped-access-writes.js',
     'scripts/test-request-context-isolation.js',
     'scripts/test-unified-soil-tension-scheduler.js',
+    'scripts/test-chameleon-reading-link-ingest.js',
     'scripts/test-dendro-rolling-7d-rain.js',
   ]],
   guards: [
     ['scripts/verify-sync-flow.js'],
     ['scripts/verify-request-context-isolation.js'],
+    ['scripts/verify-auth-flag-off-hermetic.js'],
     ['scripts/verify-lsn50-chameleon-swt.js'],
     ['scripts/test-conditional-irrigation-flow.js'],
   ],

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 function delegated(node, nodeRedRoot) {
   if (!String(node.func || '').includes("osiLib.require('daily-scheduler')")) return null;
-  const call = node.func.match(/return scheduler\.value\.(\w+)\(msg, (\{[^\n;]+\})\);$/);
+  const call = node.func.match(/return scheduler\.value\.(\w+)\(msg, (\{[^\n;]+\})\);/);
   assert.ok(call, 'unrecognized daily-scheduler adapter: ' + node.id);
   const fn = require(path.join(nodeRedRoot, 'osi-daily-scheduler'))[call[1]];
   assert.equal(typeof fn, 'function', 'missing daily-scheduler entry: ' + call[1]);

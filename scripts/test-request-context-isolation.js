@@ -3537,12 +3537,13 @@ test('dotted guard mutant: maintained-profile checker rejects test-only mutation
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'request-context-maintained-guard-mutant-'));
   const profileFiles = ['bcm2712', 'bcm2709'].map((profile) => ({
     source: profilePaths(profile).flowsPath,
+    moduleRoot: profilePaths(profile).nodeRedModules,
     copy: path.join(tempRoot, profile + '-flows.json'),
   }));
   const pristine = new Map();
   const checker = path.join(ROOT, 'scripts/verify-request-context-isolation.js');
   const runChecker = () => spawnSync(process.execPath,
-    [checker, ...profileFiles.flatMap(({ copy }) => ['--flows', copy])], { encoding: 'utf8' });
+    [checker, ...profileFiles.flatMap(({ copy, moduleRoot }) => ['--flows', copy, '--module-root', moduleRoot])], { encoding: 'utf8' });
   try {
     for (const { source, copy } of profileFiles) {
       const text = fs.readFileSync(source, 'utf8');

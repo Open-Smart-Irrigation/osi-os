@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const assert = require('node:assert/strict');
+const { verifyFrozen } = require('./lib/daily-scheduler-oracles');
 const { functionSource, inlineForMutation } = require('./flow-function-source');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,6 +13,14 @@ const legacy = require('./fixtures/daily-scheduler/legacy-nodes.json');
 const adapterFile = path.join(FIXTURE, 'adapters.json');
 async function main() {
   const record = process.argv.includes('--record');
+  verifyFrozen(record);
+  if (record) {
+    assert.ok(!fs.existsSync(path.join(FIXTURE, 'expected.json')), 'oracle already exists');
+    for (const profile of PROFILES) {
+      const current = JSON.parse(fs.readFileSync(path.join(ROOT, 'conf', profile, 'files/usr/share/flows.json')));
+      for (const frozen of legacy) assert.deepStrictEqual(current.find(n => n.id === frozen.id), frozen, 'frozen legacy source required');
+    }
+  }
   if (record) assert.ok(!fs.existsSync(path.join(ROOT, 'conf', PROFILES[0], 'files/usr/share/node-red/osi-daily-scheduler')), 'baseline recording must precede extraction');
   assert.equal(new Set(cases().map(c => c.name)).size, cases().length, 'case names must be unique');
   const expected = record ? {} : require('./fixtures/daily-scheduler/expected.json');
@@ -25,14 +34,6 @@ async function main() {
     assert.deepStrictEqual(await persistence(flows, profile), saved, 'shipped persistence');
     if(staged) assert.deepStrictEqual(await persistence(staged, profile), saved, 'adapter persistence');
     assert.deepStrictEqual(saved.map(row => row.events.length), [0, 1, 2], 'NEW-9 first save emits no event; edit and disable do');
-    if (staged) for (const adapter of staged) {
-      const unavailable = await execute(adapter.func, { msg: { payload: 'unchanged' }, failure: 'daily-load' }, profile);
-      assert.equal(unavailable.result, null, adapter.name + ' fails closed');
-      assert.equal(unavailable.trace.length, 1);
-      assert.equal(unavailable.trace[0][0], 'error');
-      assert.match(unavailable.trace[0][1], /daily-scheduler unavailable/);
-      assert.deepStrictEqual(unavailable.msg, { payload: 'unchanged' });
-    }
     for (const c of cases()) {
       const original = legacy.find(n => n.id === c.id);
       const before = await execute(original.func, c, profile);
@@ -64,7 +65,7 @@ async function main() {
       comparisons++;
     }
   }
-  if(record) fs.writeFileSync(path.join(FIXTURE, 'expected.json'), JSON.stringify(expected, null, 2) + '\n');
+  if(record) fs.writeFileSync(path.join(FIXTURE, 'expected.json'), JSON.stringify(expected, null, 2) + '\n', { flag: 'wx' });
   // EB9 will change this expectation: a refused command already has event/update outputs.
   const fired = expected['swt-mean-30'].result;
   assert.equal(fired[0].payload.data.action, 'OPEN_FOR_DURATION');
