@@ -25,3 +25,14 @@ test('capture refuses the frozen oracle option and overwriting additive evidence
  ]){const result=spawnSync(process.execPath,[script,...args],{cwd:ROOT,encoding:'utf8'});assert.equal(result.status,1);assert.match(result.stderr,reason);}
  assert.deepEqual(['baseline.json','hashes.json','additive-hashes.json'].map(file=>fs.readFileSync(path.join(FIXTURE,file),'utf8')),before);
 });
+
+test('binary patch bytes ignore host deflate choices and reject damaged payloads',()=>{
+ const {deflateSync,inflateSync}=require('node:zlib');
+ const {canonicalBinaryPatch,encode,storedZlib}=require('./lib/valve-ingress-x2-patch-codec');
+ const raw=Buffer.from('deterministic renderer payload '.repeat(10000));
+ const patch=level=>'GIT binary patch\nliteral '+raw.length+'\n'+encode(deflateSync(raw,{level})).join('\n')+'\n';
+ assert.deepEqual(inflateSync(storedZlib(raw)),raw);
+ assert.equal(canonicalBinaryPatch(patch(1)),canonicalBinaryPatch(patch(9)));
+ assert.equal(canonicalBinaryPatch(canonicalBinaryPatch(patch(9))),canonicalBinaryPatch(patch(9)));
+ assert.throws(()=>canonicalBinaryPatch('GIT binary patch\nliteral 999\nA00000\n'));
+});

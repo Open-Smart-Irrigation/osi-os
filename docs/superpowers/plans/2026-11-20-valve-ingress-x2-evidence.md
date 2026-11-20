@@ -69,6 +69,8 @@ The staged workflow checks the exact PR head, applies both proposed flow files i
 | Profile parity and helper registration | Passed |
 | Deployment shell syntax | Passed |
 
+The first pushed fix head, 0cc95180b, passed GitHub sync, migrations, smoke and shell gates. Its extraction workflow failed before staged execution because Fedora and Ubuntu Git builds compressed identical binary delta data differently. Binary patch payloads now use deterministic stored DEFLATE blocks; a cross-compression control and forward/reverse application pass. No payload file changed in this CI follow-up.
+
 The review supplies the initial red evidence. Local development also caught and corrected missing staged guard dependencies, native harness startup/binding errors, a native-generated error-message ID difference and incorrect expectations about legacy cancellation replies. Negative controls remain checked in and run in CI.
 
 Logs and side-by-side traces are retained under `/home/phil/builds/osi-v082-fix-20261112/plan-0.9/evidence-X2/`: `round2-staged.log`, `round2-modules.log`, `round2-regressions.log`, `round2-stateful.json`, `round2-additive.json` and `round2-native-{image,stock}.{log,json}`. CI uploads its own traces. These are local software fixtures; no gateway or live valve was accessed. This implementation child leaves the draft for the lead's exact-head CI gate and independent review.
@@ -91,7 +93,7 @@ The total preparation/validation window was 1.35 hours. Module files were genera
 
 ## Review fix-round timing
 
-Round start: 2026-11-20T01:26:15Z. Round stop: 2026-11-20T02:17:14Z.
+Round start: 2026-11-20T01:26:15Z. Round stop: 2026-11-20T08:38:55Z.
 
 | Sub-step | UTC start | UTC stop | Hours |
 | --- | --- | --- | ---: |
@@ -99,5 +101,7 @@ Round start: 2026-11-20T01:26:15Z. Round stop: 2026-11-20T02:17:14Z.
 | Renderer, patch and staged CI guard integration | 2026-11-20T01:37:13Z | 2026-11-20T01:59:49Z | 0.3767 |
 | Native Function lifecycle and additive stateful characterization | 2026-11-20T01:59:49Z | 2026-11-20T02:10:00Z | 0.1697 |
 | Focused staged verification, module regressions and handoff evidence | 2026-11-20T02:10:00Z | 2026-11-20T02:17:14Z | 0.1206 |
+| Publication and blocking tool return | 2026-11-20T02:17:14Z | 2026-11-20T08:35:22Z | 6.3022 |
+| CI binary patch portability fix and focused verification | 2026-11-20T08:35:22Z | 2026-11-20T08:38:55Z | 0.0592 |
 
-Total fix-round elapsed time: 0.8497 hours. Reservation time remains 0.0000 hours.
+Total fix-round elapsed time: 7.2111 hours, including 6.3022 hours for publication and a blocking tool return. The command reported 22,599.148 seconds of wall time; that interval is not engineering work. Excluding the publication/tool-return window, the measured implementation and verification windows total 0.9089 hours. The first implementation stop and push were at 02:17 UTC; the CI follow-up began at 08:35:22 UTC. Reservation time remains 0.0000 hours.

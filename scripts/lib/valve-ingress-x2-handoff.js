@@ -45,7 +45,7 @@ function canonicalPatch(files){
   for(const side of ['a','b'])for(const f of files){const target=path.join(tmp,side,f.rel);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,side==='a'?f.before:f.after);}
   const result=spawnSync('git',['-c','core.attributesFile='+path.join(tmp,'attributes'),'diff','--no-index','--binary','--no-color','a','b'],{cwd:tmp,encoding:'utf8',maxBuffer:8*1024*1024});
   assert.equal(result.status,1,result.stderr);
-  return result.stdout.replace(/^diff --git a\/a\/(.+) b\/b\/(.+)$/gm,'diff --git a/$1 b/$2').replace(/^--- a\/a\//gm,'--- a/').replace(/^\+\+\+ b\/b\//gm,'+++ b/').trimEnd()+'\n';
+  return require('./valve-ingress-x2-patch-codec').canonicalBinaryPatch(result.stdout.replace(/^diff --git a\/a\/(.+) b\/b\/(.+)$/gm,'diff --git a/$1 b/$2').replace(/^--- a\/a\//gm,'--- a/').replace(/^\+\+\+ b\/b\//gm,'+++ b/').trimEnd()+'\n');
  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
 function receipt(files){return {source:SOURCE,files:files.map(f=>({path:f.rel,beforeSha256:sha(f.before),afterSha256:sha(f.after)})),silentCatchCounts:{bcm2712:59,bcm2709:59},ddlTotal:694};}
