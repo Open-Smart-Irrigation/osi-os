@@ -59,6 +59,8 @@ test('parseArgs requires --db and --work and validates --gateway-eui', () => {
   assert.deepEqual(parseArgs(['--db', 'a.db', '--work', 'w', '--json']), { db: 'a.db', work: 'w', gatewayEui: null, json: true, allowDirty: false, requireFreeze: false });
   assert.equal(parseArgs(['--db', 'a.db', '--work', 'w', '--require-freeze']).requireFreeze, true);
   assert.equal(parseArgs(['--db', 'a.db', '--work', 'w', '--allow-dirty']).allowDirty, true);
+  assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--profile', 'other']), /--profile must be/);
+  assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--expect-row-change', 'other']), /unknown expected row change/);
 });
 
 test('gitState reports the head and whether the checkout is dirty, untracked files included', () => {
@@ -537,4 +539,92 @@ test('earlier lineage at 53 with data: interrupted run, clean restart, designed 
   assert.equal(stepOf(report, 2, 'second-run-no-op').ok, true);
   for (const p of report.passes) for (const s of p.steps) assert.equal(typeof s.durationMs, 'number');
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('mixed rain and identity fixture requires declared changes and passes on both profiles', { timeout: 900_000 }, async (t) => {
+  const root = scratch();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const migrationsDir = path.join(REPO, 'database/migrations/ordered');
+  const { loadMigrationCorpus, materializeMigrations } = require('../lib/osi-migrate/migrations-loader');
+  const { bootstrapFresh } = require('../lib/osi-migrate/runner');
+  const { nodeSqliteRunner } = require('../lib/osi-migrate/runner-iface');
+  const prefix = path.join(root, 'prefix');
+  const source = loadMigrationCorpus(migrationsDir);
+  const corpus = materializeMigrations(prefix, source.migrations.filter((m) => m.version < 78)
+    .map((m) => ({ corpus: source, name: m.name })));
+  const db = path.join(root, 'mixed.db');
+  const runner = nodeSqliteRunner(db);
+  try {
+    await bootstrapFresh(runner, { migrationsDir: prefix, corpus, writersStopped: true });
+  } finally {
+    await runner.close();
+  }
+  sql(db, `
+    INSERT INTO devices (deveui, name, type_id, gateway_device_eui) VALUES
+      ('lorain-fixture', 'Rain gauge', 'AQUASCOPE_LORAIN', NULL),
+      ('legacy-fixture', 'Legacy sensor', 'KIWI_SENSOR', ''),
+      ('linked-fixture', 'Linked sensor', 'KIWI_SENSOR', '0016C001F1000001');
+    INSERT INTO device_data (deveui, recorded_at, rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, counter_interval_seconds) VALUES
+      ('lorain-fixture', '2026-01-01T00:00:00Z', 0.25, 1.5, 0.25, 600),
+      ('lorain-fixture', '2026-01-01T00:05:00Z', 0.5, 6, NULL, 300),
+      ('legacy-fixture', '2026-01-01T00:00:00Z', 0.75, 4.5, 0.75, 600),
+      ('lorain-fixture', '2026-01-01T00:10:00Z', 1, 12, 2, 300);
+    INSERT INTO sync_link_state (peer_node, linked, gateway_device_eui, updated_at)
+      VALUES ('cloud', 1, '0016C001F1000001', '2026-01-01T00:00:00Z');
+    INSERT INTO sync_history_dirty_keys
+      (peer_node, table_name, row_key, source_row_id, changed_at, status, attempts, next_attempt_at, last_error)
+      VALUES ('cloud', 'device_data', 'DEVICE_DATA|0016C001F1000001|4', 4, '2026-01-01T00:00:00Z',
+        'pending', 2, '2026-01-02T00:00:00Z', 'fixture retry');
+  `);
+
+  const strictWork = path.join(root, 'strict');
+  const strict = runCli(['--db', db, '--work', strictWork, '--require-freeze']);
+  assert.equal(strict.status, 1, strict.stderr.slice(-3000));
+  const strictReport = readReport(strictWork);
+  assert.equal(strictReport.failedStep, 'pass 1 data-compare');
+  const rejected = stepOf(strictReport, 1, 'data-compare').result;
+  assert.deepEqual(rejected.migrationPhase.unexpected.map((d) => d.table).sort(), ['device_data', 'sync_history_dirty_keys']);
+  assert.deepEqual(rejected.bootPhase.unexpected.map((d) => d.table), ['devices']);
+
+  for (const profile of ['bcm2712', 'bcm2709']) {
+    const work = path.join(root, profile);
+    const args = ['--db', db, '--work', work, '--require-freeze', '--profile', profile,
+      '--expect-row-change', 'lorain-legacy-rates', '--expect-row-change', 'boot-device-identity'];
+    const run = runCli(args);
+    assert.equal(run.status, 0, run.stderr.slice(-3000));
+    const report = readReport(work);
+    assert.equal(report.checkout.profile, profile);
+    assert.equal(stepOf(report, 2, 'second-run-no-op').ok, true);
+    const after = new DatabaseSync(path.join(work, 'farming.db'), { readOnly: true });
+    try {
+      const telemetry = after.prepare('SELECT rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, counter_interval_seconds FROM device_data ORDER BY id');
+      telemetry.setReturnArrays(true);
+      assert.deepEqual(telemetry.all(), [[0.25, null, null, null], [0.5, 6, null, 300], [0.75, 4.5, 0.75, 600], [1, null, null, null]]);
+      assert.equal(after.prepare('SELECT COUNT(*) AS n FROM devices WHERE gateway_device_eui = ?').get('0016C001F1000001').n, 3);
+      const dirty = after.prepare('SELECT source_row_id, status, attempts, next_attempt_at, last_error FROM sync_history_dirty_keys ORDER BY source_row_id');
+      dirty.setReturnArrays(true);
+      assert.deepEqual(dirty.all(), [[1, 'pending', 0, null, null], [4, 'pending', 0, null, null]]);
+    } finally {
+      after.close();
+    }
+  }
+
+  // Zone identity fill is a separate boot effect. The device rule must not
+  // permit it, even when the same column changes in both tables.
+  sql(db, `
+    UPDATE sync_link_state SET linked = 0 WHERE peer_node = 'cloud';
+    INSERT INTO users (id, username, password_hash, created_at, user_uuid, auth_mode, server_offline_verifier_version)
+      VALUES (1, 'fixture-owner', 'x', '2026-01-01T00:00:00Z', 'fixture-owner', 'local', 0);
+    INSERT INTO irrigation_zones (name, user_id, gateway_device_eui) VALUES ('Zone fixture', 1, '');
+    UPDATE sync_link_state SET linked = 1 WHERE peer_node = 'cloud';
+  `);
+  const strayWork = path.join(root, 'stray');
+  const stray = runCli(['--db', db, '--work', strayWork, '--require-freeze',
+    '--expect-row-change', 'lorain-legacy-rates', '--expect-row-change', 'boot-device-identity']);
+  assert.equal(stray.status, 1, stray.stderr.slice(-3000));
+  const strayReport = readReport(strayWork);
+  assert.equal(strayReport.failedStep, 'pass 1 data-compare');
+  const strayComparison = stepOf(strayReport, 1, 'data-compare').result;
+  assert.equal(strayComparison.migrationPhase.ok, true);
+  assert.ok(strayComparison.bootPhase.unexpected.some((d) => d.table === 'irrigation_zones'));
 });
