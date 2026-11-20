@@ -3,23 +3,24 @@ set -eu
 
 SRC=/usr/share/node-red
 DST=/srv/node-red
+FLOW_SEED=/usr/share/flows.json
 
 mkdir -p "$DST" "$DST/node_modules"
 chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 
-# node-red.init validates and publishes flows.json before starting the service.
+# node-red.init validates and repairs flows.json before starting the service.
 # Publish the other create-only files durably before their existence can suppress
 # a retry. Use a hard link so a concurrent creator always keeps its own file.
-node - "$SRC" "$DST" <<'NODE'
+node - "$SRC" "$DST" "$FLOW_SEED" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 
-const [src, dst] = process.argv.slice(2);
+const [src, dst, flowSeed] = process.argv.slice(2);
 const dir = fs.openSync(dst, 'r');
 try {
-  for (const name of ['settings.js', 'package.json', 'package-lock.json']) {
-    const source = path.join(src, name);
+  for (const name of ['flows.json', 'settings.js', 'package.json', 'package-lock.json']) {
+    const source = name === 'flows.json' ? flowSeed : path.join(src, name);
     const target = path.join(dst, name);
     if (fs.existsSync(target) || !fs.existsSync(source)) continue;
     const temporary = path.join(dst, '.node-red-seed-' + randomUUID());
