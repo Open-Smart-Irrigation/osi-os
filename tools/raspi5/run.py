@@ -4,6 +4,7 @@ import argparse
 import gzip
 import hashlib
 import os
+import re
 import selectors
 import socket
 import sys
@@ -18,7 +19,14 @@ import boot_config
 import ethernet_test
 
 
-def prepare(source, work, dtmerge, radio_probe=None, concentratord=False):
+def verified_copy(source, digest, destination):
+    shutil.copyfile(source, destination)
+    with destination.open('rb') as image:
+        if hashlib.file_digest(image, 'sha256').hexdigest() != digest:
+            raise ValueError('firmware override SHA-256 mismatch')
+
+
+def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, quiet=False):
     # QEMU SD cards require power-of-two capacity. Keep zero padding sparse.
     disk = work / 'sd.img'
     with source.open('rb') as raw:
@@ -48,7 +56,7 @@ def prepare(source, work, dtmerge, radio_probe=None, concentratord=False):
             end = max(end, (start + count) * 512)
     with disk.open('r+b') as f:
         f.truncate(1 << (end - 1).bit_length())
-    boot_config.load(f'{disk}@@{offset * 512}', work, dtmerge)
+    boot_config.load(f'{disk}@@{offset * 512}', work, dtmerge, quiet=quiet)
 
     if concentratord:
         check = Path(__file__).with_name('check-concentratord.sh').resolve()
@@ -185,7 +193,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('image', type=Path)
     parser.add_argument('--eeprom', type=Path, help='consult BOOT_ORDER and expose bootconf.txt from a Pi 5 EEPROM image')
+    parser.add_argument('--eeprom-sha256', help='expected SHA-256 of the EEPROM fixture')
     parser.add_argument('--armstub', type=Path, help='Pi 5 Trusted Firmware-A bl31.bin (defaults to the build alongside QEMU)')
+    parser.add_argument('--armstub-sha256', help='expected SHA-256 of the external armstub')
     parser.add_argument('--qemu', default='qemu-system-aarch64')
     parser.add_argument('--ram-gib', type=int, choices=(1, 2, 4, 8, 16), default=2)
     parser.add_argument('--smoke', action='store_true', help='test a fresh boot and exit')
@@ -200,6 +210,12 @@ def main():
     parser.add_argument('--osi-test', action='store_true', help='wait for the Node-RED GUI and check the gateway SQLite database')
     parser.add_argument('--reboot-test', action='store_true', help='restart the guest kernel and verify overlay persistence')
     args = parser.parse_args()
+    for option, path, digest in [('eeprom', args.eeprom, args.eeprom_sha256),
+                                 ('armstub', args.armstub, args.armstub_sha256)]:
+        if path is None and digest is None:
+            continue
+        if path is None or not re.fullmatch(r'[0-9a-f]{64}', digest or ''):
+            parser.error(f'--{option} and --{option}-sha256 must be supplied together')
     if args.packet_test and (not args.radio_probe or args.radio_socket):
         parser.error('--packet-test requires --radio-probe and creates its own radio socket')
     qemu = shutil.which(args.qemu)
@@ -217,7 +233,7 @@ def main():
             extractor = Path(qemu).resolve().with_name('rpi-eeprom-config')
             if not extractor.is_file():
                 parser.error('build.sh supplies rpi-eeprom-config alongside QEMU')
-            shutil.copyfile(args.eeprom, work / 'eeprom.bin')
+            verified_copy(args.eeprom, args.eeprom_sha256, work / 'eeprom.bin')
             boot_config.read_eeprom(work / 'eeprom.bin', extractor, work)
             machine += ',bootloader-config=bootconf.txt'
         prepare(args.image, work, merger, args.radio_probe, args.wm1302)
@@ -234,8 +250,11 @@ def main():
         ]
         if args.eeprom:
             command.extend(['-drive', 'if=mtd,format=raw,file=eeprom.bin'])
-        armstub = args.armstub or work / 'armstub.bin'
-        if not args.armstub and not armstub.exists():
+        armstub = work / 'armstub.bin'
+        if args.armstub:
+            armstub = work / 'verified-armstub.bin'
+            verified_copy(args.armstub, args.armstub_sha256, armstub)
+        elif not armstub.exists():
             armstub = Path(qemu).resolve().with_name('rpi5-bl31.bin')
         if args.armstub or armstub.is_file():
             command.extend(['-bios', str(armstub.resolve(strict=True))])

@@ -41,6 +41,8 @@ jobs:
         run: node --test scripts/test-deploy-node-files.js
       - name: Failure-list policy
         run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js scripts/test-farming-sqlite-startup.js scripts/test-farming-sqlite-driver.js
+      - name: Pi 5 emulator gate host checks
+        run: python3 tools/raspi5/test_acceptance.py
       - name: Reject broken late and caught handlers (serial negative controls)
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries

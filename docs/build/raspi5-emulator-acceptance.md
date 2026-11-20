@@ -33,14 +33,17 @@ tools/raspi5/acceptance.sh \
 ```
 
 Set `OSI_HEAVY` if the workstation wrapper is installed outside its default
-location. The command queues the slot itself. The evidence root must exist and
-have room for sparse writable SD copies and USB media. The guest network is
+location. Invoke the command outside any current `osi-heavy` holder so it can
+queue its own slot. The evidence root must exist outside every Git worktree
+and have room for sparse writable SD copies and USB media. The guest network is
 restricted to the emulated link and a host-loopback GUI forward. The radio
 exchanges simulated frames over a Unix socket.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
 run directory with the candidate SHA and image checksum. The selected cases
-must exit zero. Keep guest disks, USB media and private fixture receipts local.
+must exit zero. The runner removes guest disks and USB media after cleanup and
+keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
+the scratch media when diagnosing a failure. Keep private receipts local.
 A missing or failed run holds the candidate. Physical SD power-cut, upgrade and
 valve checks still belong on the real-device sheet.
 
@@ -50,19 +53,21 @@ The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
-The flows cases require a candidate built after PR #714 reaches main. The runner
-checks the offline tree for the init script's commit marker and also requires
-the marker on the guest serial console in each case. Earlier candidates report
-the cases as pending. Eligible candidates add cuts on first boot, a later boot
-and first Node-RED start during the 0.8.1 upgrade. Use
-`--flows-power-cut-only` to rerun those three cases during diagnosis.
+The init script's `persistFlowHold` function identifies candidates with the
+recovery code from PR #714. These candidates must pass cuts on first boot, a later
+boot and first Node-RED start during the 0.8.1 upgrade. Each cut requires a serial
+commit receipt with the flows SHA-256 and payload stamp, then compares both with
+the recovered files. Candidates without the fix report each case as
+`not applicable to this candidate`. Use `--flows-power-cut-only` to rerun the
+three cuts during diagnosis.
 
 ### Customer-line 0.7.0 image fixture
 
 Set `OSI_RASPI5_CUSTOMER_IMAGE` to the private local factory archive and
 `OSI_RASPI5_CUSTOMER_FIXTURE_DIR` to the matching input directory. Supply both for
 customer-line upgrade qualification. With both unset the runner records the
-case as pending. Keep the input directory and all artifacts outside the repository.
+case as pending. Use `--customer-fixture-only` for a focused run with the same
+input arguments. Keep the input directory and all artifacts outside Git trees.
 
 Provide `customer.tar.gz` (the private 0.8.1 offline deploy bundle) and its
 `customer.tar.gz.sha256` sidecar,
@@ -77,5 +82,9 @@ The case boots the factory image, installs the 0.8.1 overlay offline, seeds the
 guest, then installs the candidate offline. It compares the SQL and ChirpStack
 receipts, checks the 76-to-80 ledger remap and backup, and verifies the
 active payload after reboot. The July factory baseline is a provisional match.
+Each installer leg writes an exit code and timestamped progress receipts to
+`customer-line/progress.jsonl`. A newer phase, ledger version or reference
+build count extends its 15-minute idle deadline, up to 90 minutes per installer
+leg. The focused run can take longer than the stock suite.
 This case exercises the overlay upgrade. Run a separate firmware or radio package
 migration qualification when that release path ships.

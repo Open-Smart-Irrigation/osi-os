@@ -10,8 +10,8 @@ On Ubuntu 24.04, install the host dependencies, build QEMU and the Pi 5 EL3 firm
 
 ```sh
 sudo apt-get install build-essential curl xz-utils ninja-build python3-venv pkg-config libglib2.0-dev libpixman-1-dev libfdt-dev flex bison mtools gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-tools/raspi5/build.sh ~/osi-pi5-build
-tools/raspi5/build-probe.sh ~/osi-radio-build
+osi-heavy wait --contain --need-gib 8 -- tools/raspi5/build.sh ~/osi-pi5-build
+osi-heavy wait --contain --need-gib 2 -- tools/raspi5/build-probe.sh ~/osi-radio-build
 ```
 
 ### Source pins and licences
@@ -27,6 +27,10 @@ tools/raspi5/build-probe.sh ~/osi-radio-build
 The hashes live next to the download URLs in `build.sh` and `build-probe.sh`.
 The workstation supplies the host libraries, compiler and build tools.
 Build outputs, factory images and the optional EEPROM image stay outside the checkout.
+
+The files tagged `GPL-2.0-or-later` build into the separate host QEMU executable.
+The repo's MIT licence covers the OSI code, and the model stays outside the
+firmware payload. The model's licence text is in [COPYING](COPYING).
 
 ## Run the image
 
@@ -45,15 +49,17 @@ tools/raspi5/run.py --qemu ~/osi-pi5-build/qemu/build/qemu-system-aarch64 \
     --packet-test --ethernet-test --usb-test path/to/rpi5-factory.img.gz
 ```
 
-The build installs Raspberry Pi’s BCM2712 Trusted Firmware-A beside QEMU as `rpi5-bl31.bin`. The launcher starts all four A76 cores at the firmware reset vector. BL31 initializes the interrupt controller, runs PSCI at EL3, releases the secondary cores and enters the image’s Linux kernel. The serial console shows the BL31 banner before Linux. A boot partition can supply its own BCM2712 stub through `armstub=` in config.txt. Use `--armstub PATH` for an explicit host-side override. If the default kernel_2712.img is missing, the launcher searches for kernel8.img. [Raspberry Pi BCM2712 platform source](https://github.com/raspberrypi/arm-trusted-firmware/tree/96922f8b04da6d00f84cc6e92cab1aecdfa5d781/plat/rpi/rpi5)
+The build installs Raspberry Pi’s BCM2712 Trusted Firmware-A beside QEMU as `rpi5-bl31.bin`. The launcher starts all four A76 cores at the firmware reset vector. BL31 initializes the interrupt controller, runs PSCI at EL3, releases the secondary cores and enters the image’s Linux kernel. The serial console shows the BL31 banner before Linux. A boot partition can supply its own BCM2712 stub through `armstub=` in config.txt. An explicit host-side armstub override requires `--armstub PATH --armstub-sha256 SHA256`. If the default kernel_2712.img is missing, the launcher searches for kernel8.img. [Raspberry Pi BCM2712 platform source](https://github.com/raspberrypi/arm-trusted-firmware/tree/96922f8b04da6d00f84cc6e92cab1aecdfa5d781/plat/rpi/rpi5)
 
-Pass `--eeprom pieeprom.bin` to test the SD boot selection of a 2 MiB BCM2712 EEPROM image. The launcher reads its configuration using Raspberry Pi’s extractor, follows the boot-order nibbles to the attached SD card, and copies the configuration into the guest’s reserved bootloader-config memory. The guest’s SPI10 controller also exposes a disposable copy of the EEPROM through `/dev/spidev10.0`. GPIO1 drives chip select on a representative 2 MiB MX25L1606E NOR model. The radio probe reads the JEDEC ID and checks three flash pages against the supplied file. EEPROM settings are read once per launcher invocation. The OSI 0.8.2 kernel exposes this reservation in the device tree and lacks the reserved-memory nvmem driver. The launcher reports an error for signed-boot configurations and boot orders that stop or restart before reaching SD. [Raspberry Pi EEPROM distribution](https://github.com/raspberrypi/rpi-eeprom)
+Pass `--eeprom pieeprom.bin --eeprom-sha256 SHA256` to test the SD boot selection of a 2 MiB BCM2712 EEPROM image. The launcher reads its configuration using Raspberry Pi’s extractor, follows the boot-order nibbles to the attached SD card, and copies the configuration into the guest’s reserved bootloader-config memory. The guest’s SPI10 controller also exposes a disposable copy of the EEPROM through `/dev/spidev10.0`. GPIO1 drives chip select on a representative 2 MiB MX25L1606E NOR model. The radio probe reads the JEDEC ID and checks three flash pages against the supplied file. EEPROM settings are read once per launcher invocation. The OSI 0.8.2 kernel exposes this reservation in the device tree and lacks the reserved-memory nvmem driver. The launcher reports an error for signed-boot configurations and boot orders that stop or restart before reaching SD. [Raspberry Pi EEPROM distribution](https://github.com/raspberrypi/rpi-eeprom)
 
 Use `--reboot-test` to restart the guest and check that a marker on the writable overlay survives the second boot.
 
 The optional tests stage the probe and service-check script on the disposable boot partition. The probe checks RMC and GGA sentences on the carrier UART and the ATECC608B wake and revision responses on I²C. It pulses reset on GPIO17 and uses the Semtech HAL to read the SX1302 OTP and PPS counter, tune both SX1250s and read the STTS751 temperature fixture. The packet check injects an uplink on IF channel 0, verifies the HAL's payload and CRC status, and receives immediate and timestamped downlinks. The service check starts the image's ChirpStack Concentratord with its Seeed US915 configuration and reads the synthetic gateway ID over its command socket. With both radio tests enabled, the factory MQTT forwarder publishes an injected frame at 902.3 MHz to a guest-local broker. The test submits a 923.3 MHz downlink, verifies the concentrator acknowledgement and compares the transmitted bytes at the host radio socket. The Ethernet test exchanges ARP and ICMP with a local peer. The USB test reads a marker from a virtual flash drive. Add `--osi-test` to wait for Node-RED to serve `/gui/` and run a read-only SQLite quick check against the gateway database.
 
 For interactive packet injection, pass `--radio-socket /tmp/wm1302.sock` and configure the guest concentrator. Each Unix stream frame starts with three bytes (payload length, multi-SF IF channel, spreading factor), followed by the raw LoRa PHYPayload. For a frequency-addressed uplink, set the channel byte to 255 and insert a four-byte big-endian frequency in Hz and a bandwidth byte before the payload. Bandwidth code 0 selects 125 kHz. The model uses the HAL-programmed SX1250 center frequency, signed IF offset, channel mask and spreading-factor mask to select a receiver. It accepts carriers within one IF tuning step of nominal and drops other bandwidths on the multi-SF channels. Downlinks use the three-byte format with the RF chain in the second byte. A client that stops draining the socket may be disconnected. The launcher disconnects guest Ethernet by default. Use `--nic` to supply a QEMU network backend.
+
+Use published or explicitly recorded SHA-256 values for external firmware. The launcher verifies the copies before it uses them. EEPROM firmware remains subject to Raspberry Pi’s distribution terms. The candidate gate uses the pinned BL31 build and the verified candidate image, with no external firmware override options.
 
 ## Hardware coverage
 

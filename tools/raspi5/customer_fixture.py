@@ -1,13 +1,13 @@
 """Exercise the offline upgrade of a disposable customer-line 0.7.0 image."""
+from datetime import UTC, datetime
 import hashlib
 import json
-import os
-from pathlib import Path
 import re
 import shlex
+import time
 
-from suite_vm import Guest
-from upgrade_suite import CANDIDATE_INSTALL, DB, MOUNT_USB, build_media, checked, sql
+from suite_vm import Guest, external_path
+from upgrade_suite import DB, MOUNT_USB, build_media, checked, sql
 
 FILES = (
     'customer.tar.gz', 'customer.tar.gz.sha256', 'customer-install.sh', 'customer-cache.tar',
@@ -18,6 +18,16 @@ SELECT count(*) FROM schema_migrations WHERE status <> 'applied';
 SELECT name FROM schema_migrations WHERE version = 76;
 """
 ARCHIVE = 'sdi12_transmissions.sql'
+POLL_SECONDS = 15
+IDLE_SECONDS = 15 * 60
+HARD_SECONDS = 90 * 60
+INSTALL_PHASES = ('starting', 'dependencies', 'migration', 'activation')
+PROGRESS = re.compile(r'([0-3]) (-|[0-9]{1,4}) ([0-9]{1,4}) ([0-9]{1,4}) (-|[0-9]{1,3})')
+LEDGER_HEAD = (
+    f"sqlite3 -readonly -batch -bail -cmd '.timeout 500' {DB} "
+    "\"SELECT coalesce(max(version),0) FROM schema_migrations WHERE status='applied';\" "
+    "2>/dev/null || printf '%s' -"
+)
 FILESYSTEM = """
 data_fs=$(df -P /data | awk 'NR==2 {print $1}')
 test -n "$data_fs" && test "$data_fs" != "$(df -P /rom | awk 'NR==2 {print $1}')" &&
@@ -43,9 +53,13 @@ JS
 """
 
 
+class FixtureFailure(RuntimeError):
+    """A fixed diagnostic or validated numeric result safe for shared output."""
+
+
 def verified_inputs(image, source):
     checksums = {}
-    for line in (source/'SHA256SUMS').read_text().splitlines():
+    for line in external_path(source/'SHA256SUMS').read_text().splitlines():
         parts = line.split(maxsplit=1)
         if len(parts) != 2 or not re.fullmatch(r'[0-9a-f]{64}', parts[0]):
             raise ValueError('invalid private SHA256SUMS line')
@@ -54,22 +68,23 @@ def verified_inputs(image, source):
         if name in checksums:
             raise ValueError('duplicate private SHA256SUMS entry')
         checksums[name] = digest
-    for path in (image, *(source/name for name in FILES)):
+    files = {name: external_path(source/name) for name in FILES}
+    for name, path in [(image.name, image), *files.items()]:
         with path.open('rb') as stream:
-            if hashlib.file_digest(stream, 'sha256').hexdigest() != checksums.get(path.name):
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != checksums.get(name):
                 raise ValueError('private fixture input SHA-256 mismatch')
-    return {name: source/name for name in FILES}, checksums[image.name]
+    return files, checksums[image.name]
 
 
 def ledger_ok(vm):
     if sql(vm, 'PRAGMA integrity_check; PRAGMA foreign_key_check;') != 'ok':
-        raise RuntimeError('private fixture SQLite integrity or foreign key check failed')
+        raise FixtureFailure('private fixture SQLite integrity or foreign key check failed')
 
 
 def version(vm, osi, chirpstack):
     actual = checked(vm, 'uci get osi-server.cloud.firmware_version; chirpstack --version')
     if actual.splitlines() != [osi, f'chirpstack {chirpstack}']:
-        raise RuntimeError('private fixture guest version mismatch')
+        raise FixtureFailure('private fixture guest version mismatch')
 
 
 def expect_data(vm):
@@ -83,7 +98,7 @@ SELECT count(*) > 0 FROM sync_outbox;
 SELECT count(*) FROM sync_link_state WHERE linked <> 0 OR server_url IS NOT NULL;
 """)
     if counts.splitlines() != ['1', '1', '3', '97', '1', '4', '1', '0']:
-        raise RuntimeError('private synthetic fixture census mismatch')
+        raise FixtureFailure('private synthetic fixture census mismatch')
 
 
 def snapshot(vm, radio_mode):
@@ -101,56 +116,143 @@ node chirpstack-fixture.cjs {radio_mode}
     row_hash, _, radio = receipt.partition('\n')
     registrations = json.loads(radio)
     if not re.fullmatch(r'[0-9a-f]{64}', row_hash) or not isinstance(registrations, list) or len(registrations) != 3:
-        raise RuntimeError('private fixture snapshot incomplete')
+        raise FixtureFailure('private fixture snapshot incomplete')
     return row_hash, registrations
 
 
-def run(args, directory, release, ready):
-    image = Path(os.environ['OSI_RASPI5_CUSTOMER_IMAGE'])
-    source = Path(os.environ['OSI_RASPI5_CUSTOMER_FIXTURE_DIR'])
-    work = directory/'customer-line'
+def write_receipt(path, **fields):
+    with path.open('a') as log:
+        print(json.dumps({'utc': datetime.now(UTC).isoformat(timespec='seconds'), **fields}), file=log)
+
+
+def track_install(vm, log, name, installer, bundle, cache):
+    directory = f'/tmp/osi-fixture-{name}'
+    deploy_log = f'/data/deploy-emulator-{name}.log'
+    initial = checked(vm, LEDGER_HEAD)
+    if not re.fullmatch(r'-|[0-9]{1,4}', initial):
+        raise FixtureFailure('invalid starting ledger receipt')
+    starting_head = None if initial == '-' else int(initial)
+    start = time.monotonic()
+    latest = start
+    high_water = [0, starting_head or 0, 0, 0]
+    status = dict(phase=INSTALL_PHASES[0], current_ledger=starting_head,
+                  reference_count=0, baseline_comparisons=0)
+
+    def record(event, **fields):
+        write_receipt(log, leg=name, event=event, elapsed_seconds=round(time.monotonic()-start),
+                      starting_ledger=starting_head, **fields)
+
+    record('start', **status)
+    checked(vm, f"""set -e
+{MOUNT_USB}
+mkdir -p {directory}/cache/_cacache {directory}/tmp
+tar -xf {cache} -C {directory}/cache/_cacache
+(
+    set +e
+    export npm_config_cache={directory}/cache npm_config_offline=true
+    export TMPDIR={directory}/tmp DEPLOY_OFFLINE_TS=emulator-{name}
+    sh {installer} /tmp/upgrade-usb/{bundle} --wait
+    rc=$?
+    printf '%s\\n' "$rc" > {directory}/rc.tmp && mv {directory}/rc.tmp {directory}/rc
+) </dev/null >/dev/null 2>&1 &
+""", 180)
+    probe = fr"""phase=0
+f={deploy_log}
+if test -f "$f"; then
+    if grep -Fq -- '--- Node-RED runtime dependencies ---' "$f"; then phase=1; fi
+    if grep -Fq -- '--- Edge schema migration runner ---' "$f"; then phase=2; fi
+    if grep -Fq -- '--- Flip payload + local health self-check' "$f"; then phase=3; fi
+fi
+head=$({LEDGER_HEAD})
+refs=$(find {directory}/tmp -type f -name 'ref-[0-9][0-9][0-9][0-9].db' 2>/dev/null | awk 'END {{print NR}}')
+comparisons=$(grep -c '^\[baseline\] N=[0-9]' "$f" 2>/dev/null) || comparisons=0
+rc=-
+if test -s {directory}/rc; then rc=$(cat {directory}/rc); fi
+printf '%s %s %s %s %s\n' "$phase" "$head" "$refs" "$comparisons" "$rc"
+"""
+    while True:
+        now = time.monotonic()
+        remaining = min(start + HARD_SECONDS, latest + IDLE_SECONDS) - now
+        if remaining <= 0:
+            event = 'hard-timeout' if now >= start + HARD_SECONDS else 'no-progress-timeout'
+            record(event, last_progress_seconds=round(latest-start), installer_rc=None, **status)
+            limit = HARD_SECONDS if event == 'hard-timeout' else IDLE_SECONDS
+            raise FixtureFailure(f'{name} install {event} after {limit} seconds')
+        try:
+            output = checked(vm, probe, min(40, remaining))
+        except (TimeoutError, OSError, RuntimeError):
+            record('progress-probe-failed', installer_rc=None, **status)
+            raise FixtureFailure(f'{name} installer progress probe failed') from None
+        receipt = PROGRESS.fullmatch(output)
+        if receipt is None:
+            raise FixtureFailure('invalid installer progress receipt')
+        phase, head, refs, comparisons, rc = receipt.groups()
+        current_head = None if head == '-' else int(head)
+        values = [int(phase), current_head or 0, int(refs), int(comparisons)]
+        status = dict(phase=INSTALL_PHASES[values[0]], current_ledger=current_head,
+                      reference_count=values[2], baseline_comparisons=values[3])
+        if any(current > previous for current, previous in zip(values, high_water)):
+            latest = time.monotonic()
+            high_water = [max(current, previous) for current, previous in zip(values, high_water)]
+            record('progress', **status)
+        if rc != '-':
+            code = int(rc)
+            if code > 255:
+                raise FixtureFailure('invalid installer exit status')
+            record('exit', installer_rc=code, **status)
+            if code:
+                raise FixtureFailure(f'{name} installer returned {code}')
+            return
+        now = time.monotonic()
+        time.sleep(max(0, min(POLL_SECONDS, start + HARD_SECONDS - now, latest + IDLE_SECONDS - now)))
+
+
+def run(args, scratch, receipts, release, ready):
+    work = scratch/'customer-line'
     work.mkdir()
+    evidence = receipts/'customer-line'
+    evidence.mkdir(mode=0o700)
+    log = evidence/'progress.jsonl'
+    write_receipt(log, event='phase', phase='prepare')
     try:
-        files, image_digest = verified_inputs(image, source)
-    except (OSError, ValueError):
-        raise RuntimeError('private fixture input missing or SHA256SUMS verification failed') from None
-    (work/'image.sha256').write_text(image_digest+'\n')
-    media = build_media(release, work, revision=args.release_revision, extra_files=files)
-    vm = Guest(work/'guest', image, args.qemu, args.ram, upgrade=media)
+        files, image_digest = verified_inputs(args.customer_image, args.customer_source)
+    except (OSError, ValueError, RuntimeError):
+        raise FixtureFailure('private fixture input or SHA256SUMS verification failed') from None
+    (evidence/'image.sha256').write_text(image_digest+'\n')
+    media = build_media(release, work, revision=args.release_revision, extra_files=files, quiet=True)
+    write_receipt(log, event='phase', phase='boot-0.7.0')
+    vm = Guest(work/'guest', args.customer_image, args.qemu, args.ram, upgrade=media,
+               receipts=evidence, private=True)
     try:
         vm.start()
         ready(vm)
         version(vm, '0.7.0', '4.12.1')
         checked(vm, FILESYSTEM)
         if sql(vm, 'SELECT (SELECT count(*) FROM users)+(SELECT count(*) FROM devices)+(SELECT count(*) FROM device_data);') != '0':
-            raise RuntimeError('private factory image contains persisted data')
+            raise FixtureFailure('private factory image contains persisted data')
         rom_asset = checked(vm, 'sha256sum /rom/usr/lib/node-red/gui/index.html | cut -d " " -f 1')
-        checked(vm, f"""set -e
-{MOUNT_USB}
-mkdir -p /tmp/customer-cache/_cacache
-tar -xf customer-cache.tar -C /tmp/customer-cache/_cacache
-export npm_config_cache=/tmp/customer-cache npm_config_offline=true
-sh customer-install.sh /tmp/upgrade-usb/customer.tar.gz --wait
-""", 2400)
+        track_install(vm, log, 'legacy', 'customer-install.sh', 'customer.tar.gz', 'customer-cache.tar')
         ready(vm)
         version(vm, '0.8.1', '4.12.1')
         if not rom_asset or rom_asset != checked(vm, 'sha256sum /rom/usr/lib/node-red/gui/index.html | cut -d " " -f 1'):
-            raise RuntimeError('customer overlay changed the factory GUI')
+            raise FixtureFailure('customer overlay changed the factory GUI')
         old_stamp = checked(vm, "readlink /srv/node-red/payloads/active")
         if sql(vm, LEDGER).splitlines() != ['76', '0', f'0076__{ARCHIVE}']:
-            raise RuntimeError('old customer-line ledger mismatch')
+            raise FixtureFailure('old customer-line ledger mismatch')
         old_archive_checksum = sql(vm, 'SELECT checksum FROM schema_migrations WHERE version = 76;')
+        write_receipt(log, event='phase', phase='load-synthetic-data')
         checked(vm, f'set -e\n{MOUNT_USB}\nsqlite3 -batch -bail {DB} < populate.sql')
         expect_data(vm)
         ledger_ok(vm)
         before = snapshot(vm, 'create')
-        checked(vm, 'set -e\n'+CANDIDATE_INSTALL, 2400)
+        track_install(vm, log, 'candidate', 'install.sh', 'candidate.tar.gz', 'npm-cache.tar')
         checked(vm, r"""set -e
-f=$(ls -t /data/deploy-*.log | head -1)
+f=/data/deploy-emulator-candidate.log
 grep -Fq 'remapped 1 ledger row(s)' "$f"
 backup=$(sed -n 's/.*persistent pre-reconciliation backup: \([^ ]*\) .*/\1/p' "$f")
 test -s "$backup"
 """)
+        write_receipt(log, event='phase', phase='verify-after-reboot')
         vm.reboot()
         ready(vm)
         version(vm, args.osi_version, args.chirpstack_version)
@@ -159,9 +261,9 @@ test -s "$backup"
         if sql(vm, LEDGER + "SELECT name FROM schema_migrations WHERE version = 80;").splitlines()[1:] != [
             '0', '0076__conditional_irrigation.sql', f'0080__{ARCHIVE}',
         ]:
-            raise RuntimeError('candidate ledger did not remap migration 76 to 80')
+            raise FixtureFailure('candidate ledger did not remap migration 76 to 80')
         if sql(vm, 'SELECT checksum FROM schema_migrations WHERE version = 80;') != old_archive_checksum:
-            raise RuntimeError('archive migration checksum changed during remap')
+            raise FixtureFailure('archive migration checksum changed during remap')
         checked(vm, f"""set -e
 {MOUNT_USB}
 sha256sum -c candidate.tar.gz.sha256 >/dev/null
@@ -172,11 +274,11 @@ node /tmp/verify-candidate/scripts/verify-head-cli.js /tmp/verify-candidate/farm
 """, 180)
         if sql(vm, "SELECT count(*) FROM pragma_table_info('sdi12_transmissions') WHERE name = 'uplink_key';") == '1':
             if sql(vm, 'SELECT count(*) FROM sdi12_transmissions WHERE uplink_key IS NOT NULL;') != '0':
-                raise RuntimeError('legacy archive rows unexpectedly acquired uplink keys')
+                raise FixtureFailure('legacy archive rows unexpectedly acquired uplink keys')
         expect_data(vm)
         ledger_ok(vm)
         if snapshot(vm, 'snapshot') != before:
-            raise RuntimeError('private synthetic database or radio registrations changed')
+            raise FixtureFailure('private synthetic database or radio registrations changed')
         return 'ledger 76→80; synthetic rows, radio registrations and active payload verified after reboot'
     finally:
         vm.stop()

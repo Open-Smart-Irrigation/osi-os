@@ -12,7 +12,9 @@ def fat_name(name):
     return '::' + str(path)
 
 
-def load(volume, work, dtmerge):
+def load(volume, work, dtmerge, *, quiet=False):
+    stderr = subprocess.DEVNULL if quiet else None
+    stdout = subprocess.DEVNULL if quiet else None
     selected = {'kernel': '', 'armstub': '', 'device_tree': 'bcm2712-rpi-5-b.dtb',
                 'cmdline': 'cmdline.txt'}
     changes = []
@@ -23,7 +25,7 @@ def load(volume, work, dtmerge):
         nonlocal prefix, overlay_prefix
         if name in parents or len(parents) > 16:
             raise ValueError(f'recursive config.txt include {name!r}')
-        raw = subprocess.check_output(['mtype', '-i', volume, fat_name(name)])
+        raw = subprocess.check_output(['mtype', '-i', volume, fat_name(name)], stderr=stderr)
         active = True
         for line in raw.decode('utf-8-sig').splitlines():
             line = line.partition('#')[0].strip()
@@ -67,12 +69,12 @@ def load(volume, work, dtmerge):
     selected['kernel'] = kernel_name(prefix)
     if selected['armstub']:
         subprocess.run(['mcopy', '-i', volume, fat_name(selected['armstub']), work / 'armstub.bin'],
-                       check=True)
+                       check=True, stdout=stdout, stderr=stderr)
     overlay_base = prefix if prefix and exists(prefix + overlay_prefix + 'README') else ''
     for key, destination in [('kernel', 'kernel_2712.img'), ('device_tree', 'bcm2712-rpi-5-b.dtb'),
                              ('cmdline', 'cmdline.txt')]:
         subprocess.run(['mcopy', '-i', volume, fat_name(prefix + selected[key]), work / destination],
-                       check=True)
+                       check=True, stdout=stdout, stderr=stderr)
     dtb = work / 'bcm2712-rpi-5-b.dtb'
     merged = work / 'merged.dtb'
     for overlay, params in changes:
@@ -80,8 +82,8 @@ def load(volume, work, dtmerge):
         if overlay:
             source = str(work / 'overlay.dtbo')
             subprocess.run(['mcopy', '-o', '-i', volume, fat_name(overlay_base + overlay), source],
-                           check=True)
-        subprocess.run([dtmerge, dtb, merged, source, *params], check=True)
+                           check=True, stdout=stdout, stderr=stderr)
+        subprocess.run([dtmerge, dtb, merged, source, *params], check=True, stdout=stdout, stderr=stderr)
         merged.replace(dtb)
 
 

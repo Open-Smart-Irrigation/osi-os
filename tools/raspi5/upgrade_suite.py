@@ -55,12 +55,13 @@ def cache_locked_packages(release, out):
     return archive
 
 
-def build_media(release, directory, *, revision, extra_files=None):
+def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     """Package the candidate with its own deployment scripts on a read-only USB disk."""
     out=directory/'upgrade'
     out.mkdir()
     env=dict(os.environ, REPO_ROOT=str(release),OUT_DIR=str(out),BUNDLE_SHA=revision[:8])
-    subprocess.run(['bash',release/'scripts/deploy-bundle.sh',release/'react_gui.tar.gz'],env=env,check=True,stdout=subprocess.DEVNULL)
+    stderr = subprocess.DEVNULL if quiet else None
+    subprocess.run(['bash',release/'scripts/deploy-bundle.sh',release/'react_gui.tar.gz'],env=env,check=True,stdout=subprocess.DEVNULL,stderr=stderr)
     bundle=next(out.glob('*.tar.gz'))
     cache=cache_locked_packages(release,out)
     with bundle.open('rb') as stream:
@@ -74,9 +75,10 @@ def build_media(release, directory, *, revision, extra_files=None):
     disk = out/'upgrade-usb.img'
     with disk.open('wb') as stream:
         stream.truncate(max(64*1024**2, 2*sum(path.stat().st_size for path in files.values())))
-    subprocess.run(['mkfs.vfat', disk], stdout=subprocess.DEVNULL, check=True)
+    subprocess.run(['mkfs.vfat', disk], stdout=subprocess.DEVNULL, stderr=stderr, check=True)
     for name, path in files.items():
-        subprocess.run(['mcopy', '-i', disk, path, '::'+name], check=True)
+        subprocess.run(['mcopy', '-i', disk, path, '::'+name],
+                       stdout=subprocess.DEVNULL, stderr=stderr, check=True)
     return disk
 
 
@@ -104,6 +106,15 @@ done
 exit 1""", 600)
 
 
+def wait_for_api(vm):
+    checked(vm, """for i in $(seq 1 100); do
+    code=$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)
+    [ "$code" = 401 ] && exit 0
+    sleep 2
+done
+exit 1""", 420)
+
+
 def run(vm, old_version, new_version, *, cut_at=None):
     if checked(vm,'uci get osi-server.cloud.firmware_version') != old_version:
         raise RuntimeError('old firmware version mismatch')
@@ -118,19 +129,19 @@ def run(vm, old_version, new_version, *, cut_at=None):
     before = sql(vm, READ)
     if len(before.splitlines()) != 4:
         raise RuntimeError('incomplete fixture')
-    code,_=vm.command('set -e\n'+CANDIDATE_INSTALL, 2400, until=cut_at)
+    old_stamp = vm.flows_receipt()[1] if cut_at else None
+    code, receipt = vm.command('set -e\n'+CANDIDATE_INSTALL, 2400, until=cut_at)
     if cut_at is not None and code is None:
         # This is the candidate init's first publication on the upgraded
         # payload. The installer is still running, so cut without a guest call.
         vm.stop(cut=True)
+        if receipt[1] in (b'image', old_stamp):
+            raise RuntimeError('upgrade commit did not name a new deployed payload')
         vm.start()
-        checked(vm, """for i in $(seq 1 100); do
-    code=$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)
-    [ "$code" = 401 ] && exit 0
-    sleep 2
-done
-exit 1""", 420)
-        checked(vm, 'test -L /srv/node-red/flows.json && test -L /srv/node-red/payloads/active')
+        wait_for_api(vm)
+        vm.verify_flows_receipt(receipt)
+        if checked(vm, 'cat /srv/node-red/payloads/active/release-version') != new_version:
+            raise RuntimeError('recovery did not retain the candidate release payload')
     elif cut_at is not None and code == 0:
         raise RuntimeError('offline installer finished without a flows commit marker')
     elif code:
@@ -139,7 +150,7 @@ f=$(ls -t /data/deploy-*.log | head -1)
 for reason in ENOTCACHED ENOENT EAI_AGAIN ERESOLVE EACCES SQLITE_BUSY SQLITE_CONSTRAINT 'npm install failed' 'insufficient disk' 'payload verification failed' 'migration failed'; do
 grep -Fq "$reason" "$f" && echo "$reason"
 done""")
-        (vm.work/'upgrade-diagnostics.log').write_text(info+'\n')
+        (vm.receipts/'upgrade-diagnostics.log').write_text(info+'\n')
         raise RuntimeError('offline installer exited '+str(code)+'; '+info.replace('\n',', '))
     if cut_at is None:
         vm.reboot()
