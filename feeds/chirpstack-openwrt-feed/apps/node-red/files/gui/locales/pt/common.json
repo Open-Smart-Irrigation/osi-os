@@ -44,7 +44,8 @@
       "help": "Sem agregação, cada ponto fica à hora da medição; com agregação de 15 minutos, horária, diária ou semanal, fica no início do seu período, e para as fontes meteorológicas um dia é o dia local da zona. A chuva, a ET0 e a ETc de um fornecedor meteorológico, dos valores horários de uma estação ou de «daily agronomy» são totais do período; os restantes valores são médias. A temperatura, a humidade e o vento horários do Open-Meteo são valores à hora indicada. As fontes meteorológicas têm no máximo uma resolução horária, e «daily agronomy» diária."
     },
     "preset": {
-      "metricLabel": "Métrica entre zonas"
+      "metricLabel": "Comparar uma medida entre zonas",
+      "more": "Mais medidas"
     },
     "tray": {
       "label": "Séries de análise",
@@ -92,6 +93,7 @@
       "normalize": "Normalizar"
     },
     "export": {
+      "label": "Exportar",
       "csv": "Exportar CSV",
       "png": "Exportar PNG",
       "allZonesCsv": "Exportar CSV de todas as zonas",
