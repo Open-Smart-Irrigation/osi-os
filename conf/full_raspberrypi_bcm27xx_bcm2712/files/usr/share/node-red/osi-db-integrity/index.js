@@ -2,6 +2,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { execFileSync } = require('node:child_process');
 
 const SQLITE_TIMEOUT_MS = 120_000;
@@ -60,8 +61,10 @@ function backupDb(dbPath, { keep = 5 } = {}) {
 function liveQuickCheck(dbPath) {
   let result;
   try {
-    result = execFileSync('sqlite3', ['-batch', '-bail', '-ifexists', '-cmd', '.timeout 5000',
-      dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
+    const liveUri = pathToFileURL(dbPath);
+    liveUri.searchParams.set('mode', 'rw');
+    result = execFileSync('sqlite3', ['-batch', '-bail', '-cmd', '.timeout 5000',
+      liveUri.href, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
   } catch (error) {
     if (typeof error.status === 'number' && !error.signal && !error.code) {
       const codes = Array.from(String(error.stderr).matchAll(/^.+ \((\d+)\)\s*$/gm), match => Number(match[1]) & 255);

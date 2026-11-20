@@ -108,6 +108,21 @@ test('an SQLite open or lock failure never selects an older backup', async t => 
   }
 });
 
+test('the live SQLite open cannot create a database that disappeared after the path check', async t => {
+  const dir = scratch();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = makeDb(dir, 'farming?fixture.db');
+  const stat = fs.lstatSync;
+  t.mock.method(fs, 'lstatSync', (filename, ...options) => {
+    const result = stat(filename, ...options);
+    if (filename === dbPath) fs.unlinkSync(dbPath);
+    return result;
+  });
+  await assert.rejects(runBootIntegrityCheck(dbPath), /restoration refused/);
+  assert.equal(fs.existsSync(dbPath), false);
+  assert.equal(fs.existsSync(dbPath + '.osi-recovery'), false);
+});
+
 test('corrupt DB + passing backup: recovered', async () => {
   const dir = scratch();
   const dbPath = makeDb(dir);
