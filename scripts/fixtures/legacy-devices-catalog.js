@@ -41,7 +41,7 @@ function buildFixture(db, shape) {
   if (shape === 'rebuild') seed = seed.replace(", 'RAK10701_FIELD_TESTER'", '').replace(",'RAK10701_FIELD_TESTER'", '');
   db.exec(seed);
   db.exec('PRAGMA foreign_keys=OFF');
-  const children = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+  const children = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND lower(substr(name,1,7)) <> 'sqlite_' ORDER BY name")
     .all().filter(row => db.prepare(`PRAGMA foreign_key_list("${row.name}")`).all()
       .some(fk => fk.table === 'devices' || fk.table === 'devices_old')).map(row => row.name);
   for (const name of children) {

@@ -1,24 +1,25 @@
 #!/usr/bin/env node
 'use strict';
 // Explicit offline recovery, never called automatically by deploy or boot.
-// Requires Node with node:sqlite. Every database write targets a private copy.
+// Stock Node 20 + SQLite CLI. Every database write targets a private copy.
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { DatabaseSync } = require('node:sqlite');
+const { DatabaseSync, checkRuntime } = require('./lib/repair-sqlite-cli');
 const { normalizeSqlV3, computeFingerprints } = require('../lib/osi-migrate/fingerprints');
 const { ensureLedger } = require('../lib/osi-migrate/ledger');
 const { syncFingerprints } = require('../lib/osi-migrate/runner');
 const { LEGACY_CATALOG_SQL } = require('../lib/osi-migrate/legacy-device-catalog');
 const { loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
 const { execFileSync } = require('node:child_process');
+const { prepareOffline, assertHold, backupOnline, releaseHold } = require('./lib/legacy-device-repair-ops');
 
 const ROOT = path.resolve(__dirname, '..');
 const q = s => '"' + s.replace(/"/g, '""') + '"';
 const adapter = db => ({ all: async sql => db.prepare(sql).all(), exec: async sql => db.exec(sql) });
 const rows = (db, sql) => db.prepare(sql).all().map(r => ({ ...r }));
-const master = db => rows(db, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name");
+const master = db => rows(db, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE lower(substr(name,1,7)) <> 'sqlite_' ORDER BY type,name");
 const LEDGER = new Set(['schema_migrations', 'schema_object_fingerprints']);
 
 function hashFile(file) {
@@ -71,8 +72,9 @@ function assertNoOpenHandles(file) {
     }
   }
 }
-function assertGatewayStopped(file) {
-  if (file !== '/data/db/farming.db') return;
+function assertGatewayStopped(file, root = '/') {
+  if (file !== path.join(root, '/data/db/farming.db')) return;
+  assertHold(root);
   for (const name of ['node-red', 'osi-identityd']) {
     const response = JSON.parse(execFileSync('ubus', ['call', 'service', 'list', JSON.stringify({ name })], { encoding: 'utf8' }));
     if (!response || typeof response !== 'object' || Array.isArray(response)) throw new Error('unknown procd service state');
@@ -96,13 +98,6 @@ function correctedSql(sql) {
   });
 }
 
-function valueBytes(value) {
-  if (value === null) return 'null';
-  if (typeof value === 'bigint') return 'i:' + value;
-  if (typeof value === 'number') { const b = Buffer.alloc(8); b.writeDoubleBE(value); return 'r:' + b.toString('hex'); }
-  if (value instanceof Uint8Array) return 'b:' + Buffer.from(value).toString('hex');
-  return 's:' + value;
-}
 function witness(db) {
   const out = {};
   const tables = rows(db, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
@@ -112,10 +107,13 @@ function witness(db) {
     if (columns.some(c => c.hidden)) throw new Error(`unsupported generated/hidden column in ${name}`);
     const h = crypto.createHash('sha256');
     let count = 0;
-    const stmt = db.prepare(`SELECT rowid AS __eb19_rowid, * FROM ${q(name)} ORDER BY rowid`);
-    stmt.setReadBigInts(true);
-    for (const row of stmt.iterate()) {
-      h.update(JSON.stringify(Object.values(row).map(valueBytes)) + '\n');
+    // Encode SQLite storage classes before JSON transport: binary/text NULs,
+    // 64-bit integers and full-precision doubles must never pass through lossy
+    // CLI JSON numbers or blob rendering. Hash rows as a stream.
+    const encoded = column => `CASE typeof(${column}) WHEN 'integer' THEN 'i:' || CAST(${column} AS TEXT) WHEN 'real' THEN 'r:' || printf('%!.26g',${column}) WHEN 'text' THEN 's:' || hex(CAST(${column} AS BLOB)) WHEN 'blob' THEN 'b:' || hex(${column}) ELSE 'null' END`;
+    const fields = ['rowid', ...columns.map(c => q(c.name))].map((c, i) => encoded(c) + ' AS ' + q('v' + i));
+    for (const row of db.prepare(`SELECT ${fields.join(',')} FROM ${q(name)} ORDER BY rowid`).iterate()) {
+      h.update(JSON.stringify(Object.values(row)) + '\n');
       count++;
     }
     out[name] = { columns, count, digest: h.digest('hex') };
@@ -138,6 +136,7 @@ async function plan(db) {
   }
   const affected = rows(db, LEGACY_CATALOG_SQL);
   if (!affected.length) { checkDb(db); return { needed: false, tables: [], objects }; }
+  if (affected.some(o => o.type === 'view')) throw new Error('legacy view requires separate qualification; automatic repair supports child tables and canonical triggers');
   const ref = new DatabaseSync(':memory:');
   try {
     ref.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
@@ -167,7 +166,7 @@ async function plan(db) {
         throw new Error(`unproven legacy text in table ${obj.name}`);
       }
     }
-    if (affected.some(o => correctedSql(o.sql).includes('devices_old'))) throw new Error('unproven legacy literal/comment; refusing text surgery');
+    if (affected.some(o => correctedSql(o.sql).toLowerCase().includes('devices_old'))) throw new Error('unproven legacy literal/comment; refusing text surgery');
     return { needed: true, tables: tables.map(o => o.name), objects, ledger };
   } finally { ref.close(); }
 }
@@ -202,6 +201,7 @@ async function rebuild(db, proposal, checkpoint) {
         const insert = db.prepare('INSERT INTO sqlite_sequence(rowid,name,seq) VALUES (?,?,?)');
         for (const r of sequence) insert.run(r.rowid, r.name, r.seq);
       }
+      if (rows(db, 'PRAGMA foreign_key_check').length) throw new Error('foreign_key_check failed before COMMIT');
       await checkpoint('before-commit');
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -216,17 +216,17 @@ async function rebuild(db, proposal, checkpoint) {
   assertEqual(rows(db, 'PRAGMA foreign_keys'), [{ foreign_keys: 1 }], 'FK enforcement was not restored');
 }
 
-async function repair({ dbPath, apply = false, writersStopped = false, backupDir, checkpoint = async () => {} } = {}) {
+async function repair({ dbPath, apply = false, writersStopped = false, backupDir, checkpoint = async () => {}, gatewayRoot = '/' } = {}) {
   if (!dbPath) throw new Error('database path is required');
   const file = path.resolve(dbPath);
   if (fs.realpathSync(file) !== file) throw new Error('refusing symlinked database path');
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.nlink !== 1) throw new Error('refusing non-regular or multiply-linked database; inspect retained repair artifacts');
-  if (fs.existsSync(file + '.legacy-device-fk-repair.lock')) throw new Error('refusing incomplete repair lock (EEXIST); inspect its stage/receipt before retry');
+  if (fs.lstatSync(file + '.legacy-device-fk-repair.lock', { throwIfNoEntry: false })) throw new Error('refusing incomplete repair lock (EEXIST); inspect its stage/receipt before retry');
   if (apply && (!writersStopped || !backupDir)) throw new Error('--apply requires --writers-stopped and --backup-dir; stop all writers first');
   if (apply) safeDirectory(path.dirname(file));
   assertNoSidecars(file);
-  if (apply) { assertGatewayStopped(file); assertNoOpenHandles(file); }
+  if (apply) { assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file); }
   const originalState = sourceState(file);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-report-'));
   let db, stage, lock, published = false, publicationCommitted = false;
@@ -239,7 +239,11 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     db.exec('PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON');
     assertEqual(rows(db, 'PRAGMA integrity_check'), [{ integrity_check: 'ok' }], 'source copy integrity_check failed');
     const proposal = await plan(db);
-    if (!apply || !proposal.needed) return { applied: false, needed: proposal.needed, tables: proposal.tables, fieldCount: 'unknown' };
+    if (!apply || !proposal.needed) {
+      if (proposal.needed) await rebuild(db, proposal, checkpoint);
+      checkDb(db);
+      return { applied: false, needed: proposal.needed, tables: proposal.tables, dataEligible: true, fieldCount: 'unknown' };
+    }
     const before = witness(db);
     db.close(); db = null;
     lock = file + '.legacy-device-fk-repair.lock';
@@ -285,7 +289,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     record.preservation = Object.fromEntries(Object.entries(before).map(([name, w]) => [name, { rows: w.count, digest: w.digest }]));
     record.phase = 'verified'; receipt();
     await checkpoint('verified');
-    assertNoSidecars(file); assertGatewayStopped(file); assertNoOpenHandles(file);
+    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file);
     assertEqual(sourceState(file), originalState, 'source changed before backup');
     const backupRoot = path.resolve(backupDir);
     let existing = backupRoot;
@@ -300,13 +304,14 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     assertEqual(hashFile(backup), record.originalSha256, 'backup verification failed');
     sync(backup); sync(backupRoot);
     record.backup = backup;
-    fs.linkSync(file, path.join(stage, 'original.db'));
+    fs.copyFileSync(file, path.join(stage, 'original.db'), fs.constants.COPYFILE_EXCL);
+    assertEqual(hashFile(path.join(stage, 'original.db')), record.originalSha256, 'independent original verification failed');
     sync(path.join(stage, 'original.db')); sync(stage); sync(path.dirname(file));
-    const linkedState = sourceState(file);
+    const preparedState = sourceState(file);
     record.phase = 'prepared'; receipt();
     await checkpoint('prepared');
-    assertNoSidecars(file); assertGatewayStopped(file); assertNoOpenHandles(file);
-    assertEqual(sourceState(file), linkedState, 'source changed before atomic swap');
+    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file);
+    assertEqual(sourceState(file), preparedState, 'source changed before atomic swap');
     assertEqual(hashFile(file), record.originalSha256, 'source bytes changed before atomic swap');
     assertNoSidecars(candidate);
     assertEqual(sourceState(candidate), candidateState, 'verified candidate changed before atomic swap');
@@ -324,8 +329,12 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
   } catch (e) {
     if (published && !publicationCommitted) {
       try {
-        fs.linkSync(file, path.join(stage, 'verified.db'));
-        fs.linkSync(path.join(stage, 'original.db'), path.join(stage, 'restore.db'));
+        fs.copyFileSync(file, path.join(stage, 'verified.db'), fs.constants.COPYFILE_EXCL);
+        fs.copyFileSync(path.join(stage, 'original.db'), path.join(stage, 'restore.db'), fs.constants.COPYFILE_EXCL);
+        assertEqual(hashFile(path.join(stage, 'restore.db')), originalState.sha256, 'restore copy verification failed');
+        fs.chmodSync(path.join(stage, 'restore.db'), stat.mode & 0o777);
+        fs.chownSync(path.join(stage, 'restore.db'), stat.uid, stat.gid);
+        sync(path.join(stage, 'restore.db'));
         fs.renameSync(path.join(stage, 'restore.db'), file);
         sync(path.dirname(file));
       } catch (restoreError) { e.message += '; automatic restore failed: ' + restoreError.message; }
@@ -344,15 +353,34 @@ function parseArgs(argv) {
   let mode;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--report' || a === '--apply') { if (mode) throw new Error('choose exactly one mode'); mode = a; out.apply = a === '--apply'; }
+    if (['--report', '--apply', '--prepare-offline', '--backup-online', '--release-hold'].includes(a)) { if (mode) throw new Error('choose exactly one mode'); mode = a; out.apply = a === '--apply'; if (!['--report', '--apply'].includes(a)) out.action = a; }
     else if (a === '--writers-stopped') out.writersStopped = true;
     else if (a === '--backup-dir') { out.backupDir = argv[++i]; if (!out.backupDir || out.backupDir.startsWith('--')) throw new Error('--backup-dir requires a path'); }
     else if (!a.startsWith('-') && !out.dbPath) out.dbPath = a;
     else throw new Error(`unknown argument: ${a}`);
   }
-  if (!mode || !out.dbPath) throw new Error('usage: repair-legacy-device-fk.js <db> --report | --apply --writers-stopped --backup-dir <dir>');
+  if (!mode || !out.dbPath) throw new Error('usage: repair-legacy-device-fk.js --check-runtime | <db> --backup-online --backup-dir <dir> | --prepare-offline | --report | --apply --writers-stopped --backup-dir <dir> | --release-hold');
   return out;
 }
-if (require.main === module) Promise.resolve().then(() => repair(parseArgs(process.argv.slice(2))))
+async function main(argv) {
+  if (argv.length === 1 && argv[0] === '--check-runtime') return checkRuntime();
+  const args = parseArgs(argv);
+  if (['--prepare-offline', '--backup-online', '--release-hold'].includes(args.action)) {
+    if (path.resolve(args.dbPath) !== '/data/db/farming.db') throw new Error('gateway maintenance modes require /data/db/farming.db');
+    if (args.action === '--prepare-offline') return prepareOffline();
+    if (args.action === '--backup-online') return backupOnline(args);
+    return releaseHold({ verify: async file => {
+      const checks = execFileSync('sqlite3', ['-init', '/dev/null', '-readonly', file, 'PRAGMA integrity_check; PRAGMA foreign_key_check;'], { encoding: 'utf8' }).trim();
+      if (checks !== 'ok') throw new Error('database integrity/FK verification failed; keep writer hold');
+      const { verifyHead } = require('../lib/osi-migrate');
+      const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+      const result = await verifyHead(cliRunner(file, { readOnly: true }), { migrationsDir: path.join(ROOT, 'database/migrations/ordered') });
+      if (!result.ok) throw new Error('migration verification failed; keep writer hold: ' + result.reason);
+    } });
+  }
+  return repair(args);
+}
+if (require.main === module) main(process.argv.slice(2))
   .then(r => console.log(JSON.stringify(r))).catch(e => { console.error('Legacy device FK repair refused/failed: ' + e.message); process.exitCode = 1; });
+
 module.exports = { repair, parseArgs, correctedSql, witness, assertNoOpenHandles, assertGatewayStopped };

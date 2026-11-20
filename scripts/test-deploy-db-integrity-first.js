@@ -72,7 +72,7 @@ for (const [name, body] of [
       const before = [digest(db), digest(`${db}-wal`)];
       const r = run(db, body);
       assert.notEqual(r.status, 0, r.stdout + r.stderr);
-      assert.match(r.stderr, /Nothing was changed\. Copy the database with its -wal and -shm files before anything else, and follow docs\/operations\/damaged-farm-database\.md/);
+      assert.match(r.stderr, /This check applied no database repair or migration; SQLite may rebuild -shm\. Copy the database with its -wal and -shm files before anything else, and follow docs\/operations\/damaged-farm-database\.md/);
       assert.deepEqual([digest(db), digest(`${db}-wal`)], before, 'farming.db and farming.db-wal unchanged');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -128,3 +128,68 @@ head are not accepted for a later head. Local repair qualification remains
 mandatory even when the CI runner also exercises its test driver. The
 existing boot-node suite's production-column-capture skip is not a field
 rehearsal. All new fixtures are synthetic.
+
+## Sol review remediation
+
+Sol reviewed `2479425fa` with three P1, four P2 and one P3 findings. The changes
+below address all eight; they still require independent re-review on the new
+head. The earlier command counts above describe `2479425fa`, not the revised
+implementation. Follow-up readiness remains WARN: one behind/five ahead at
+resume, intended base `origin/main` (`1a984f31f`), AGENTS revision `1f9c2c4b8`.
+The branch history is preserved. Field count remains unknown.
+
+| Finding | Revised behavior and regression |
+|---|---|
+| P1 catalog inventory | A literal `sqlite_` prefix test replaces wildcard LIKE. An unknown sqliteX trigger or index refuses; its object and source hash survive. |
+| P1 reboot and retained original | `--prepare-offline` records prior service enablement durably, disables and verifies installed autostart links before downtime, and refuses pending boot enable scripts. Apply on the gateway requires this hold. The prepared-boundary power-loss fixture dispatches the real OpenWrt rc.common with shipped init files and proves the old writer does not start. Retained originals and restoration files are independent copies, with inode and hash checks. Explicit release checks the repaired DB, installed retirement flow and verified migration head before restoring recorded enablement. |
+| P1 stock runtime | A streamed SQLite CLI adapter holds one connection throughout each fenced transaction. Node 20.18.3 runs availability, report, apply and both full profile boot functions on populated fixtures, including 64-bit IDs. Both profile configurations select the SQLite CLI and default BusyBox mkfifo; qualification checks those dependencies. No native addon or node:sqlite is required by recovery. |
+| P2 detector | The shared shell/library predicate includes views and bounded exact legacy tokens. A historical view-only remnant refuses; a benign devices_oldest_seen_at column passes. Ambiguous exact text remains conservative. |
+| P2 FK commit boundary | Foreign-key checking runs before COMMIT and again after rebuilding. A real orphan refuses report eligibility and rolls the staged catalog back to its original FK targets. |
+| P2 first backup | EB19 uses its own strict online backup mode: available CLI, successful .backup, integrity=ok and runtime artifacts in one fsynced set. Failure retains evidence without a raw-copy fallback or service restart. |
+| P2 missing-main evidence | WAL, SHM, journal, repair lock and durable writer hold are checked before a missing file is treated as fresh. The shell checks repair evidence again before seeding. Tests include dangling links and an actual committed orphan WAL; no main file is created and evidence remains intact. |
+| P3 refusal scope | Refusal promises no database repair or migration and accounts for possible WAL-index creation. Incomplete locks point directly to receipt inspection, not a report command that would refuse the lock. The existing damaged-database message assertion now pins this narrower wording; its data/hash assertions remain. |
+
+The adapter streams SQL-encoded storage classes into row witnesses so binary
+values, embedded NULs, Unicode, full-precision reals and 64-bit integers do not
+cross a lossy JSON conversion. Its private FIFO protocol rejects CLI
+metacommands, suppresses ambient CLI init files, frames trailing SQL comments
+and checks the required transport/JSON/FK capabilities before service downtime.
+The Node 20 qualification runs on the workstation architecture with both
+profile payloads; no ARM gateway or field catalog was accessed.
+
+The new regression selection is RED on the reviewed parent: 16 failing tests,
+including both sqliteX objects, view and substring cases, orphan sidecars/locks,
+a committed WAL, staged orphan rollback and stock Node recovery. The expanded
+qualification retains all original 51 cases and adds these review cases,
+OpenWrt boot/release fixtures, mixed partially healed children and binary-value
+preservation. Current final-head results and exact command logs are recorded
+in the PR and package evidence. The full migrations workflow, including its
+cutover job, is rerun locally through one osi-heavy reservation as requested.
+The ordered corpus, seeds and both flows files remain unchanged; 0083 is free.
+
+The revised local validation is green: migration modules 205/205, the complete
+deploy/baseline/CLI batch 561/561, populated qualification 84/84, cutover 15/15
+and deploy pin contract 55/55. Qualification retains all original 51 cases with
+no skips, and includes both Node 20 full profile boot functions. Image dependency
+checks cover SQLite CLI and default BusyBox mkfifo. The strict online backup
+also passes as the last reader of a committed WAL without changing main/WAL
+bytes. The final parent selection reproduces 22 failures, including acceptance
+without a durable hold and misleading refusal wording.
+
+The first complete 125-step replay had two stale assertions: the expected
+missing-main refusal text and the static three-physical-file sidecar guard.
+Their replacements assert the corrected wording and stronger physical/link
+checks; byte/hash assertions remain. The complete affected batch and full sync
+verifier were rerun, along with the latest native preflight and qualification
+commands. All effective workflow results are green. Nine pre-existing optional
+or pending-composition skips remain in the broad workflow. No new skips or test
+filters were used in the final complete qualification.
+
+For local reproduction, run the Node 22 harness with
+`EB19_STOCK_NODE=/path/to/node-v20.18.3/bin/node`; CI provisions that executable
+before returning to Node 22. The local Node 20 binary was verified against the
+[versioned Node release checksums](https://nodejs.org/download/release/v20.18.3/SHASUMS256.txt).
+Use the private-PID-namespace driver through osi-heavy as shown above. GitHub CI
+on the pushed head and the separate Sol re-review remain external gates. The
+PR's “Assumptions to confirm” records the conservative view/startup-script
+refusals, workstation-only hardware qualification and pending flows reservation.

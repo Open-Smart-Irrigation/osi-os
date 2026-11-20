@@ -308,49 +308,78 @@ cleanly, then remove it the same way.
 
 ### Legacy device foreign-key repair
 
-Deploy and migration preflights refuse table, trigger or index SQL containing
-`devices_old`, including ambiguous text, before changing the database or flipping
-the payload. Field count: **unknown**. Do not restart the old boot-time healer to
-get past the refusal. This explicit recovery is the sanctioned exception for
-replacing a database file with its own repaired and verified copy, never a seed.
+Deploy and migration preflights refuse exact `devices_old` tokens in tables,
+triggers, indexes and views, including ambiguous literals/comments. A missing
+main file with any WAL, SHM, journal or repair lock is recovery evidence, never
+a fresh install. Keep it intact. The check applies no database repair or
+migration; SQLite may create/rebuild the WAL index (`-shm`). Earlier deploy
+phases may have installed packages or staged files. Field count: **unknown**.
 
-Use the reviewed checkout's `scripts/repair-legacy-device-fk.js`. It stages
-the candidate on the database's filesystem. It requires Node 22.13 or newer with
-`node:sqlite` available. It supports the shipped schema with damaged child FK
-targets, including quoted, unquoted, bracketed and lowercase references. Older
-schemas, unknown or missing objects, divergent ledgers and any surviving
-`devices_old` parent are refused. Preserve the refused catalog for separate
-qualification; do not force it to fit. There is no runtime migration or 0083.
+Use the complete reviewed checkout, including `scripts/lib/`, `lib/osi-migrate/`
+and the approved `database/` corpus. The repair uses the shipped SQLite CLI on
+Node 20.18.3, with one persistent CLI connection per transaction; it needs no
+`node:sqlite` or extra native binding. Both profile configurations ship the CLI and use the BusyBox defaults with
+mkfifo enabled.
+Prove the local CLI, FIFO transport, FK introspection and lossless integer
+transport before stopping services. A missing capability refuses before downtime.
 
-1. Obtain authorization for the named gateway. Take the **Pre-repair backup
-   script** backup above, including the SQLite `.backup` and runtime files.
-   Stop the identity supervisor and Node-RED, and keep them stopped throughout:
+The supported repair is the shipped schema with legacy FK-reference damage,
+including mixed quoted, unquoted, bracketed and lowercase references. Unknown
+objects (including unrecognized views), older schemas, divergent ledgers, any
+surviving old parent and orphaned data refuse. There is no migration or 0083.
+Never restart the old healer to bypass a refusal.
+
+1. Obtain authorization for the named gateway and verify the reviewed checkout.
+   Check recovery availability, then take a strict online backup while services
+   are still running. Use a timestamped directory under an existing private
+   backup parent:
 
    ```sh
+   node scripts/repair-legacy-device-fk.js --check-runtime
+   BK=/data/db/backups/osi-os-$(date +%Y%m%d-%H%M%S)
+   node scripts/repair-legacy-device-fk.js /data/db/farming.db --backup-online --backup-dir "$BK"
+   ```
+
+   This EB19 path requires an existing main database, successful SQLite `.backup`
+   and `integrity_check` returning `ok`. It copies flows, settings, credentials
+   and GUI into the same backup set and fsyncs it. It never falls back to raw
+   database copying, stops a service or arms an automatic restart trap. Do not
+   substitute the generic pre-repair backup script here. Any failure retains the
+   partial backup and receipt, exits nonzero and requires investigation before
+   proceeding; a printed directory alone is not backup acceptance.
+
+2. Make the stopped-writer state survive a reboot **before** stopping services:
+
+   ```sh
+   node scripts/repair-legacy-device-fk.js /data/db/farming.db --prepare-offline
    /etc/init.d/osi-identityd stop
    /etc/init.d/node-red stop
    ubus call service list '{"name":"osi-identityd"}'
    ubus call service list '{"name":"node-red"}'
    ```
 
-   Both named services must be absent or have only `running:false` instances.
-   Stop other database users too. A running/unknown service or any open handle
-   refuses apply. `--writers-stopped` is an operator assertion, not a command to
-   stop services. The tool rechecks procd on the gateway and scans open handles;
-   it cannot prevent a separate privileged actor from restarting a writer.
-2. With writers stopped, checkpoint and close SQLite normally:
+   Preparation durably records both services' prior enablement under
+   `/data/db/farming.db.legacy-device-fk-writer-hold/`, disables autostart through
+   the installed init scripts, fsyncs the rc.d directory and verifies no start
+   link remains. This covers the old software already installed: its boot entry
+   is no longer selected by OpenWrt rcS. Pending first-boot scripts that could
+   enable these services refuse preparation. Preparation does not stop them.
+   An incomplete preparation retains its receipt for investigation; do not guess
+   prior enablement or delete the hold. Apply on the gateway rechecks the durable
+   hold as well as procd and open file handles. Stop other writers too. A separate
+   privileged actor must not start or enable services during recovery.
+
+3. With all writers stopped, checkpoint and close SQLite normally:
 
    ```sh
    sqlite3 /data/db/farming.db 'PRAGMA wal_checkpoint(TRUNCATE);'
    ls -l /data/db/farming.db /data/db/farming.db-wal /data/db/farming.db-shm /data/db/farming.db-journal
    ```
 
-   Missing sidecars are expected. If any sidecar remains, stop and investigate;
-   the tool refuses even an empty one. Never delete WAL, SHM or journal files to
-   pass the gate. On a damaged database follow the damaged-database runbook
-   before checkpointing it.
-3. From that checkout, run the report. It works on disposable scratch and makes
-   no source change or backup. A refusal changes nothing in the source:
+   Missing sidecars are expected. If any remains, investigate; never delete it
+   to pass a gate. For physical damage, use the damaged-database runbook before
+   checkpointing. Set persistent scratch and allow at least four database sizes
+   for working pages, independent originals and backups, plus filesystem margin:
 
    ```sh
    WORK=/data/db/backups/legacy-device-fk-work-$(date +%Y%m%d-%H%M%S)
@@ -360,58 +389,59 @@ qualification; do not force it to fit. There is no runtime migration or 0083.
    node scripts/repair-legacy-device-fk.js /data/db/farming.db --report
    ```
 
-   Use persistent scratch, not the gateway's small RAM-backed `/tmp`. Allow at
-   least three database sizes of free space for scratch, rebuilt pages, journals
-   and backups, plus filesystem margin. A full disk refuses publication and
-   retains the original; keep any failed-stage evidence for inspection.
+   Report rebuilds only disposable scratch and checks data eligibility, including
+   FKs, before accepting a shape. It changes no source data. An orphan refuses
+   and rolls the scratch transaction back. Do not treat shape recognition alone
+   as proof that the data can be repaired.
 
-4. If the supported-shape report is accepted, apply with a persistent backup
-   directory. Use a timestamped directory chosen for this repair:
+4. If report returns `dataEligible:true`, apply with a new persistent backup set:
 
    ```sh
-   BK=/data/db/backups/legacy-device-fk-$(date +%Y%m%d-%H%M%S)
-   node scripts/repair-legacy-device-fk.js /data/db/farming.db --apply --writers-stopped --backup-dir "$BK"
+   REPAIR_BK=/data/db/backups/legacy-device-fk-$(date +%Y%m%d-%H%M%S)
+   node scripts/repair-legacy-device-fk.js /data/db/farming.db --apply --writers-stopped --backup-dir "$REPAIR_BK"
    ```
 
-   The tool rebuilds children only on a copy under FK fencing, preserves all
-   rows/columns, implicit rowids and sequence values, and verifies integrity,
-   FKs and complete row digests before publication. Existing fingerprints are
-   recomputed only on the proven copy; migration rows remain unchanged. It
-   fsyncs the persistent backup and candidate, retains `original.db` beside a
-   receipt, and atomically renames the verified candidate over the source.
-   The JSON result names every retained file. Keep these files through the
-   deploy and acceptance window.
-5. Verify and retry the deploy, which performs its normal ledger/schema checks:
+   Rebuilds run on a private copy with FK fencing. FK checks must pass inside
+   the transaction before COMMIT and again afterwards. Complete row, column,
+   rowid and sequence witnesses must match. Existing computed fingerprints are
+   refreshed on the proven copy; ledger rows remain unchanged. Before atomic
+   publication, the tool fsyncs the verified candidate and backup and preserves
+   an **independent copy** at `original.db`, with a durable receipt. It never
+   hard-links the source to retained evidence. Keep the writer hold in place.
+
+5. Verify the database, then deploy the reviewed retirement payload and complete
+   its acceptance checks. Only after a successful deploy, release the hold:
 
    ```sh
    sqlite3 -readonly /data/db/farming.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'
    node scripts/repair-legacy-device-fk.js /data/db/farming.db --report
+   # Run the reviewed deploy and its acceptance checks here.
+   node scripts/repair-legacy-device-fk.js /data/db/farming.db --release-hold
    ```
 
-   Expect `ok`, no FK rows and `needed:false`. Do not bypass a remaining schema
-   or ledger refusal. The deploy owns the subsequent service restart.
-   The tool closes the candidate in DELETE journal mode; the normal database
-   helper restores WAL on startup. Remove the empty `$WORK` with `rmdir` after
-   acceptance; keep the named backup, receipt and retained original.
+   Expect `ok`, no FK rows and `needed:false`. Release refuses an incomplete
+   repair lock, an installed flow still containing the boot surgery, failed
+   integrity/FK checks or an unverified ledger/fingerprint head. It restores
+   exactly the recorded service enablement and archives the hold receipt. It
+   does not start services; the deploy owns activation. Keep all backups and
+   receipts through acceptance. Do not bypass a remaining schema refusal.
 
-An interrupted attempt retains `/data/db/farming.db.legacy-device-fk-repair.lock`.
-Its `stage` file names a private directory with a receipt and any candidate or
-original. Keep writers stopped. Before publication the DB path retains the
-original bytes; after publication it holds either the original or the verified
-candidate. A caught error before the published receipt is durable attempts an atomic
-restoration, retaining both versions. After that commit point, cleanup errors
-keep the verified replacement and retained original, and exit nonzero for
-operator inspection. A power cut never requires trusting an unverified candidate.
+An interrupted repair retains `/data/db/farming.db.legacy-device-fk-repair.lock`.
+Its `stage` file names the receipt and private evidence directory. **Keep the
+writer hold and services stopped across reboot.** Do not rerun report against a
+locked source: inspect the receipt directly. Before publication the path retains
+original bytes; after it, the path contains the original or verified candidate.
+Caught errors before the durable published receipt attempt restoration from an
+independent copy, retaining both versions. Errors after that boundary retain the
+verified replacement and exit nonzero for inspection.
 
-Inspect the receipt's phase, original/candidate SHA-256 values, persistent backup
-and actual file hashes with `sha256sum`. Verify integrity and FKs on the candidate
-before choosing it. If the DB path matches the original, it is still unrepaired;
-if it matches the verified candidate, the copy verification preceded publication.
-An absent receipt, different hashes or ambiguous paths require escalation.
-Do not remove the lock or rename retained originals on a guess. Have the recovery
-state reviewed and authorize its disposition before clearing a stale lock and
-retrying. Never hand-edit `sqlite_master`, use `writable_schema`, drop an old
-parent, copy in a seed, hand-stamp fingerprints, or force a deploy past refusal.
+Compare the receipt's phase, original/candidate hashes and actual file hashes.
+Verify integrity and FKs on a candidate before choosing it. An absent receipt,
+different hashes or ambiguous paths require escalation. Have the recovery state
+reviewed and authorize its disposition before clearing a stale lock. Never patch
+`sqlite_master`, enable `writable_schema`, drop an old parent, install a seed,
+hand-stamp fingerprints or force deploy past a refusal. A missing main file with
+sidecars or a lock is not permission to create one.
 
 ### Changing DEVICE_EUI and linked offline login
 

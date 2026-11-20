@@ -1541,11 +1541,19 @@ seed_db_if_missing() {
         echo "HELD: Database recovery is incomplete. Refusing to seed $DB_PATH." >&2
         return 1
     fi
+    if [ -e "$DB_PATH.legacy-device-fk-repair.lock" ] || [ -L "$DB_PATH.legacy-device-fk-repair.lock" ]; then
+        echo "ERROR: incomplete legacy device FK repair; inspect its receipt using .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair before seeding." >&2
+        return 1
+    fi
+    if [ ! -e "$DB_PATH" ] && { [ -e "$DB_PATH.legacy-device-fk-writer-hold" ] || [ -L "$DB_PATH.legacy-device-fk-writer-hold" ]; }; then
+        echo "ERROR: missing database with a durable writer hold; preserve recovery evidence before seeding." >&2
+        return 1
+    fi
     if [ -e "$DB_PATH" ]; then
         echo "SKIP: existing live database preserved at $DB_PATH"
         return 0
     fi
-    if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then
+    if [ -e "$DB_PATH-wal" ] || [ -L "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -L "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ] || [ -L "$DB_PATH-journal" ]; then
         echo "ERROR: $DB_PATH is missing but SQLite sidecar files exist." >&2
         echo "Refusing to seed; inspect $DB_DIR before continuing." >&2
         return 1
@@ -1583,7 +1591,7 @@ seed_db_if_missing() {
   }
   const dir = fs.openSync(path.dirname(target), 'r');
   try {
-    for (const suffix of ['.osi-recovery', '-wal', '-shm', '-journal']) {
+    for (const suffix of ['.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold', '-wal', '-shm', '-journal']) {
       if (fs.lstatSync(target + suffix, { throwIfNoEntry: false })) {
         throw new Error('database recovery record or sidecar appeared before seeding: ' + suffix);
       }
@@ -2347,27 +2355,35 @@ check_live_db_readonly() {
         echo "HELD: Database recovery is incomplete. Resolve $DB_PATH.osi-recovery before deploying." >&2
         return 1
     fi
-    [ -e "$DB_PATH" ] || return 0
-    command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
     if [ -e "$DB_PATH.legacy-device-fk-repair.lock" ] || [ -L "$DB_PATH.legacy-device-fk-repair.lock" ]; then
-        echo "ERROR: incomplete offline legacy device FK repair. Inspect its retained receipt with scripts/repair-legacy-device-fk.js; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
+        echo "ERROR: incomplete offline legacy device FK repair. Keep writers stopped and inspect its retained receipt; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
         return 1
     fi
+    if [ ! -e "$DB_PATH" ]; then
+        for cldb_suffix in '' -wal -shm -journal .legacy-device-fk-writer-hold; do
+            if [ -e "$DB_PATH$cldb_suffix" ] || [ -L "$DB_PATH$cldb_suffix" ]; then
+                echo "ERROR: missing database with recovery evidence at $DB_PATH$cldb_suffix; preserve it and investigate. No database repair or migration was applied." >&2
+                return 1
+            fi
+        done
+        return 0
+    fi
+    command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
     if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
-        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). This check applied no database repair or migration; SQLite may rebuild -shm. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
         return 1
     fi
     if [ "$cldb_result" != "ok" ]; then
-        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). This check applied no database repair or migration; SQLite may rebuild -shm. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
         return 1
     fi
     # EB19: read-only and before checkpoints, ledger writes or payload changes.
-    if ! cldb_legacy="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','trigger','index') AND (instr(lower(coalesce(sql,'')), 'devices_old') > 0 OR lower(tbl_name) = 'devices_old') ORDER BY type, name" 2>&1)"; then
-        echo "ERROR: could not inspect the legacy device catalog: $cldb_legacy. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
+    if ! cldb_legacy="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','trigger','index','view') AND ((' ' || lower(coalesce(sql,'')) || ' ') GLOB ('*[^a-z0-9_$' || char(128) || '-' || char(1114111) || ']devices_old[^a-z0-9_$' || char(128) || '-' || char(1114111) || ']*') OR lower(tbl_name) = 'devices_old') ORDER BY type, name" 2>&1)"; then
+        echo "ERROR: could not inspect the legacy device catalog: $cldb_legacy. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
         return 1
     fi
     if [ -n "$cldb_legacy" ]; then
-        echo "ERROR: legacy devices_old catalog references. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
+        echo "ERROR: legacy devices_old catalog references. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
         return 1
     fi
 }

@@ -47,6 +47,11 @@ jobs:
           }
       - uses: actions/setup-node@v4
         with:
+          node-version: '20.18.3'
+      - name: Retain stock gateway Node for offline repair qualification
+        run: echo "EB19_STOCK_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
           node-version: '22'  # node:sqlite (used by rehearse-devices-rebuild) requires Node >=22.5
       # The conditional irrigation replication tests validate payloads against the
       # sync contract schema with the pinned AJV in scripts/package.json.

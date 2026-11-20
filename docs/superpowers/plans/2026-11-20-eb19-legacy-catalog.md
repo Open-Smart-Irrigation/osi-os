@@ -75,7 +75,7 @@ alone does not bypass either admission check.
 change only FK spelling before creating the database. A separate rename fixture
 executes the historical rename/copy/drop sequence on an already populated seed.
 The literal-only fixture gives an unrelated table a string default containing
-the replacement text. No fixture writes `sqlite_master` directly.
+the replacement text. The core builder does not edit the catalog. Partial-healing regression cases replay the old catalog edits only on synthetic databases.
 
 Every fixture populates two devices and every discovered direct FK child of
 `devices` (13 in this base), including calibration and schedule tables. A newly

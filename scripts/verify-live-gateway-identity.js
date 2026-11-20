@@ -287,7 +287,7 @@ expectIncludes('deploy.sh', deploySource,
   'identityd_deploy_state="disarmed"\necho "OK"',
   'disarms restoration only after final readiness succeeds');
 
-expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard');
+expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -L "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -L "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ] || [ -L "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard, including dangling links');
 expectIncludes('deploy.sh', deploySource,
   'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \\\n       ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null; then\n        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2\n        node_red_restart_needed=0\n        exit 1\n    fi\n    PAYLOAD_FLIPPED=1\n    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP at $(deploy_time)"\n    swap_call clearPendingSwitch "$DEPLOY_STAMP" >/dev/null 2>&1 || true\nelse\n    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"\nfi',
   'retains paired payload activation and its already-active no-op');

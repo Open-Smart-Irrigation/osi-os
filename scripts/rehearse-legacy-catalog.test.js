@@ -460,6 +460,8 @@ test('option B named-service gate accepts stopped services and refuses running o
   try {
     // Simulated gateway path and fixture ubus executable; no gateway is opened.
     fs.writeFileSync(path.join(dir, 'ubus'), '#!/bin/sh\nprintf "%s\\n" "$EB19_PROCD_FIXTURE"\n', { mode: 0o700 });
+    const gatewayRoot = require('./fixtures/legacy-device-gateway').makeGateway(path.join(dir, 'gateway'));
+    require('./lib/legacy-device-repair-ops').prepareOffline({ root: gatewayRoot });
     const cases = [
       [{}, true],
       [{ 'node-red': { instances: {} }, 'osi-identityd': { instances: { main: { running: false } } } }, true],
@@ -471,10 +473,348 @@ test('option B named-service gate accepts stopped services and refuses running o
       [[], false],
     ];
     for (const [state, accepted] of cases) {
-      const r = spawnSync(process.execPath, ['-e', "require(process.argv[1]).assertGatewayStopped('/data/db/farming.db')", path.join(ROOT, 'scripts/repair-legacy-device-fk.js')], {
+      const r = spawnSync(process.execPath, ['-e', "require(process.argv[1]).assertGatewayStopped(process.argv[3],process.argv[2])", path.join(ROOT, 'scripts/repair-legacy-device-fk.js'), gatewayRoot, path.join(gatewayRoot, 'data/db/farming.db')], {
         encoding: 'utf8', env: { ...process.env, PATH: dir + ':' + process.env.PATH, EB19_PROCD_FIXTURE: JSON.stringify(state) },
       });
       assert.equal(r.status === 0, accepted, JSON.stringify(state) + ': ' + r.stderr);
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const kind of ['trigger', 'index']) {
+  test(`Sol review sqliteX ${kind}: refuse unknown object without losing it or source bytes`, async () => {
+    await withFixture('quoted', async (file, dir) => {
+      const db = new DatabaseSync(file);
+      const sql = kind === 'trigger'
+        ? 'CREATE TRIGGER sqliteX_audit AFTER INSERT ON device_data BEGIN SELECT 1; END'
+        : 'CREATE INDEX sqliteX_audit ON device_data(recorded_at)';
+      db.exec(sql); db.close();
+      const before = digest(file);
+      await assert.rejects(tool().repair(options(file, dir)), /unknown or divergent catalog object/);
+      assert.equal(digest(file), before);
+      const after = new DatabaseSync(file);
+      try { assert.equal(after.prepare("SELECT count(*) n FROM sqlite_master WHERE name='sqliteX_audit'").get().n, 1); }
+      finally { after.close(); }
+    });
+  });
+}
+function shellFunction(name) {
+  const source = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+  return new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(source)[0];
+}
+for (const kind of ['partial-healing-view', 'benign-substring', 'benign-unicode-substring', 'benign-dollar-substring']) {
+  test(`Sol review shared preflight ${kind} is consistent in library and deploy shell`, async () => {
+    await withFixture('healthy', async (file, dir) => {
+      if (kind === 'partial-healing-view') file = path.join(dir, 'historical-view.db');
+      const db = new DatabaseSync(file);
+      if (kind === 'partial-healing-view') {
+        db.exec('CREATE TABLE devices(id INTEGER PRIMARY KEY); CREATE TABLE child(device_id INTEGER REFERENCES devices(id)); CREATE VIEW retained_device_history AS SELECT * FROM devices; INSERT INTO devices VALUES(1),(2); INSERT INTO child VALUES(1),(2)');
+        db.exec('PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=OFF; ALTER TABLE devices RENAME TO devices_old; CREATE TABLE devices(id INTEGER PRIMARY KEY); INSERT INTO devices SELECT * FROM devices_old; DROP TABLE devices_old');
+        // Partial old-healer run: the child was corrected, the renamed view was not.
+        db.exec('PRAGMA writable_schema=ON');
+        db.exec("UPDATE sqlite_master SET sql=replace(sql,'REFERENCES \"devices_old\"','REFERENCES devices') WHERE name='child'");
+        db.exec('PRAGMA writable_schema=OFF; PRAGMA schema_version=100');
+      } else {
+        const column = kind === 'benign-unicode-substring' ? 'devices_oldé' : kind === 'benign-dollar-substring' ? 'devices_old$seen' : 'devices_oldest_seen_at';
+        db.exec('ALTER TABLE devices ADD COLUMN ' + column + ' TEXT');
+      }
+      db.close();
+      const before = digest(file);
+      const { assertNoLegacyDeviceCatalog } = require('../lib/osi-migrate/legacy-device-catalog');
+      const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+      const probe = assertNoLegacyDeviceCatalog(cliRunner(file));
+      if (kind === 'partial-healing-view') await assert.rejects(probe, /Legacy devices_old.*view:retained_device_history/);
+      else await probe;
+      const shell = spawnSync('sh', ['-c', shellFunction('check_live_db_readonly') + '\nDB_PATH="$1"; check_live_db_readonly', 'probe', file], { encoding: 'utf8' });
+      assert.equal(shell.status === 0, kind !== 'partial-healing-view', shell.stderr);
+      if (kind === 'partial-healing-view') await assert.rejects(tool().repair({ dbPath: file }), /legacy view requires separate qualification/);
+      assert.equal(digest(file), before);
+    });
+  });
+}
+for (const suffix of ['-wal', '-shm', '-journal', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold']) {
+  for (const link of [false, true]) {
+    test(`Sol review absent main + ${suffix} ${link ? 'dangling link' : 'file'} refuses library, deploy and seeding`, async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-absent-evidence-'));
+      const file = path.join(dir, 'farming.db');
+      const evidence = file + suffix;
+      try {
+        if (link) fs.symlinkSync(path.join(dir, 'missing'), evidence);
+        else fs.writeFileSync(evidence, 'committed recovery evidence');
+        const { applyPending } = require('../lib/osi-migrate');
+        const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+        await assert.rejects(applyPending(cliRunner(file), { migrationsDir: path.join(ROOT, 'database/migrations/ordered') }), /recovery|repair|sidecar/i);
+        for (const fn of ['check_live_db_readonly', 'seed_db_if_missing']) {
+          const r = spawnSync('sh', ['-c', shellFunction(fn) + '\nDB_PATH="$1"; ' + fn, 'probe', file], { encoding: 'utf8' });
+          assert.notEqual(r.status, 0, fn + ': ' + r.stderr);
+          assert.equal(fs.existsSync(file), false);
+        }
+        if (link) assert.equal(fs.readlinkSync(evidence), path.join(dir, 'missing'));
+        else assert.equal(fs.readFileSync(evidence, 'utf8'), 'committed recovery evidence');
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
+}
+test('Sol review committed orphan WAL survives applyPending without a main database', async () => {
+  await withFixture('healthy', async (file, dir) => {
+    const writer = spawnSync(process.execPath, ['-e', "const{DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.argv[1]);d.exec(\"PRAGMA journal_mode=WAL; INSERT INTO device_data(deveui,recorded_at) VALUES ('FFFF000000000001','2026-07-01')\");process.kill(process.pid,'SIGKILL')", file]);
+    assert.equal(writer.signal, 'SIGKILL');
+    fs.renameSync(file, path.join(dir, 'retained-main.db'));
+    const before = digest(file + '-wal');
+    const { applyPending } = require('../lib/osi-migrate');
+    const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+    await assert.rejects(applyPending(cliRunner(file), { migrationsDir: path.join(ROOT, 'database/migrations/ordered') }), /sidecar/);
+    assert.equal(fs.existsSync(file), false);
+    assert.equal(digest(file + '-wal'), before);
+  });
+});
+test('Sol review orphan data rolls staged catalog back before COMMIT and report refuses eligibility', async () => {
+  await withFixture('quoted', async (file, dir) => {
+    const bad = new DatabaseSync(file); bad.exec("PRAGMA foreign_keys=OFF; UPDATE device_data SET deveui='missing-device' WHERE rowid=(SELECT min(rowid) FROM device_data)"); bad.close();
+    const before = digest(file);
+    const reportError = await tool().repair({ dbPath: file }).then(() => null, e => e);
+    await assert.rejects(tool().repair(options(file, dir)), /foreign_key_check/);
+    const stage = fs.readFileSync(path.join(file + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
+    const candidate = new DatabaseSync(path.join(stage, 'candidate.db'));
+    try { assert.ok(candidate.prepare('PRAGMA foreign_key_list(device_data)').all().some(f => f.table === 'devices_old')); }
+    finally { candidate.close(); }
+    assert.match(reportError && reportError.message || '', /foreign_key_check failed before COMMIT/);
+    assert.equal(digest(file), before);
+  });
+});
+test('Sol review mixed partially healed children preserve every row and both FK spellings', async () => {
+  await withFixture('bracketed', async (file, dir) => {
+    const db = new DatabaseSync(file);
+    db.exec('PRAGMA writable_schema=ON');
+    db.exec('UPDATE sqlite_master SET sql=replace(sql,\'[devices_old]\',\'"devices_old"\') WHERE name=\'device_data\'');
+    db.exec('UPDATE sqlite_master SET sql=replace(replace(sql,\'REFERENCES "devices_old"\',\'REFERENCES devices\'),\'REFERENCES devices_old\',\'REFERENCES devices\') WHERE type=\'table\' AND sql LIKE \'%devices_old%\'');
+    db.exec('PRAGMA writable_schema=OFF; PRAGMA schema_version=101');
+    db.close();
+    const r = await tool().repair(options(file, dir));
+    assert.equal(r.applied, true);
+    assert.equal(r.tables.length, 12);
+    const repaired = new DatabaseSync(file);
+    try { assert.equal(repaired.prepare('SELECT count(*) n FROM device_data').get().n, 2); assert.deepEqual(repaired.prepare('PRAGMA foreign_key_check').all(), []); }
+    finally { repaired.close(); }
+  });
+});
+test('Sol review prepared power loss keeps independent originals and disables the real OpenWrt boot entries', async () => {
+  await withFixture('quoted', async (file, dir) => {
+    const { makeGateway, reboot } = require('./fixtures/legacy-device-gateway');
+    const { prepareOffline, assertHold } = require('./lib/legacy-device-repair-ops');
+    const root = makeGateway(path.join(dir, 'gateway'));
+    reboot(root);
+    assert.match(fs.readFileSync(path.join(root, 'started'), 'utf8'), /node-red/);
+    fs.unlinkSync(path.join(root, 'started'));
+    const gatewayFile = path.join(root, 'data/db/farming.db');
+    fs.copyFileSync(file, gatewayFile);
+    await assert.rejects(tool().repair({ ...options(gatewayFile, dir), gatewayRoot: root }), /writer-hold|receipt/);
+    assert.equal(digest(gatewayFile), digest(file));
+    const held = prepareOffline({ root });
+    assert.ok(held.services.every(s => s.enabled));
+    const before = digest(gatewayFile);
+    const bin = path.join(dir, 'bin'); fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ubus'), '#!/bin/sh\nprintf \'{}\\n\'\n', { mode: 0o700 });
+    const script = `require(process.argv[1]).repair({dbPath:process.argv[2],apply:true,writersStopped:true,backupDir:process.argv[3],gatewayRoot:process.argv[4],checkpoint:async p=>{if(p==='prepared')process.kill(process.pid,'SIGKILL')}}).catch(e=>{console.error(e);process.exitCode=1})`;
+    const child = spawnSync(process.execPath, ['-e', script, path.join(ROOT, 'scripts/repair-legacy-device-fk.js'), gatewayFile, path.join(dir, 'backup'), root], { encoding: 'utf8', env: { ...process.env, PATH: bin + ':' + process.env.PATH } });
+    assert.equal(child.signal, 'SIGKILL', child.stderr);
+    reboot(root); // fresh shell dispatch, no state retained from prepareOffline
+    assert.equal(fs.existsSync(path.join(root, 'started')), false, 'old writer must not enter its boot path');
+    assertHold(root);
+    const stage = fs.readFileSync(path.join(gatewayFile + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
+    const original = path.join(stage, 'original.db');
+    assert.notEqual(fs.statSync(gatewayFile).ino, fs.statSync(original).ino);
+    assert.equal(fs.statSync(original).nlink, 1);
+    assert.equal(digest(original), before);
+    assert.equal(digest(gatewayFile), before);
+  });
+});
+test('Sol review strict online backup verifies DB and runtime together and never stops/restarts on failure', async () => {
+  await withFixture('healthy', async (file, dir) => {
+    const { makeGateway } = require('./fixtures/legacy-device-gateway');
+    const { backupOnline } = require('./lib/legacy-device-repair-ops');
+    const root = makeGateway(path.join(dir, 'gateway'));
+    fs.copyFileSync(file, path.join(root, 'data/db/farming.db'));
+    const live = new DatabaseSync(path.join(root, 'data/db/farming.db'));
+    let r;
+    try {
+      live.exec("PRAGMA journal_mode=WAL; INSERT INTO device_data(deveui,recorded_at) VALUES ('FFFF000000000001','2026-07-02')");
+      const wal = digest(path.join(root, 'data/db/farming.db-wal'));
+      r = backupOnline({ root, backupDir: path.join(dir, 'online-backup') });
+      assert.equal(digest(path.join(root, 'data/db/farming.db-wal')), wal);
+      const snapshot = new DatabaseSync(path.join(r.backup, 'farming.db'));
+      try { assert.equal(snapshot.prepare('SELECT count(*) n FROM device_data').get().n, 3, 'online backup includes committed WAL pages'); }
+      finally { snapshot.close(); }
+    } finally { live.close(); }
+    assert.equal(r.integrity, 'ok');
+    for (const name of ['farming.db','flows.json','settings.js','flows_cred.json','gui']) assert.ok(fs.existsSync(path.join(r.backup, name)));
+    const bad = new DatabaseSync(path.join(root, 'data/db/farming.db')); bad.close();
+    fs.writeFileSync(path.join(root, 'data/db/farming.db'), 'broken');
+    assert.throws(() => backupOnline({ root, backupDir: path.join(dir, 'failed-backup') }), /strict online backup failed/);
+    assert.equal(fs.existsSync(path.join(root, 'started')), false);
+    assert.equal(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(p => /^S/.test(p)).length, 2, 'failure changes no service enablement');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'failed-backup/receipt.json'))).phase, 'failed');
+  });
+});
+for (const profile of ['bcm2712', 'bcm2709']) {
+  test(`Sol review stock Node 20.18.3 report and repair are runnable for ${profile}`, async () => {
+    await withFixture('quoted', async (file, dir) => {
+      const large = new DatabaseSync(file);
+      large.exec('UPDATE device_data SET id=9223372036854775806 WHERE id=(SELECT min(id) FROM device_data); UPDATE sqlite_sequence SET seq=9223372036854775807 WHERE name=\'device_data\'');
+      large.close();
+      const config = fs.readFileSync(path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/.config`), 'utf8');
+      assert.match(config, /^CONFIG_PACKAGE_sqlite3-cli=y$/m, 'the shipped profile must include the recovery CLI');
+      if (/^CONFIG_BUSYBOX_CUSTOM=y$/m.test(config)) assert.match(config, /^CONFIG_BUSYBOX_CONFIG_MKFIFO=y$/m);
+      else assert.match(fs.readFileSync(path.join(ROOT, 'openwrt/package/utils/busybox/Config-defaults.in'), 'utf8'), /config BUSYBOX_DEFAULT_MKFIFO\n\s*bool\n\s*default y/);
+      const node = process.env.EB19_STOCK_NODE;
+      assert.ok(node, 'set EB19_STOCK_NODE to the qualified Node 20.18.3 executable');
+      assert.equal(execFileSync(node, ['--version'], { encoding: 'utf8' }).trim(), 'v20.18.3');
+      const toolPath = path.join(ROOT, 'scripts/repair-legacy-device-fk.js');
+      const run = args => {
+        const r = spawnSync(node, [toolPath, ...args], { encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout);
+      };
+      assert.equal(run(['--check-runtime']).adapter, 'sqlite3-cli');
+      assert.equal(run([file, '--report']).dataEligible, true);
+      assert.equal(run([file, '--apply', '--writers-stopped', '--backup-dir', path.join(dir, 'backups')]).applied, true);
+      assert.equal(execFileSync('sqlite3', ['-readonly', file, "SELECT cast(max(id) AS TEXT) FROM device_data"], { encoding: 'utf8' }).trim(), '9223372036854775806');
+      const payload = fs.readFileSync(path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`), 'utf8');
+      const init = JSON.parse(payload).find(n => n.id === 'sync-init-fn').func;
+      const shimSource = require('./rehearse-devices-rebuild').makeFacadeShim.toString();
+      const bootScript = `
+        const {DatabaseSync}=require(process.argv[1]);
+        const {witness}=require(process.argv[2]);
+        const makeShim=new Function('DatabaseSync','return ('+process.argv[5]+')')(DatabaseSync);
+        (async()=>{
+          let d=new DatabaseSync(process.argv[3]);
+          const children=d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND lower(substr(name,1,7)) <> 'sqlite_'").all().filter(r=>d.prepare('PRAGMA foreign_key_list("'+r.name+'")').all().some(f=>f.table==='devices')).map(r=>r.name);
+          const before=witness(d);d.close();
+          const shim=makeShim(process.argv[3]); const errors=[];
+          try { await new Function('osiDb','env','node','msg',process.argv[4])({Database:function(){return shim;}},{get:()=>''},{warn:()=>{},error:e=>errors.push(String(e)),log:()=>{},status:()=>{}},{}); } finally { shim.close(); }
+          if(errors.length)throw new Error(errors.join(';'));
+          d=new DatabaseSync(process.argv[3]);const after=witness(d);
+          for(const name of children)if(JSON.stringify(before[name])!==JSON.stringify(after[name]))throw new Error('history changed: '+name);
+          if(d.prepare('PRAGMA foreign_key_check').all().length)throw new Error('FK check failed');
+          d.close();console.log('stock Node 20 full boot and populated child witnesses passed');
+        })().catch(e=>{console.error(e.stack);process.exitCode=1});`;
+      const boot = spawnSync(node, ['-e', bootScript, path.join(ROOT, 'scripts/lib/repair-sqlite-cli.js'), toolPath, file, retiredFunction(init), shimSource], { encoding: 'utf8', timeout: 60000, killSignal: 'SIGKILL' });
+      assert.equal(boot.status, 0, boot.stderr);
+      assert.match(boot.stdout, /full boot and populated child witnesses passed/);
+    });
+  });
+}
+
+test('Sol review writer hold release refuses old payload and failed validation, then restores recorded enablement only', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-hold-release-'));
+  try {
+    const { makeGateway } = require('./fixtures/legacy-device-gateway');
+    const { prepareOffline, releaseHold, assertHold } = require('./lib/legacy-device-repair-ops');
+    const root = makeGateway(path.join(dir, 'gateway'));
+    execFileSync(path.join(root, 'etc/init.d/osi-identityd'), ['disable'], { env: { ...process.env, IPKG_INSTROOT: root } });
+    const r = prepareOffline({ root });
+    assert.deepEqual(r.services.map(s => s.enabled), [false, true]);
+    const flows = path.join(root, 'srv/node-red/flows.json');
+    fs.writeFileSync(flows, JSON.stringify([{ id: 'sync-init-fn', func: 'PRAGMA writable_schema=ON' }]));
+    await assert.rejects(releaseHold({ root, verify: async () => {} }), /retired boot surgery/);
+    fs.writeFileSync(flows, JSON.stringify([{ id: 'sync-init-fn', func: 'return msg;' }]));
+    await assert.rejects(releaseHold({ root, verify: async () => { throw new Error('invalid ledger'); } }), /invalid ledger/);
+    assertHold(root);
+    const released = await releaseHold({ root, verify: async () => {} });
+    assert.equal(released.released, true);
+    assert.equal(fs.existsSync(r.hold), false);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(f => /^S/.test(f)), ['S99node-red']);
+    assert.equal(fs.existsSync(path.join(root, 'started')), false);
+    assert.equal(JSON.parse(fs.readFileSync(released.receipt)).phase, 'released');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('Sol review refusal text accounts for WAL index creation and sends locked recovery to receipts', () => {
+  const { RECOVERY } = require('../lib/osi-migrate/legacy-device-catalog');
+  assert.doesNotMatch(RECOVERY, /Nothing was changed/);
+  assert.match(RECOVERY, /no database repair or migration/);
+  assert.match(RECOVERY, /WAL index/);
+  const shell = shellFunction('check_live_db_readonly');
+  assert.doesNotMatch(shell, /Nothing was changed/);
+  assert.match(shell, /inspect its retained receipt; follow/);
+  assert.doesNotMatch(shell, /retained receipt with scripts\/repair/);
+});
+
+test('Sol review stock transport preserves binary, NUL text, Unicode and exact real values', async () => {
+  await withFixture('quoted', async (file, dir) => {
+    const db = new DatabaseSync(file);
+    db.exec("UPDATE device_data SET lsn50_mode_label=x'00fffe8000', swt_1=1.2345678901234567 WHERE id=1; UPDATE device_data SET lsn50_mode_label=CAST(x'00c2b5f09f8cb1' AS TEXT), swt_1=-0.000000000000000123456789 WHERE id=2");
+    const before = db.prepare('SELECT id,typeof(lsn50_mode_label) t,hex(lsn50_mode_label) h,swt_1 FROM device_data ORDER BY id').all(); db.close();
+    await tool().repair(options(file, dir));
+    const after = new DatabaseSync(file);
+    try { assert.deepEqual(after.prepare('SELECT id,typeof(lsn50_mode_label) t,hex(lsn50_mode_label) h,swt_1 FROM device_data ORDER BY id').all(), before); }
+    finally { after.close(); }
+  });
+});
+
+test('Sol review a persistent handle also refuses missing-main WAL evidence before migration', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-open-orphan-'));
+  const file = path.join(dir, 'farming.db');
+  const { nodeSqliteRunner } = require('../lib/osi-migrate/runner-iface');
+  const { applyPending } = require('../lib/osi-migrate');
+  const runner = nodeSqliteRunner(file);
+  try {
+    await runner.exec('PRAGMA journal_mode=WAL; CREATE TABLE history(id); INSERT INTO history VALUES(1)');
+    fs.renameSync(file, file + '.preserved');
+    const wal = digest(file + '-wal');
+    await assert.rejects(applyPending(runner, { migrationsDir: path.join(ROOT, 'database/migrations/ordered') }), /sidecar/);
+    assert.equal(fs.existsSync(file), false);
+    assert.equal(digest(file + '-wal'), wal);
+  } finally { await runner.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const suffix of ['.legacy-device-fk-repair.lock', '-wal', '.legacy-device-fk-writer-hold']) {
+  test(`Sol review recovery evidence arriving during seed staging (${suffix}) refuses the final move`, async () => {
+    await withFixture('healthy', async (seed, dir) => {
+      const target = path.join(dir, 'new-farming.db');
+      const scratch = path.join(dir, 'stage'); fs.mkdirSync(scratch);
+      const script = shellFunction('seed_db_if_missing') + '\nDB_PATH="$1"; TMP_DIR="$2"; SEED_SOURCE="$3"; SUFFIX="$4"; SEED_DB_REL=seed\nfetch() { cp "$SEED_SOURCE" "$2"; : > "$DB_PATH$SUFFIX"; }\nseed_db_if_missing';
+      const r = spawnSync('sh', ['-c', script, 'seed', target, scratch, seed, suffix], { encoding: 'utf8' });
+      assert.notEqual(r.status, 0, r.stderr);
+      assert.equal(fs.existsSync(target), false);
+      assert.ok(fs.existsSync(target + suffix));
+      assert.equal(digest(path.join(scratch, 'farming.db')), digest(seed));
+    });
+  });
+}
+test('Sol review missing stock SQLite refuses before any offline preparation or service change', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-runtime-missing-'));
+  try {
+    const root = require('./fixtures/legacy-device-gateway').makeGateway(path.join(dir, 'gateway'));
+    const bin = path.join(dir, 'bin'); fs.mkdirSync(bin);
+    const r = spawnSync(process.env.EB19_STOCK_NODE, ['-e', 'require(process.argv[1]).prepareOffline({root:process.argv[2]})', path.join(ROOT, 'scripts/lib/legacy-device-repair-ops.js'), root], { env: { ...process.env, PATH: bin }, encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /sqlite3.*ENOENT|ENOENT.*sqlite3/);
+    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.legacy-device-fk-writer-hold')), false);
+    assert.equal(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(f => /^S/.test(f)).length, 2);
+    assert.equal(fs.existsSync(path.join(root, 'started')), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('Sol review a pending boot enable script refuses before autostart changes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-pending-enable-'));
+  try {
+    const root = require('./fixtures/legacy-device-gateway').makeGateway(path.join(dir, 'gateway'));
+    fs.writeFileSync(path.join(root, 'etc/uci-defaults/94_enable'), '/etc/init.d/osi-identityd enable\n');
+    assert.throws(() => require('./lib/legacy-device-repair-ops').prepareOffline({ root }), /pending service enablement/);
+    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.legacy-device-fk-writer-hold')), false);
+    assert.equal(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(f => /^S/.test(f)).length, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Sol review strict backup as last reader preserves the main file and committed WAL evidence', async () => {
+  await withFixture('healthy', async (file, dir) => {
+    const root = require('./fixtures/legacy-device-gateway').makeGateway(path.join(dir, 'gateway'));
+    const source = path.join(root, 'data/db/farming.db'); fs.copyFileSync(file, source);
+    const writer = spawnSync(process.execPath, ['-e', "const{DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.argv[1]);d.exec(\"PRAGMA journal_mode=WAL;INSERT INTO device_data(deveui,recorded_at) VALUES ('FFFF000000000001','2026-07-03')\");process.kill(process.pid,'SIGKILL')", source]);
+    assert.equal(writer.signal, 'SIGKILL');
+    const before = [digest(source), digest(source + '-wal')];
+    const r = require('./lib/legacy-device-repair-ops').backupOnline({ root, backupDir: path.join(dir, 'online-backup') });
+    assert.deepEqual([digest(source), digest(source + '-wal')], before);
+    const snapshot = new DatabaseSync(path.join(r.backup, 'farming.db'));
+    try { assert.equal(snapshot.prepare('SELECT count(*) n FROM device_data').get().n, 3); }
+    finally { snapshot.close(); }
+  });
 });
