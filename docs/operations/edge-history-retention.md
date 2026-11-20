@@ -301,6 +301,13 @@ boot's last successful NTP sample and elapsed uptime to defer pruning when
 the clock is unverified or has stepped. It yields to an active SQLite writer
 and retries on the next tick.
 
+Capture uses the same trusted clock check. The archive warns and skips
+transmissions received before the clock is trusted, while canonical ingest
+continues. On the first trusted maintenance tick, legacy epoch-dated receipts
+qualify for normal 365-day expiry. Once that work is caught up, maintenance
+also expires legacy receipts more than 24 hours ahead of the trusted clock
+in batches of eight. Receipts within 24 hours of the current time age normally.
+
 | Storage profile | Minimum free space on the database filesystem |
 |---|---:|
 | Pi 5, 16 GB-class media and larger | 1 GiB |
@@ -308,12 +315,16 @@ and retries on the next tick.
 
 Below the floor, the archive pauses capture while canonical ingest continues.
 After expiry is caught up, maintenance prunes the oldest remaining receipts
-and measures free space after each batch. On standard SQLite images the
-freed pages stay inside the database for reuse. Pressure pruning pauses
-when those reusable pages cover the shortfall, up to a 64 MiB target, or a
-batch makes no progress. The status and hourly warning distinguish actual
-filesystem free space from reusable pages. Below 16 MiB free, maintenance
-defers writes too, preserving headroom for canonical ingest. A failed
-filesystem probe defers pruning and logs a warning.
+at least 30 days old. A low-space episode permits at most 32 pressure
+deletions. After a batch, the job requires a rise in measured filesystem
+free space before trying again. It resets the episode when it sees free
+space at or above the floor. The count and last pre-batch measurement
+commit with the deletion and survive Node-RED restarts.
+
+When a batch frees no filesystem space or the episode reaches its cap,
+maintenance reports `SDI12 archive cannot recover space` in the node status
+and logs. It reports reusable SQLite pages as a separate figure. Below
+16 MiB free, maintenance defers writes to preserve space for canonical
+ingest. A failed filesystem probe defers pruning and logs a warning.
 
 See [Full-precision transmission archive](../devices/dragino-sdi12.md#full-precision-transmission-archive).

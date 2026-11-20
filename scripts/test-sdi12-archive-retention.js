@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,7 +10,8 @@ const { Worker } = require('node:worker_threads');
 const test = require('node:test');
 
 const root = path.join(__dirname, '..');
-const archive = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-archive');
+const archivePath = require.resolve('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-archive');
+const archive = require(archivePath);
 const migrations = path.join(root, 'database/migrations/ordered');
 const dayMs = 86400000;
 const now = Date.parse('2026-11-20T12:00:00Z');
@@ -21,33 +23,16 @@ const goodClock = () => ({
   marker: { boot_id: 'test-boot', epoch_ms: now - 60000, uptime_ms: 0, stratum: 2 },
 });
 
-function fixture(t, { beforeMigration = false } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-sdi12-retention-'));
-  const filename = path.join(dir, 'farming.db');
-  const db = new DatabaseSync(filename);
-  const migration = prefix => fs.readFileSync(path.join(migrations,
-    fs.readdirSync(migrations).find(name => name.startsWith(prefix))), 'utf8');
-  db.exec(migration('0080__'));
-  db.exec('PRAGMA journal_mode=WAL; CREATE TABLE canonical_readings (value INTEGER)');
-  const createIndex = () => db.exec(migration('0083__'));
-  if (!beforeMigration) createIndex();
-  let free = floor;
-  let statfsError = null;
-  let opens = 0;
-  const pressureState = {};
-  let onDelete = () => 0;
-  const insert = db.prepare(`INSERT INTO sdi12_transmissions
-    (deveui, recorded_at, received_at, raw_ascii, frames_json, context_json)
-    VALUES (?, ?, ?, '+0.00010', ?, ?) RETURNING id`);
+function maintenanceDbApi(filename, onOpen = () => {}, onDelete) {
   // The production helper exposes the selected sqlite3 driver's callback API.
   // The fixture adapts node:sqlite to that API, using a separate SQLite handle.
-  const api = {
+  return {
     OPEN_READWRITE: 2,
     openNativeFarming(mode, callback) {
       assert.equal(mode, this.OPEN_READWRITE);
-      opens++;
+      onOpen();
       const connection = new DatabaseSync(filename);
-      connection.function('fixture_on_delete', onDelete);
+      if (onDelete) connection.function('fixture_on_delete', onDelete);
       function invoke(action, done) {
         setImmediate(() => {
           let result;
@@ -70,8 +55,49 @@ function fixture(t, { beforeMigration = false } = {}) {
       };
     },
   };
+}
+
+function runAfterProcessRestart(filename, freeBytes) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  return JSON.parse(execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { DatabaseSync } = require('node:sqlite');
+    const createApi = ${maintenanceDbApi.toString()};
+    const dbPath = ${JSON.stringify(filename)};
+    const archive = require(${JSON.stringify(archivePath)});
+    archive.maintain(createApi(dbPath), {
+      now: ${now}, dbPath,
+      clock: () => (${JSON.stringify(goodClock())}),
+      statfs: () => ({ bavail: ${freeBytes}, bsize: 1 }),
+    }).then(result => process.stdout.write(JSON.stringify(result))).catch(error => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+  `], { env, encoding: 'utf8' }));
+}
+
+function fixture(t, { beforeMigration = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-sdi12-retention-'));
+  const filename = path.join(dir, 'farming.db');
+  const db = new DatabaseSync(filename);
+  const migration = prefix => fs.readFileSync(path.join(migrations,
+    fs.readdirSync(migrations).find(name => name.startsWith(prefix))), 'utf8');
+  db.exec(migration('0023__'));
+  db.exec(migration('0080__'));
+  db.exec('PRAGMA journal_mode=WAL; CREATE TABLE canonical_readings (value INTEGER)');
+  const createIndex = () => db.exec(migration('0083__'));
+  if (!beforeMigration) createIndex();
+  let free = floor;
+  let statfsError = null;
+  let opens = 0;
+  let onDelete = () => 0;
+  const insert = db.prepare(`INSERT INTO sdi12_transmissions
+    (deveui, recorded_at, received_at, raw_ascii, frames_json, context_json)
+    VALUES (?, ?, ?, '+0.00010', ?, ?) RETURNING id`);
+  const api = maintenanceDbApi(filename, () => opens++, () => onDelete());
   const run = options => archive.maintain(api, {
-    now, clock: goodClock, dbPath: filename, pressureState,
+    now, clock: goodClock, dbPath: filename,
     statfs(directory) {
       assert.equal(directory, dir);
       if (statfsError) throw statfsError;
@@ -84,7 +110,7 @@ function fixture(t, { beforeMigration = false } = {}) {
     fs.rmSync(dir, { recursive: true, force: true });
   });
   return {
-    db, filename, run, createIndex,
+    db, api, filename, run, createIndex,
     add(time, sensor = 'TEST_SENSOR_A', bytes = 0, recordedAt = null, contextJson = '{}') {
       return insert.get(sensor, recordedAt, iso(time), JSON.stringify(['x'.repeat(bytes)]), contextJson).id;
     },
@@ -124,9 +150,10 @@ test('one tick expires at most eight rows, oldest first with ID as the global ti
 
 test('pressure deletes the oldest remaining rows until the measured floor is reached', async t => {
   const f = fixture(t);
-  const newer = f.add(now - 2, 'TEST_SENSOR_A');
-  const early = Array.from({ length: 10 }, (_, i) => f.add(now - 3, 'TEST_SENSOR_' + (99 - i), 10000));
-  const later = f.add(now - 1);
+  const boundary = now - 30 * dayMs;
+  const newer = f.add(boundary + 1, 'TEST_SENSOR_A');
+  const early = Array.from({ length: 10 }, (_, i) => f.add(boundary - 1, 'TEST_SENSOR_' + (99 - i), 10000));
+  const later = f.add(boundary);
   assert.equal((await f.run()).deleted, 0, 'exactly at the floor');
   let probes = 0;
   const statfs = () => ({ bavail: ++probes === 1 ? floor - 4096 : floor, bsize: 1 });
@@ -138,36 +165,78 @@ test('pressure deletes the oldest remaining rows until the measured floor is rea
   assert.equal((await f.run()).deleted, 0);
 });
 
-test('at a flat filesystem floor, reusable SQLite pages stop further pressure deletions', async t => {
+test('a flat filesystem stops pressure across restart even when the whole archive is smaller than the shortfall', async t => {
   const f = fixture(t);
-  for (let i = 0; i < 16; i++) f.add(now - dayMs, 'TEST_SENSOR_A', 10000);
-  const fileSize = fs.statSync(f.filename).size;
-  f.free(floor - 4096);
+  for (let i = 0; i < 32; i++) f.add(now - 45 * dayMs, 'TEST_SENSOR_A', 10000);
+  const recent = f.add(now - 29 * dayMs);
+  f.free(floor - 16 * 1024 ** 2);
   const pressure = await f.run();
+  assert.equal(pressure.reason, 'pressure_stalled');
   assert.equal(pressure.deleted, 8);
-  assert.equal(pressure.freeBytes, floor - 4096);
-  assert.ok(pressure.reusableBytes >= 4096);
-  assert.equal((await f.run()).reason, 'pressure_limited');
-  assert.equal(f.ids().length, 8);
-  f.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  const afterCheckpoint = fs.statSync(f.filename).size;
-  for (let i = 0; i < 8; i++) f.add(now, 'TEST_SENSOR_A', 10000);
-  f.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  assert.ok(afterCheckpoint >= fileSize);
-  assert.equal(fs.statSync(f.filename).size, afterCheckpoint, 'SQLite reuses the freed pages');
+  assert.ok(pressure.reusableBytes > 0, 'SQLite page gains are visible');
+  const remaining = f.ids();
+  for (let i = 0; i < 4; i++) {
+    assert.equal(runAfterProcessRestart(f.filename, floor - 16 * 1024 ** 2).reason, 'pressure_stalled');
+  }
+  assert.deepEqual(f.ids(), remaining);
+  assert.equal(remaining.length, 25);
+  assert.ok(remaining.includes(recent));
+  f.add(cutoff);
+  assert.equal((await f.run()).reason, 'expired', 'age expiry runs during a pressure stop');
+  assert.deepEqual(f.ids(), remaining);
+
+  // Less filesystem space must not let the job mistake its own WAL writes for recovery.
+  f.free(floor - 17 * 1024 ** 2);
+  assert.equal((await f.run()).deleted, 0);
+  f.free(floor - 15 * 1024 ** 2);
+  assert.equal((await f.run()).deleted, 8);
 });
 
-test('a pressure batch without space or page gains does not repeat until headroom improves', async t => {
+test('the maintenance adapter reports when the archive cannot recover space', async t => {
   const f = fixture(t);
-  for (let i = 0; i < 20; i++) f.add(now - dayMs);
-  f.free(floor - 8192);
-  const first = await f.run();
-  assert.equal(first.deleted, 8);
-  assert.equal(first.reusableBytes, 0);
-  assert.equal((await f.run()).reason, 'pressure_limited');
-  assert.equal(f.ids().length, 12);
+  f.add(now - 45 * dayMs, 'TEST_SENSOR_A', 10000);
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(fs, 'statfsSync', () => ({ bavail: floor - 8000, bsize: 1 }));
+  const clock = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock');
+  t.mock.method(clock, 'readRuntimeClock', goodClock);
+  const status = [];
+  const warnings = [];
+  const node = { status: value => status.push(value), warn: value => warnings.push(value) };
+  await archive.liveMaintain({
+    node,
+    osiLib: { require: () => ({ ok: true, value: f.api }) },
+  });
+  assert.equal(status[0].fill, 'yellow');
+  assert.match(status[0].text, /archive cannot recover space/);
+  assert.match(warnings[0], /archive cannot recover space.*filesystem free .*SQLite reusable/);
+});
+
+test('pressure protects the newest 30 days and caps an episode even when filesystem space rises', async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 40; i++) f.add(now - 30 * dayMs);
+  const recent = f.add(now - 30 * dayMs + 1);
+  let freeBytes = floor - 1_000_000;
+  const risingSpace = () => ({ bavail: ++freeBytes, bsize: 1 });
+  for (let i = 0; i < 4; i++) assert.equal((await f.run({ statfs: risingSpace })).deleted, 8);
+  assert.equal(runAfterProcessRestart(f.filename, freeBytes + 1).reason, 'pressure_cap');
+  assert.equal(f.ids().length, 9);
+  assert.equal((await f.run()).reason, 'idle', 'an observed recovery ends the episode');
+  const next = await f.run({ statfs: risingSpace });
+  assert.equal(next.deleted, 8);
+  assert.deepEqual(f.ids(), [recent]);
+  assert.equal((await f.run({ statfs: risingSpace })).deleted, 0);
+});
+
+test('an interrupted pressure state write rolls the whole delete back', async t => {
+  const f = fixture(t);
+  const row = f.add(now - 40 * dayMs);
   f.free(floor - 4096);
-  assert.equal((await f.run()).deleted, 8);
+  f.db.exec(`CREATE TRIGGER stop_state BEFORE INSERT ON app_settings
+    BEGIN SELECT RAISE(ABORT, 'pressure state failure'); END`);
+  await assert.rejects(f.run(), /pressure state failure/);
+  assert.deepEqual(f.ids(), [row]);
+  f.db.exec('DROP TRIGGER stop_state');
+  assert.equal((await f.run()).deleted, 1);
 });
 
 test('interruptions roll back the batch and the next run starts at the same oldest row', async t => {
@@ -204,15 +273,28 @@ test('empty, untrusted clocks, failed probe and emergency headroom', async t => 
   assert.equal(f.ids().length, 1);
   f.failProbe(null);
   f.free(floor);
-  const future = f.add(now + 500 * dayMs);
-  assert.equal((await f.run()).deleted, 1);
-  assert.deepEqual(f.ids(), [future], 'a future-stamped row does not advance the cutoff');
+
 });
 
-test('maintenance yields to an ingest writer and an ingest writer can commit during repeated pruning', async t => {
+test('the first trusted maintenance tick uses the corrected clock for legacy outliers', async t => {
+  const f = fixture(t);
+  const epoch = f.add(0);
+  const future = f.add(now + 500 * dayMs);
+  const recent = f.add(now);
+  const plausible = f.add(now + dayMs);
+  assert.equal((await f.run({ clock: () => ({ ...goodClock(), uptime: 0 }) })).deleted, 0);
+  assert.deepEqual(f.ids(), [epoch, future, recent, plausible]);
+  assert.equal((await f.run()).reason, 'expired');
+  assert.deepEqual(f.ids(), [future, recent, plausible]);
+  assert.equal((await f.run()).reason, 'future_outlier');
+  assert.deepEqual(f.ids(), [recent, plausible]);
+});
+
+test('pressure maintenance yields to ingest and an ingest writer can commit during a pressure batch', async t => {
   const f = fixture(t);
   const maxContext = JSON.stringify('x'.repeat(256 * 1024 - 2));
-  for (let i = 0; i < 16; i++) f.add(cutoff, 'TEST_SENSOR_A', 256 * 1024 - 4, null, maxContext);
+  for (let i = 0; i < 16; i++) f.add(now - 31 * dayMs, 'TEST_SENSOR_A', 256 * 1024 - 4, null, maxContext);
+  f.free(floor - 1_000_000);
   f.db.exec('BEGIN IMMEDIATE');
   try {
     f.db.exec('INSERT INTO canonical_readings VALUES (42)');
@@ -266,6 +348,7 @@ test('maintenance yields to an ingest writer and an ingest writer can commit dur
   assert.ok(waitMs >= 40 && waitMs < 5000, `ingest waited ${waitMs} ms on the pruning write`);
   t.diagnostic(`canonical insert with overlapping maximum-payload batch: ${waitMs.toFixed(1)} ms`);
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM canonical_readings').get().n, 2);
+  f.free(floor - 500_000);
   assert.equal((await f.run()).deleted, 8);
   assert.deepEqual(f.ids(), []);
 });

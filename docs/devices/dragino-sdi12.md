@@ -393,10 +393,14 @@ values; TriSCAN moisture scaled frequency and VIC retain their separate meanings
 `recorded_at` preserves the source timestamp selected by the existing ingest
 path: the highest-index segment's timestamp, falling back to the completing
 event's timestamp if the former is absent. It can be null or invalid.
-`received_at` is the local time when the archive write starts; every original
+`received_at` is the local time when archive capture starts. Every original
 network timestamp remains in `frames_json`. Neither time proves the instant
 when the probe sampled the soil. Match sample times against the frame reception
 window and take a fresh reading before disturbing the soil.
+
+Archive capture requires a trusted local clock. An unverified clock or a
+clock step produces an `SDI12 archive skipped: untrusted clock` warning.
+Canonical reading writes continue.
 
 `context_json` snapshots the saved profile, probe identity and layout at ingest,
 including response positions and depths. It also retains the legacy depth-map
