@@ -5,6 +5,16 @@ START=99
 BOOTSTRAP_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
 BOOTSTRAP_UPDATED="/srv/node-red/chirpstack-bootstrap.js"
 
+updated_bootstrap_verified() {
+	local receipt="${BOOTSTRAP_UPDATED}.atomic-sha256"
+	local expected actual
+	[ -f "$BOOTSTRAP_UPDATED" ] && [ ! -L "$BOOTSTRAP_UPDATED" ] || return 1
+	[ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
+	expected="$(cat "$receipt")" || return 1
+	actual="$(sha256sum "$BOOTSTRAP_UPDATED")" || return 1
+	[ "$expected" = "${actual%% *}" ]
+}
+
 stamp_valid() {
 	[ -f /etc/osi-bootstrap.done ] || return 1
 	[ -f /srv/node-red/.chirpstack.env ] || return 1
@@ -23,9 +33,9 @@ start() {
 
 	local bootstrap_script=""
 	local provisioned_this_boot=0
-	# Deploy publishes this copy atomically. Select it before the ROM copy,
-	# which can be from an older firmware with an in-place settings writer.
-	if [ -f "$BOOTSTRAP_UPDATED" ]; then
+	# Sysupgrade may retain a legacy writer at this path. Only prefer a
+	# copy attested by the atomic deploy installer.
+	if updated_bootstrap_verified; then
 		bootstrap_script="$BOOTSTRAP_UPDATED"
 	elif [ -f "$BOOTSTRAP_ROM" ]; then
 		bootstrap_script="$BOOTSTRAP_ROM"

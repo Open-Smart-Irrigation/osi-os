@@ -272,6 +272,15 @@ try {
 NODE
 }
 
+publish_bootstrap_receipt() {
+    local script="$1" receipt="$1.atomic-sha256" stage
+    stage="$(mktemp "$receipt.osi-stage.XXXXXX")" || return 1
+    if ! { file_sha256 "$script" > "$stage" && publish_boot_file "$stage" "$receipt" 644; }; then
+        rm -f "$stage"
+        return 1
+    fi
+}
+
 # Live destinations supply a mode and are checked before publication. The
 # three-argument form downloads only to private deploy or payload staging.
 fetch_required() {
@@ -807,7 +816,7 @@ print_bootstrap_note() {
     fi
     echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
     echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."
-    echo "NOTE: osi-bootstrap uses the updated /srv/node-red script when present, then the firmware copy."
+    echo "NOTE: osi-bootstrap uses the updated /srv/node-red script when its deploy receipt verifies, then the firmware copy."
     if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
        grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
         echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
@@ -4000,6 +4009,10 @@ fetch_required "Gateway identity service enable script" \
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js" 644 || exit 1
+if ! publish_bootstrap_receipt "$BOOTSTRAP_SCRIPT_FALLBACK"; then
+    echo "ERROR: could not publish the bootstrap deploy receipt" >&2
+    exit 1
+fi
 
 # issue-183 early secure begin
 if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
