@@ -96,7 +96,7 @@ All IDs, wires and output arities stay fixed. The only libs change is adding
 `{"var":"osiLib","module":"osi-lib"}` to `get-actuations-response`, explicitly
 approved by Phil. `zone-env-fn`, `strega-today-liters-fn` and
 `get-actuations-query` retain their existing bindings without additions/removals.
-The adapter source total falls from 57,553 to 7,590 characters per profile.
+The adapter source total falls from 57,553 to 8,266 characters per profile.
 Today-liters retains its original authorization preflight so its early replies
 precede the new facade dependency.
 
@@ -250,3 +250,29 @@ process timezone, and the staged affected handoff. Inventory reports 1,014 files
 with 834 direct runners. Hygiene and prose checks pass. The regenerated adapters
 total 8,266 characters per profile; the only libs addition remains the approved
 osiLib binding on `get-actuations-response`.
+
+The combined proof/runtime batch exits 0. Its fresh-clone receipt reports
+`5 PR-only commits absent` and exactly these refs: `refs/heads/squash`,
+`refs/remotes/origin/main`, `refs/remotes/origin/squash`. The clone has the same
+committed implementation tree and a single parent at main-ancestry base
+`1a984f31`. It has no object alternates. Original parity (286 comparisons),
+additive parity (134 comparisons) and `verify-x3-zone-env-handoff.js --affected`
+all pass inside that clone. The script obtains its source and base dynamically;
+no PR commit is an oracle or handoff input.
+
+| Additional final check | Result |
+|---|---|
+| Fresh local squash-equivalent clone, UTC / Node 22.23.1 | PASS: parity and staged affected handoff, with PR-only objects and refs absent |
+| Node 20.18.3 module and packaging tests | PASS: 62/62 (54 existing module tests plus 8 packaging tests) |
+| Node-RED 3.1.15 / Node 20.18.3, UTC and Europe/Zurich | PASS: 840 native traces per timezone and cardinality/Catch controls |
+| Node-RED 4.0.9 / Node 20.18.3, UTC and Europe/Zurich | PASS: 840 native traces per timezone and cardinality/Catch controls |
+
+The next publication commit records these results only. CI repeats the squash
+proof on the published head. Full local suites were not queued, and the reserved
+flows, active baselines and all frozen oracle blobs remain unchanged.
+
+UTC stop: **2026-11-20T11:38:32Z**. Implementation and focused-verification wall
+time from the recorded start is **0:22:53** (0.38 h), including osi-heavy queue
+waits, the fresh clone and serial runtime verification. Active subparts were not
+separately timed. Reservation cost remains **0.00 h**; publication and GitHub CI
+follow this stop.
