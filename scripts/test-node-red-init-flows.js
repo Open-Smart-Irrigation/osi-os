@@ -1,8 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -21,11 +22,28 @@ const nodes = [
 ];
 const seed = JSON.stringify(nodes) + '\n';
 const swap = require('./deploy-payload-swap');
+const imageSeedScript = fs.readFileSync(profile + '/etc/uci-defaults/98_osi_node_red_seed', 'utf8');
+
+function sqlite(db, query) {
+  return execFileSync('sqlite3', ['-batch', '-bail', db, query], { encoding: 'utf8' }).trim();
+}
+
+function addLedger(db) {
+  sqlite(db, "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, checksum TEXT, status TEXT);" +
+    "INSERT INTO schema_migrations VALUES (72,'fixture','applied');");
+}
+
 
 function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'node-red-init-flows-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'data'));
+  fs.mkdirSync(path.join(root, 'data', 'db'), { recursive: true });
+  const db = path.join(root, 'data', 'db', 'farming.db');
+  const imageDb = path.join(root, 'image-seed.db');
+  if (!linked) {
+    addLedger(imageDb);
+    fs.copyFileSync(imageDb, db);
+  }
   const userDir = path.join(root, 'srv', 'node-red');
   const flows = path.join(userDir, 'flows.json');
   const creds = path.join(userDir, 'flows_cred.json');
@@ -35,6 +53,8 @@ function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
   const target = linked ? path.join(payload, 'flows.json') : flows;
   fs.mkdirSync(linked ? payload : userDir, { recursive: true });
   fs.writeFileSync(bundled, seed);
+  const origin = path.join(userDir, '.image-flows-origin');
+  if (!linked) fs.writeFileSync(origin, createHash('sha256').update(seed).digest('hex') + '\n');
   if (linked) {
     fs.symlinkSync('fixture', active);
     fs.symlinkSync('payloads/active/flows.json', flows);
@@ -52,7 +72,8 @@ function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
     .replaceAll('/usr/libexec/', root + '/usr/libexec/')
     .replaceAll('/usr/lib/node-red/gui', path.join(root, 'gui'))
     .replaceAll('/dev/console', path.join(root, 'console'))
-    .replaceAll('/usr/share/flows.json', bundled));
+    .replaceAll('/usr/share/flows.json', bundled)
+    .replaceAll('/usr/share/db/farming.db', imageDb));
   const bootInit = path.join(root, 'osi-bootstrap');
   const service = path.join(root, 'etc', 'init.d', 'osi-identityd');
   const request = path.join(root, 'usr', 'libexec', 'osi-identityd.sh');
@@ -132,7 +153,7 @@ fi
     assert.equal(result.status, 0, result.stderr);
     return result.stdout + result.stderr;
   }
-  return { root, userDir, initPath, flows, creds, active, target, start, trace, stamp: path.join(root, 'etc', 'osi-bootstrap.done') };
+  return { root, userDir, initPath, flows, creds, active, target, start, trace, origin, db, imageDb, bundled, stamp: path.join(root, 'etc', 'osi-bootstrap.done') };
 }
 
 function quarantine(file) {
@@ -318,20 +339,96 @@ for (const condition of ['missing', 'bad digest', 'invalid structure']) {
   });
 }
 
-test('a sealed payload holds on a missing pristine copy even with healthy live flows', t => {
+test('a missing pristine copy warns on a healthy payload and holds when recovery becomes necessary', t => {
   const fx = fixture(t, { linked: true });
   assert.match(fx.start(), /procd start/);
   const before = fs.readFileSync(fx.target);
+  swap.writePayloadState(fx.userDir, 'fixture', 'healthy', 'passed health checks');
   fs.unlinkSync(path.join(path.dirname(fx.target), 'flows.pristine.json'));
+  const log = fx.start();
+  assert.match(log, /procd start/);
+  assert.match(log, /logger .*WARN: Pristine flow recovery unavailable.*pristine flows .*missing/);
+  const warning = swap.readPayloadState(fx.userDir);
+  assert.equal(warning.state, 'healthy');
+  assert.match(warning.flow_recovery_warning, /pristine flows .*missing/);
+  assert.equal(fs.existsSync(path.join(fx.userDir, 'DEPLOY-HELD')), false);
+  assert.deepEqual(fs.readFileSync(fx.target), before);
+
+  fs.writeFileSync(fx.target, Buffer.alloc(before.length));
   const result = fx.start({ expectFailure: true });
   assert.equal(result.status, 1);
   assert.doesNotMatch(result.stdout, /procd start/);
   assert.match(result.stderr, /logger .*HELD:.*pristine flows .*missing.*You must re-run the deploy/);
   assert.equal(swap.readPayloadState(fx.userDir).reason,
     fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8').trim());
-  assert.deepEqual(fs.readFileSync(fx.target), before);
   assert.doesNotMatch(fx.start(), /procd start/);
 });
+
+test('regular public paths cannot restore image DDL over a newer deployed schema', t => {
+  const fx = fixture(t);
+  if (process.env.OSI_TEST_V081_FLOW) fs.copyFileSync(process.env.OSI_TEST_V081_FLOW, fx.bundled);
+  else fs.writeFileSync(fx.bundled, JSON.stringify([...nodes, { id: 'sync-init-fn', type: 'function', func: 'legacy trigger body' }]));
+  fs.writeFileSync(fx.origin, createHash('sha256').update(fs.readFileSync(fx.bundled)).digest('hex') + '\n');
+  fs.writeFileSync(fx.flows, Buffer.alloc(128));
+  fs.mkdirSync(path.join(fx.userDir, 'payloads', 'newer'), { recursive: true });
+  fs.mkdirSync(path.join(fx.root, 'gui'));
+  fs.symlinkSync('payloads/newer/modules/osi-zone-env', path.join(fx.userDir, 'osi-zone-env'));
+  swap.writePayloadState(fx.userDir, 'newer', 'healthy', 'passed health checks');
+
+  const migration = fs.readFileSync('database/migrations/ordered/0073__zone_env_rain_quality_sync.sql', 'utf8');
+  sqlite(fx.db, 'CREATE TABLE zone_daily_environment (sync_version INTEGER); ' + migration +
+    "INSERT INTO schema_migrations VALUES (73,'newer','applied');");
+  const query = "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name LIKE 'trg_dp_zone_env_outbox_%' ORDER BY name";
+  const before = sqlite(fx.db, query);
+  assert.match(before, /rain/);
+  const result = fx.start({ expectFailure: true });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /image flows ownership is contradicted/);
+  assert.doesNotMatch(result.stdout, /procd start/);
+  assert.equal(swap.readPayloadState(fx.userDir).state, 'held');
+  assert.deepEqual(fs.readFileSync(fx.flows), Buffer.alloc(128));
+  assert.equal(sqlite(fx.db, query), before);
+});
+
+for (const [condition, prepare, expected] of [
+  ['missing provenance', fx => fs.unlinkSync(fx.origin), /factory seed record/],
+  ['newer ledger', fx => sqlite(fx.db, "INSERT INTO schema_migrations VALUES (73,'newer','applied');"), /newer than or differs/],
+  ['missing live ledger', fx => fs.unlinkSync(fx.db), /schema ledger database is missing/],
+]) {
+  test(`image fallback holds when ${condition}`, t => {
+    const fx = fixture(t);
+    fs.writeFileSync(fx.flows, '[null]');
+    prepare(fx);
+    const result = fx.start({ expectFailure: true });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, expected);
+    assert.doesNotMatch(result.stdout, /procd start/);
+    assert.equal(swap.readPayloadState(fx.userDir).state, 'held');
+  });
+}
+
+for (const pristineDb of [true, false]) {
+  test(`first-boot seed ${pristineDb ? 'records factory ownership' : 'refuses to mark an upgraded DB as factory'}`, t => {
+    const fx = fixture(t);
+    fs.unlinkSync(fx.origin);
+    if (!pristineDb) sqlite(fx.db, "INSERT INTO schema_migrations VALUES (73,'newer','applied');");
+    const earlySeed = imageSeedScript.slice(0, imageSeedScript.indexOf('\nNODE\n') + 6)
+      .replaceAll('/srv/node-red', fx.userDir)
+      .replaceAll('/usr/share/flows.json', fx.bundled)
+      .replaceAll('/usr/share/db/farming.db', fx.imageDb)
+      .replaceAll('/data/db/farming.db', fx.db)
+      .replaceAll('/usr/share/node-red', path.join(fx.root, 'rom'))
+      .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'));
+    const result = spawnSync('sh', ['-c', earlySeed], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(fx.origin), pristineDb);
+    assert.equal(fs.existsSync(fx.flows), pristineDb);
+    if (pristineDb) {
+      fs.writeFileSync(fx.flows, '[null]');
+      assert.match(fx.start(), /restored flows.json .*bundled-flows.json/);
+    }
+  });
+}
 
 test('a legacy payload with healthy live flows can boot until its first sealed deploy', t => {
   const fx = fixture(t, { linked: true, pristine: null });

@@ -4,6 +4,8 @@ set -eu
 SRC=/usr/share/node-red
 DST=/srv/node-red
 FLOW_SEED=/usr/share/flows.json
+IMAGE_DB=/usr/share/db/farming.db
+LIVE_DB=/data/db/farming.db
 
 mkdir -p "$DST" "$DST/node_modules"
 chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
@@ -11,46 +13,71 @@ chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 # node-red.init validates and repairs flows.json before starting the service.
 # Publish the other create-only files durably before their existence can suppress
 # a retry. Use a hard link so a concurrent creator always keeps its own file.
-node - "$SRC" "$DST" "$FLOW_SEED" <<'NODE'
+node - "$SRC" "$DST" "$FLOW_SEED" "$IMAGE_DB" "$LIVE_DB" <<'NODE'
 const fs = require('fs');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 
-const [src, dst, flowSeed] = process.argv.slice(2);
+const [src, dst, flowSeed, imageDb, liveDb] = process.argv.slice(2);
+const hasEntry = file => fs.lstatSync(file, { throwIfNoEntry: false });
+const origin = path.join(dst, '.image-flows-origin');
+const flow = path.join(dst, 'flows.json');
+
+function freshImageSeed() {
+  if (['payloads', 'payload-state.json', '.payload-swap.js'].some(name => hasEntry(path.join(dst, name))) ||
+      hasEntry('/usr/lib/node-red/gui')?.isSymbolicLink() ||
+      [dst, path.join(dst, 'node_modules')].some(dir =>
+        fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink())) ||
+      ['-wal', '-shm', '-journal', '.osi-recovery'].some(suffix => hasEntry(liveDb + suffix))) return false;
+  return hasEntry(flowSeed)?.isFile() && hasEntry(imageDb)?.isFile() && hasEntry(liveDb)?.isFile() &&
+    fs.readFileSync(imageDb).equals(fs.readFileSync(liveDb));
+}
+
 const dir = fs.openSync(dst, 'r');
 try {
-  for (const name of ['flows.json', 'settings.js', 'package.json', 'package-lock.json']) {
-    const source = name === 'flows.json' ? flowSeed : path.join(src, name);
+  // Only a fresh image can issue this record. A later deploy with a missing
+  // flow and a different database must never seed the firmware's old DDL.
+  if (!hasEntry(flow) && !hasEntry(origin) && freshImageSeed()) {
+    const digest = createHash('sha256').update(fs.readFileSync(flowSeed)).digest('hex');
+    publish(origin, temporary => fs.writeFileSync(temporary, digest + '\n', { flag: 'wx', mode: 0o644 }));
+    publish(flow, temporary => fs.copyFileSync(flowSeed, temporary, fs.constants.COPYFILE_EXCL));
+  }
+  for (const name of ['settings.js', 'package.json', 'package-lock.json']) {
+    const source = path.join(src, name);
     const target = path.join(dst, name);
-    if (fs.existsSync(target) || !fs.existsSync(source)) continue;
-    const temporary = path.join(dst, '.node-red-seed-' + randomUUID());
-    fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
-    try {
-      const fd = fs.openSync(temporary, 'r');
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      try {
-        fs.linkSync(temporary, target);
-      } catch (error) {
-        if (error.code === 'EEXIST') continue;
-        throw error;
-      }
-      try {
-        fs.fsyncSync(dir);
-      } catch (error) {
-        fs.unlinkSync(target);
-        fs.fsyncSync(dir);
-        throw error;
-      }
-    } finally {
-      fs.unlinkSync(temporary);
-    }
+    if (hasEntry(target) || !hasEntry(source)) continue;
+    publish(target, temporary => fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL));
   }
 } finally {
   fs.closeSync(dir);
+}
+
+function publish(target, write) {
+  const temporary = path.join(dst, '.node-red-seed-' + randomUUID());
+  try {
+    write(temporary);
+    const fd = fs.openSync(temporary, 'r');
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.linkSync(temporary, target);
+    } catch (error) {
+      if (error.code === 'EEXIST') return;
+      throw error;
+    }
+    try {
+      fs.fsyncSync(dir);
+    } catch (error) {
+      fs.unlinkSync(target);
+      fs.fsyncSync(dir);
+      throw error;
+    }
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }
 NODE
 
