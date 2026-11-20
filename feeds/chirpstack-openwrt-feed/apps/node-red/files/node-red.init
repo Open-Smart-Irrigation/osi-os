@@ -735,7 +735,7 @@ const flowLink = fs.lstatSync(flowFile, { throwIfNoEntry: false })?.isSymbolicLi
 const guiLink = fs.lstatSync('/usr/lib/node-red/gui', { throwIfNoEntry: false })?.isSymbolicLink();
 
 function persistFlowHold(stamp, reason) {
-  const line = 'HELD: Node-RED stopped. ' + reason + '. Re-run the deploy for this release to stage verified flows.';
+  const line = 'HELD: Node-RED stopped. ' + reason + '. You must re-run the deploy for this release before Node-RED can start.';
   const mode = { mode: 0o644, uid: process.getuid(), gid: process.getgid() };
   const state = path.join(root, 'payload-state.json');
   const note = path.join(root, 'DEPLOY-HELD');
@@ -767,15 +767,28 @@ try {
     }
     live = readJson(flowTarget, isFlows);
     source = live;
-    if (live.problem) {
-      if (deployed) {
+    if (deployed) {
+      const dir = path.dirname(flowTarget);
+      const pristine = path.join(dir, 'flows.pristine.json');
+      const seal = path.join(dir, 'flows-seed.json');
+      const compatibility = readJson(path.join(dir, 'compatibility.json'),
+        value => value !== null && typeof value === 'object' && !Array.isArray(value));
+      const sealed = compatibility.value?.flows_pristine_sha256 !== undefined ||
+        fs.lstatSync(seal, { throwIfNoEntry: false }) || fs.lstatSync(pristine, { throwIfNoEntry: false });
+      // Pre-seal deployments can run their healthy live file. Once a payload
+      // declares a pristine copy, verify it at every boot, even if no
+      // recovery is needed yet.
+      if (sealed || live.problem) {
         const helper = require(path.join(root, '.payload-swap.js'));
-        const bytes = helper.readPristineFlows(root, stamp);
-        sourceName = path.join(path.dirname(flowTarget), 'flows.pristine.json');
-        source = { stat: fs.statSync(sourceName), ...parseJson(bytes, isFlows) };
-      } else {
-        source = readJson(sourceName, isFlows);
+        const seed = parseJson(helper.readPristineFlows(root, stamp), isFlows);
+        if (seed.problem) throw new Error('invalid pristine flows (' + seed.problem + ')');
+        if (live.problem) {
+          sourceName = pristine;
+          source = { stat: fs.statSync(pristine), ...seed };
+        }
       }
+    } else if (live.problem) {
+      source = readJson(sourceName, isFlows);
       if (source.problem) throw new Error('cannot restore flows.json (' + source.problem + ')');
     }
   } catch (error) {

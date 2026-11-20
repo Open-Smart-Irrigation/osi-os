@@ -312,11 +312,33 @@ for (const condition of ['missing', 'bad digest', 'invalid structure']) {
     assert.doesNotMatch(first.stdout, /procd start/);
     assert.match(first.stderr, /HELD: Node-RED stopped/);
     assert.equal(swap.readPayloadState(fx.userDir).state, 'held');
-    assert.match(fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8'), /Re-run the deploy/);
+    assert.match(fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8'), /You must re-run the deploy .* before Node-RED can start/);
     assert.equal(fs.readFileSync(quarantine(fx.target)[0], 'utf8'), '[{}]');
     assert.doesNotMatch(fx.start(), /procd start/);
   });
 }
+
+test('a sealed payload holds on a missing pristine copy even with healthy live flows', t => {
+  const fx = fixture(t, { linked: true });
+  assert.match(fx.start(), /procd start/);
+  const before = fs.readFileSync(fx.target);
+  fs.unlinkSync(path.join(path.dirname(fx.target), 'flows.pristine.json'));
+  const result = fx.start({ expectFailure: true });
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stdout, /procd start/);
+  assert.match(result.stderr, /logger .*HELD:.*pristine flows .*missing.*You must re-run the deploy/);
+  assert.equal(swap.readPayloadState(fx.userDir).reason,
+    fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8').trim());
+  assert.deepEqual(fs.readFileSync(fx.target), before);
+  assert.doesNotMatch(fx.start(), /procd start/);
+});
+
+test('a legacy payload with healthy live flows can boot until its first sealed deploy', t => {
+  const fx = fixture(t, { linked: true, pristine: null });
+  fs.writeFileSync(fx.target, seed);
+  assert.match(fx.start(), /procd start/);
+  assertPatched(fx);
+});
 
 test('a same-release deploy can stage past a missing held flow and switch only to verified bytes', t => {
   const fx = fixture(t, { linked: true, pristine: null });
