@@ -580,15 +580,15 @@ function realTarget(file) {
 }
 
 function readJson(file, isValid) {
-  let stat;
+  let metadata;
   try {
-    stat = fs.statSync(file);
+    metadata = fs.statSync(file);
   } catch (error) {
     if (error.code === 'ENOENT') return { problem: 'missing' };
     throw error;
   }
-  if (!stat.isFile()) throw new Error('expected a regular file at ' + file);
-  return { stat, ...parseJson(fs.readFileSync(file), isValid) };
+  if (!metadata.isFile()) throw new Error('expected a regular file at ' + file);
+  return { stat: metadata, ...parseJson(fs.readFileSync(file), isValid) };
 }
 
 function parseJson(bytes, isValid) {
