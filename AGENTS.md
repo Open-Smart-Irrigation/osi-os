@@ -84,6 +84,7 @@ and tags free of customer-specific history.
   `settings.js` protects identity keys, but operators should still remove stale
   identity lines during repair so no future or manual env-file path can revive
   them. Canonical EUI is uppercase and comes from the helper / UCI path.
+- **Legacy `devices_old` catalog recovery:** deploy and migration preflights refuse these references. Only `scripts/repair-legacy-device-fk.js` may perform the offline, backed-up, verified-copy atomic replacement; never patch `sqlite_master`. Procedure: [Legacy device foreign-key repair](.claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair).
 
 ---
 

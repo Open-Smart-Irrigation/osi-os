@@ -1,9 +1,9 @@
 # EB19: populated legacy catalog retirement
 
-EB19 is blocked on a governed legacy-FK repair. Deleting the boot-time surgery
-alone preserves existing rows but leaves populated history tables unusable. This
-branch supplies the fixture and rehearsal needed to assign that repair; it makes
-no runtime, migration, seed, or bundled-database change. Refs #93.
+The CTO selected option B: deployment refuses legacy `devices_old` references,
+and an explicit offline operator tool repairs supported catalogs on a copy.
+There is no runtime migration and no 0083. Field count: **unknown**. The flows
+retirement remains an unapplied handoff behind EB2 and EB12. Refs #93.
 
 ## Sources and scope
 
@@ -106,27 +106,43 @@ before commit exercise FK restoration and complete-row preservation. A storage
 engine refusing the restore itself cannot be proven to restore successfully;
 the handoff makes those existing restore catches warn independently.
 
-## Disposition and stop boundary
+## Option B implementation plan
 
-The populated quoted retirement rehearsal exits 1: 28 rows survive unchanged,
-`integrity_check` is `ok`, but `foreign_key_check` reports 26 violations across
-13 children. The FK-enforced telemetry insert fails. The full boot function
-still finishes normally. Empty seed parity would miss this failure.
-
-Retire the surgery only after an assigned, reviewed repair handles affected
-catalogs through the schema-governed deployment path. A child-table constraint
-rebuild belongs to a `destructive` migration: writers stopped, online backup,
-FK OFF outside a transaction, copy every supported column, preserve indexes and
-triggers, validate populated rows and FKs, and restore FK ON on success and
-error exits. Refuse unknown shapes or divergent surviving old-parent data.
-Do not repair with a new writable-schema block or bless drift by hand-stamping.
-
-The dispatcher must assign the repair and its number (0083 is currently next),
-and decide how damaged pre-ledger or already-drifted catalogs enter that repair
-without weakening preflight. That design and its implementation are stopped here
-as requested. No new migration or runner change is authored. An affected local
-copy must pass its governed repair plus the retirement rehearsal before the
-handoff can be activated. An unaffected synthetic catalog is insufficient.
+1. Add a read-only catalog guard before deploy's first write and again in
+   `run_schema_migration`. Cover table, trigger and index SQL. Add the same guard
+   before `applyPending` ledger creation and `verifyHead` fingerprint grace.
+   Refusal names the repair tool and this runbook's recovery entry. Fetch the
+   guard with the runner; keep existing command-ledger SHA pins unchanged.
+2. Implement `scripts/repair-legacy-device-fk.js`. Report copies the offline file
+   into disposable scratch, leaving the source unchanged. Apply requires an
+   explicit stopped-writers assertion, no sidecars or open DB handles, an
+   exclusive repair-directory lock, and a persistent backup directory.
+3. Prove the schema against the shipped seed after identifier-only reference
+   correction. Refuse unknown objects, columns, missing objects or any surviving
+   old parent. Initial support is the current shipped schema with damaged FK
+   targets, including quoted, unquoted, bracketed and lowercase spellings.
+4. Rebuild affected children on a same-filesystem candidate under FK OFF and one
+   transaction, dropping and recreating triggers without running their effects.
+   Preserve implicit rowids, every column and row, explicit indexes, triggers and
+   AUTOINCREMENT state. Restore FK ON/legacy OFF in `finally`. Verify integrity,
+   FKs, complete streaming row digests, columns and schema before publication.
+   Refresh existing fingerprints only on the verified canonical copy; preserve
+   the migration ledger and all other data. No ledger is introduced on a
+   pre-ledger database.
+5. Fsync the verified candidate and backup, retain the source inode as
+   `original.db` in the repair directory, and write a durable receipt. Recheck
+   source identity/hash and open handles, then atomically rename the candidate
+   over the source. The original stays retained across every publication phase.
+   A caught post-publication failure restores that original atomically; a power
+   cut can leave either the original or the verified candidate at the DB path,
+   with the original retained. Incomplete attempts keep their lock and receipt
+   for operator inspection and prevent an automatic retry.
+6. Extend the fixture suite for dry-run immutability, successful repair followed
+   by the retired full boot, unknown-shape refusal, live-handle/sidecar refusal,
+   and killed subprocesses before and after publication. Add the recovery recipe
+   and the sanctioned-tool line in AGENTS. Run the boot gates and deploy pin
+   suite. Sol's destructive-path review follows this implementation; no live
+   repair or field census is authorized by this task.
 
 ## Flows handoff
 
@@ -197,7 +213,7 @@ Do not apply this candidate before the repair disposition above is complete.
 
 ## Final-branch gate requirements
 
-After the assigned repair and flows reservation, rerun the populated fixture
+After the offline repair and flows reservation, rerun the populated fixture
 through the repair, then the full boot candidate. Require identical complete
 rows, successful telemetry writes, zero FK violations, and FK ON/legacy OFF/
 writable-schema OFF on the same connection after every tested exit. Add cases
@@ -215,8 +231,8 @@ node scripts/verify-sync-flow.js
 ```
 
 Also run the flows skill's roundtrip, parse, wiring, bare-require, size, silent-
-catch and stray-DDL checks. The governed repair will require the migration and
-seed gates from `osi-schema-change-control`. The existing populated devices
+catch and stray-DDL checks. The runner changes require the migration and seed gates from
+`osi-schema-change-control`, even though the ordered corpus stays unchanged. The existing populated devices
 rebuild suite includes a pending production-column capture; its skip is not a
 production-copy rehearsal. This package uses only the populated synthetic copy
 authorized by the task. Non-author review and final verification belong to the

@@ -2349,12 +2349,25 @@ check_live_db_readonly() {
     fi
     [ -e "$DB_PATH" ] || return 0
     command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
+    if [ -e "$DB_PATH.legacy-device-fk-repair.lock" ] || [ -L "$DB_PATH.legacy-device-fk-repair.lock" ]; then
+        echo "ERROR: incomplete offline legacy device FK repair. Inspect its retained receipt with scripts/repair-legacy-device-fk.js; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
+        return 1
+    fi
     if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
         echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
         return 1
     fi
     if [ "$cldb_result" != "ok" ]; then
         echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+    # EB19: read-only and before checkpoints, ledger writes or payload changes.
+    if ! cldb_legacy="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','trigger','index') AND (instr(lower(coalesce(sql,'')), 'devices_old') > 0 OR lower(tbl_name) = 'devices_old') ORDER BY type, name" 2>&1)"; then
+        echo "ERROR: could not inspect the legacy device catalog: $cldb_legacy. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
+        return 1
+    fi
+    if [ -n "$cldb_legacy" ]; then
+        echo "ERROR: legacy devices_old catalog references. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. Nothing was changed." >&2
         return 1
     fi
 }
@@ -2486,6 +2499,7 @@ fetch_migration_runner() {
         fingerprints.js \
         index.js \
         ledger.js \
+        legacy-device-catalog.js \
         runner-iface.js \
         runner.js \
         sql-normalize.js
@@ -2531,6 +2545,9 @@ run_schema_migration() {
         return 0
     fi
     if ! ensure_sqlite3_cli; then
+        return 1
+    fi
+    if ! check_live_db_readonly; then
         return 1
     fi
     if ! command -v node >/dev/null 2>&1; then

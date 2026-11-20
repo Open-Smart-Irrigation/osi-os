@@ -1,76 +1,73 @@
 # EB19 execution report
 
-The populated fixture rejects deletion alone. Runtime implementation stopped at
-the migration-assignment boundary; #93 remains open. The
-[analysis and flows handoff](2026-11-20-eb19-legacy-catalog.md) records the source
-trace, proposed repair requirements and exact decoded-function patch.
+The CTO selected option B: fail closed during deployment, and repair supported
+catalogs with an explicit offline tool. There is no runtime migration and no
+0083. Field count: **unknown**. The flows retirement remains unapplied behind
+EB2 and EB12. This draft awaits destructive-path review and the flows reservation.
+
+The [analysis and flows handoff](2026-11-20-eb19-legacy-catalog.md) records the
+source trace, implementation plan and exact decoded-function patch for both
+profiles. Neither flows file, the ordered corpus, seed SQL nor bundled databases
+changed. No gateway, host or cloud access occurred.
 
 ## Code and authorization
 
-Startup: READY at `ec822b556`, intended base `origin/main`, 0 behind/0 ahead,
-AGENTS.md revision `c63103827`. No flows reservation was granted. Neither
-maintained flows file, the ordered corpus, runner, seed SQL nor bundled databases
-changed. There was no host, gateway or cloud access.
+Resume readiness: READY at `9e7e3c69a`, intended base `origin/main` at
+`ec822b556`, 0 behind/1 ahead, AGENTS.md source revision `c63103827`. The new
+AGENTS line explicitly sanctions this copy-based offline recovery. The user
+instructed a fast-forward continuation of draft PR #699 and a later Sol review.
 
-The branch contains synthetic fixtures, a real-SQLite rehearsal, its CI entry,
-and the analysis. The dispatcher must assign the repair (0083 is currently next)
-and resolve preflight/baseline admission before the flows handoff. No schema
-repair is implemented or claimed safe here. Independent review is the next
-assigned stage; the draft must remain unmerged.
+Deploy's read-only database check now refuses matching table, trigger and index
+SQL before its first live change, before checkpointing, and again at migration
+entry. The migration CLI refuses before creating backup directories, pruning or
+ledger inspection; `applyPending` refuses before ledger creation, and
+`verifyHead` refuses before any fingerprint grace. The predicate and recovery
+message are shared with the runner and checked against deploy's shell text.
+The command-ledger pinned files are unchanged; their existing pins are retained.
 
-## Reproduction and result
+The offline tool requires `--report` or `--apply --writers-stopped --backup-dir`.
+Apply checks gateway procd state, sidecars and open handles, and refuses unknown
+schemas. It rebuilds on a private copy, verifies schema and complete streaming
+row/column/rowid digests, checks integrity and FKs, refreshes existing fingerprints
+on that proven copy, and publishes by atomic rename only after a fsync'd backup
+and retained original. Incomplete attempts retain their lock and receipt.
 
-All SQLite-heavy commands ran sequentially through:
+Initial support is the shipped schema with legacy FK-reference damage. A
+surviving old parent, older or divergent schema, missing objects, or ambiguous
+literal/comment matches are refused. The full historical-rename fixture also
+has missing objects and is deliberately refused for separate qualification.
+There is no inferred repair for unknown field shapes.
+
+## Evidence and verification
+
+All SQLite-heavy work uses:
 
 ```sh
 osi-heavy wait --contain --scratch-tmpfs 1G --need-gib 8 -- <command>
 ```
 
-The red acceptance command was:
+The preflight regression test run against parent `9e7e3c69a` is RED: its
+integrity-only probe accepts the populated damaged catalog (exit 0 where refusal
+is required). The same test passes with the new guard. Original row-survival
+characterization remains: deletion alone preserves 28 complete fixture rows
+but leaves 26 FK violations and rejects telemetry INSERT.
 
-```sh
-node scripts/rehearse-legacy-catalog.js quoted retired boot
-```
+A direct unisolated expanded run reached the new safety refusal on this
+workstation: `/proc` denies inspection of an unrelated process. The tool's
+refusal is retained. `scripts/run-legacy-catalog-rehearsal.js` runs the fixture
+family in a private PID namespace so every fixture process is inspectable;
+locally it uses an unprivileged user namespace, while CI uses its disposable
+runner's sudo facility. This changes the test environment, not the production
+check. Live-handle refusal is still exercised against a real open SQLite handle.
 
-It exited 1. Complete rows were preserved: two devices plus two rows in each of
-13 FK children, 28 rows total. There were 26 FK violations; a telemetry INSERT
-failed with `no such table: main.devices_old`. The same connection closed with
-`foreign_keys=1`, `legacy_alter_table=0`, `writable_schema=0`. The physical
-integrity check returned `ok`. Row survival and integrity alone therefore do
-not establish a usable catalog.
+The suite covers report/apply CLI paths, all supported FK spellings, both profile
+boot functions after repair, divergent-catalog refusal, source/candidate races,
+64-bit IDs and AUTOINCREMENT high-water values, ledger/fingerprint agreement,
+and SIGKILL before commit, after verification, before publication and after
+publication. Caught errors additionally inspect FK ON/legacy OFF on the actual
+repair connection before close. A killed connection cannot run `finally`; the
+original remains intact and an unverified candidate cannot be published.
 
-The green characterization suite is deliberately different from a green repair
-acceptance test. It reproduces that failure, validates the historical surgery's
-exact-spelling repairs, and exposes its partial-failure leaks and text-matching
-hazards. It also checks row preservation and FK restoration for a healthy
-catalog and the existing sanctioned parent rebuild's tested exits. These checks
-do not qualify a future child-table migration.
-
-## Checks
-
-| Command | Result |
-|---|---|
-| `node --test scripts/rehearse-legacy-catalog.test.js` | 18 passed, no skips |
-| `node scripts/verify-runtime-schema-parity.js` | Exit 0: `verify-runtime-schema-parity: OK (2 flows: devices CHECK + runtime trigger parity)` |
-| `node scripts/verify-profile-parity.js` | Exit 0: `All parity checks passed.` |
-| `node scripts/verify-devices-rebuild-fence.js` | Exit 0: `verify-devices-rebuild-fence: OK (2 flows)` |
-| `node --test scripts/rehearse-devices-rebuild.test.js` | Exit 0: 9 passed, 1 existing pending-production-capture skip |
-| `node scripts/verify-sync-flow.js` | Exit 0: `Sync flow verification passed`; ends `All parity checks passed.` |
-| `node scripts/verify-no-new-silent-catch.js` | Exit 0: baseline 65 per maintained profile |
-| `node scripts/verify-flows-fn-parse.js` | Exit 0: `verify-flows-fn-parse: OK` |
-| `node scripts/verify-test-inventory.js` | Exit 0: new suite is assigned to the migrations workflow |
-| `node scripts/verify-agents-size.js` | Exit 0: 28,648 bytes |
-| `node scripts/verify-doc-hygiene.js` | Exit 0, built-in patterns; maintainer name list unavailable |
-| `node .claude/skills/anti-slop-writing/slop-check.js <both EB19 Markdown files>` | Exit 0, no tier-1 findings |
-| `git diff --cached --check` | Exit 0 |
-
-Node emitted its expected experimental-SQLite warning. The existing production
-column-capture skip is unrelated to these synthetic fixtures and is not counted
-as a production-copy rehearsal. The new fixture populates every discovered
-direct devices FK child and has no capture placeholder.
-
-Migration/seed regeneration and their gates were not run: their source artifacts
-are unchanged and the task explicitly stops before a new migration. GUI checks
-are outside this branch's scope. The entire boot/flows gate must run again after
-the assigned repair and reservation; the present green gates cover the current
-shipped flows, while the new rehearsal also exercises the handoff in memory.
+Verification results are recorded below after the queued runs complete. The
+existing boot-node suite's production-column-capture skip is not a field
+rehearsal. All new fixtures are synthetic.

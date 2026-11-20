@@ -48,6 +48,7 @@ const NODE_RED_DIRS = [
 // Rebuild-capable tools outside the globs. A whole-`scripts/*.js` sweep would
 // swallow this verifier's own fixtures, so the list is explicit.
 const EXTRA_SCRIPTS = [
+  'scripts/repair-legacy-device-fk.js',
   'scripts/repair-pi-schema.js',
   'scripts/repair-sync-outbox-v2.js',
   'scripts/baseline-existing-db.js',
