@@ -71,7 +71,10 @@ const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) 
           )}
           {c.relativeHumidityPct != null && (
             <span className="text-base font-semibold tabular-nums" style={{ color: 'var(--info-text)' }}>
-              {formatWeatherValue(c.relativeHumidityPct, i18n.language, 0, '%')}
+              {t('environment.forecast.relativeHumidityValue', {
+                value: formatWeatherValue(c.relativeHumidityPct, i18n.language, 0, '%'),
+                defaultValue: '{{value}}\u00a0RH',
+              })}
             </span>
           )}
           {c.windSpeedMps != null && (

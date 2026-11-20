@@ -553,7 +553,8 @@
       "rain": "Pluie",
       "probability": "Probabilité",
       "hourlyHelpLabel": "À propos de la pluie horaire",
-      "hourlyHelp": "Les barres indiquent la pluie en millimètres ; la ligne pointillée indique la probabilité de pluie en pourcentage."
+      "hourlyHelp": "Les barres indiquent la pluie en millimètres ; la ligne pointillée indique la probabilité de pluie en pourcentage.",
+      "relativeHumidityValue": "{{value}} HR"
     },
     "metrics": {
       "air_temperature_c": "Temp. air",

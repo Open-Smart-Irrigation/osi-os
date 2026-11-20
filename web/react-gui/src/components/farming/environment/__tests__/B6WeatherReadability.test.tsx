@@ -6,6 +6,11 @@ import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import en from '../../../../../public/locales/en/devices.json';
 import fr from '../../../../../public/locales/fr/devices.json';
+import de from '../../../../../public/locales/de-CH/devices.json';
+import itDevices from '../../../../../public/locales/it/devices.json';
+import es from '../../../../../public/locales/es/devices.json';
+import pt from '../../../../../public/locales/pt/devices.json';
+import lg from '../../../../../public/locales/lg/devices.json';
 import { WeatherTab } from '../WeatherTab';
 import { ForecastTab } from '../ForecastTab';
 import { AgronomicTab } from '../AgronomicTab';
@@ -31,7 +36,7 @@ function forecast(): ForecastEnvironment {
 }
 function instance() {
   const i = i18next.createInstance();
-  void i.use(initReactI18next).init({ lng: 'en', fallbackLng: 'en', resources: { en: { devices: en }, fr: { devices: fr } }, interpolation: { escapeValue: false } });
+  void i.use(initReactI18next).init({ lng: 'en', fallbackLng: 'en', resources: { en: { devices: en }, fr: { devices: fr }, 'de-CH': { devices: de }, it: { devices: itDevices }, es: { devices: es }, pt: { devices: pt }, lg: { devices: lg } }, interpolation: { escapeValue: false } });
   return i;
 }
 afterEach(() => { cleanup(); chart.axes = []; });
@@ -93,7 +98,7 @@ it('B6 current conditions translate compass points and format decimal commas', a
   const current = { ...online, available: true, current: { airTemperatureC: 12.4, relativeHumidityPct: 66, windSpeedMps: 2.7, windDirectionDeg: 225, weatherCode: null, description: null, rainMm: null, pressureHpa: null, cloudCoverPct: null, precipitationProbabilityPct: null } };
   render(<I18nextProvider i18n={i}><WeatherTab forecast={forecast()} online={current} location={location} /></I18nextProvider>);
   expect(screen.getByText('12,4 °C')).toBeInTheDocument();
-  expect(screen.getByText('66 %')).toBeInTheDocument();
+  expect(screen.getByText('66 % HR').textContent).toBe('66\u00a0%\u00a0HR');
   expect(screen.getByText('2,7 m/s SO')).toBeInTheDocument();
 });
 
@@ -113,4 +118,20 @@ it('B6 gives forecast summary tiles theme-aware paired colors', () => {
   const value = screen.getByText('1.5 mm');
   expect(value).toHaveClass('text-[var(--info-text)]');
   expect(value.parentElement).toHaveClass('bg-[var(--info-bg)]');
+});
+
+
+it.each([
+  ['en', 'RH'], ['de-CH', 'r. F.'], ['fr', 'HR'], ['it', 'UR'],
+  ['es', 'HR'], ['pt', 'HR'], ['lg', 'RH'],
+])('B6 shows qualified measured-zero humidity in %s', async (locale, qualifier) => {
+  const i = instance();
+  await i.changeLanguage(locale);
+  const current: OnlineEnvironment = { ...online, available: true, current: {
+    airTemperatureC: null, relativeHumidityPct: 0, windSpeedMps: null,
+    windDirectionDeg: null, weatherCode: null, description: null,
+    rainMm: null, pressureHpa: null, cloudCoverPct: null, precipitationProbabilityPct: null,
+  } };
+  render(<I18nextProvider i18n={i}><WeatherTab forecast={forecast()} online={current} location={location} /></I18nextProvider>);
+  expect(screen.getByText(`0 % ${qualifier}`).textContent).toBe(`0\u00a0%\u00a0${qualifier}`);
 });

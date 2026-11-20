@@ -550,7 +550,8 @@
       "rain": "Rain",
       "probability": "Probability",
       "hourlyHelpLabel": "About hourly rain",
-      "hourlyHelp": "Bars show rain in millimetres; the dashed line shows rain probability in percent."
+      "hourlyHelp": "Bars show rain in millimetres; the dashed line shows rain probability in percent.",
+      "relativeHumidityValue": "{{value}} RH"
     },
     "metrics": {
       "air_temperature_c": "Air Temp",

@@ -519,3 +519,4 @@ row in the same change.
 | `environment.compass.WNW` | B6 adds "WNW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
 | `environment.compass.NW` | B6 adds "NW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
 | `environment.compass.NNW` | B6 adds "NNW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.relativeHumidityValue` | B6 Sol review restores the visible relative-humidity qualifier: "{{value}} RH" (with a nonbreaking space). `lg` ships the English source until a human Luganda pass. |

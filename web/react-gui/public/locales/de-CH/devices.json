@@ -553,7 +553,8 @@
       "rain": "Regen",
       "probability": "Wahrscheinlichkeit",
       "hourlyHelpLabel": "Zum stündlichen Regen",
-      "hourlyHelp": "Die Balken zeigen Regen in Millimetern; die gestrichelte Linie zeigt die Regenwahrscheinlichkeit in Prozent."
+      "hourlyHelp": "Die Balken zeigen Regen in Millimetern; die gestrichelte Linie zeigt die Regenwahrscheinlichkeit in Prozent.",
+      "relativeHumidityValue": "{{value}} r. F."
     },
     "metrics": {
       "air_temperature_c": "Lufttemp.",

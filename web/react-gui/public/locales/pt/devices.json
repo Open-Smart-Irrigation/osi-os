@@ -553,7 +553,8 @@
       "rain": "Chuva",
       "probability": "Probabilidade",
       "hourlyHelpLabel": "Sobre a chuva por hora",
-      "hourlyHelp": "As barras mostram a chuva em milímetros; a linha tracejada mostra a probabilidade de chuva em percentagem."
+      "hourlyHelp": "As barras mostram a chuva em milímetros; a linha tracejada mostra a probabilidade de chuva em percentagem.",
+      "relativeHumidityValue": "{{value}} HR"
     },
     "metrics": {
       "air_temperature_c": "Temp. ar",

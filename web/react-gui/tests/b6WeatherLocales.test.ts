@@ -17,6 +17,7 @@ const keys = [
   'environment.agronomic.conditions', 'environment.agronomic.evapotranspiration',
   'environment.forecast.rain', 'environment.forecast.probability',
   'environment.forecast.hourlyHelp', 'environment.forecast.hourlyHelpLabel',
+  'environment.forecast.relativeHumidityValue',
 ];
 const at = (data: any, key: string): string => key.split('.').reduce((obj, part) => obj?.[part], data);
 
