@@ -2305,6 +2305,9 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
 const R11_HELPERS = ['osi-lib', 'osi-db-helper'];
 function r11Image(gw) {
   const img = path.join(gw.root, 'image');
+  // makeGateway models a project after npm install. The factory image has no
+  // installed helper links before the first-boot seed runs.
+  fs.unlinkSync(path.join(gw.proj, 'node_modules', 'osi-fixture-helper'));
   fs.mkdirSync(path.join(img, 'codecs'), { recursive: true });
   fs.mkdirSync(path.join(img, 'node_modules'), { recursive: true });
   fs.copyFileSync(writeLockFixture(gw, LOCKED_VERSION), path.join(img, 'package-lock.json'));
@@ -2410,6 +2413,7 @@ test('R11 fresh image: the first boot seeds sqlite3 and copies the image', () =>
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /OK: seeded verified sqlite3/);
   assert.deepEqual(r11Copies(gw), r11All('image'));
+  assert.match(fs.readFileSync(path.join(gw.proj, '.image-flows-origin'), 'utf8'), /^[0-9a-f]{64}\n$/);
   assert.equal(fs.existsSync(r11Marker(gw)), false, 'a successful seed removes its marker');
   assert.equal(requireSqlite3(gw.proj).status, 0);
 });
