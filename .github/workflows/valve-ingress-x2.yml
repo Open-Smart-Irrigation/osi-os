@@ -4,10 +4,17 @@ on:
   pull_request:
     branches: [main, master]
   push:
-    branches: [main, master]
+    # Keep preparation gates runnable while the PR awaits X1/base integration.
+    branches: [main, master, chore/valve-control-x2-entrypoints]
 
 permissions:
   contents: read
+
+# Prepared handoff on the reviewed base; update all three at X1 integration.
+env:
+  OSI_FLOWS_SIZE_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
+  OSI_DDL_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
+  OSI_MIGRATIONS_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
 
 jobs:
   characterization:
@@ -27,6 +34,10 @@ jobs:
         env:
           X2_EVIDENCE: ${{ runner.temp }}/x2-differential.json
         run: node scripts/test-valve-ingress-x2-parity.js
+      - name: Check generated loader fallback and squash-only history
+        run: |
+          node scripts/generate-valve-ingress-x2-fallback.js
+          node scripts/test-valve-ingress-x2-squash.js
       - name: Staged flows, baseline recounts and existing integration gates
         env:
           X2_STATE_EVIDENCE: ${{ runner.temp }}/x2-stateful.json

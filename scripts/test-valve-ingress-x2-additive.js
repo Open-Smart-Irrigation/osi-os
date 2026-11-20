@@ -10,6 +10,7 @@ const {pinnedSource}=require('./lib/valve-ingress-x2-frozen');
 async function main(){
  const capture=process.argv[2];assert.ok(!capture||capture==='--capture-additive='+file,'capture requires the distinct additive fixture path');
  if(capture)assert.ok(!fs.existsSync(file),'additive capture is write-once');
+ const writeEvidence=require('./lib/valve-ingress-x2-evidence').createEvidenceWriter('X2_ADDITIVE_EVIDENCE');
  pinnedSource();
  const tcases=cases(),hashes={},evidence=[];
  for(const profile of ['bcm2712','bcm2709']){
@@ -31,7 +32,7 @@ async function main(){
  const record={source:baseline.source,casesSha256:digest(tcases),hashes};
  if(capture)fs.writeFileSync(file,JSON.stringify(record,null,2)+'\n',{flag:'wx'});
  else assert.deepEqual(record,JSON.parse(fs.readFileSync(file)),'additive legacy capture changed');
- if(process.env.X2_ADDITIVE_EVIDENCE)fs.writeFileSync(process.env.X2_ADDITIVE_EVIDENCE,JSON.stringify(evidence,null,2)+'\n');
+ writeEvidence(evidence);
  console.log(`X2 additive: ${tcases.length} branch-asserted cases x 2 profiles identical`);
 }
 if(require.main===module)main().catch(error=>{console.error(error);process.exitCode=1;});

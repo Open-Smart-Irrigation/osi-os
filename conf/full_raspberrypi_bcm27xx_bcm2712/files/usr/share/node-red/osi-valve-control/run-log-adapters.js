@@ -1,2 +1,6 @@
-// Compatibility export; ingress is independent of the physical valve package.
-module.exports = require('../osi-command-ingress/run-log-adapters');
+'use strict';
+// Lazy X2 compatibility entry points; the existing loader binding owns the fallback.
+module.exports = {
+  formatStregaResponse: function formatStregaResponse(msg, deps) { return require('../osi-lib').invokeCommandIngress('formatStregaResponse', msg, deps); },
+  buildActuatorLog: function buildActuatorLog(msg, deps) { return require('../osi-lib').invokeCommandIngress('buildActuatorLog', msg, deps); },
+};

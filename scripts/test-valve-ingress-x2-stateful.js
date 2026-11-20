@@ -3,7 +3,8 @@ const test=require('node:test'),assert=require('node:assert/strict'),crypto=requ
 const {DatabaseSync}=require('node:sqlite');
 const H=require('./lib/valve-equivalence-harness');
 const evidence=[];
-test.after(()=>{if(process.env.X2_STATE_EVIDENCE)fs.writeFileSync(process.env.X2_STATE_EVIDENCE,JSON.stringify(evidence,null,2)+'\n');});
+const writeEvidence=require('./lib/valve-ingress-x2-evidence').createEvidenceWriter('X2_STATE_EVIDENCE');
+test.after(()=>writeEvidence(evidence));
 const clean=value=>JSON.parse(JSON.stringify(value===undefined?null:value));
 function observe(gateway,world){
  const trace=[],raw=gateway.raw,prepare=raw.prepare.bind(raw),exec=raw.exec.bind(raw),clock=new DatabaseSync(':memory:');let serial=0,fault=null;

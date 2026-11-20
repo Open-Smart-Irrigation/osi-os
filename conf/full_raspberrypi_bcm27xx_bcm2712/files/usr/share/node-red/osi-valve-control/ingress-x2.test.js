@@ -19,10 +19,10 @@ test('copied bodies allow only the six approved diagnostics and valve-unavailabl
   for (const patch of manifest.nodes) {
     const original = baseline.nodes.find(node => node.id === patch.id).func;
     const restore = source => source.replace(/catch\((e[23467])\) \{ node.warn\('X2 fan [^']+: ' \+ String\(\1 && \1.message \|\| \1\)\); \}/g, 'catch($1) {}').replace("catch (error) { node.warn('X2 cancel close: ' + String(error && error.message || error)); }", 'catch (_) {}').replace('err.statusCode = 503;', 'err.statusCode = 500;');
-    const source = restore(VC[patch.entry].toString());
+    const source = restore(require('../osi-command-ingress')[patch.entry].toString());
     if (patch.id !== ROUTER) assert.ok(source.includes(original), patch.entry + ': body changed');
     else {
-      const nonValve = restore(require('./command-routing').routeNonValveCommand.toString());
+      const nonValve = restore(require('../osi-command-ingress/command-routing').routeNonValveCommand.toString());
       const branches = [...original.matchAll(/^if \([\s\S]*?^\}/gm)].map(match => match[0]);
       assert.equal(branches.length, 22, 'every original top-level branch is accounted for');
       for (const branch of branches) assert.equal(Number(source.includes(branch)) + Number(nonValve.includes(branch)), 1, 'branch copied once: ' + branch.slice(0, 70));
@@ -75,21 +75,19 @@ test('concurrent manual requests retain separate request context', async () => {
   assert.equal(b[0].osi.request.durationMinutes, 9);
 });
 
-test('a missing outer module returns exactly one HTTP refusal and never invokes a command entry', async () => {
+test('a missing ingress module uses the bundled implementation and preserves the legacy reply', async () => {
   const manifest = require(manifestPath);
-  for (const patch of manifest.nodes.filter(node => !['routeCommand','buildActuatorLog'].includes(node.entry))) {
+  const loader = require('../osi-lib');
+  for (const patch of manifest.nodes) {
     const tc = cases().find(entry => entry.id === patch.id);
-    const modified = { ...tc, options: { ...tc.options } };
-    const out = await execute({ ...baseline.nodes.find(node => node.id === patch.id), ...patch.replacement }, modified, __dirname, (node, deps) => {
-      deps.osiLib = { require() { return { ok: false, error: 'fixture module absent' }; } };
+    const before = await execute(baseline.nodes.find(node => node.id === patch.id), tc, __dirname);
+    const after = await execute({ ...baseline.nodes.find(node => node.id === patch.id), ...patch.replacement }, tc, __dirname, (node, deps) => {
+      const previous=deps.osiLib;
+      deps.osiLib = { invokeCommandIngress:loader.invokeCommandIngress, require(name) { return name==='command-ingress' ? {ok:false,error:'fixture ingress absent'} : previous.require(name); } };
       return new Function(...Object.keys(deps), node.func)(...Object.values(deps));
     });
-    assert.equal(out.error, null, patch.entry);
-    const messages = (Array.isArray(out.value) ? out.value : [out.value]).filter(Boolean);
-    assert.equal(messages.length, 1, patch.entry);
-    assert.equal(messages[0].statusCode, 503);
-    assert.deepEqual(out.effects.map(effect => effect[0]), ['error']);
-    assert.deepEqual(out.effects[0][2], { $undefined: true }, 'logging must not also send msg into the HTTP catch lane');
+    const {comparable}=require(path.join(ROOT,'scripts/lib/valve-ingress-x2-adapters'));
+    assert.deepEqual(comparable(after),comparable(before),patch.entry);
   }
 });
 

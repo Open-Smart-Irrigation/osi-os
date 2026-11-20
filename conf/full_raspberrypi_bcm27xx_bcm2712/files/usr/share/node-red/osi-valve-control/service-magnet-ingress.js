@@ -1,2 +1,5 @@
-// Compatibility export; ingress is independent of the physical valve package.
-module.exports = require('../osi-command-ingress/service-magnet-ingress');
+'use strict';
+// Lazy X2 compatibility entry points; the existing loader binding owns the fallback.
+module.exports = {
+  parseStregaMagnetRequest: function parseStregaMagnetRequest(msg, deps) { return require('../osi-lib').invokeCommandIngress('parseStregaMagnetRequest', msg, deps); },
+};

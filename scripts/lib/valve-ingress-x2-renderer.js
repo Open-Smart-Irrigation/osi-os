@@ -18,10 +18,8 @@ function replacement(id) {
   assert.ok(original && entry, 'unknown X2 node');
   const libs = original.libs.some(lib => lib.var === 'osiLib') ? original.libs : [...original.libs, { var:'osiLib', module:'osi-lib' }];
   const args = [...new Set(['env','global','node','Date','Buffer','setTimeout',...libs.map(lib => lib.var)])];
-  const http = !['routeCommand','buildActuatorLog'].includes(entry[1]);
-  const returned = original.outputs === 1 ? 'msg' : '[' + [...Array(original.outputs-1).fill('null'),'msg'].join(', ') + ']';
-  const guard = http ? "msg.statusCode = 503; msg.payload = { error: 'command_ingress_unavailable' }; return "+returned+';' : 'return;';
-  const func = "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) { node.error('Command ingress unavailable: ' + x2Load.error); "+guard+" }\nreturn x2Load.value."+entry[1]+'(msg, { '+args.join(', ')+' });';
+  const injected = '{ '+args.join(', ')+' }';
+  const func = "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('"+entry[1]+"', msg, "+injected+");\nreturn x2Load.value."+entry[1]+'(msg, '+injected+');';
   return { func, libs };
 }
 function validateManifest() {

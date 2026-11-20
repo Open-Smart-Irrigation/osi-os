@@ -1,2 +1,5 @@
-// Compatibility export; ingress is independent of the physical valve package.
-module.exports = require('../osi-command-ingress/service-model-ingress');
+'use strict';
+// Lazy X2 compatibility entry points; the existing loader binding owns the fallback.
+module.exports = {
+  parseStregaModelRequest: function parseStregaModelRequest(msg, deps) { return require('../osi-lib').invokeCommandIngress('parseStregaModelRequest', msg, deps); },
+};

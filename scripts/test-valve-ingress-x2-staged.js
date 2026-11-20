@@ -23,6 +23,7 @@ try{
    const result=spawnSync(process.execPath,['scripts/lib/valve-ingress-x2-runtime.js','--control='+control],{cwd:tree.dir,env:{...process.env,X2_EVIDENCE:''},encoding:'utf8',maxBuffer:4*1024*1024});
    assert.equal(result.status,1,'native '+control+' control did not fail');
    assert.match(result.stderr,/X2 native differential/,'control failed outside the differential assertion: '+result.stderr);
+   if(control==='returned-auth')assert.match(result.stdout,/one 401 per receiver on output 2, zero Catch deliveries/);
    console.log('native negative control rejected:',control);
   }
  }else{

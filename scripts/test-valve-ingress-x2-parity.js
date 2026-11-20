@@ -15,6 +15,7 @@ const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)
 async function main() {
   const allowed = ['--baseline-only','--negative-control'];
   assert.ok(process.argv.slice(2).every(arg => allowed.includes(arg)), 'unknown X2 parity option');
+  const writeEvidence=require('./lib/valve-ingress-x2-evidence').createEvidenceWriter('X2_EVIDENCE');
   require('./lib/valve-ingress-x2-frozen').pinnedSource();
   const baselineOnly = process.argv.includes('--baseline-only');
   const evidence = [];
@@ -55,7 +56,7 @@ async function main() {
     }
   }
 
-  if (process.env.X2_EVIDENCE) fs.writeFileSync(process.env.X2_EVIDENCE, JSON.stringify({ node: process.version, source: baseline.source, cases: evidence }, null, 2) + '\n');
+  writeEvidence({node:process.version,source:baseline.source,cases:evidence});
   console.log(`X2 ${baselineOnly ? 'baseline' : 'differential'}: ${allCases.length} cases x 2 profiles, all identical (Node ${process.versions.node})`);
 }
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
