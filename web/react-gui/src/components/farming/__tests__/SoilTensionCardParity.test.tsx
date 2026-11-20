@@ -17,7 +17,7 @@ import { formatDateTime } from '../../../utils/datetime';
 
 // The edge counterpart of the OSI Cloud SoilTensionCardParity test: the WATERMARK card
 // (DraginoTempCard) and the Tensiomark card (Sdi12SoilCard) render one soil tension layout,
-// with the same labels and states, so the two cards line up and match the cloud.
+// with the same geometry and value formatting across probe families.
 
 vi.mock('../../../services/api', () => ({
   devicesAPI: { remove: vi.fn().mockResolvedValue(undefined), rename: vi.fn() },
@@ -153,7 +153,6 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
     expect(screen.queryByText('TENSIOMARK')).not.toBeInTheDocument();
     expect(screen.queryByText(/^SWT\b/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Soil temperature/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Address /)).not.toBeInTheDocument();
     expect(screen.getByText('SDI-12')).toBeInTheDocument();
     expect(screen.getByText('Identified')).toBeInTheDocument();
   });
@@ -180,17 +179,29 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
     expect(screen.queryByText(/Soil tension|Soil temperature|^SWT\b|Last seen|minutes ago/)).not.toBeInTheDocument();
   });
 
-  it.each(FAMILIES)('%s: gives each probe its own pill on the latest stored value', (family) => {
-    renderFamily(family, { kpa: [12, 35] });
+  it('WATERMARK: gives each probe its own pill on the latest stored value', () => {
+    renderFamily('watermark', { kpa: [12, 35] });
     expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe('wet');
     expect(statusOf(tile('Soil tension 2 (60 cm)'))).toBe('moist');
+    expect(screen.queryByText('Calibration range: unverified')).not.toBeInTheDocument();
   });
 
-  it.each(FAMILIES)('%s: keeps value and pill on a five-day-old reading and puts the age on the last-seen line', (family) => {
+  it('Tensiomark: shows each probe address and unverified calibration without a pill', () => {
+    renderFamily('tensiomark', { kpa: [12, 35] });
+    const shallow = tile('Soil tension 1 (20 cm)');
+    const deep = tile('Soil tension 2 (60 cm)');
+    expect(within(shallow).getByText('Address 1')).toBeInTheDocument();
+    expect(within(deep).getByText('Address 4')).toBeInTheDocument();
+    expect(screen.getAllByText('Calibration range: unverified')).toHaveLength(2);
+    expect(statusOf(shallow)).toBeNull();
+    expect(statusOf(deep)).toBeNull();
+  });
+
+  it.each(FAMILIES)('%s: keeps the value on a five-day-old reading and puts the age on the last-seen line', (family) => {
     const old = minutesAgo(5 * 24 * 60);
     renderFamily(family, { lastSeen: old });
     expect(within(tile('Soil tension 2 (60 cm)')).getByRole('button', { name: '60.6 kPa' })).toBeInTheDocument();
-    expect(statusOf(tile('Soil tension 2 (60 cm)'))).toBe('dry');
+    expect(statusOf(tile('Soil tension 2 (60 cm)'))).toBe(family === 'watermark' ? 'dry' : null);
     // From six hours on the shared footer shows the full date and time.
     expect(screen.getByTestId('device-card-last-seen')).toHaveTextContent(`Last seen ${formatDateTime(old, 'en')}`);
   });
@@ -213,11 +224,11 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
     expect(within(invalid).queryByRole('button', { name: /kPa|pF/ })).not.toBeInTheDocument();
   });
 
-  it.each(FAMILIES)('%s: follows the pF display preference and keeps 0 kPa in kPa with a Wet pill', (family) => {
+  it.each(FAMILIES)('%s: follows the pF display preference and keeps 0 kPa in kPa', (family) => {
     window.localStorage.setItem('osi.display.swtUnit', 'pF');
     renderFamily(family, { kpa: [0, 60.6] });
     expect(within(tile('Soil tension 1 (20 cm)')).getByRole('button', { name: '0.0 kPa' })).toBeInTheDocument();
-    expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe('wet');
+    expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe(family === 'watermark' ? 'wet' : null);
     // pF = log10(kPa * 10): log10(606) = 2.78
     expect(within(tile('Soil tension 2 (60 cm)')).getByRole('button', { name: '2.78 pF' })).toBeInTheDocument();
   });
@@ -250,6 +261,27 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
 });
 
 describe('SoilTensionReadings', () => {
+  it('applies the qualification per probe and preserves the eligible probe’s value and water status', () => {
+    render(
+      <I18nextProvider i18n={i18n()}>
+        <SoilTensionReadings family="Tensiomark" probes={[
+          { channel: 1, depthCm: 20, kpa: 30, unverifiedCalibration: { note: 'Calibration range: unverified', addressLabel: 'Address a' } },
+          { channel: 2, depthCm: 40, kpa: 30 },
+        ]} />
+      </I18nextProvider>,
+    );
+    const unverified = tile('Soil tension 1 (20 cm)');
+    const eligible = tile('Soil tension 2 (40 cm)');
+    expect(within(unverified).getByText('30.0 kPa')).toBeInTheDocument();
+    expect(within(unverified).getByText('Address a')).toBeInTheDocument();
+    expect(within(unverified).getByText('Calibration range: unverified')).toBeInTheDocument();
+    expect(statusOf(unverified)).toBeNull();
+    expect(within(eligible).getByText('30.0 kPa')).toBeInTheDocument();
+    expect(within(eligible).getByText('Moist')).toBeInTheDocument();
+    expect(statusOf(eligible)).toBe('moist');
+    expect(within(eligible).queryByText('Calibration range: unverified')).not.toBeInTheDocument();
+  });
+
   it('opens the history callbacks of the value and the secondary line', () => {
     const onValue = vi.fn();
     const onSecondary = vi.fn();
@@ -307,7 +339,7 @@ describe('soil tension tiles at phone width (R15)', () => {
     renderFamily(family, { kpa: [150_000, 60.6] });
     const value = within(tile('Soil tension 1 (20 cm)')).getByRole('button', { name: '150000.0 kPa' });
     expect(value).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]', 'text-xl', 'sm:text-2xl');
-    expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe('dry');
+    expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe(family === 'watermark' ? 'dry' : null);
   });
 
   // S1-2: the caption is uppercase; the depth unit must stay "cm".
