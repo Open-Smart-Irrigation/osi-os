@@ -869,6 +869,7 @@ async function withHistoryExportSlot(build) {
   if (portableExportInFlight) {
     const busy = new Error('export already running');
     busy.statusCode = 429;
+    busy.code = historyHelper.EXPORT_REASON_CODES.BUSY;
     busy.suggestion = 'try again when the current export finishes';
     busy.headers = { 'Retry-After': '30' };
     throw busy;
@@ -886,7 +887,7 @@ async function withHistoryExportSlot(build) {
 async function buildZoneExportCsv(db, options = {}) {
   return withHistoryExportSlot(async () => {
     const result = await historyHelper.buildZoneExportCsv(db, options);
-    return { ...result, csv: historyHelper.toCsv(result.columns, result.rows) };
+    return { ...result, csv: historyHelper.toCsv(result.columns, result.rows, options) };
   });
 }
 
@@ -967,18 +968,26 @@ async function handlePortableHistoryRequest(request = {}) {
     }
     httpError(404, 'Endpoint not found');
   } catch (error) {
-    const payload = { error: error && error.message ? error.message : 'Unexpected error' };
-    if (error && error.detail !== undefined) payload.detail = error.detail;
-    if (error && error.suggestion) payload.suggestion = error.suggestion;
-    return {
-      statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
-      headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
-      payload: payload
-    };
+    return historyExportErrorResponse(error);
   }
 }
 
+// The reserved per-zone wiring uses this same whole-JSON response formatter.
+function historyExportErrorResponse(error) {
+  const payload = { error: error && error.message ? error.message : 'Unexpected error' };
+  if (error && error.detail !== undefined) payload.detail = error.detail;
+  if (error && error.suggestion) payload.suggestion = error.suggestion;
+  if (error && Object.values(historyHelper.EXPORT_REASON_CODES).includes(error.code)) payload.code = error.code;
+  return {
+    statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
+    headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
+    payload,
+  };
+}
+
 module.exports = {
+  historyExportErrorResponse,
+  EXPORT_REASON_CODES: historyHelper.EXPORT_REASON_CODES,
   withHistoryExportSlot,
   buildZoneExportCsv,
   handlePortableHistoryRequest,
