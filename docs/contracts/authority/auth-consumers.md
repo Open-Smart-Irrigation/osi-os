@@ -15,7 +15,7 @@ The snapshot contains 166 HTTP entry nodes per profile: 73 inline HMAC implement
 | G3 | resolveScope/assertEnabledAccount/assertRole cache account state for 30 seconds. Invalidation tickets protect in-flight loads, but are not a durable session revocation barrier. |
 | G4 | Authorization before queued SQL, async work, writer acquisition or delayed physical dispatch does not prove current rights at apply time. Carry validated session identity and recheck at the final boundary. |
 | G5 | Device-owner SQL or ownedValve still refuses a zone grantee after a successful scope check (#451). Remove only after replacing it with current authorized resource targeting. |
-| G6 | Radio tools currently use device-scope/writer or admin gates inconsistently. CTO R6 requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass. |
+| G6 | Radio tools currently use device-scope/writer or admin gates inconsistently. Phil's R6 decision requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass. |
 | G7 | Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority. |
 | G8 | No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation. |
 | G9 | Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token. |
@@ -341,11 +341,11 @@ ACK/mirror settlement. Unbound cloud-local labels remain a separate owner path.
 
 ## Decided defaults, 20 Nov 2026
 
-The baseline rows above remain a dated code audit. The current authority defaults
-are the CTO rulings R1–R8 in v1.md, including the lead-confirmed owner/admin-only
-radio rule and actorless-command refusal. There is no installer role/entitlement
-or legacy application path to add. R6/Q1 and R7/Q3 are product defaults Phil may
-override explicitly; no product question remains open.
+The baseline rows above remain a dated code audit. The current authority requirements
+are R1–R8 in v1.md, including Phil's decided owner/admin-only radio rule (R6/Q1),
+unbounded offline login until reconnect (R7/Q3), and the CTO's actorless-command
+refusal. There is no installer role, enum, entitlement or role mirror for EB6/CL2
+to add, and no legacy application path. No product question remains open.
 
 R2 adds exactly one recorded, audited promotion of the original enabled bootstrap
 account when an existing installation has no enabled admin. This is separate

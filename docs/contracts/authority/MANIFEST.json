@@ -1,6 +1,6 @@
 {
   "contract_version": "authority-v1",
-  "status": "Decided defaults: CTO ruling and lead confirmation, 20 Nov 2026",
+  "status": "Decided requirements: CTO ruling and Phil decisions, 20 Nov 2026",
   "sources": {
     "edge_commit": "ec822b556a4bf789774a2e4deda7841d469dc631",
     "cloud_commit": "b002b807b32744979c118bf8f40b3136f2a75a32"
@@ -34,7 +34,7 @@
   ],
   "open_questions": [],
   "validation": "node scripts/test-authority-contract.js",
-  "product_decisions_owner": "CTO ruling; Phil may override R6/R7",
+  "product_decisions_owner": "Phil (R6/Q1, R7/Q3); CTO ruling, 20 Nov 2026",
   "product_decisions_selected": true,
   "model": "scripts/lib/authority-contract-model.js (test-only)",
   "dependencies": "npm ci --prefix scripts --omit=dev --ignore-scripts",
@@ -60,8 +60,5 @@
   },
   "ruling_date": "2026-11-20",
   "actor_capability": "authority_actor_v1",
-  "phil_overridable_defaults": [
-    "R6",
-    "R7"
-  ]
+  "phil_overridable_defaults": []
 }

@@ -1,6 +1,6 @@
 {
   "contract_version": "authority-v1",
-  "representation": "Resolve input by recursive valid_defaults/case.input merge (arrays replace). Policies assert the CTO decided defaults of 20 Nov 2026; superseded alternatives are not active choices. Validate resolved input, execute normalized model, and assert every expected field. No runtime verifier is supplied.",
+  "representation": "Resolve input by recursive valid_defaults/case.input merge (arrays replace). Policies assert the CTO requirements and Phil decisions of 20 Nov 2026; superseded alternatives are not active choices. Validate resolved input, execute normalized model, and assert every expected field. No runtime verifier is supplied.",
   "valid_defaults": {
     "origin": "edge",
     "mode": "linked_online",
@@ -8893,6 +8893,1754 @@
         "reason": "actor_binding_mismatch",
         "effects": 0
       }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-network_observations-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-radio_configuration_history-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration_history",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_survey-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-field_test_download-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey_download",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-0-owner",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-0-admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-0-member",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-0-viewer",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-0-super_admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-1-owner",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-1-admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-1-member",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-1-viewer",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-cloud_network_observations-cloud-1-super_admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-0-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-0-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-0-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-0-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-0-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-1-owner",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-1-admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-1-member",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-1-viewer",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-edge-1-super_admin",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-0-owner",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-0-admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-0-member",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-0-viewer",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-0-super_admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-1-owner",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-1-admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "admin",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "none",
+          "device_owner": false
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-1-member",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "researcher",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-1-viewer",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-tool-raw_radio_exports-cloud-1-super_admin",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_raw_export",
+        "actor": {
+          "gateway_role": "viewer",
+          "gateway_owner": false,
+          "ownership_proven": false,
+          "enabled": true,
+          "zone_relation": "owned",
+          "device_owner": true,
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    }
+  ],
+  "radio_tools": [
+    {
+      "id": "network_observations",
+      "action": "radio_observations",
+      "origins": [
+        "edge"
+      ]
+    },
+    {
+      "id": "radio_configuration",
+      "action": "radio_configuration",
+      "origins": [
+        "edge"
+      ]
+    },
+    {
+      "id": "radio_configuration_history",
+      "action": "radio_configuration_history",
+      "origins": [
+        "edge"
+      ]
+    },
+    {
+      "id": "field_test_survey",
+      "action": "radio_survey",
+      "origins": [
+        "edge"
+      ]
+    },
+    {
+      "id": "field_test_download",
+      "action": "radio_survey_download",
+      "origins": [
+        "edge"
+      ]
+    },
+    {
+      "id": "cloud_network_observations",
+      "action": "radio_observations",
+      "origins": [
+        "cloud"
+      ]
+    },
+    {
+      "id": "raw_radio_exports",
+      "action": "radio_raw_export",
+      "origins": [
+        "edge",
+        "cloud"
+      ]
     }
   ]
 }

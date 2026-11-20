@@ -71,7 +71,7 @@ function authorize(input) {
   if (action === 'device_rename' && origin === 'cloud' && r.edge_backed && !r.capabilities.includes('entity_name_commands_v1')) return deny('capability_unavailable');
   if (action.startsWith('radio_')) {
     const radioOwner = a.gateway_owner && a.ownership_proven && a.local_actor_mapped;
-    return a.gateway_role === 'admin' || radioOwner ? allow(action === 'radio_observations' ? 0 : 1) : deny('insufficient_role');
+    return a.gateway_role === 'admin' || radioOwner ? allow(['radio_configuration', 'radio_survey'].includes(action) ? 1 : 0) : deny('insufficient_role');
   }
   if (action === 'system_reboot' || action === 'system_fan') {
     if (a.gateway_role === 'admin') return allow();

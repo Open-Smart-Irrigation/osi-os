@@ -138,6 +138,7 @@ function verify() {
     assert.equal(source, pinned(item.file.replace('bcm2712', 'bcm2709')), `both profile modules: ${item.file}`);
     assert.ok(source.includes(item.function), `missing ${item.file} ${item.function}`);
     assert.ok(item.checks_today && item.revocation_path);
+    assert.ok(!/add installer entitlement|and installer at/.test(item.revocation_path), 'radio handoff must use existing owner/admin authority');
     for (const gap of item.gaps) assert.ok(gaps.has(gap));
   }
   const moduleFiles = execFileSync('git', ['ls-tree', '-r', '--name-only', inventory.sources.edge_commit, inventory.sources.payload_root], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(file => /\/osi-[^/]+\/.*\.js$/.test(file) && !/\.test\.js$|\/test[^/]*\.js$/.test(file));
@@ -178,12 +179,42 @@ function verify() {
   }
   assert.deepEqual(authority.valid_defaults.policies, manifest.policy_defaults);
   assert.equal(manifest.product_decisions_selected, true);
+  assert.deepEqual(manifest.phil_overridable_defaults, []);
   for (const d of decisions.decisions) {
-    assert.equal(d.status, 'decided_default');
+    assert.equal(d.status, ['R6', 'R7'].includes(d.id) ? 'decided' : 'decided_default');
     assert.equal(d.ruling_date, '2026-11-20');
     if (d.policy_dimension) assert.equal(d.selected_default, manifest.policy_defaults[d.policy_dimension]);
-    assert.equal(d.phil_may_override, ['R6', 'R7'].includes(d.id));
-    if (d.phil_may_override) assert.equal(d.override_owner, 'Phil');
+    assert.equal(d.product_default, false);
+    assert.equal(d.phil_may_override, false);
+    assert.equal(d.override_owner, null);
+    if (['R6', 'R7'].includes(d.id)) assert.equal(d.decision_owner, 'Phil');
+  }
+  const radioTools = [
+    { id: 'network_observations', action: 'radio_observations', origins: ['edge'] },
+    { id: 'radio_configuration', action: 'radio_configuration', origins: ['edge'] },
+    { id: 'radio_configuration_history', action: 'radio_configuration_history', origins: ['edge'] },
+    { id: 'field_test_survey', action: 'radio_survey', origins: ['edge'] },
+    { id: 'field_test_download', action: 'radio_survey_download', origins: ['edge'] },
+    { id: 'cloud_network_observations', action: 'radio_observations', origins: ['cloud'] },
+    { id: 'raw_radio_exports', action: 'radio_raw_export', origins: ['edge', 'cloud'] },
+  ];
+  assert.deepEqual(authority.radio_tools, radioTools, 'every Phil Q1 tool has an explicit fixture family');
+  for (const tool of radioTools) for (const origin of tool.origins) for (const scoped of [false, true]) {
+    for (const subject of ['owner', 'admin', 'member', 'viewer', 'super_admin']) {
+      const id = `radio-tool-${tool.id}-${origin}-${Number(scoped)}-${subject}`;
+      const c = authority.cases.find(c => c.id === id);
+      assert.ok(c, `required radio boundary case ${id}`);
+      const input = model.merge(authority.valid_defaults, c.input);
+      assert.equal(input.action, tool.action);
+      assert.equal(input.origin, origin);
+      assert.equal(input.scoped_access, scoped);
+      assert.equal(input.actor.enabled, true);
+      assert.equal(input.actor.gateway_owner, subject === 'owner');
+      assert.equal(input.actor.gateway_role, subject === 'admin' ? 'admin' : ['viewer', 'super_admin'].includes(subject) ? 'viewer' : 'researcher');
+      if (subject === 'owner') assert.equal(input.actor.ownership_proven, true);
+      if (subject === 'super_admin') assert.equal(input.actor.cloud_role, 'SUPER_ADMIN');
+      assert.equal(c.expected.decision, ['owner', 'admin'].includes(subject) ? 'allow' : 'deny');
+    }
   }
   for (const input of inputs) assert.deepEqual(input.policies, manifest.policy_defaults, 'only decided defaults are executable');
   for (const [dimension, superseded] of Object.entries({ installer: 'gateway_installer', offline: 'bounded_offline_lease', stop_authority: 'current_rights', first_admin: 'operator_provisioned', clock: 'durable_high_water', prediction: 'admin_zone_write', owner_system: 'mapped_admin_only' })) {

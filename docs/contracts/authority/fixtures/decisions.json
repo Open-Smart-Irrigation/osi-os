@@ -2,7 +2,7 @@
   "contract_version": "authority-v1",
   "ruling_title": "CTO ruling on the K1 #700 open decisions",
   "ruling_date": "2026-11-20",
-  "activation_rule": "These are decided implementation defaults. R6/Q1 and R7/Q3 are product defaults Phil may override explicitly; no override is inferred from an input flag.",
+  "activation_rule": "These are decided implementation requirements. Phil decided R6/Q1 and confirmed R7/Q3 on 20 Nov 2026. No product question or provisional product default remains; no alternative is inferred from an input flag.",
   "decisions": [
     {
       "id": "R1",
@@ -79,28 +79,30 @@
       "former_question": "Q1",
       "ruling_item": "R6",
       "ruling_date": "2026-11-20",
-      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
-      "status": "decided_default",
+      "authority": "Phil decision, 20 Nov 2026, recorded in CTO ruling",
+      "status": "decided",
       "policy_dimension": "installer",
       "selected_default": "owner_admin_radio",
-      "product_default": true,
-      "phil_may_override": true,
-      "override_owner": "Phil",
-      "rule": "Radio tools and raw radio data are limited to the enabled paired gateway owner and enabled gateway admins over the whole gateway. No installer role or entitlement. Member/viewer membership alone and cloud SUPER_ADMIN never authorize them. Sensor history and device GPS remain separate."
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Radio tools and raw radio data are limited to the enabled paired gateway owner and enabled gateway admins over the whole gateway. No installer role or entitlement. Member/viewer membership alone and cloud SUPER_ADMIN never authorize them. Sensor history and device GPS remain separate.",
+      "decision_owner": "Phil"
     },
     {
       "id": "R7",
       "former_question": "Q3",
       "ruling_item": "R7",
       "ruling_date": "2026-11-20",
-      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
-      "status": "decided_default",
+      "authority": "Phil decision, 20 Nov 2026, recorded in CTO ruling",
+      "status": "decided",
       "policy_dimension": "offline",
       "selected_default": "until_reconnect",
-      "product_default": true,
-      "phil_may_override": true,
-      "override_owner": "Phil",
-      "rule": "Fence cloud sessions immediately. A disconnected gateway accepts local login without an offline time limit until reconnect; edge revocation commits then. Deliver through the gateway own non-human transport credential, unaffected by disabling a human polling principal."
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Fence cloud sessions immediately. A disconnected gateway accepts local login without an offline time limit until reconnect; edge revocation commits then. Deliver through the gateway own non-human transport credential, unaffected by disabling a human polling principal.",
+      "decision_owner": "Phil"
     },
     {
       "id": "R8a",

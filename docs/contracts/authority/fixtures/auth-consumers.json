@@ -25,7 +25,7 @@
     "G3": "resolveScope/assertEnabledAccount/assertRole cache account state for 30 seconds. Invalidation tickets protect in-flight loads, but are not a durable session revocation barrier.",
     "G4": "Authorization before queued SQL, async work, writer acquisition or delayed physical dispatch does not prove current rights at apply time. Carry validated session identity and recheck at the final boundary.",
     "G5": "Device-owner SQL or ownedValve still refuses a zone grantee after a successful scope check (#451). Remove only after replacing it with current authorized resource targeting.",
-    "G6": "Radio tools currently use device-scope/writer or admin gates inconsistently. CTO R6 requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass.",
+    "G6": "Radio tools currently use device-scope/writer or admin gates inconsistently. Phil's R6 decision requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass.",
     "G7": "Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority.",
     "G8": "No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation.",
     "G9": "Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token.",
@@ -5868,7 +5868,7 @@
       "file": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/commands.js",
       "function": "applyCommand",
       "checks_today": "Transaction checks actor disabled, fresh device access and writer; no installer entitlement.",
-      "revocation_path": "Add installer entitlement to radio mutation and current actor check; local session checks at API transaction boundary.",
+      "revocation_path": "Require enabled paired gateway owner/admin for radio mutation and current actor check; local session checks at API transaction boundary. No installer role or entitlement.",
       "gaps": [
         "G1",
         "G4",
@@ -5949,7 +5949,7 @@
       "file": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/index.js",
       "function": "saveRadioConfiguration",
       "checks_today": "Persists revision with actorUserUuid supplied by caller; no bearer or installer entitlement.",
-      "revocation_path": "Network adapter/command applier must validate current session/actor and installer at revision write.",
+      "revocation_path": "Network adapter/command applier must validate current session/actor and enabled paired gateway owner/admin at revision write. No installer role or entitlement.",
       "gaps": [
         "G1",
         "G4",
