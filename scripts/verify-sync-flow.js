@@ -126,6 +126,7 @@ execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-cont
 execFileSync(process.execPath, [path.resolve(__dirname, 'test-terra-selection-edge-acceptance.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'verify-history-api-contract.test.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-scoped-access.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'test-release-1.0-surfaces.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'installation-recovery-adapter.test.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');

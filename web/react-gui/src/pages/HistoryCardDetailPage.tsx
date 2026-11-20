@@ -11,7 +11,8 @@ import {
 import { HistoryExportSheet } from '../components/history/mobile/HistoryExportSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import type { VisibleInterval } from '../components/history/mobile/MobileSoilUplotHistory';
-const MobileSoilUplotHistory = lazy(() => import('../components/history/mobile/MobileSoilUplotHistory').then((module) => ({ default: module.MobileSoilUplotHistory })));
+import { MOBILE_HISTORY_INTERNAL_ENABLED } from '../history/mobileHistoryInternalGate';
+
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
@@ -22,7 +23,8 @@ import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
-import { useIsDesktop } from '../history/useIsDesktop';
+import { useDesktopData } from '../history/useDesktopData';
+import { EXPANDED_DATA_VIEWS_ENABLED } from '../history/expandedDataViews';
 import { isMobileSoilUplotEnabled } from '../history/mobileSoilUplot';
 import { useOrientation } from '../history/useOrientation';
 import {
@@ -44,6 +46,9 @@ import type {
 } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
+const MobileSoilUplotHistory = MOBILE_HISTORY_INTERNAL_ENABLED
+  ? lazy(() => import('../components/history/mobile/MobileSoilUplotHistory').then((module) => ({ default: module.MobileSoilUplotHistory })))
+  : null;
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
 const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
@@ -109,9 +114,10 @@ type DetailRouteScope =
 function selectableViewsForCard(card: HistoryCardSummary | null): HistoryViewMode[] {
   if (!card) return [];
   const definition = historyCardDefinitionsByType[card.cardType];
-  const allowedViews = new Set<HistoryViewMode>(definition.views);
+  const views = definition.views.filter((view) => EXPANDED_DATA_VIEWS_ENABLED || view !== 'advanced');
+  const allowedViews = new Set<HistoryViewMode>(views);
   const filtered = card.views.filter((view) => allowedViews.has(view));
-  return filtered.length > 0 ? filtered : [...definition.views];
+  return filtered.length > 0 ? filtered : views;
 }
 
 function primaryViewModes(views: readonly HistoryViewMode[]): HistoryViewMode[] {
@@ -122,7 +128,7 @@ function defaultPrimaryViewForCard(card: HistoryCardSummary | null): HistoryView
   if (!card) return 'line-chart';
   const selectableViews = selectableViewsForCard(card);
   if (card.defaultView !== 'advanced' && selectableViews.includes(card.defaultView)) return card.defaultView;
-  return primaryViewModes(selectableViews)[0] ?? card.defaultView;
+  return primaryViewModes(selectableViews)[0] ?? 'line-chart';
 }
 
 function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string {
@@ -309,7 +315,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const featureFlags = useFeatureFlags();
   const orientation = useOrientation();
   const isLandscape = orientation === 'landscape';
-  const isDesktop = useIsDesktop();
+  const isDesktop = useDesktopData();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
@@ -403,13 +409,15 @@ export const HistoryCardDetailPage: React.FC = () => {
     defaultRange,
     displayCard ? `${displayCard.cardId}:${defaultRange}` : defaultRange,
   );
+  const canUseMobileSoilChart = isMobileSoilUplotEnabled({
+    buildEnabled: MOBILE_HISTORY_INTERNAL_ENABLED,
+    historyUxReady: featureFlags.isReady,
+    historyUxEnabled: featureFlags.historyEnabled,
+    isMobile: !isDesktop,
+    cardType: displayCard?.cardType,
+  });
   const selectedView = useMemo(() => {
     const selectableViews = selectableViewsForCard(displayCard);
-    const canStartMobileSoilChart = import.meta.env.VITE_HISTORY_UPLOT_SOIL_ENABLED === 'true'
-      && featureFlags.isReady
-      && featureFlags.historyEnabled
-      && !isDesktop
-      && displayCard?.cardType === 'soil';
     if (
       displayCard
       && userSelectedView?.cardId === displayCard.cardId
@@ -417,8 +425,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     ) {
       return userSelectedView.view;
     }
-    return canStartMobileSoilChart ? 'line-chart' : defaultPrimaryViewForCard(displayCard);
-  }, [displayCard, featureFlags.historyEnabled, featureFlags.isReady, isDesktop, userSelectedView]);
+    return canUseMobileSoilChart ? 'line-chart' : defaultPrimaryViewForCard(displayCard);
+  }, [canUseMobileSoilChart, displayCard, userSelectedView]);
   const shouldRenderAdvanced = selectedView === 'advanced';
   const sourceOptions = useMemo(() => sourceOptionsForCard(displayCard), [displayCard]);
   const allSourceKeys = useMemo(() => sourceOptions.map((source) => source.key), [sourceOptions]);
@@ -434,12 +442,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const mobileSourceKey = selectedSourceKey ?? (sourceOptions.length === 0 && displayCard?.sourceDevices?.length === 1
     ? (typeof displayCard.sourceDevices[0]?.sourceKey === 'string' && displayCard.sourceDevices[0].sourceKey.trim() ? displayCard.sourceDevices[0].sourceKey.trim() : null)
     : null);
-  const useMobileSoilUplot = isMobileSoilUplotEnabled({
-    historyUxReady: featureFlags.isReady,
-    historyUxEnabled: featureFlags.historyEnabled,
-    isMobile: !isDesktop,
-    cardType: displayCard?.cardType,
-  }) && selectedView === 'line-chart' && displayCard?.availability.available === true;
+  const useMobileSoilUplot = canUseMobileSoilChart && selectedView === 'line-chart' && displayCard?.availability.available === true;
   const requiresCalendarSource = (selectedView === 'calendar' || selectedView === 'soil-profile') && sourceOptions.length > 1 && selectedSourceKey === null;
   const exportDefaultChannels = useMemo(() => {
     if (!displayCard) return [];
@@ -772,6 +775,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
         <HistoryDesktopDetail
+          expandedViewsEnabled={EXPANDED_DATA_VIEWS_ENABLED}
           cards={desktopCards}
           selectedCard={desktopSelectedCard}
           zoneName={resolvedZone?.name ?? null}
@@ -849,7 +853,7 @@ export const HistoryCardDetailPage: React.FC = () => {
               {singleDeviceName}
             </div>
           )}
-          {useMobileSoilUplot && resolvedScope && displayCard ? (
+          {MobileSoilUplotHistory && useMobileSoilUplot && resolvedScope && displayCard ? (
             <Suspense fallback={<div className="min-h-[420px]" role="status" aria-label={t('mobileUplot.loading')} />}>
               <MobileSoilUplotHistory scope={resolvedScope} cardId={displayCard.cardId} sourceKey={mobileSourceKey} visibleIntervalReaderRef={mobileVisibleIntervalRef} />
             </Suspense>

@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { isMobileSoilUplotEnabled, mobileSoilHistoryContextKey } from '../mobileSoilUplot';
 
 describe('mobile soil uPlot gate', () => {
-  const ready = { buildFlag: 'true', historyUxReady: true, historyUxEnabled: true, isMobile: true, cardType: 'soil' };
+  const ready = { buildEnabled: true, historyUxReady: true, historyUxEnabled: true, isMobile: true, cardType: 'soil' };
   it('requires explicit build opt-in, ready permission, mobile layout and soil card', () => {
     expect(isMobileSoilUplotEnabled(ready)).toBe(true);
-    expect(isMobileSoilUplotEnabled({ ...ready, buildFlag: undefined })).toBe(false);
-    expect(isMobileSoilUplotEnabled({ ...ready, buildFlag: 'TRUE' })).toBe(false);
+    expect(isMobileSoilUplotEnabled({ ...ready, buildEnabled: false })).toBe(false);
     expect(isMobileSoilUplotEnabled({ ...ready, historyUxReady: false })).toBe(false);
     expect(isMobileSoilUplotEnabled({ ...ready, historyUxEnabled: false })).toBe(false);
     expect(isMobileSoilUplotEnabled({ ...ready, isMobile: false })).toBe(false);

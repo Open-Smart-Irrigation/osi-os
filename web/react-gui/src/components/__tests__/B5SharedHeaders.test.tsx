@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AppHeader } from '../AppHeader';
@@ -78,4 +78,21 @@ it('keeps language selection outside the collapsed phone utility panel', () => {
   expect(panel).toHaveClass('hidden');
   // JSDOM cannot apply the responsive CSS; the unmodified browser spec checks visibility.
   expect(panel).not.toContainElement(screen.getByRole('button', { name: 'Language' }));
+});
+
+it('routes Data through History when a desktop browser narrows below 1024 px', () => {
+  vi.stubGlobal('matchMedia', undefined);
+  vi.stubGlobal('innerWidth', 1440);
+  try {
+    render(<MemoryRouter><DashboardHeader username="user" onAddZone={vi.fn()} onAddDevice={vi.fn()} onLogout={vi.fn()} /></MemoryRouter>);
+    const dataTab = screen.getByRole('link', { name: 'tabs.data' });
+    expect(dataTab).toHaveAttribute('href', '/analysis');
+
+    vi.stubGlobal('innerWidth', 768);
+    act(() => window.dispatchEvent(new Event('resize')));
+    expect(dataTab).toHaveAttribute('href', '/history');
+  } finally {
+    cleanup();
+    vi.unstubAllGlobals();
+  }
 });

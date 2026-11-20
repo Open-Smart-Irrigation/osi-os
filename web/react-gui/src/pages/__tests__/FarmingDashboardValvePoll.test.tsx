@@ -134,6 +134,22 @@ describe('FarmingDashboard /api/valves poll count (production SWR defaults)', ()
     expect(valvesList).toHaveBeenCalledTimes(0);
   });
 
+  it('keeps UC512 out of the control cards while STREGA still gets its card', async () => {
+    const uc512 = nonValveDevice({ type_id: 'MILESIGHT_UC512', name: 'UC512' });
+    devicesGetAll.mockResolvedValueOnce([uc512]);
+    const dashboard = renderDashboard();
+    await settleInitialFetches();
+    expect(screen.queryByTestId('strega-valve-card-stub')).toBeNull();
+    expect(valvesList).not.toHaveBeenCalled();
+    dashboard.unmount();
+
+    devicesGetAll.mockResolvedValueOnce([uc512, stregaDevice()]);
+    renderDashboard();
+    await settleInitialFetches();
+    expect(screen.getAllByTestId('strega-valve-card-stub')).toHaveLength(1);
+    expect(valvesList).toHaveBeenCalled();
+  });
+
   it('polls /api/valves on a farm with a STREGA valve, panel visible (dedupe with ValveControlPanel)', async () => {
     window.localStorage.setItem('osi.modules.valveControl', 'true');
     devicesGetAll.mockResolvedValue([stregaDevice()]);

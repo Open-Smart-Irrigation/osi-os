@@ -64,6 +64,7 @@ function defaultSpanMsForRange(range: HistoryRangeLabel): number {
 }
 
 export interface HistoryDesktopDetailProps {
+  expandedViewsEnabled?: boolean;
   cards: HistoryCardSummary[];
   selectedCard: HistoryCardSummary;
   zoneName: string | null;
@@ -74,6 +75,7 @@ export interface HistoryDesktopDetailProps {
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
 export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
+  expandedViewsEnabled = true,
   cards,
   selectedCard,
   zoneName,
@@ -93,22 +95,23 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     resetViewport(initialBounds, defaultSpanMs),
   );
   const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
-  const [selectedView, setSelectedView] = useState<HistoryViewMode>(() => defaultDesktopView(selectedCard));
+  const [selectedView, setSelectedView] = useState<HistoryViewMode>(() => defaultDesktopView(selectedCard, expandedViewsEnabled));
   const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
   const [aggregationOverride, setAggregationOverride] = useState<HistoryAggregationLevel | null>(null);
-  const [mode, setMode] = useState<DesktopMode>('focus');
-  const viewOptions = useMemo(() => selectableDesktopViews(selectedCard), [selectedCard]);
+  const [requestedMode, setMode] = useState<DesktopMode>('focus');
+  const mode = expandedViewsEnabled ? requestedMode : 'focus';
+  const viewOptions = useMemo(() => selectableDesktopViews(selectedCard, expandedViewsEnabled), [selectedCard, expandedViewsEnabled]);
   const sourceOptions = useMemo(() => desktopSourceOptions(selectedCard), [selectedCard]);
   const selectedViewForCard = useMemo(() => {
     const allowedViews = viewOptions.map((entry) => entry.view);
-    return allowedViews.includes(selectedView) ? selectedView : defaultDesktopView(selectedCard);
-  }, [selectedCard, selectedView, viewOptions]);
+    return allowedViews.includes(selectedView) ? selectedView : defaultDesktopView(selectedCard, expandedViewsEnabled);
+  }, [selectedCard, selectedView, viewOptions, expandedViewsEnabled]);
   const shouldRenderAdvanced = selectedViewForCard === 'advanced';
   const requiresExplicitSource = (selectedViewForCard === 'calendar' || selectedViewForCard === 'soil-profile') && sourceOptions.length > 1 && selectedSourceKey === null;
 
   useEffect(() => {
-    setSelectedView(defaultDesktopView(selectedCard));
-  }, [selectedCard.cardId, selectedCard.defaultView]);
+    setSelectedView(defaultDesktopView(selectedCard, expandedViewsEnabled));
+  }, [selectedCard.cardId, selectedCard.defaultView, expandedViewsEnabled]);
 
   useEffect(() => {
     setSelectedSourceKey(null);
@@ -316,31 +319,32 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                 ))}
               </div>
             ) : null}
-            {/* Focus | Compare segmented control */}
-            <div
-              role="group"
-              aria-label={t('history.desktop.modeLabel', { defaultValue: 'View mode' })}
-              className="flex shrink-0 rounded border border-[var(--border)]"
-            >
-              {(['focus', 'compare'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  aria-pressed={mode === m}
-                  data-testid={`mode-${m}`}
-                  onClick={() => setMode(m)}
-                  className={`shrink-0 whitespace-nowrap px-3 py-1 text-xs font-semibold capitalize transition-colors ${
-                    mode === m
-                      ? 'bg-[var(--primary)] text-[var(--on-primary)]'
-                      : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
-                  }`}
-                >
-                  {m === 'focus'
-                    ? t('history.desktop.modeFocus', { defaultValue: 'Focus' })
-                    : t('history.desktop.modeCompare', { defaultValue: 'Compare' })}
-                </button>
-              ))}
-            </div>
+            {expandedViewsEnabled && (
+              <div
+                role="group"
+                aria-label={t('history.desktop.modeLabel', { defaultValue: 'View mode' })}
+                className="flex shrink-0 rounded border border-[var(--border)]"
+              >
+                {(['focus', 'compare'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={mode === m}
+                    data-testid={`mode-${m}`}
+                    onClick={() => setMode(m)}
+                    className={`shrink-0 whitespace-nowrap px-3 py-1 text-xs font-semibold capitalize transition-colors ${
+                      mode === m
+                        ? 'bg-[var(--primary)] text-[var(--on-primary)]'
+                        : 'bg-[var(--secondary-bg)] text-[var(--text)] hover:bg-[var(--border)]'
+                    }`}
+                  >
+                    {m === 'focus'
+                      ? t('history.desktop.modeFocus', { defaultValue: 'Focus' })
+                      : t('history.desktop.modeCompare', { defaultValue: 'Compare' })}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {/* Range presets + zoom — always visible so the shared viewport can be adjusted in either mode */}
           <div className="flex min-w-0 flex-wrap items-center gap-1">

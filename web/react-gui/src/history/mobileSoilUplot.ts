@@ -1,5 +1,5 @@
 export interface MobileSoilUplotGateInput {
-  buildFlag?: string;
+  buildEnabled: boolean;
   historyUxReady: boolean;
   historyUxEnabled: boolean;
   isMobile: boolean;
@@ -7,13 +7,13 @@ export interface MobileSoilUplotGateInput {
 }
 
 export function isMobileSoilUplotEnabled({
-  buildFlag = typeof import.meta.env === 'undefined' ? undefined : import.meta.env.VITE_HISTORY_UPLOT_SOIL_ENABLED,
+  buildEnabled,
   historyUxReady,
   historyUxEnabled,
   isMobile,
   cardType,
 }: MobileSoilUplotGateInput): boolean {
-  return buildFlag === 'true'
+  return buildEnabled
     && historyUxReady
     && historyUxEnabled
     && isMobile

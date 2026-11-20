@@ -1,12 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { mobileHistoryInternalEnabled } from '../mobileHistoryInternalGate';
+import { expect, it } from 'vitest';
+import { MOBILE_HISTORY_INTERNAL_ENABLED } from '../mobileHistoryInternalGate';
 
-describe('mobile history internal gate', () => {
-  it('requires the exact string true', () => {
-    expect(mobileHistoryInternalEnabled('true')).toBe(true);
-    expect(mobileHistoryInternalEnabled('TRUE')).toBe(false);
-    expect(mobileHistoryInternalEnabled(' true')).toBe(false);
-    expect(mobileHistoryInternalEnabled(true)).toBe(false);
-    expect(mobileHistoryInternalEnabled(undefined)).toBe(false);
-  });
+it('keeps the experimental phone charts off in the standard GUI config', () => {
+  expect(MOBILE_HISTORY_INTERNAL_ENABLED).toBe(false);
 });

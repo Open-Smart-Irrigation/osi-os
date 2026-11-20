@@ -12,7 +12,7 @@ export const HistoryMobileHeader: React.FC<HistoryMobileHeaderProps> = ({
   showAdmin = false,
 }) => {
   const { t } = useTranslation('history');
-  return <div className="lg:hidden">
+  return (
     <AppHeader title={t('history.shell.title')} activeTab="data" username={null} onLogout={onLogout} showAdmin={showAdmin} />
-  </div>;
+  );
 };

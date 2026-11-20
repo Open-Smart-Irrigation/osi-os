@@ -37,6 +37,11 @@ export interface AnalysisCatalogEntry {
   configurationState?: 'current' | 'other_supported';
 }
 
+export function analysisSourceKey(channel: AnalysisCatalogEntry): string {
+  return channel.deviceSourceId
+    ?? `${channel.hubEui ?? ''}|${channel.zoneId ?? 'unassigned'}|${channel.sourceKind}:${channel.cardType}:${channel.sourceKey}`;
+}
+
 export interface AnalysisCatalogResponse {
   generatedAt: string;
   channels: AnalysisCatalogEntry[];

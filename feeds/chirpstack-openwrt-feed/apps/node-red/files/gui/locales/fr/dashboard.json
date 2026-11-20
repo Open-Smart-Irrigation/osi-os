@@ -12,13 +12,13 @@
   "admin": "Admin",
   "adminMenu": {
     "users": "Utilisateurs",
-    "grants": "Autorisations"
+    "grants": "Autorisations d’accès"
   },
   "account": "Compte",
   "accountMenu": {
     "osiServer": "OSI Server"
   },
-  "logout": "Déconnexion",
+  "logout": "Se déconnecter",
   "loading": "Chargement du tableau de bord...",
   "failedToLoad": "Échec du chargement des données",
   "autoRefresh": "Actualisation automatique toutes les 10 secondes",
@@ -38,5 +38,9 @@
     "zones": "Zones",
     "data": "Données",
     "journal": "Journal"
+  },
+  "header": {
+    "menu": "Menu",
+    "primaryNavigation": "Navigation principale"
   }
 }
