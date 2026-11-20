@@ -53,6 +53,13 @@ jobs:
         run: node --test scripts/test-chirpstack-sqlite-wal.js
       - name: Recover Node-RED startup files
         run: node --test scripts/test-node-red-init-flows.js
+      - name: Fence interrupted farm database restores
+        run: |
+          if ! command -v sqlite3 >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y sqlite3
+          fi
+          node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.test.js
       - name: Shell tests
         run: |
           sh scripts/test-gateway-identity-helper.sh
