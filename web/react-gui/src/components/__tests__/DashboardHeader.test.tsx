@@ -162,10 +162,12 @@ describe('DashboardHeader (osi-os)', () => {
 
   // The journal module is gateway-level; with it off, the Add menu must not
   // offer the one entry point that lands on /journal.
-  it('offers the journal capture entry in the Add menu when the journal module is on', () => {
+  it('offers journal capture as a real link when the journal module is on', () => {
     renderHeader();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(screen.getByRole('menuitem', { name: 'Activity' })).toBeInTheDocument();
+    const activity = screen.getByRole('menuitem', { name: 'Activity' });
+    expect(activity).toBeInstanceOf(HTMLAnchorElement);
+    expect(activity).toHaveAttribute('href', '/journal?capture=1');
   });
 
   it('hides the journal capture entry from the Add menu when the journal module is off', () => {

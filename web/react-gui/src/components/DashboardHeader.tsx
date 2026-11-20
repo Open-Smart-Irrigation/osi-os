@@ -1,5 +1,4 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { HeaderMenu } from './HeaderMenu';
 import { AppHeader, HEADER_BUTTON } from './AppHeader';
@@ -23,13 +22,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   showAdmin = false,
 }) => {
   const { t } = useTranslation(['dashboard', 'settings']);
-  const navigate = useNavigate();
   const modules = useGatewayModules();
 
   return <AppHeader title={t('title')} activeTab="zones" username={username} onLogout={onLogout} showAdmin={showAdmin}
     actions={canWrite ? <HeaderMenu label={t('add')} align="left" triggerClassName={HEADER_BUTTON} items={[
       { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },
       { key: 'device', label: t('addMenu.device'), onSelect: onAddDevice },
-      ...(modules?.journal ? [{ key: 'activity', label: t('addMenu.activity'), onSelect: () => navigate('/journal?capture=1') }] : []),
+      ...(modules?.journal ? [{ key: 'activity', label: t('addMenu.activity'), to: '/journal?capture=1' }] : []),
     ]} /> : undefined} />;
 };
