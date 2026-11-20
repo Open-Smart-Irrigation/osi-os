@@ -38,7 +38,7 @@ test('recent command projection filters report-only rows before the 50-row limit
   const context = {
     msg: { payload: [{ id: 1 }], authUsername: 't' },
     osiDb: { Database: class Database { constructor() { return callbackDb; } } },
-    osiLib: { require(name) { return name === 'osi-valve-control' ? { ok: true, value: valveControl } : { ok: false, error: name }; } },
+    osiLib: { require(name) { return name === 'zone-env' ? { ok: true, value: zoneEnv } : name === 'osi-valve-control' ? { ok: true, value: valveControl } : { ok: false, error: name }; } },
     env: { get() { return ''; } },
     node: { warn(value) { opened.push(value); }, error(value) { opened.push(value); } },
   };
@@ -56,20 +56,14 @@ test('zone environment estimate projection skips malformed and valid report-only
   await insertExpectation(fixture.db, ['report-volume', EUI, null, '2026-10-18T10:00:00.000Z', -1, '', 90, 'estimated_duration_flow_rate', 'OBSERVED_COMPLETE', 'unexplained', reportTransport, '2026-10-18T10:00:00.000Z']);
   await insertExpectation(fixture.db, ['malformed-volume', EUI, null, '2026-10-18T11:00:00.000Z', -1, '', 80, 'estimated_duration_flow_rate', 'OBSERVED_COMPLETE', 'unexplained', '{bad-json', '2026-10-18T11:00:00.000Z']);
   await fixture.db.run('UPDATE valve_actuation_expectations SET zone_id=? WHERE expectation_id IN (?,?)', [zone.id, 'report-volume', 'malformed-volume']);
-  const node = flow.find((item) => item.id === 'zone-env-fn');
-  const start = node.func.indexOf('async function loadEstimatedIrrigationByLocalDate');
-  const end = node.func.indexOf('\nasync function buildWaterHistory', start);
-  assert.ok(start >= 0 && end > start);
-  const source = node.func.slice(start, end);
   const context = {
     ZE: zoneEnv,
-    osiLib: { require(name) { return name === 'osi-valve-control' ? { ok: true, value: valveControl } : { ok: false, error: name }; } },
+    osiLib: { require(name) { return name === 'zone-env' ? { ok: true, value: zoneEnv } : name === 'osi-valve-control' ? { ok: true, value: valveControl } : { ok: false, error: name }; } },
     node: { warn() {} },
     s(value) { return "'" + String(value).replace(/'/g, "''") + "'"; },
     q(sql) { return fixture.db.all(sql); },
   };
-  const fn = await vm.runInNewContext('(async function(){\n' + source + '\nreturn loadEstimatedIrrigationByLocalDate;\n})()', context, { timeout: 5000 });
-  const projected = await fn({ id: zone.id, timezone: 'UTC' }, '2026-10-18', '2026-10-18');
+  const projected = await zoneEnv.loadEstimatedIrrigationByLocalDate({ id: zone.id, timezone: 'UTC' }, '2026-10-18', '2026-10-18', { ...context, Date });
   assert.deepEqual(Object.keys(projected), []);
   fixture.cleanup();
 });

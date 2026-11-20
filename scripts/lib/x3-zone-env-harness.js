@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const originalTimingSafeEqual = crypto.timingSafeEqual;
 const { EventEmitter } = require('node:events');
 const { StringDecoder } = require('node:string_decoder');
 const { spawnSync, spawn } = require('node:child_process');
@@ -16,9 +17,9 @@ const SECRET = 'x3-local-fixture-secret';
 const IDS = ['zone-env-fn', 'strega-today-liters-fn', 'get-actuations-query', 'get-actuations-response'];
 const PROFILES = ['bcm2712', 'bcm2709'];
 function share(profile) { return path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share`); }
-function token(extra = {}) {
-  const payload = Buffer.from(JSON.stringify({ userId: 1, username: 'fixture', exp: Date.parse(NOW) + 3600000, ...extra })).toString('base64url');
-  return 'Bearer ' + payload + '.' + crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+function token(extra = {}, secret = SECRET, raw) {
+  const payload = Buffer.from(raw === undefined ? JSON.stringify({ userId: 1, username: 'fixture', exp: Date.parse(NOW) + 3600000, ...extra }) : raw).toString('base64url');
+  return 'Bearer ' + payload + '.' + crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 }
 function fixedDate(now) {
   const RealDate = Date;
@@ -100,11 +101,13 @@ function seed(db, c) {
     const payload = key === 'online_current_v2' ? { source: 'cached', observedAt: NOW, airTemperatureC: 0, rainMm: 0, relativeHumidityPct: null } : { source: 'cached', observedAt: NOW, hours: [{time: NOW, rainMm: 0, airTemperatureC: null}], days: [] };
     db.exec(`INSERT INTO zone_weather_cache(zone_id,cache_key,source,payload_json,observed_at,fetched_at,expires_at) VALUES(1,${sqlValue(key)},'cached',${sqlValue(c.badCache ? '{' : JSON.stringify(payload))},'${NOW}','${NOW}',${sqlValue(new Date(Date.parse(c.now || NOW) + (c.expiresNow ? 0 : c.expired ? -1 : 1) * 60000).toISOString())});`);
   }
-  return bundle;
+  if (c.extended) require('./x3-zone-env-extra-cases').seedExtra(db, c, bundle);
+  return c.bundle || bundle;
 }
 function weather(url, c, bundle) {
   const now = Date.parse(c.now || NOW);
-  if (url.includes('environment-bundles')) return c.emptyShared ? [] : [{ zoneUuid: 'zone-fixture', summary: bundle }];
+  if (url.includes('environment-bundles')) return c.sharedEntries || (c.emptyShared ? [] : [{ zoneUuid: 'zone-fixture', summary: bundle }]);
+  if (c.httpReplies) { for (const [match, reply] of Object.entries(c.httpReplies)) if (url.includes(match)) return reply; }
   if (url.endsWith('/auth/token')) return c.noToken ? {} : { jwt_token: 'fixture-provider' };
   if (url.includes('/weather/')) return { data: { dt: now / 1000, main: { temp: 0, humidity: 0, pressure: null }, wind: { speed: 0, deg: 0 }, weather: [] } };
   if (url.includes('/forecast5/')) return ['ambient_temperature','ambient_humidity','wind_speed','wind_direction','rainfall_3h','precipitation'].filter(type => !c.supplementalRain || type !== 'rainfall_3h').flatMap(measurement_type => [0,3,6].map(hour => ({ timestamp: new Date(now + hour * 3600000).toISOString(), measurement_type, value: 0 })));
@@ -130,8 +133,9 @@ async function execute(profile, source, c, executor) {
   const bundle = seed(db, c);
   const trace = [];
   let closes = 0, sqlIndex = 0;
+  const branches = { sqlErrors: [], loads: [], closeCallbacks: 0, signatureChecks: [] };
     const root = share(profile);
-  const envValues = { AUTH_TOKEN_SECRET: SECRET, ...(c.openagri ? { OPENAGRI_WEATHER_URL: 'https://provider.example.test', ...(c.staticToken ? { OPENAGRI_WEATHER_BEARER_TOKEN: 'fixture-provider' } : { OPENAGRI_WEATHER_USERNAME: 'fixture', OPENAGRI_WEATHER_PASSWORD: 'fixture-password' }) } : {}), ...(c.scoped ? { OSI_SCOPED_ACCESS: '1' } : {}), ...c.env };
+  const envValues = { AUTH_TOKEN_SECRET: SECRET, ...(c.openagri ? { OPENAGRI_WEATHER_URL: c.providerUrl || 'https://provider.example.test', ...(c.staticToken ? { OPENAGRI_WEATHER_BEARER_TOKEN: 'fixture-provider' } : { OPENAGRI_WEATHER_USERNAME: 'fixture', OPENAGRI_WEATHER_PASSWORD: 'fixture-password' }) } : {}), ...(c.scoped ? { OSI_SCOPED_ACCESS: '1' } : {}), ...c.env };
   const facade = {};
   for (const kind of ['all', 'get', 'run']) facade[kind] = (sql, params, cb) => {
     if (typeof params === 'function') { cb = params; params = []; }
@@ -146,44 +150,57 @@ async function execute(profile, source, c, executor) {
       return kind === 'get' ? rows[0] : rows;
     };
     try { const value = task(); if (cb) { cb(null, value); return; } return Promise.resolve(value); }
-    catch (e) { if (cb) { cb(e); return; } return Promise.reject(e); }
+    catch (e) { if (c.extended) branches.sqlErrors.push({ sql, message: e.message }); if (cb) { cb(e); return; } return Promise.reject(e); }
   };
-  facade.close = cb => { closes++; trace.push({ kind: 'close' }); if (c.closeError) throw new Error('fixture close failure'); if (cb) cb(); };
+  facade.close = cb => { closes++; trace.push({ kind: 'close' }); if (c.closeError) throw new Error('fixture close failure'); if (cb) { if (c.closeCallbackError) branches.closeCallbacks++; cb(c.closeCallbackError ? new Error('fixture callback close error') : undefined); } };
   const osiDb = { Database: function(file) { trace.push({ kind: 'open', file }); if (c.openError) throw new Error('fixture open failure'); return facade; } };
-  const http = { request(url, options, callback) {
-    const item = { kind: 'http', url, options, body: '' }; trace.push(item);
+  const makeHttp = transport => ({ request(url, options, callback) {
+    const item = { kind: 'http', url, options, body: '', ...(c.extended ? { transport } : {}) }; trace.push(item);
     const req = new EventEmitter();
     req.write = body => { item.body += body; };
     req.destroy = e => req.emit('error', e);
     req.setTimeout = (ms, callback) => { item.timeoutMs = ms; req.timeout = callback; };
     req.end = () => process.nextTick(() => {
-      const fail = c.httpFailure && (!c.failSharedOnly || url.includes('environment-bundles'));
-      if (fail === 'timeout' || fail && c.httpFailure === 'timeout') return req.timeout();
-      if (fail && c.httpFailure === 'network') return req.destroy(new Error('fixture network failure'));
-      const res = new EventEmitter(); res.statusCode = fail && c.httpFailure === 'status' ? 503 : 200;
+      const selected = (c.httpFaults || []).find(rule => url.includes(rule.match));
+      const failure = selected ? selected.failure : c.httpFailure;
+      const fail = failure && (!c.failSharedOnly || url.includes('environment-bundles'));
+      if (fail === 'timeout' || fail && failure === 'timeout') return req.timeout();
+      if (fail && failure === 'network') return req.destroy(new Error('fixture network failure'));
+      const res = new EventEmitter(); res.statusCode = fail && failure === 'status' ? 503 : 200;
       callback(res);
-      process.nextTick(() => { res.emit('data', fail && c.httpFailure === 'malformed' ? '{' : fail && c.httpFailure === 'empty' ? '' : fail && c.httpFailure === 'shape' ? '{}' : JSON.stringify(weather(url, c, bundle))); res.emit('end'); });
+      process.nextTick(() => { res.emit('data', fail && failure === 'malformed' ? '{' : fail && failure === 'empty' ? '' : fail && failure === 'shape' ? '{}' : JSON.stringify(weather(url, c, bundle))); res.emit('end'); });
     });
     return req;
-  } };
+  } });
+  const http = makeHttp('http'), https = makeHttp('https');
   const diagnostics = [];
-  const node = Object.fromEntries(['warn', 'error', 'log', 'status', 'send'].map(kind => [kind, value => diagnostics.push({ kind, value: value instanceof Error ? value.message : value })]));
+  const node = Object.fromEntries(['warn', 'error', 'log', 'status', 'send'].map(kind => [kind, (value, message) => diagnostics.push({ kind, value: value && value.message ? value.message : value, ...(c.extended && message ? { message: JSON.parse(JSON.stringify(message)) } : {}) })]));
   const loadCounts = {};
   const osiLib = { require(name) {
     // Loading the newly required facade in the run adapters is wiring. Record
     // the original dependency resolutions inside it, in their original order.
+    if (c.extended) branches.loads.push(name);
     if (!(name === 'zone-env' && c.node !== IDS[0])) trace.push({ kind: 'load', name });
     loadCounts[name] = (loadCounts[name] || 0) + 1;
-    if (name === c.missingModule && (!c.missingModuleOn || loadCounts[name] === c.missingModuleOn)) return { ok: false, error: 'fixture module unavailable' };
+    if (name === c.missingModule && (!c.missingModuleOn || loadCounts[name] === c.missingModuleOn)) return { ok: false, error: 'fixture module unavailable', ...(c.quarantined ? { quarantined: true } : {}) };
     if (name === 'scope') return { ok: true, value: {
       resolveAuthSecret: () => SECRET,
-      resolveZoneUuidById: async () => c.scopeMissingZone ? null : 'zone-fixture',
+      resolveZoneUuidById: async (db, id) => { if (c.scopeResolveError) throw new Error('fixture zone resolution failure'); return c.realScope ? require(path.join(root, 'node-red/osi-scope-helper')).resolveZoneUuidById(db, id) : c.scopeMissingZone ? null : 'zone-fixture'; },
       assertEnabledAccount: async () => { if (c.disabled) { const e = new Error('disabled'); e.statusCode = 403; throw e; } },
     } };
     const modulePath = path.join(root, 'node-red', name === 'osi-valve-control' ? name : 'osi-' + name);
-    return { ok: true, value: require(modulePath) };
+    return { ok: true, value: c.missingPredicate && name === 'osi-valve-control' ? {} : require(modulePath) };
   } };
   let msg = { res: { fixture: 'response-handle' }, req: { headers: { authorization: c.auth === 'missing' ? undefined : c.auth === 'invalid' ? 'Bearer invalid' : token(c.expiredAuth ? { exp: 1 } : c.unknownUser ? { username: 'unknown' } : {}) }, params: { zone_id: c.invalidId ? 'invalid' : '1', deveui: c.invalidId ? '' : 'a840410000000001' }, query: { depth: 90 } }, payload: c.node === IDS[2] ? c.noUser ? [] : [{ id: 1 }] : c.node === IDS[3] ? c.badRows ? {} : statusRows() : undefined, authUsername: c.unknownUser ? 'unknown' : 'fixture', _msgid: 'fixture-msg' };
+  if (c.extended) {
+    const signSecret = c.signGenerated ? Buffer.alloc(48, 0x42).toString('hex') : SECRET;
+    if (c.authCase) {
+      const raw = c.authCase === 'malformed-json' ? '{' : c.authCase === 'missing-user' ? JSON.stringify({ username: 'fixture' }) : c.authCase === 'missing-name' ? JSON.stringify({ userId: 1 }) : undefined;
+      msg.req.headers.authorization = token({ exp: Date.parse(c.now || NOW) + 3600000 }, signSecret, raw);
+      if (c.authCase === 'wrong-signature') { const auth = msg.req.headers.authorization; msg.req.headers.authorization = auth.slice(0,-1) + (auth.endsWith('A') ? 'B' : 'A'); }
+    } else if (!c.auth && !c.expiredAuth) msg.req.headers.authorization = token({ exp: Date.parse(c.now || NOW) + 3600000 }, signSecret);
+    if (Object.prototype.hasOwnProperty.call(c, 'payload')) msg.payload = c.payload;
+  }
   const fakeFs = {
     readFileSync(file) {
       trace.push({ kind: 'fs-read', file });
@@ -197,7 +214,7 @@ async function execute(profile, source, c, executor) {
     },
   };
   const globals = { get(key) { if (key === 'fs') return c.noSecret ? undefined : fakeFs; }, set() { throw new Error('unexpected global write'); } };
-  const dependencies = { osiDb, osiLib, crypto: { ...crypto, randomBytes: size => Buffer.alloc(size, 0x42) }, httpLib: http, httpsLib: http, env: { get: key => envValues[key] }, global: globals, node, Date: fixedDate(c.now || NOW) };
+  const dependencies = { osiDb, osiLib, crypto: { ...crypto, randomBytes: size => Buffer.alloc(size, 0x42), timingSafeEqual(a,b) { const result=originalTimingSafeEqual(a,b); if(c.extended) branches.signatureChecks.push(result); return result; } }, httpLib: http, httpsLib: https, env: { get: key => envValues[key] }, global: globals, node, Date: fixedDate(c.now || NOW) };
   const RealDate = global.Date;
   global.Date = dependencies.Date;
   let result, thrown;
@@ -206,8 +223,9 @@ async function execute(profile, source, c, executor) {
   } catch (e) { thrown = { name: e.name, message: e.message }; }
   finally { global.Date = RealDate; }
   const state = Object.fromEntries(['zone_weather_cache', 'zone_shared_environment'].map(table => [table, db.rows('SELECT * FROM ' + table + ' ORDER BY 1,2', [])]));
+  const schema = c.extended ? require('./x3-zone-env-extra-cases').schemaState(db) : undefined;
   db.close(); fs.rmSync(dir, { recursive: true, force: true });
-  return JSON.parse(JSON.stringify({ result, msg, thrown, trace, diagnostics, closes, state }));
+  return JSON.parse(JSON.stringify({ result, msg, thrown, trace, diagnostics, closes, state, ...(c.extended ? { branches, schema } : {}) }));
 }
 const scenarios = [
   ...[
@@ -266,4 +284,4 @@ const scenarios = [
   { name: 'actuations/open-error', node: IDS[2], openError: true, expectThrown: true },
   { name: 'liters/open-error', node: IDS[1], openError: true },
 ];
-module.exports = { execute, scenarios, IDS, LEGACY, PROFILES, FIXTURES, share, ROOT };
+module.exports = { execute, scenarios, IDS, LEGACY, PROFILES, FIXTURES, share, ROOT, NOW, SECRET, token, fixedDate };

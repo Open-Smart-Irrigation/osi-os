@@ -11,6 +11,10 @@ const mapped = new Map(['bcm2712','bcm2709'].map(profile => {
  const relative = `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`;
  return [path.join(root, relative), path.join(scratch, relative)];
 }));
+for (const relative of ['scripts/fixtures/silent-catch-baseline.json', 'scripts/verify-no-stray-ddl-baseline.json']) {
+ const target = path.join(scratch, relative);
+ if (fs.existsSync(target)) mapped.set(path.join(root, relative), target);
+}
 fs.readFileSync = function(file, ...args) {
  const target = typeof file === 'string' ? mapped.get(path.resolve(file)) : null;
  return original(target || file, ...args);

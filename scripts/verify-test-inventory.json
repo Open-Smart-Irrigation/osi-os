@@ -51,6 +51,10 @@
     {
       "path": "scripts/test-release-sqlite-overlap.js",
       "runner": "scripts/test-release-smoke.js"
+    },
+    {
+      "path": "scripts/test-x3-zone-env-runtime.js",
+      "runner": "scripts/verify-x3-zone-env-handoff.js"
     }
   ],
   "excluded": [

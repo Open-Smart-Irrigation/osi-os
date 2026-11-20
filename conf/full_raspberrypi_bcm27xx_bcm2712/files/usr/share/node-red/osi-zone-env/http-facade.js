@@ -416,7 +416,10 @@ async function ensureSchema() {
     "CREATE TABLE IF NOT EXISTS valve_actuation_expectations(expectation_id TEXT PRIMARY KEY,device_eui TEXT NOT NULL,zone_id INTEGER,command_id TEXT,effect_key TEXT,commanded_at TEXT NOT NULL,commanded_duration_seconds INTEGER NOT NULL,expected_close_at TEXT NOT NULL,flow_rate_lpm REAL,flow_rate_source TEXT,estimated_gross_liters REAL,volume_source TEXT NOT NULL DEFAULT 'unknown',observed_open_at TEXT,observed_close_at TEXT,reconciliation_state TEXT NOT NULL DEFAULT 'PENDING_OBSERVATION',cancel_reason TEXT,created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))"
   ];
   for (const sql of migrations) {
-    try { await run(sql); } catch (_) {}
+    try { await run(sql); } catch (error) {
+      const expected = /^duplicate column name:/i.test(String(error && error.message || error)) && /^ALTER TABLE /.test(sql);
+      node.warn('zone-env compatibility DDL ' + (expected ? 'already present: ' : 'failed: ') + sql + ': ' + String(error && error.message || error));
+    }
   }
 }
 async function getCache(zoneId, cacheKey) {
@@ -477,11 +480,11 @@ async function resolveOnlineCurrent(zone, location, nowIso) {
   let payload = null;
   try {
     payload = await fetchOpenAgriCurrent(baseUrl, bearerToken, username, password, location.latitude, location.longitude);
-  } catch (_) {}
+  } catch (error) { node.warn('zone-env OpenAgri current failed: ' + String(error && error.message || error)); }
   if (!payload) {
     try {
       payload = await fetchOpenMeteoCurrent(location.latitude, location.longitude, location.timezone);
-    } catch (_) {}
+    } catch (error) { node.warn('zone-env Open-Meteo current failed: ' + String(error && error.message || error)); }
   }
   if (payload) {
     const expiresAt = new Date(new Date(nowIso).getTime() + ttlMinutes * 60000).toISOString();
@@ -545,10 +548,10 @@ async function resolveForecast(zone, location, crop, nowIso) {
   let supplement = null;
   try {
     primary = await fetchOpenAgriForecast(baseUrl, bearerToken, username, password, location.latitude, location.longitude);
-  } catch (_) {}
+  } catch (error) { node.warn('zone-env OpenAgri forecast failed: ' + String(error && error.message || error)); }
   try {
     supplement = await fetchOpenMeteoForecast(location.latitude, location.longitude, location.timezone);
-  } catch (_) {}
+  } catch (error) { node.warn('zone-env Open-Meteo forecast failed: ' + String(error && error.message || error)); }
   const merged = ZE.mergeForecasts(primary, supplement, { nowMs: Date.now() });
   if (merged) {
     const expiresAt = new Date(new Date(nowIso).getTime() + ttlMinutes * 60000).toISOString();
@@ -791,7 +794,7 @@ try {
   await close();
   return respond(summary, 200);
 } catch (error) {
-  try { await close(); } catch (_) {}
+  try { await close(); } catch (error) { node.warn('zone-env error-path close failed: ' + String(error && error.message || error)); }
   return respond({ error: error.message }, error.statusCode || 500);
 }
 })();

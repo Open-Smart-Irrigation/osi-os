@@ -12,7 +12,7 @@ function implementationSource(node, nodeRedRoot) {
   const method = METHODS[node.id];
   assert.equal(typeof api[method], 'function', node.id + ': missing facade entry point');
   const source = String(api[method]);
-  if (node.id !== 'zone-env-fn') return source;
+  if (node.id !== 'zone-env-fn') return node.func + '\n' + source;
   assert.ok(source.includes('runProjection.loadEstimatedIrrigationByLocalDate('));
   return source + '\n' + String(api.loadEstimatedIrrigationByLocalDate);
 }

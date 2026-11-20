@@ -130,6 +130,9 @@ jobs:
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
           TZ=UTC node scripts/test-x3-zone-env-parity.js --verify
+          TZ=UTC node scripts/test-x3-zone-env-additive.js
+          TZ=Europe/Zurich node scripts/test-x3-zone-env-additive.js
+          node scripts/test-x3-zone-env-revision.js
           node scripts/verify-x3-zone-env-handoff.js
           node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-env-unknown-rain.js
