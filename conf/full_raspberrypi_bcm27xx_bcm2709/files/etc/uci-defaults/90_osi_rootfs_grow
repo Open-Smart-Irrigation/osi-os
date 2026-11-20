@@ -8,28 +8,51 @@ NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
 [ -f "$STAMP" ] && exit 0
 [ -f "$NEEDS_RESIZE" ] && exit 0
 
-ROOT_SRC="$(findmnt -n -o SOURCE /overlay 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null)"
-case "$ROOT_SRC" in
-  /dev/mmcblk0p2) DISK=/dev/mmcblk0; PART=2 ;;
-  *) logger -t osi-rootfs-grow "unsupported root source $ROOT_SRC; skipping"; exit 0 ;;
-esac
-
-command -v parted >/dev/null 2>&1 || { logger -t osi-rootfs-grow "parted missing; skipping"; exit 0; }
-command -v resize2fs >/dev/null 2>&1 || { logger -t osi-rootfs-grow "resize2fs missing; skipping"; exit 0; }
-
-logger -t osi-rootfs-grow "resizing $DISK partition $PART in place"
-if ! parted -s "$DISK" --align optimal --pretend-input-tty <<EOF
-resizepart $PART 100%
-quit
-EOF
-then
-  logger -t osi-rootfs-grow "parted resizepart failed; leaving partition unchanged"
+. /usr/libexec/osi-rootfs-grow.sh || exit 1
+if ! osi_rootfs_target; then
+  logger -t osi-rootfs-grow "unsupported writable filesystem ($ROOT_FSTYPE); automatic growth skipped"
+  [ "$ROOT_FSTYPE" = f2fs ] && exit 0
+  exit 1
+fi
+if osi_rootfs_provisioned; then
+  logger -t osi-rootfs-grow "provisioned gateway; refusing automatic partition changes"
   exit 0
 fi
+if ! osi_rootfs_geometry; then
+  logger -t osi-rootfs-grow "unsupported root filesystem or partition layout; leaving defaults for retry"
+  exit 1
+fi
+DISK=/dev/mmcblk0
+PART=2
 
-partprobe "$DISK" 2>/dev/null || true
+command -v parted >/dev/null 2>&1 || {
+  logger -t osi-rootfs-grow "parted missing; will retry"
+  exit 1
+}
+command -v resize2fs >/dev/null 2>&1 || {
+  logger -t osi-rootfs-grow "resize2fs missing; will retry"
+  exit 1
+}
 
-touch "$NEEDS_RESIZE"
+if [ "$((PART_START + PART_SECTORS))" -lt "$DISK_SECTORS" ]; then
+  logger -t osi-rootfs-grow "resizing $DISK partition $PART in place"
+  # Script mode refuses the mounted-partition question. Permit exactly this
+  # grow command, with one answer; never feed an unbounded yes process.
+  if ! LC_ALL=C parted "$DISK" --align optimal ---pretend-input-tty resizepart "$PART" 100% <<EOF; then
+yes
+EOF
+    logger -t osi-rootfs-grow "parted resizepart failed; will retry"
+    exit 1
+  fi
+fi
+
+# Reboot, rather than relying on the kernel to reread a mounted partition (or
+# on partprobe, which the images do not ship). fstools recreates the overlay
+# loop with the new capacity on the next boot.
+touch "$NEEDS_RESIZE" && sync || {
+  logger -t osi-rootfs-grow "pending marker could not be persisted; will retry"
+  exit 1
+}
 logger -t osi-rootfs-grow "partition resized; rebooting to grow filesystem"
-sync
-reboot
+reboot || exit 1
+exit 0

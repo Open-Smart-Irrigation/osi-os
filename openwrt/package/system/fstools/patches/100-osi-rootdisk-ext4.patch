@@ -1,0 +1,40 @@
+--- a/libfstools/common.c
++++ b/libfstools/common.c
+@@ -96,17 +96,23 @@
+ static bool use_f2fs(struct volume *v, uint64_t offset, const char *bdev)
+ {
+-	uint64_t size = 0;
+-	bool ret = false;
+-	int fd;
+-
+-	fd = open(bdev, O_RDONLY);
+-	if (fd < 0)
+-		return false;
+-
+-	if (ioctl(fd, BLKGETSIZE64, &size) == 0)
+-		ret = size - offset > F2FS_MINSIZE;
+-
+-	close(fd);
+-
+-	return ret;
++#ifdef OSI_ROOTDISK_EXT4
++	/* New blank overlays use ext4 for online growth. Existing ext4/F2FS volumes
++	 * never enter block_volume_format()'s formatting branch. */
++	return false;
++#else
++	uint64_t size = 0;
++	bool ret = false;
++	int fd;
++
++	fd = open(bdev, O_RDONLY);
++	if (fd < 0)
++		return false;
++
++	if (ioctl(fd, BLKGETSIZE64, &size) == 0)
++		ret = size - offset > F2FS_MINSIZE;
++
++	close(fd);
++
++	return ret;
++#endif
+ }

@@ -42,6 +42,7 @@ const CANONICAL_PAYLOAD = [
   'files/etc/hotplug.d/ntp/70-osi-irrigation-clock',
   'files/usr/libexec/osi-gateway-identity.sh',
   'files/usr/libexec/osi-identityd.sh',
+  'files/usr/libexec/osi-rootfs-grow.sh',
   'files/usr/libexec/osi-sync-protocol-capability-cli.js',
   'files/usr/share/db',
   'files/usr/share/flows.json',
