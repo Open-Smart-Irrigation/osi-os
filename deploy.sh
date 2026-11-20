@@ -272,32 +272,37 @@ try {
 NODE
 }
 
-# The optional mode selects staged, syntax-checked publication for a boot file.
+# Live destinations supply a mode and are checked before publication. The
+# three-argument form downloads only to private deploy or payload staging.
 fetch_required() {
-    local label="$1" src="$2" dest="$3" stage rc
+    local label="$1" src="$2" dest="$3" stage= rc=0
     echo "--- $label ---"
     if [ "$#" -gt 3 ]; then
         mkdir -p "${dest%/*}" || return 1
         stage="$(mktemp "$dest.osi-stage.XXXXXX")" || return 1
-        rc=0
         fetch "$src" "$stage" || rc=$?
-        if [ "$rc" -eq 0 ]; then
-            case "$dest" in
-                *.js) node --check < "$stage" || rc=$? ;;
-                *) sh -n "$stage" || rc=$? ;;
-            esac
-        fi
-        if [ "$rc" -eq 0 ]; then
-            publish_boot_file "$stage" "$dest" "$4" || rc=$?
-        fi
-        rm -f "$stage"
     else
-        rc=0
         fetch "$src" "$dest" || rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        echo "ERROR: could not install $src (exit $rc)" >&2
+        [ -z "${stage:-}" ] || rm -f "$stage"
+        echo "ERROR: could not fetch $src (exit $rc)" >&2
         return "$rc"
+    fi
+    if [ "$#" -gt 3 ]; then
+        case "$dest" in
+            *.js) node --check < "$stage" || rc=$? ;;
+            *.json) node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$stage" || rc=$? ;;
+            *) sh -n "$stage" || rc=$? ;;
+        esac
+        if [ "$rc" -eq 0 ]; then
+            publish_boot_file "$stage" "$dest" "$4" || rc=$?
+        fi
+        rm -f "$stage" || rc=1
+        if [ "$rc" -ne 0 ]; then
+            echo "ERROR: could not install $src (exit $rc)" >&2
+            return "$rc"
+        fi
     fi
     echo "OK"
 }
@@ -1513,17 +1518,67 @@ seed_db_if_missing() {
         return 1
     fi
 
-    seed_tmp="$TMP_DIR/farming.db"
-    fetch "$SEED_DB_REL" "$seed_tmp"
-    if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$seed_tmp" "PRAGMA integrity_check;" | grep -qx "ok"
+    local seed_tmp check
+    mkdir -p "$DB_DIR" || return 1
+    seed_tmp="$(mktemp "$DB_PATH.osi-stage.XXXXXX")" || return 1
+    if ! fetch "$SEED_DB_REL" "$seed_tmp"; then
+        rm -f "$seed_tmp"
+        echo "ERROR: could not fetch $SEED_DB_REL" >&2
+        return 1
     fi
-    if [ -e "$DB_PATH" ]; then
-        echo "SKIP: existing live database appeared during deploy and was preserved at $DB_PATH"
-        return 0
+    if ! check="$(sqlite3 -batch -bail -readonly "$seed_tmp" 'PRAGMA integrity_check;')" ||
+        [ "$check" != ok ] || [ ! -s "$seed_tmp" ]; then
+        rm -f "$seed_tmp"
+        echo "ERROR: downloaded database seed failed integrity_check" >&2
+        return 1
     fi
-    mv "$seed_tmp" "$DB_PATH"
-    echo "OK: seeded new database at $DB_PATH"
+    if ! node - "$seed_tmp" "$DB_PATH" <<'NODE'
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const [stage, target] = process.argv.slice(2);
+  const fd = fs.openSync(stage, 'r');
+  try {
+    fs.fchmodSync(fd, 0o644);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const dir = fs.openSync(path.dirname(target), 'r');
+  try {
+    for (const suffix of ['.osi-recovery', '-wal', '-shm', '-journal']) {
+      if (fs.lstatSync(target + suffix, { throwIfNoEntry: false })) {
+        throw new Error('database recovery record or sidecar appeared before seeding: ' + suffix);
+      }
+    }
+    let published = false;
+    try {
+      fs.linkSync(stage, target);
+      published = true;
+    } catch (error) {
+      if (error.code !== 'EEXIST' || !fs.lstatSync(target).isFile()) throw error;
+    }
+    if (published) {
+      try {
+        fs.fsyncSync(dir);
+      } catch (error) {
+        fs.unlinkSync(target);
+        fs.fsyncSync(dir);
+        throw error;
+      }
+      console.log('OK: seeded new database at ' + target);
+    } else {
+      console.log('SKIP: a live database appeared during deploy and was preserved');
+    }
+  } finally {
+    fs.closeSync(dir);
+  }
+NODE
+    then
+        rm -f "$seed_tmp"
+        echo "ERROR: could not publish database seed" >&2
+        return 1
+    fi
+    rm -f "$seed_tmp" || return 1
 }
 
 node_red_restart_needed=0
@@ -3888,6 +3943,26 @@ early_disk_check || exit 1
 ensure_osi_server_config || exit 1
 # osi-server configuration end
 
+fetch_required "Node-RED settings.js" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
+    "/srv/node-red/settings.js" 644 || exit 1
+
+fetch_required "Node-RED init script" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
+    "/etc/init.d/node-red" 755 || exit 1
+# A previous image may still have a seed script left to run. Update those
+# consumers before replacing the recovery writer an existing service can call.
+if [ -e /etc/uci-defaults/97_osi_db_seed ]; then
+    fetch_required "Outstanding first-boot database seed guard" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/97_osi_db_seed" \
+        "/etc/uci-defaults/97_osi_db_seed" 755 || exit 1
+fi
+if [ -e /etc/uci-defaults/98_osi_node_red_seed ]; then
+    fetch_required "Outstanding first-boot runtime seed guard" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/98_osi_node_red_seed" \
+        "/etc/uci-defaults/98_osi_node_red_seed" 755 || exit 1
+fi
+
 fetch_required "Boot database integrity check" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
     "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
@@ -3896,13 +3971,6 @@ fetch_required "Boot database integrity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-db-integrity" \
     "/etc/init.d/osi-db-integrity" 755 || exit 1
 
-fetch_required "Node-RED settings.js" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
-    "/srv/node-red/settings.js" 644 || exit 1
-
-fetch_required "Node-RED init script" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red" 755 || exit 1
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
@@ -3952,53 +4020,53 @@ seed_db_if_missing || exit 1
 
 fetch_required "Node-RED runtime package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \
-    "/srv/node-red/package.json"
+    "/srv/node-red/package.json" 644 || exit 1
 
 fetch_required "Node-RED runtime package-lock.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" \
-    "/srv/node-red/package-lock.json"
+    "/srv/node-red/package-lock.json" 644 || exit 1
 
 stage_command_ledger_dependency
 
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
-    "/srv/node-red/edge-channels.json"
+    "/srv/node-red/edge-channels.json" 644 || exit 1
 
 fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
-    "/srv/node-red/codecs/strega_gen1_decoder.js"
+    "/srv/node-red/codecs/strega_gen1_decoder.js" 644 || exit 1
 
 fetch_required "STREGA Gen2 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
-    "/srv/node-red/codecs/strega_gen2_decoder.js"
+    "/srv/node-red/codecs/strega_gen2_decoder.js" 644 || exit 1
 
 fetch_required "LSN50 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
-    "/srv/node-red/codecs/dragino_lsn50_decoder.js"
+    "/srv/node-red/codecs/dragino_lsn50_decoder.js" 644 || exit 1
 
 fetch_required "S2120 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
-    "/srv/node-red/codecs/sensecap_s2120_decoder.js"
+    "/srv/node-red/codecs/sensecap_s2120_decoder.js" 644 || exit 1
 
 fetch_required "LoRain codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
-    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
+    "/srv/node-red/codecs/aquascope_lorain_decoder.js" 644 || exit 1
 
 fetch_required "UC512 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
-    "/srv/node-red/codecs/milesight_uc512_decoder.js"
+    "/srv/node-red/codecs/milesight_uc512_decoder.js" 644 || exit 1
 
 fetch_required "SDI12 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
-    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
+    "/srv/node-red/codecs/dragino_sdi12_decoder.js" 644 || exit 1
 
 fetch_required "Tektelic KIWI/CLOVER codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
-    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
+    "/srv/node-red/codecs/tektelic_agriculture_decoder.js" 644 || exit 1
 
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
-    "/srv/node-red/codecs/agroscope_uplink_transform.js"
+    "/srv/node-red/codecs/agroscope_uplink_transform.js" 644 || exit 1
 
 # issue-183 Gen2 begin
 if [ -f "$CHIRPSTACK_ENV_FILE" ] && \

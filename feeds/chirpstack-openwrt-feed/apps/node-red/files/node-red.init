@@ -534,6 +534,7 @@ start_service() {
     local startup_report startup_warning committed
     if startup_report="$(
         FLOW_FILE="$flow_file" \
+        FLOW_DB_PATH="$OSI_DB_PATH" \
         CRED_FILE="$cred_file" \
         CLOUD_BROKER_NODE_ID="$cloud_broker_node_id" \
         DEVICE_EUI_VALUE="$device_eui" \
@@ -734,15 +735,68 @@ const active = ['active', '.active'].map(name => path.join(payloads, name))
 const flowLink = fs.lstatSync(flowFile, { throwIfNoEntry: false })?.isSymbolicLink();
 const guiLink = fs.lstatSync('/usr/lib/node-red/gui', { throwIfNoEntry: false })?.isSymbolicLink();
 
+const payloadState = path.join(root, 'payload-state.json');
+const recordMode = { mode: 0o644, uid: process.getuid(), gid: process.getgid() };
+
+function assertImageOwnsFlows(seed) {
+  const exists = file => fs.lstatSync(file, { throwIfNoEntry: false });
+  if (exists(payloads) || exists(payloadState) || flowLink || guiLink ||
+      [root, path.join(root, 'node_modules')].some(dir => exists(dir) &&
+        fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink()))) {
+    throw new Error('image flows ownership is contradicted by the deployed payload layout');
+  }
+  const marker = path.join(root, '.image-flows-origin');
+  if (!exists(marker)?.isFile() ||
+      fs.readFileSync(marker, 'utf8').trim() !== createHash('sha256').update(fs.readFileSync(seed)).digest('hex')) {
+    throw new Error('image flows ownership could not be verified from the factory seed record');
+  }
+
+  function ledger(file) {
+    if (!exists(file)?.isFile()) throw new Error('image or live schema ledger database is missing');
+    const query = "SELECT version, checksum, status FROM schema_migrations ORDER BY version";
+    const output = require('node:child_process').execFileSync('sqlite3',
+      ['-batch', '-bail', '-readonly', '-json', '-cmd', '.timeout 5000', file, query],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const rows = JSON.parse(output);
+    if (!rows.length || rows.some(row => row.status !== 'applied' || !Number.isSafeInteger(row.version) ||
+        row.version < 1 || typeof row.checksum !== 'string' || !row.checksum)) {
+      throw new Error('image or live schema ledger has no complete applied history');
+    }
+    return rows;
+  }
+
+  const image = new Map(ledger('/usr/share/db/farming.db').map(row => [row.version, row.checksum]));
+  const live = ledger(process.env.FLOW_DB_PATH);
+  if (live.some(row => image.get(row.version) !== row.checksum)) {
+    throw new Error('the live database schema is newer than or differs from the image seed ledger');
+  }
+}
+
 function persistFlowHold(stamp, reason) {
   const line = 'HELD: Node-RED stopped. ' + reason + '. You must re-run the deploy for this release before Node-RED can start.';
-  const mode = { mode: 0o644, uid: process.getuid(), gid: process.getgid() };
-  const state = path.join(root, 'payload-state.json');
   const note = path.join(root, 'DEPLOY-HELD');
   const record = { format: 1, active: stamp, state: 'held', reason: line, updated_at: new Date().toISOString(), writer: 'flow-recovery' };
   console.error(line);
-  writeAtomic(state, JSON.stringify(record) + '\n', mode, fs.existsSync(state), false);
-  writeAtomic(note, line + '\n', mode, fs.existsSync(note), false);
+  writeAtomic(payloadState, JSON.stringify(record) + '\n', recordMode, fs.existsSync(payloadState), false);
+  writeAtomic(note, line + '\n', recordMode, fs.existsSync(note), false);
+}
+
+function recordFlowWarning(stamp, problem) {
+  const warning = 'Pristine flow recovery unavailable for this payload: ' + problem +
+    '. Re-run the deploy to restore its recovery copy.';
+  console.warn('WARN: ' + warning);
+  try {
+    const previous = readJson(payloadState, value => value?.format === 1 && value.active === stamp);
+    if (previous.value?.flow_recovery_warning === warning) return;
+    const record = previous.problem
+      ? { format: 1, active: stamp, state: 'unverified', reason: warning, writer: 'flow-recovery' }
+      : previous.value;
+    record.flow_recovery_warning = warning;
+    record.updated_at = new Date().toISOString();
+    writeAtomic(payloadState, JSON.stringify(record) + '\n', recordMode, previous.stat, false);
+  } catch (error) {
+    console.warn('WARN: could not persist the pristine flow warning: ' + error.message);
+  }
 }
 
 try {
@@ -768,17 +822,8 @@ try {
     live = readJson(flowTarget, isFlows);
     source = live;
     if (deployed) {
-      const dir = path.dirname(flowTarget);
-      const pristine = path.join(dir, 'flows.pristine.json');
-      const seal = path.join(dir, 'flows-seed.json');
-      const compatibility = readJson(path.join(dir, 'compatibility.json'),
-        value => value !== null && typeof value === 'object' && !Array.isArray(value));
-      const sealed = compatibility.value?.flows_pristine_sha256 !== undefined ||
-        fs.lstatSync(seal, { throwIfNoEntry: false }) || fs.lstatSync(pristine, { throwIfNoEntry: false });
-      // Pre-seal deployments can run their healthy live file. Once a payload
-      // declares a pristine copy, verify it at every boot, even if no
-      // recovery is needed yet.
-      if (sealed || live.problem) {
+      const pristine = path.join(path.dirname(flowTarget), 'flows.pristine.json');
+      try {
         const helper = require(path.join(root, '.payload-swap.js'));
         const seed = parseJson(helper.readPristineFlows(root, stamp), isFlows);
         if (seed.problem) throw new Error('invalid pristine flows (' + seed.problem + ')');
@@ -786,13 +831,17 @@ try {
           sourceName = pristine;
           source = { stat: fs.statSync(pristine), ...seed };
         }
+      } catch (error) {
+        if (live.problem) throw error;
+        recordFlowWarning(stamp, error.message);
       }
     } else if (live.problem) {
+      assertImageOwnsFlows(sourceName);
       source = readJson(sourceName, isFlows);
       if (source.problem) throw new Error('cannot restore flows.json (' + source.problem + ')');
     }
   } catch (error) {
-    if (deployed) {
+    if (deployed || live?.problem) {
       persistFlowHold(stamp, error.message);
       if (live?.stat && live.problem) {
         const archive = quarantineName(flowTarget);

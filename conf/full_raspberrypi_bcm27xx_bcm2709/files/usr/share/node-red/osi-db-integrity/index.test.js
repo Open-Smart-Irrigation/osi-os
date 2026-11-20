@@ -63,6 +63,51 @@ test('healthy DB: backup skipped when recent backup exists', async () => {
   assert.equal(backupsAfter.length, backupsBefore.length, 'no new backup when recent exists');
 });
 
+test('a killed DELETE-journal writer rolls back without replacing the latest committed row', async t => {
+  const dir = scratch();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = makeDb(dir);
+  makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
+  const run = sql => execFileSync('sqlite3', ['-batch', '-bail', dbPath], { ...EXEC_OPTS, input: sql });
+  run(`PRAGMA journal_mode=DELETE;
+CREATE TABLE spill (data BLOB);
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 160)
+INSERT INTO spill SELECT randomblob(7500) FROM n;
+UPDATE t SET x = 'latest committed';
+`);
+  assert.throws(() => run(`PRAGMA cache_size=7;
+PRAGMA cache_spill=ON;
+BEGIN IMMEDIATE;
+UPDATE t SET x = 'uncommitted';
+UPDATE spill SET data = randomblob(7500);
+.shell kill -KILL $PPID
+`), error => error.signal === 'SIGKILL');
+  assert.ok(fs.statSync(dbPath + '-journal').size > 512, 'dirty pages spilled to a hot journal');
+  assert.throws(() => execFileSync('sqlite3', ['-readonly', dbPath, 'PRAGMA quick_check;'],
+    { ...EXEC_OPTS, stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.equal((await runBootIntegrityCheck(dbPath)).status, 'ok');
+  assert.equal(run('SELECT x FROM t;').trim(), 'latest committed');
+  assert.equal(fs.existsSync(dbPath + '.osi-recovery'), false);
+  assert.ok(!fs.readdirSync(dir).some(name => name.includes('.corrupt-')));
+});
+
+test('an SQLite open or lock failure never selects an older backup', async t => {
+  const dir = scratch();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = makeDb(dir);
+  makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
+  const original = fs.readFileSync(dbPath);
+  const previousPath = process.env.PATH;
+  t.after(() => { process.env.PATH = previousPath; });
+  process.env.PATH = dir + ':' + previousPath;
+  for (const result of ['database is locked (5)', 'unable to open database file (14)']) {
+    fs.writeFileSync(path.join(dir, 'sqlite3'), `#!/bin/sh\nprintf '%s\n' 'Error: ${result}' >&2\nexit 1\n`, { mode: 0o755 });
+    await assert.rejects(runBootIntegrityCheck(dbPath), /restoration refused/);
+    assert.deepEqual(fs.readFileSync(dbPath), original);
+    assert.equal(fs.existsSync(dbPath + '.osi-recovery'), false);
+  }
+});
+
 test('corrupt DB + passing backup: recovered', async () => {
   const dir = scratch();
   const dbPath = makeDb(dir);

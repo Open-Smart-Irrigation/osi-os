@@ -43,7 +43,7 @@ function backupDb(dbPath, { keep = 5 } = {}) {
   const backupPath = `${dbPath}.bak-${stamp}`;
   publishAtomic(backupPath, file => {
     execFileSync('sqlite3', [dbPath, `.backup ${sqliteDotQuote(file)}`], SQLITE_EXEC_OPTIONS);
-    const check = execFileSync('sqlite3', [file, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+    const check = execFileSync('sqlite3', ['-readonly', file, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
     if (check !== 'ok') throw new Error(`backup integrity_check failed: ${check}`);
   }, { exclusive: true });
   try {
@@ -54,11 +54,32 @@ function backupDb(dbPath, { keep = 5 } = {}) {
   return backupPath;
 }
 
-function quickCheck(dbPath) {
+// A normal, existing-file-only open lets SQLite replay a hot DELETE journal
+// before verifying the live database. A busy, inaccessible or unavailable
+// database is a failed check with no evidence that justifies restoration.
+function liveQuickCheck(dbPath) {
+  let result;
   try {
-    if (fs.statSync(dbPath).size < 100) return false;
-    const out = execFileSync('sqlite3', ['-readonly', dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
-    return out === 'ok';
+    result = execFileSync('sqlite3', ['-batch', '-bail', '-ifexists', '-cmd', '.timeout 5000',
+      dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim();
+  } catch (error) {
+    if (typeof error.status === 'number' && !error.signal && !error.code) {
+      const codes = Array.from(String(error.stderr).matchAll(/^.+ \((\d+)\)\s*$/gm), match => Number(match[1]) & 255);
+      if (codes.length && codes.every(code => code === 11 || code === 26)) return false;
+    }
+    throw new Error('live database check could not complete; restoration refused: ' +
+      (String(error.stderr || '').trim() || error.message));
+  }
+  if (!result) throw new Error('live database returned no quick_check result; restoration refused');
+  return result === 'ok' && fs.statSync(dbPath).size >= 100;
+}
+
+function backupQuickCheck(dbPath) {
+  try {
+    if (!fs.lstatSync(dbPath).isFile() || fs.statSync(dbPath).size < 100) return false;
+    if (['-wal', '-shm', '-journal'].some(suffix => fs.lstatSync(dbPath + suffix, { throwIfNoEntry: false }))) return false;
+    return execFileSync('sqlite3', ['-batch', '-bail', '-readonly',
+      dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim() === 'ok';
   } catch {
     return false;
   }
@@ -92,7 +113,7 @@ function findPassingBackup(dbPath) {
   const backups = fs.readdirSync(dir).filter(f => f.startsWith(prefix)).sort().reverse();
   for (const f of backups) {
     const p = path.join(dir, f);
-    if (quickCheck(p)) return p;
+    if (backupQuickCheck(p)) return p;
   }
   return null;
 }
@@ -172,11 +193,11 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   if (fs.lstatSync(marker, { throwIfNoEntry: false })) {
     return { status: 'held', marker };
   }
-  if (!fs.existsSync(dbPath)) {
-    return { status: 'ok-missing' };
-  }
+  const live = fs.lstatSync(dbPath, { throwIfNoEntry: false });
+  if (!live) return { status: 'ok-missing' };
+  if (!live.isFile()) throw new Error('live database is not a regular file; restoration refused');
 
-  if (quickCheck(dbPath)) {
+  if (liveQuickCheck(dbPath)) {
     const age = newestBackupAge(dbPath, now);
     if (age >= recentBackupMaxAgeMs) {
       try { backupDb(dbPath, { keep: backupKeep }); } catch (err) {
