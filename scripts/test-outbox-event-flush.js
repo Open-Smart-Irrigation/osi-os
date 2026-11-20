@@ -38,7 +38,7 @@ const FLUSH_BUILD_ID = 'sync-outbox-build';
 const CONDITIONAL_REPLICATION = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy');
 const ZONE_COMMAND_APPLY_ID = 'zone-command-apply-fn';
 const FLUSH_MARK_ID = 'sync-outbox-mark';
-const MQTT_ACK_ID = '9d5e3035c3d069c4';
+const MQTT_ACK_ID = 'account-cloud-guard-9d5e3035c3d069c4';
 const SYNC_TAB = '93b1537a596e0e6d';
 const DEVICE_API_TAB = 'device-api-tab';
 

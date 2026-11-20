@@ -10,7 +10,7 @@ link request. No schema change was needed.
 The implementation lives in the existing installation helper, which already ships
 through image and script deployment. Both profiles carry identical payloads.
 The flow-size ratchet permits the change without an exception: embedded JavaScript
-falls by 41,480 characters per profile. Six empty flow catches were removed or
+falls by 44,267 characters per profile. Six empty flow catches were removed or
 made visible; the maintained baseline falls from 65 to 59.
 
 ## Baseline and scope
@@ -134,3 +134,68 @@ must clear the full verifier before this draft is considered ready.
 The PR stays draft. The dispatcher-assigned Sol review, independent verification
 and paired deployment qualification remain pending. No review was requested and
 no merge was attempted by this implementation sub-agent.
+
+
+## P1 re-review correction
+
+The first Sol review at ad92d6fbc required a durable restart obligation after
+normal finalization. SQLite/UCI could be committed and the journal removed before
+the later request-file write failed. That could leave MQTT using its prior
+boot-time credentials with no recoverable restart obligation.
+
+Normal commit now flushes SQLite/WAL, stamps `restart_pending` and retains the
+journal. The restart nodes are thin module delegates: the module validates the
+receipt against the committed account, publishes the existing three-field
+identityd request atomically, then removes the receipt. A publication failure
+leaves the receipt and returns an applied-but-restart-pending 503. Recovery on
+startup and before either account operation follows the same rule.
+
+A retry matching the committed link's original target returns the saved reply
+through the builder's third output, wired to local success. It makes no new
+cloud authentication request. A disconnect retry does not repeat its writes.
+A different requested operation first publishes the prior obligation, then asks
+the caller to retry after the scheduled restart. No account ownership rule was
+added. Cloud MQTT publications now pass through thin guards using the same
+receipt/sentinel predicate, so unresolved recovery pauses both MQTT and REST.
+MQTT input/output nodes and broker configuration remain unchanged.
+
+Before editing, the branch was clean at ad92d6fbc. Readiness reported WARN,
+behind 1/ahead 2 from origin/main 1a984f31f. The intervening main commit only
+updated failed-restore guidance. Rebase completed without conflicts; range-diff
+showed both existing commits unchanged. Readiness then reported READY at
+9e3f9e6f7, behind 0/ahead 2, AGENTS.md revision c63103827.
+
+The focused restart-obligation tests load the original helper and flows from
+ad92d6fbc for the red run. They cover directory, write and rename failures after
+commit for both operations and profiles; retries without cloud authentication;
+commit/publication interruption; startup failure and retry; recovery before a
+different operation; interruption before the committed stamp; original versus
+canonical login spelling; and cloud MQTT guards. The MQTT configuration hash is
+pinned from the reviewed head so ordinary CI needs no historical checkout.
+
+The updated implementer brief makes GitHub CI on the exact pushed SHA the full
+suite gate while the second workstation is unavailable. Full suites were not
+queued locally for this iteration. Local focused tests use the required
+`osi-heavy wait --contain --scratch-tmpfs 1G --need-gib 8 --` wrapper. Current
+results and the exact-head CI snapshot are reported with the corrective push;
+the Sol re-review remains pending.
+
+
+P1 local results:
+
+| Check | Result |
+|---|---|
+| Restart-obligation regressions against ad92d6fbc | Expected RED: 32 failures |
+| Restart-obligation regressions on the correction | PASS: 32 tests |
+| Existing account-link suite | PASS: 32 tests |
+| Flow wiring suite | PASS |
+| Profile parity, identity verifier, size/catch/DDL/require/parse/sandbox guards | PASS |
+| Helper registration, test inventory, instruction and documentation hygiene | PASS |
+| Frozen boot node and migration-preflight bodies | Unchanged; identity verifier PASS |
+| Full suites | Exact-head GitHub CI is the gate; see the corrective-push report |
+
+One exploratory run of older Terra/scoped migration CLIs still refused unrelated
+command-node shapes already present on the reviewed head. Their speculative edits
+were discarded. The journal-command generator's approved shape comparison now
+recognizes only the added cloud ACK guard, and its current-flow idempotence probe
+passes. No SQL or schema checksum was changed.

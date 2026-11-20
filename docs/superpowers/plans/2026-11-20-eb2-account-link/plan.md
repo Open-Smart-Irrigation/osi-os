@@ -54,3 +54,32 @@ existing authenticated-user scope. B9 owns GUI states and copy. Cloud transfer,
 registration replay after an uncertain response, remote credential revocation
 and server-side operation receipts need separate cloud work. Do not edit the
 cloud checkout, schema, boot DDL or migration preflight.
+
+## P1 review correction
+
+Normal finalization must retain the private journal through daemon request
+publication. Record `restart_pending` only after flushing the committed database;
+recovery of an older receipt still probes the database. The module publisher
+uses the same three-field identityd request and removes the receipt only after
+atomic publication. Publication errors leave transport blocked by the journal.
+
+Move both restart nodes to thin module delegates. A matching link retry recovers
+the saved response through a third builder output wired to local success, so it
+makes no cloud authentication request. A disconnect retry also returns the saved
+completion without repeating its writes. A different requested account operation
+first publishes the earlier obligation and asks the caller to retry after the
+scheduled restart. Preserve all identity sentinel and frozen-body guards.
+
+`scripts/test-account-link-restart-obligation.js` exercises both real profile
+publishers with directory, write and rename faults after coordinator commit. It
+also reconstructs the helper after a commit/publication interruption and runs
+startup recovery. The restart-obligation regressions fail on ad92d6fbc because the committed
+receipt is gone. The same tests must pass after the correction.
+
+
+Cloud MQTT output guards share the same receipt/sentinel predicate as REST and
+history. They sit before the existing MQTT outputs, including the disabled
+simulation output. MQTT nodes and broker configuration stay byte-identical to
+the reviewed head; ChirpStack downlinks keep their routes. ACK wiring pins name
+the new guard, and the journal-command generator preserves it on an idempotent
+run. The heartbeat function and independent health-sampling path are unchanged.

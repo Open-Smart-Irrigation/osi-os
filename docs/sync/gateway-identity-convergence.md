@@ -32,14 +32,26 @@ Account-link and disconnect also pause sync builders while an account operation
 is active or `/data/db/osi-account-link-config.json` exists. This private recovery
 journal coordinates the MQTT UCI options with the SQLite account/peer transaction;
 it carries credentials and must remain mode 0600. The installation helper flushes
-the journal before writing UCI, then flushes the committed database and WAL before
-removing it. A failed local transaction restores the old configuration. After an
-interruption, recovery compares the committed account and peer with the journal
-and either completes the new configuration or restores the old one.
+the journal before writing UCI, then flushes the committed database and WAL. Both
+normal finalization and recovery retain this receipt until the daemon-owned
+restart request has been atomically published. A failed local transaction restores
+the old configuration. After an interruption, recovery compares the committed
+account and peer with the journal and either completes the new configuration or
+restores the old one. A stamped committed receipt whose context has changed stays
+blocked for operator disposition.
 
-The account finalizer retries recovery on Node-RED startup and publishes a daemon
-restart request before removing the receipt. The next authenticated link or
-disconnect also retries recovery. An unreadable journal or failed restore blocks
-new link requests before cloud authentication; sync transport stays paused until
-recovery succeeds. The identity sentinel still blocks linking and finalization,
+The account finalizer retries recovery on Node-RED startup. Before another link or
+disconnect, the installation helper also retries outstanding publication. A retry
+of the same committed link returns its saved result through local success wiring,
+without authenticating with the cloud again; a disconnect retry completes without
+repeating its database writes. A different requested operation first publishes
+the earlier obligation and asks the caller to retry after the scheduled restart.
+
+An unreadable journal, failed restore or failed request publication leaves the
+receipt in place and keeps identity-sensitive transport blocked. Thin guards
+before every cloud MQTT output use the same predicate as REST/history builders;
+ChirpStack downlinks and MQTT broker settings are unchanged. Successful
+publication removes the receipt; the identity daemon then owns the restart using
+the existing `account_link`/10-second or `account_unlink`/2-second three-field
+request contract. The identity sentinel still blocks linking and finalization,
 including when it appears while cloud authentication is in flight.

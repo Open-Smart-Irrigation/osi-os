@@ -140,7 +140,17 @@ const run = (sql, params) => new Promise((resolve, reject) => db.run(sql, params
 const close = () => new Promise((resolve) => db.close(() => resolve()));
 try {
   const configIo = { fs: global.get('fs'), cp: global.get('cp') };
-  await recoverAccountConfig(db, configIo);
+  const recovery = await recoverAccountConfig(db, configIo);
+  if (recovery.recovered && recovery.committed) {
+    if (recovery.kind !== 'link' || recovery.username !== localUsername || recovery.serverUrl !== serverUrl || recovery.requestedUsername !== username) {
+      throw accountRestartRetryError();
+    }
+    msg._alRecoveredReply = recovery.reply;
+    msg._alRestartPublished = 'link';
+    flow.set('account_linked', true);
+    flow.set('history_sync_v1_confirmed', false);
+    return [null, null, msg];
+  }
   preflightAccountConfig(configIo);
   let installationRows = await q('SELECT installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, recovery_operation_uuid FROM installation_identity WHERE singleton_id=1', []);
   if (installationRows.length === 0) {
@@ -486,7 +496,8 @@ try {
   await accountConfigTransaction(db, {
       fs: global.get('fs'), cp: global.get('cp'),
       desired: linkMqttConfig(flow),
-      marker: { kind: 'link', username: localUsername, token: syncToken, context: validatedContext },
+      marker: { kind: 'link', username: localUsername, token: syncToken, context: validatedContext, request_username: flow.get('al_server_username'),
+        reply: { serverUsername: verifiedUsername, claimedDevices: flow.get('al_claimed') || [], skippedDevices: flow.get('al_skipped') || [] } },
     }, async (tx) => {
     const local = await tx.get('SELECT id FROM users WHERE id=? AND username=?', [Number(flow.get('al_local_user_id')), localUsername]);
     if (!local) throw new Error('Local linked account no longer exists');
@@ -539,7 +550,7 @@ try {
 } catch (error) {
   try { await close(); } catch (closeError) { node.warn('Linked account finalization DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError)); }
   msg.statusCode = Number(error && (error.statusCode || error.status)) || 500;
-  msg.payload = { message: 'Unable to persist linked account state', detail: String(error.message || error) };
+  msg.payload = { message: 'Unable to complete linked account state', detail: String(error.message || error), reason: error.code || null, applied: error.applied === true };
   return [null, msg];
 }
 })();
@@ -618,7 +629,15 @@ const db = new osiDb.Database('/data/db/farming.db');
 const close = () => db.close();
 try {
   claimAccountOperation(msg);
-  await recoverAccountConfig(db, { fs: global.get('fs'), cp: global.get('cp') });
+  const recovery = await recoverAccountConfig(db, { fs: global.get('fs'), cp: global.get('cp') });
+  if (recovery.recovered && recovery.committed) {
+    if (recovery.kind !== 'disconnect' || recovery.username !== auth.username) throw accountRestartRetryError();
+    msg._alRestartPublished = 'disconnect';
+    flow.set('account_linked', false);
+    flow.set('history_sync_v1_confirmed', false);
+    await close();
+    return [msg, null];
+  }
   await accountConfigTransaction(db, {
     fs: global.get('fs'), cp: global.get('cp'), desired: emptyMqttConfig(),
     marker: { kind: 'disconnect', username: auth.username },
@@ -639,12 +658,17 @@ try {
 } catch (error) {
   try { await close(); } catch (closeError) { node.warn('Unlink DB close failed: ' + String(closeError.message || closeError)); }
   msg.statusCode = error.statusCode || 500;
-  msg.payload = { message: String(error.message || error) };
+  msg.payload = { message: String(error.message || error), reason: error.code || null, applied: error.applied === true };
   return [null, msg];
 }
 })();
 }
 async function accountLink_success({msg, node, flow, env, global, osiDb, osiLib}) {
+if (msg._alRecoveredReply) {
+  msg.statusCode = 200;
+  msg.payload = { success: true, ...msg._alRecoveredReply, restartRecovered: true };
+  return msg;
+}
 const serverUsername = flow.get('al_verified_server_username');
 const claimed = flow.get('al_claimed') || [];
 const skipped = flow.get('al_skipped') || [];
@@ -806,60 +830,130 @@ async function configCommitMatches(tx, marker) {
     && ['server_url','cloud_user_id','gateway_device_eui','installation_uuid'].every(key => String(peer[key]) === String(context[key]));
 }
 
+function accountRestartRetryError() {
+  const error = new Error('The previous account change was recovered and its restart was queued; retry after the restart');
+  error.code = 'account_restart_queued'; error.statusCode = 503; error.applied = true;
+  return error;
+}
+
+function publishAccountRestart({fs, requestId, kind, warn = console.warn}) {
+  const id = String(requestId || '').trim();
+  const requestIdBytes = Buffer.from(id, 'utf8');
+  if (!id || requestIdBytes.length > 64) throw new Error('Account restart request identity is missing or too long');
+  if (!fs) throw new Error('Account restart publication requires the fs global');
+  if (!['link', 'disconnect'].includes(kind)) throw new Error('Invalid account restart kind');
+  const requestDir = '/var/run/osi-node-red-restart-requests';
+  const reason = kind === 'link' ? 'account_link' : 'account_unlink';
+  const delaySeconds = kind === 'link' ? 10 : 2;
+  const safeRequestId = requestIdBytes.toString('hex');
+  const finalPath = requestDir + '/' + reason + '-' + safeRequestId + '.json';
+  let tempPath = '';
+  try {
+    fs.mkdirSync(requestDir, { recursive: true, mode: 0o700 });
+    tempPath = finalPath + '.' + crypto.randomUUID() + '.tmp';
+    const request = { reason, delaySeconds, requestedAtEpoch: Math.floor(Date.now() / 1000) };
+    fs.writeFileSync(tempPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(tempPath, finalPath);
+  } catch (error) {
+    if (tempPath) {
+      try { fs.unlinkSync(tempPath); }
+      catch (cleanupError) { if (cleanupError.code !== 'ENOENT') warn('Account restart temporary-file cleanup failed'); }
+    }
+    // Never surface command arguments or private journal contents.
+    const pending = new Error('Account change is applied but its daemon restart request could not be published');
+    pending.code = 'account_restart_pending'; pending.statusCode = 503; pending.applied = true;
+    throw pending;
+  }
+}
+
 async function recoverAccountConfig(db, io) {
   if (!io.fs) throw new Error('Account-link configuration recovery requires the fs global');
   if (!io.fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) return { recovered: false };
   requireConfigIo(io);
-  // The DB write lock serializes recovery with finalization, including an
-  // interrupted process whose WAL transaction was rolled back at open.
   return db.transaction(async tx => {
     let journal;
     try { journal = JSON.parse(io.fs.readFileSync(ACCOUNT_CONFIG_JOURNAL, 'utf8')); }
     catch (error) { throw new Error('Unable to read the account-link recovery journal'); }
     if (journal.version !== 1 || !journal.marker || !journal.before || !journal.after) throw new Error('Invalid account-link recovery journal');
     const committed = await configCommitMatches(tx, journal.marker);
+    if (journal.restart_pending === true && !committed) throw new Error('Account restart recovery context changed; keeping its receipt');
     writeMqttConfig(io.cp, committed ? journal.after : journal.before);
-    if (io.beforeRemove) io.beforeRemove(journal.marker.kind);
     syncAccountDatabase(io.fs);
+    // Only a transaction known to have rolled back in this running process
+    // can remove its receipt without a restart. Boot recovery also reloads a
+    // restored prior configuration, because its boot snapshot may differ.
+    if (committed || !io.rollbackOnly) publishAccountRestart({fs: io.fs, requestId: journal.operation_id || 'recovery', kind: journal.marker.kind, warn: io.warn});
+    const user = await tx.get('SELECT server_username FROM users WHERE username=?', [journal.marker.username]);
+    const result = { recovered: true, committed, kind: journal.marker.kind,
+      username: journal.marker.username, serverUrl: journal.marker.context && journal.marker.context.server_url,
+      reply: journal.marker.reply || {serverUsername: user && user.server_username || null, claimedDevices: null, skippedDevices: null} };
+    result.requestedUsername = journal.marker.request_username || result.reply.serverUsername;
     removeAccountJournal(io.fs);
-    return { recovered: true, committed, kind: journal.marker.kind };
+    return result;
   });
 }
 
 async function accountConfigTransaction(db, options, mutate) {
   requireConfigIo(options);
-  await recoverAccountConfig(db, options);
-  let journalWritten = false;
+  const prior = await recoverAccountConfig(db, options);
+  if (prior.recovered && prior.committed) throw accountRestartRetryError();
+  let journal = null;
   let committed = false;
   try {
     await db.transaction(async tx => {
-      const before = readMqttConfig(options.cp);
-      writeAccountJournal(options.fs, { version: 1, marker: options.marker, before, after: options.desired });
-      journalWritten = true;
-      // All SQL is part of this transaction. A constraint failure leaves both
-      // the authenticated user and the peer context at their previous values.
+      journal = { version: 1, operation_id: crypto.randomUUID(), marker: options.marker,
+        before: readMqttConfig(options.cp), after: options.desired };
+      writeAccountJournal(options.fs, journal);
       await mutate(tx);
       writeMqttConfig(options.cp, options.desired);
     });
     committed = true;
     syncAccountDatabase(options.fs);
-    removeAccountJournal(options.fs);
+    // This stamp is written only after SQLite is durable. A process dying
+    // before the stamp is still recoverable through the original marker.
+    journal.restart_pending = true;
+    writeAccountJournal(options.fs, journal);
+    // Normal finalization leaves the obligation for the downstream publisher.
   } catch (error) {
-    if (journalWritten) {
-      try { await recoverAccountConfig(db, options); }
+    if (committed) {
+      const pending = new Error('Account change is applied; restart recovery remains pending');
+      pending.code = 'account_restart_pending'; pending.statusCode = 503; pending.applied = true;
+      throw pending;
+    }
+    if (journal) {
+      try { await recoverAccountConfig(db, {...options, rollbackOnly: true}); }
       catch (recoveryError) {
         const blocked = new Error('Account-link configuration recovery is required; retry the operation');
         blocked.code = 'link_recovery_required'; blocked.statusCode = 503;
         throw blocked;
       }
     }
-    if (!committed) throw error;
-    // A failed journal removal after commit does not roll back accepted state.
+    throw error;
   }
 }
 
+async function accountLink_restart(deps, kind) {
+  const {msg, node, global, osiDb} = deps;
+  if (msg._alRestartPublished === kind) return [msg, null];
+  const db = new osiDb.Database('/data/db/farming.db');
+  try {
+    const result = await recoverAccountConfig(db, {fs: global.get('fs'), cp: global.get('cp'), warn: text => node.warn(text)});
+    if (!result.recovered || !result.committed || result.kind !== kind) throw new Error('Account restart recovery receipt is unavailable');
+    msg._alRestartPublished = kind;
+    node.status({fill:'green', shape:'dot', text:'scheduled account restart'});
+    return [msg, null];
+  } catch (error) {
+    node.warn('Account restart publication remains pending');
+    msg.statusCode = 503;
+    msg.payload = {success:false, applied:true, reason:'account_restart_pending', message:'Account change is applied; retry to publish the daemon restart request'};
+    return [null, msg];
+  } finally { await db.close(); }
+}
+async function accountLink_restartLink(deps) { return accountLink_restart(deps, 'link'); }
+async function accountLink_restartDisconnect(deps) { return accountLink_restart(deps, 'disconnect'); }
+
 async function accountLinkStage(stage, deps) {
-  const handlers = { refreshBuild: accountLink_refreshBuild, refreshMark: accountLink_refreshMark, build: accountLink_build, handle: accountLink_handle, finalize: accountLink_finalize,
+  const handlers = { restartLink: accountLink_restartLink, restartDisconnect: accountLink_restartDisconnect, refreshBuild: accountLink_refreshBuild, refreshMark: accountLink_refreshMark, build: accountLink_build, handle: accountLink_handle, finalize: accountLink_finalize,
     disconnect: accountLink_disconnect, clear: accountLink_clear, success: accountLink_success };
   const handler = handlers[stage];
   if (!handler) throw new Error('Unknown account-link stage');
@@ -892,27 +986,15 @@ module.exports.accountLinkStage = accountLinkStage;
 module.exports.accountConfigTransaction = accountConfigTransaction;
 module.exports.recoverAccountConfig = recoverAccountConfig;
 
-// Runs as the account finalizer's On Start hook. Recovery is also retried at
-// the next authenticated operation if the platform cannot complete it at boot.
+// Both normal finalization and startup use the same receipt/publication rule.
 async function recoverAccountConfigOnStart({osiDb, fs, cp, warn}) {
   if (!fs || !fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) return;
   const db = new osiDb.Database('/data/db/farming.db');
-  try {
-    await recoverAccountConfig(db, { fs, cp, beforeRemove(kind) {
-      const dir = '/var/run/osi-node-red-restart-requests';
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const target = dir + '/account_' + (kind === 'disconnect' ? 'unlink' : 'link') + '-recovery.json';
-      const temporary = target + '.' + crypto.randomUUID() + '.tmp';
-      try {
-        fs.writeFileSync(temporary, JSON.stringify({ reason: kind === 'disconnect' ? 'account_unlink' : 'account_link', delaySeconds: kind === 'disconnect' ? 2 : 10, requestedAtEpoch: Math.floor(Date.now()/1000) }), { mode: 0o600, flag: 'wx' });
-        fs.renameSync(temporary, target);
-      } finally {
-        try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      }
-    } });
-  } catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
+  try { await recoverAccountConfig(db, {fs, cp, warn}); }
+  catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
   finally { await db.close(); }
 }
+module.exports.publishAccountRestart = publishAccountRestart;
 module.exports.recoverAccountConfigOnStart = recoverAccountConfigOnStart;
 
 function gatewayWorkBlocked({fs, warn, accountConfig = true}) {
@@ -1075,3 +1157,10 @@ try {
 }
 })();
 }
+
+// The MQTT connection keeps boot-time credentials until identityd restarts it.
+// Stop new cloud publications while an account operation/receipt is unresolved.
+function accountCloudMessage({msg, node, global}) {
+  return gatewayWorkBlocked({fs: global.get('fs'), warn: text => node.warn(text)}) ? null : msg;
+}
+module.exports.accountCloudMessage = accountCloudMessage;

@@ -46,7 +46,7 @@ for (const type of protectedTypes) {
 }
 assert.ok(helper, 'thin watermark-config-command-apply-fn exists');
 assert.equal(helper.type, 'function');
-assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']]);
+assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['account-cloud-guard-9d5e3035c3d069c4']]);
 assert.match(helper.func, /applyWatermarkCommand/);
 assert.match(helper.func, /_pendingCommandEnvelope/);
 assert.match(helper.func, /gateway_device_eui/);

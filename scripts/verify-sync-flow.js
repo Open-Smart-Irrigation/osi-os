@@ -561,7 +561,10 @@ function expectWireById(nodeId, targetId, description) {
     return;
   }
   const wires = Array.isArray(node.wires) ? node.wires.flat() : [];
-  if (!wires.includes(targetId)) {
+  const guard = findNodeById('account-cloud-guard-' + targetId);
+  const guarded = guard && guard.type === 'function' && guard.func.includes('load.value.accountCloudMessage(')
+    && JSON.stringify(guard.wires) === JSON.stringify([[targetId]]) && wires.includes(guard.id);
+  if (!wires.includes(targetId) && !guarded) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -2354,11 +2357,11 @@ for (const marker of ['writeAccountJournal(options.fs', 'await mutate(tx)', 'wri
   if (!accountLinkSource.includes(marker)) fail('account-link coordinator missing '+marker);
 }
 expectExcludes('Finalize linked account state', '/etc/init.d/node-red restart', 'direct service restart during link persistence');
-expectIncludes('Schedule Link Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful link completion');
-expectIncludes('Schedule Link Restart', "reason: 'account_link', delaySeconds: 10", 'uses the account-link restart contract');
+expectIncludes('Schedule Link Restart', "accountLinkStage('restartLink',", 'publishes the durable link restart obligation through the module');
+expectWireById('al-link-build-req', 'al-link-success', 'returns a recovered committed link without cloud authentication');
 expectExcludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
-expectIncludes('Schedule Unlink Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful unlink completion');
-expectIncludes('Schedule Unlink Restart', "reason: 'account_unlink', delaySeconds: 2", 'uses the account-unlink restart contract');
+expectIncludes('Schedule Unlink Restart', "accountLinkStage('restartDisconnect',", 'publishes the durable disconnect restart obligation through the module');
+if (!accountLinkSource.includes('journal.restart_pending = true')) fail('account finalization must retain a durable restart obligation');
 expectExcludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
 const cloudRestNodeIds = [
   'al-link-server-auth',

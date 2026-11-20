@@ -3852,7 +3852,7 @@
     "y": 100,
     "wires": [
       [
-        "d769e9face3844d5"
+        "account-cloud-guard-d769e9face3844d5"
       ]
     ]
   },
@@ -3945,7 +3945,7 @@
     "y": 200,
     "wires": [
       [
-        "9b38464d56b05ae0"
+        "account-cloud-guard-9b38464d56b05ae0"
       ]
     ]
   },
@@ -3988,7 +3988,7 @@
         "conditional-lifecycle-command-adapter"
       ],
       [
-        "9d5e3035c3d069c4",
+        "account-cloud-guard-9d5e3035c3d069c4",
         "command-ack-queue-rest"
       ],
       [
@@ -4073,7 +4073,7 @@
     "y": 340,
     "wires": [
       [
-        "d83e38164efbb860"
+        "account-cloud-guard-d83e38164efbb860"
       ]
     ]
   },
@@ -4126,7 +4126,7 @@
     "y": 420,
     "wires": [
       [
-        "c338bc61bee49337"
+        "account-cloud-guard-c338bc61bee49337"
       ],
       [
         "command-ack-queue-rest"
@@ -4257,7 +4257,7 @@
     "y": 280,
     "wires": [
       [
-        "9b38464d56b05ae0"
+        "account-cloud-guard-9b38464d56b05ae0"
       ]
     ]
   },
@@ -5127,7 +5127,7 @@
     "z": "account-link-tab",
     "name": "Build server auth request",
     "func": "function gatewayIdentityRestartPending() {\n  const fs = global.get('fs');\n  if (!fs) {\n    node.warn('Gateway identity restart check: fs global is unavailable; blocking identity-sensitive work');\n    return true;\n  }\n  const statePath = '/var/run/osi-identity-restart.json';\n  if (!fs.existsSync(statePath)) return false;\n  try {\n    JSON.parse(fs.readFileSync(statePath, 'utf8'));\n    return true;\n  } catch (error) {\n    node.warn('Gateway identity restart state is unreadable; blocking identity-sensitive work: ' + String(error && error.message ? error.message : error));\n    return true;\n  }\n}\nif (gatewayIdentityRestartPending()) {\n  flow.set('al_server_password', null);\n  msg.statusCode = 503;\n  msg.payload = { message: 'Gateway identity is being applied. The central hub will restart before linking.' };\n  return [null, msg];\n}\nconst load = osiLib.require('installation');\nif (!load.ok) { msg.statusCode = 503; msg.payload = { message: 'Installation identity helper is unavailable' }; return [null, msg]; }\nreturn load.value.accountLinkStage('build', { msg, node, flow, env, global, osiDb, osiLib });",
-    "outputs": 2,
+    "outputs": 3,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
@@ -5149,6 +5149,9 @@
       ],
       [
         "al-link-resp"
+      ],
+      [
+        "al-link-success"
       ]
     ]
   },
@@ -5893,7 +5896,7 @@
         "sim-dendro-debug-live"
       ],
       [
-        "sim-dendro-mqtt-cloud"
+        "account-cloud-guard-sim-dendro-mqtt-cloud"
       ]
     ]
   },
@@ -8896,12 +8899,21 @@
     "type": "function",
     "z": "account-link-tab",
     "name": "Schedule Link Restart",
-    "func": "function failRestartRequest(message, error) {\n  const detail = error ? String(error && error.message ? error.message : error).slice(0, 200) : '';\n  node.warn(message + (detail ? ': ' + detail : ''));\n  node.status({ fill: 'red', shape: 'ring', text: 'link restart request failed' });\n  msg.statusCode = 503;\n  msg.payload = { success: false, message };\n  if (detail) msg.payload.detail = detail;\n  return [null, msg];\n}\nconst requestId = String((msg && msg._msgid) || '').trim();\nif (!requestId) {\n  return failRestartRequest('Account link was applied, but the central hub restart could not be queued because msg._msgid is missing');\n}\nconst requestIdBytes = Buffer.from(requestId, 'utf8');\nif (requestIdBytes.length > 64) {\n  return failRestartRequest('Account link was applied, but the central hub restart could not be queued because msg._msgid is too long');\n}\nconst fs = global.get('fs');\nif (!fs) {\n  return failRestartRequest('Account link was applied, but the central hub restart could not be queued because the fs global is unavailable');\n}\nconst requestDir = '/var/run/osi-node-red-restart-requests';\nconst safeRequestId = requestIdBytes.toString('hex');\nlet tempPath = '';\ntry {\n  fs.mkdirSync(requestDir, { recursive: true, mode: 0o700 });\n  const finalPath = requestDir + '/account_link-' + safeRequestId + '.json';\n  const uniqueSuffix = Date.now().toString(36) + '-' + Math.random().toString(16).slice(2);\n  tempPath = finalPath + '.' + uniqueSuffix + '.tmp';\n  const request = { reason: 'account_link', delaySeconds: 10, requestedAtEpoch: Math.floor(Date.now() / 1000) };\n  fs.writeFileSync(tempPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });\n  fs.renameSync(tempPath, finalPath);\n  tempPath = '';\n  node.status({ fill: 'green', shape: 'dot', text: 'scheduled link restart' });\n} catch (error) {\n  if (tempPath) {\n    try {\n      fs.unlinkSync(tempPath);\n    } catch (cleanupError) {\n      if (!cleanupError || cleanupError.code !== 'ENOENT') {\n        node.warn('link restart request cleanup failed: ' + String(cleanupError && cleanupError.message ? cleanupError.message : cleanupError));\n      }\n    }\n  }\n  return failRestartRequest('Account link was applied, but the central hub restart could not be queued', error);\n}\nreturn [msg, null];",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { msg.statusCode = 503; msg.payload = { success: false, applied: true, reason: 'account_restart_pending', message: 'Account restart helper is unavailable' }; return [null, msg]; }\nreturn load.value.accountLinkStage('restartLink', { msg, node, flow, env, global, osiDb });",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
     "x": 2920,
     "y": 160,
     "wires": [
@@ -8941,12 +8953,21 @@
     "type": "function",
     "z": "account-link-tab",
     "name": "Schedule Unlink Restart",
-    "func": "function failRestartRequest(message, error) {\n  const detail = error ? String(error && error.message ? error.message : error).slice(0, 200) : '';\n  node.warn(message + (detail ? ': ' + detail : ''));\n  node.status({ fill: 'red', shape: 'ring', text: 'unlink restart request failed' });\n  msg.statusCode = 503;\n  msg.payload = { success: false, message };\n  if (detail) msg.payload.detail = detail;\n  return [null, msg];\n}\nconst requestId = String((msg && msg._msgid) || '').trim();\nif (!requestId) {\n  return failRestartRequest('Account unlink was applied, but the central hub restart could not be queued because msg._msgid is missing');\n}\nconst requestIdBytes = Buffer.from(requestId, 'utf8');\nif (requestIdBytes.length > 64) {\n  return failRestartRequest('Account unlink was applied, but the central hub restart could not be queued because msg._msgid is too long');\n}\nconst fs = global.get('fs');\nif (!fs) {\n  return failRestartRequest('Account unlink was applied, but the central hub restart could not be queued because the fs global is unavailable');\n}\nconst requestDir = '/var/run/osi-node-red-restart-requests';\nconst safeRequestId = requestIdBytes.toString('hex');\nlet tempPath = '';\ntry {\n  fs.mkdirSync(requestDir, { recursive: true, mode: 0o700 });\n  const finalPath = requestDir + '/account_unlink-' + safeRequestId + '.json';\n  const uniqueSuffix = Date.now().toString(36) + '-' + Math.random().toString(16).slice(2);\n  tempPath = finalPath + '.' + uniqueSuffix + '.tmp';\n  const request = { reason: 'account_unlink', delaySeconds: 2, requestedAtEpoch: Math.floor(Date.now() / 1000) };\n  fs.writeFileSync(tempPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });\n  fs.renameSync(tempPath, finalPath);\n  tempPath = '';\n  node.status({ fill: 'green', shape: 'dot', text: 'scheduled unlink restart' });\n} catch (error) {\n  if (tempPath) {\n    try {\n      fs.unlinkSync(tempPath);\n    } catch (cleanupError) {\n      if (!cleanupError || cleanupError.code !== 'ENOENT') {\n        node.warn('unlink restart request cleanup failed: ' + String(cleanupError && cleanupError.message ? cleanupError.message : cleanupError));\n      }\n    }\n  }\n  return failRestartRequest('Account unlink was applied, but the central hub restart could not be queued', error);\n}\nreturn [msg, null];",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { msg.statusCode = 503; msg.payload = { success: false, applied: true, reason: 'account_restart_pending', message: 'Account restart helper is unavailable' }; return [null, msg]; }\nreturn load.value.accountLinkStage('restartDisconnect', { msg, node, flow, env, global, osiDb });",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
-    "libs": [],
+    "libs": [
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
     "x": 1040,
     "y": 320,
     "wires": [
@@ -9363,7 +9384,7 @@
         "journal-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ],
       [
         "watermark-config-command-apply-fn"
@@ -9391,7 +9412,7 @@
     "y": 500,
     "wires": [
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -13201,7 +13222,7 @@
         "zone-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -13233,7 +13254,7 @@
         "weather-zones-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4",
+        "account-cloud-guard-9d5e3035c3d069c4",
         "sync-outbox-flush-coalesce"
       ]
     ]
@@ -13262,7 +13283,7 @@
         "installation-revision-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -13767,7 +13788,7 @@
     "y": 620,
     "wires": [
       [
-        "9d5e3035c3d069c4",
+        "account-cloud-guard-9d5e3035c3d069c4",
         "command-ack-queue-rest"
       ],
       [
@@ -14653,7 +14674,7 @@
         "934bf2bc19a8ce22"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -14962,7 +14983,7 @@
         "entity-name-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -14989,7 +15010,7 @@
         "watermark-config-command-apply-fn"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ],
     "func": "return (async () => {\n  let cmd;\n  try {\n    cmd = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : (msg.payload || {});\n  } catch (parseError) {\n    node.error('Entity name command parse failed closed: ' + String(parseError && parseError.message ? parseError.message : parseError), msg);\n    return [null, null];\n  }\n  const envelope = cmd._pendingCommandEnvelope;\n  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {\n    node.error('Entity name command has no protected delivery envelope', msg);\n    return [null, null];\n  }\n  const commandType = String(envelope.commandType || '').trim().toUpperCase();\n  if (!['UPSERT_DEVICE_NAME','UPSERT_ZONE_NAME'].includes(commandType)) return [msg, null];\n  const dbLoad = osiLib.require('osi-db-helper');\n  const nameLoad = osiLib.require('entity-name');\n  if (!dbLoad.ok || !nameLoad.ok) {\n    const detail = [dbLoad, nameLoad]\n      .filter(function(load) { return !load.ok; })\n      .map(function(load) { return load.error; })\n      .join('; ');\n    node.error('Entity name command helpers unavailable: ' + detail, msg);\n    return [null, null];\n  }\n  const gatewayEui = String(env.get('DEVICE_EUI') || '').trim().toUpperCase();\n  const db = new dbLoad.value.Database('/data/db/farming.db');\n  const close = () => new Promise((resolve, reject) => db.close((error) => error ? reject(error) : resolve()));\n  try {\n    const result = await nameLoad.value.applyNameCommand(db, envelope, {\n      scopedMode: String(env.get('OSI_SCOPED_ACCESS') || '') === '1',\n      gateway_device_eui: gatewayEui,\n      command_type_recognized: msg._commandTypeRecognized === true\n    });\n    if (!result.handled) return [msg, null];\n    // The acknowledgement leaves before the ChirpStack attempt starts. The\n    // label update is best effort (design D3), and a ChirpStack that accepts\n    // the connection and never answers must not hold the cloud's answer for\n    // the whole deadline. node.send emits it now and the function returns\n    // [null, null], so nothing is emitted twice.\n    node.send([null, {\n      topic: 'devices/' + gatewayEui + '/command_ack',\n      payload: JSON.stringify(result.ack),\n      qos: 1\n    }]);\n    if (commandType === 'UPSERT_DEVICE_NAME' && result.ack && result.ack.result === 'APPLIED') {\n      // target is null when the payload was too malformed to name one. An\n      // APPLIED rename always has one, but the guard below costs nothing and\n      // keeps a future ack shape from turning null into the string 'NULL'.\n      const devEui = String(result.ack.target === null || result.ack.target === undefined ? '' : result.ack.target).trim().toUpperCase();\n      const csLoad = osiLib.require('chirpstack');\n      if (!csLoad.ok) {\n        node.warn('Entity name command ChirpStack helper unavailable: ' + csLoad.error);\n      } else {\n        let client = null;\n        try {\n          client = csLoad.value.createProvisioningClientFromEnv(env);\n        } catch (clientError) {\n          node.warn('Entity name command ChirpStack provisioning not configured: ' + String(clientError && clientError.message ? clientError.message : clientError));\n        }\n        if (client && devEui) {\n          try {\n            await csLoad.value.updateDeviceName(client, devEui, async () => {\n              const row = await db.get('SELECT name FROM devices WHERE deveui=? AND deleted_at IS NULL LIMIT 1', [devEui]);\n              return row && row.name !== undefined && row.name !== null ? row.name : null;\n            });\n          } catch (csError) {\n            node.warn('Entity name command ChirpStack update failed for ' + devEui + ': ' + String(csError && csError.message ? csError.message : csError));\n          }\n        }\n      }\n    }\n    return [null, null];\n  } catch (error) {\n    node.error('Entity name command apply failed closed: ' + String(error && error.message ? error.message : error), msg);\n    return [null, null];\n  } finally {\n    try {\n      await close();\n    } catch (closeError) {\n      node.warn('Entity name command DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));\n    }\n  }\n})();"
@@ -15537,7 +15558,7 @@
         "934bf2bc19a8ce22"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -15662,7 +15683,7 @@
         "command-ack-queue-rest"
       ],
       [
-        "9d5e3035c3d069c4"
+        "account-cloud-guard-9d5e3035c3d069c4"
       ]
     ]
   },
@@ -15905,6 +15926,150 @@
     "y": 200,
     "wires": [
       []
+    ]
+  },
+  {
+    "id": "account-cloud-guard-d769e9face3844d5",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 490,
+    "y": 130,
+    "wires": [
+      [
+        "d769e9face3844d5"
+      ]
+    ]
+  },
+  {
+    "id": "account-cloud-guard-9b38464d56b05ae0",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 500,
+    "y": 230,
+    "wires": [
+      [
+        "9b38464d56b05ae0"
+      ]
+    ]
+  },
+  {
+    "id": "account-cloud-guard-d83e38164efbb860",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 1210,
+    "y": 370,
+    "wires": [
+      [
+        "d83e38164efbb860"
+      ]
+    ]
+  },
+  {
+    "id": "account-cloud-guard-c338bc61bee49337",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 520,
+    "y": 430,
+    "wires": [
+      [
+        "c338bc61bee49337"
+      ]
+    ]
+  },
+  {
+    "id": "account-cloud-guard-9d5e3035c3d069c4",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 540,
+    "y": 470,
+    "wires": [
+      [
+        "9d5e3035c3d069c4"
+      ]
+    ]
+  },
+  {
+    "id": "account-cloud-guard-sim-dendro-mqtt-cloud",
+    "type": "function",
+    "z": "dendro-live-sim-tab",
+    "name": "Gate cloud MQTT during account recovery",
+    "func": "const load = osiLib.require('installation');\nif (!load.ok) { node.warn('Account transport guard is unavailable'); return null; }\nreturn load.value.accountCloudMessage({ msg, node, global });",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 620,
+    "y": 230,
+    "wires": [
+      [
+        "sim-dendro-mqtt-cloud"
+      ]
     ]
   }
 ]
