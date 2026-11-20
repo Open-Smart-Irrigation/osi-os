@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -210,7 +211,22 @@ for (const profile of ['bcm2712', 'bcm2709']) {
         VALUES (1, 2, 1, 'Existing workspace', '{"layout":"stacked"}');
         INSERT INTO analysis_views (id, user_id, name, view_json)
         VALUES (1, 2, 'Existing view', '{"mode":"correlation"}');
+        INSERT INTO irrigation_events (user_id, irrigation_zone_id, action, duration_minutes, created_at)
+        VALUES (2, 1, 'OPEN_FOR_DURATION', 2, '2026-11-19T08:00:00.000Z');
       `);
+      const soilEui = 'A840410000000002';
+      db.prepare(`
+        INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+        VALUES (?, 'Soil fixture', 'KIWI_SENSOR', 2, 1, '2026-11-19', '2026-11-19')
+      `).run(soilEui);
+      const soilSourceKey = 'soil-src-' + createHash('sha256').update(soilEui).digest('hex').slice(0, 12);
+      db.prepare(`
+        INSERT INTO history_channel_rollups (
+          zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+          min_value, max_value, mean_value, median_value, latest_value, coverage_pct, coverage_confidence, sample_count, unit
+        ) VALUES (1, 'soil', ?, 'swt_1', 'daily', '2026-11-19T00:00:00.000Z', '2026-11-20T00:00:00.000Z',
+          32, 32, 32, 32, 32, 100, 'configured', 1, 'kPa')
+      `).run(soilSourceKey);
       for (const route of removeRoutes) {
         const url = route.url.replaceAll(/:[a-zA-Z]+/g, '1');
         const result = await http(staged, db, request(route.method.toUpperCase(), url, {}, {}, {
@@ -234,10 +250,17 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       const cards = await http(staged, db, request('GET', '/api/history/zones/1/cards', { zoneId: '1' }));
       assert.equal(cards.statusCode, 200);
       assert.ok(cards.payload.cards.length);
-      const basicCard = cards.payload.cards.find((entry) => entry.cardType === 'irrigation');
-      const cardData = `/api/history/zones/1/cards/${basicCard.cardId}/data`;
-      assert.equal((await http(staged, db, request('GET', cardData, { zoneId: '1', cardId: basicCard.cardId },
-        { view: 'event-timeline', range: '24h' }))).statusCode, 200);
+      const range = { range: 'custom', from: '2026-11-19T00:00:00Z', to: '2026-11-20T00:00:00Z' };
+      const irrigation = cards.payload.cards.find((entry) => entry.cardType === 'irrigation');
+      const events = await http(staged, db, request('GET', `/api/history/zones/1/cards/${irrigation.cardId}/data`,
+        { zoneId: '1', cardId: irrigation.cardId }, { ...range, view: 'event-timeline' }));
+      assert.equal(events.statusCode, 200);
+      assert.deepEqual(events.payload.events.map((entry) => [entry.label, entry.metadata.durationMinutes]), [['OPEN_FOR_DURATION', 2]]);
+      const soil = cards.payload.cards.find((entry) => entry.cardType === 'soil');
+      const rollups = await http(staged, db, request('GET', `/api/history/zones/1/cards/${soil.cardId}/data`,
+        { zoneId: '1', cardId: soil.cardId }, { ...range, view: 'line-chart', aggregation: 'daily' }));
+      assert.equal(rollups.statusCode, 200);
+      assert.equal(rollups.payload.series.find((entry) => entry.channelKey === 'swt_1').points[0].mean, 32);
 
       const catalog = await http(staged, db, request('GET', '/api/analysis/channels'));
       assert.equal(catalog.statusCode, 200);
