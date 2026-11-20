@@ -21,8 +21,12 @@ function verify() {
   const authority = read('fixtures/authorization.json');
   const revocation = read('fixtures/revocation.json');
   const pauses = read('fixtures/pause-continuations.json');
+  const upgrades = read('fixtures/admin-upgrade.json');
   const decisions = read('fixtures/decisions.json');
-  assert.deepEqual([...manifest.open_questions].sort(), decisions.decisions.map(d => d.id).sort());
+  assert.deepEqual([...manifest.decision_ids].sort(), decisions.decisions.map(d => d.id).sort());
+  assert.deepEqual(manifest.open_questions, []);
+  assert.equal(manifest.ruling_date, '2026-11-20');
+  assert.equal(manifest.actor_capability, 'authority_actor_v1');
   const schema = read('vectors.schema.json');
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   ajv.addSchema(schema);
@@ -45,7 +49,7 @@ function verify() {
   assert.equal(inventory.sources.edge_commit, manifest.sources.edge_commit);
   assert.equal(inventory.sources.cloud_commit, manifest.sources.cloud_commit);
   for (const file of manifest.files) assert.ok(fs.existsSync(path.join(DIR, file)), `missing ${file}`);
-  for (const fixture of [inventory, authority, revocation, pauses, decisions]) {
+  for (const fixture of [inventory, authority, revocation, pauses, upgrades, decisions]) {
     assert.equal(fixture.contract_version, manifest.contract_version);
   }
   const pinned = file => execFileSync('git', ['show', `${inventory.sources.edge_commit}:${file}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
@@ -167,20 +171,38 @@ function verify() {
     validate('pauseCase', c);
     model.runPause(c.initial, c.steps, authority.valid_defaults, (actual, expected, op) => projection(actual, expected, `${c.id}/${op}`));
   }
-  for (const d of decisions.decisions.filter(d => d.kind === 'product')) {
-    assert.equal(d.owner, 'Phil');
-    assert.equal(d.status, 'open');
-    assert.equal(d.selected_option, null, 'a recommendation is not approval');
-    assert.ok(Object.hasOwn(d.options, d.recommended_option));
+  unique(upgrades.cases.map(c => c.id), 'upgrade case');
+  for (const c of upgrades.cases) {
+    validate('adminUpgradeCase', c);
+    model.runAdminUpgrade(c.initial, c.steps, (actual, expected, op) => projection(actual, expected, `${c.id}/${op}`));
   }
-  const dimensions = { Q1: 'installer', Q2: 'owner_system', Q3: 'offline', Q5: 'prediction', Q7: 'stop_authority', Q8: 'first_admin', Q9: 'clock' };
-  for (const [id, dimension] of Object.entries(dimensions)) {
-    const d = decisions.decisions.find(d => d.id === id);
-    for (const option of Object.keys(d.options)) assert.ok(inputs.some(i => i.policies[dimension] === option), `${id}/${option} runnable`);
+  assert.deepEqual(authority.valid_defaults.policies, manifest.policy_defaults);
+  assert.equal(manifest.product_decisions_selected, true);
+  for (const d of decisions.decisions) {
+    assert.equal(d.status, 'decided_default');
+    assert.equal(d.ruling_date, '2026-11-20');
+    if (d.policy_dimension) assert.equal(d.selected_default, manifest.policy_defaults[d.policy_dimension]);
+    assert.equal(d.phil_may_override, ['R6', 'R7'].includes(d.id));
+    if (d.phil_may_override) assert.equal(d.override_owner, 'Phil');
   }
+  for (const input of inputs) assert.deepEqual(input.policies, manifest.policy_defaults, 'only decided defaults are executable');
+  for (const [dimension, superseded] of Object.entries({ installer: 'gateway_installer', offline: 'bounded_offline_lease', stop_authority: 'current_rights', first_admin: 'operator_provisioned', clock: 'durable_high_water', prediction: 'admin_zone_write', owner_system: 'mapped_admin_only' })) {
+    assert.throws(() => validate('authorityInput', model.merge(authority.valid_defaults, { policies: { [dimension]: superseded } })), /constant/);
+  }
+  const wrongBootstrap = structuredClone(authority.cases.find(c => c.id === 'fresh-flag-off-stored-admin'));
+  wrongBootstrap.expected.stored_role = 'researcher';
+  assert.throws(() => verifyCase(wrongBootstrap), /stored_role/);
+  const missingOriginal = structuredClone(upgrades.cases.find(c => c.id === 'missing-bootstrap-operator-fallback'));
+  missingOriginal.steps[0].expected.decision = 'promoted_original_bootstrap';
+  assert.throws(() => model.runAdminUpgrade(missingOriginal.initial, missingOriginal.steps,
+    (actual, expected, op) => projection(actual, expected, op)), /decision/);
+  const refusedStop = structuredClone(pauses.cases.find(c => c.id === 'lost-authority-before_apply-reduce_only_continuation'));
+  refusedStop.steps.find(s => s.op === 'apply_pause').expected.decision = 'deny';
+  assert.throws(() => model.runPause(refusedStop.initial, refusedStop.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision/);
   // Deliberately corrupt required expectations to the reviewed old behavior.
   // A shape-only checker would accept these records.
-  for (const id of ['sdi12_recipe_apply-1-missing_bearer', 'sdi12_recipe_rollback-1-revoked', 'cloud-owner-viewer-zone_config', 'rename-no-name-capability']) {
+  for (const id of ['sdi12_recipe_apply-1-missing_bearer', 'sdi12_recipe_rollback-1-revoked', 'cloud-owner-viewer-zone_config', 'rename-no-name-capability', 'clock-behind-high-water-expires-still-young-token', 'actorless-queued-valve_open-refused-at-upgrade']) {
     const bad = structuredClone(authority.cases.find(c => c.id === id));
     assert.ok(bad, id);
     bad.expected = { decision: 'allow', effects: 1 };
@@ -190,8 +212,11 @@ function verify() {
     assert.throws(() => verifyCase(bad), /decision/, `${id} old behavior must fail`);
   }
   const doc = fs.readFileSync(path.join(DIR, 'v1.md'), 'utf8');
-  for (const question of manifest.open_questions) assert.ok(doc.includes(question));
-  console.log(`authority contract: OK (${inventory.routes.length} routes, ${inventory.verification_callers.length} verifier callers (73 inline, 10 shared, 6 admin), ${inventory.module_consumers.length} module consumers, ${authority.cases.length} authority cases, ${revocation.cases.length} lifecycle cases, ${pauses.cases.length} pause cases; old-behavior mutation probes rejected)`);
+  for (const id of manifest.decision_ids) assert.ok(doc.includes(id));
+  assert.ok(doc.includes('20 Nov 2026'));
+  assert.ok(doc.includes(upgrades.release_note_line), 'exact release-note line');
+  assert.ok(!doc.includes('## Open questions'));
+  console.log(`authority contract: OK (${inventory.routes.length} routes, ${inventory.verification_callers.length} verifier callers (73 inline, 10 shared, 6 admin), ${inventory.module_consumers.length} module consumers, ${authority.cases.length} authority cases, ${revocation.cases.length} lifecycle cases, ${pauses.cases.length} pause cases, ${upgrades.cases.length} admin-upgrade cases; old-behavior mutation probes rejected)`);
 }
 if (require.main === module) {
   try { verify(); } catch (error) { console.error(`authority contract: FAIL: ${error.message}`); process.exitCode = 1; }

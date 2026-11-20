@@ -25,11 +25,11 @@
     "G3": "resolveScope/assertEnabledAccount/assertRole cache account state for 30 seconds. Invalidation tickets protect in-flight loads, but are not a durable session revocation barrier.",
     "G4": "Authorization before queued SQL, async work, writer acquisition or delayed physical dispatch does not prove current rights at apply time. Carry validated session identity and recheck at the final boundary.",
     "G5": "Device-owner SQL or ownedValve still refuses a zone grantee after a successful scope check (#451). Remove only after replacing it with current authorized resource targeting.",
-    "G6": "No installer entitlement exists. Current network/radio gates admit ordinary scoped users or admins; hiding the GUI alone cannot enforce installer-only tools.",
+    "G6": "Radio tools currently use device-scope/writer or admin gates inconsistently. CTO R6 requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass.",
     "G7": "Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority.",
     "G8": "No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation.",
     "G9": "Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token.",
-    "G11": "Edge GET /api/users lists accounts without grant assignments; no GET grant directory exists at this pin. The entire account/grant router is 404 with scoped access off, so Admin cannot inspect/revoke existing grants in every mode.",
+    "G11": "Edge GET /api/users lacks grant assignments and flag-off account/grant administration returns 404. CTO R2 requires real admin on fresh bootstrap and one recorded original-bootstrap-only upgrade, plus audit/release note and operator fallback.",
     "G10": "Some verifiers allow absent/zero expiry or treat exp equality as valid. K1 requires bounded expiry and rejection at now >= exp.",
     "G12": "Public feature discovery, account-wide measurement export, ownerless legacy today-liters read and writer-only valve list have different admission paths; shared route groups cannot describe them as one bearer/scope gate."
   },
@@ -39,7 +39,7 @@
         "flag_on": "No bearer; zero-user bootstrap policy, password validation and conditional INSERT; scoped bootstrap selects admin.",
         "flag_off": "No bearer; same zero-user policy; default researcher role."
       },
-      "revocation_path": "Issuance must read the committed account/session generation. Public bootstrap stays zero-user only.",
+      "revocation_path": "CTO R2: fresh bootstrap stores admin in both flags. Existing-user installations stay closed to public bootstrap; one recorded upgrade may promote only the original enabled bootstrap account, with audit, receipt and revocation atomically.",
       "gaps": [
         "G1",
         "G4"
@@ -467,7 +467,7 @@
         "flag_on": "osi-network-api.actor checks id+username and disabled; device/location/radio read/write uses fresh device scope and writer role; gateway location PUT admin; observations per-device visibility.",
         "flag_off": "Module bearer/current disabled actor; substitutes admin role and wildcard device scope."
       },
-      "revocation_path": "Add installer entitlement on radio observations/configuration and survey tools in both modes, plus session validation at read/write boundary. Device GPS remains separate.",
+      "revocation_path": "Require current valid session and enabled paired gateway owner/admin for radio tools in both flags, including raw exports. No installer entitlement. Device GPS retains its separate existing boundary.",
       "gaps": [
         "G1",
         "G2",
@@ -8057,7 +8057,7 @@
       "admission_today": "Owner short-circuit before GatewayScope; PUT prediction-config, POST prediction-recompute and POST soil-profile/refresh use it.",
       "capability_source_today": "Cloud read membership path and caller role; owner bypasses member gate.",
       "legacy_fallback_today": "Owner writes cloud-local prediction/config outputs for edge-backed zones.",
-      "required_admission": "Select explicit Phil Q5 policy after current mapped membership; reads separate. These cloud-local prediction jobs do not directly mutate edge canonical policy. Edge policy changes require their paired command.",
+      "required_admission": "CTO R4: normal current enabled mapped writer and owned/granted zone, with no product exception or owner short-circuit; cloud-local prediction jobs do not directly mutate edge policy.",
       "capability_source_required": "Gateway membership/mode proof for edge-backed zone; typed capability for any resulting edge command.",
       "legacy_fallback_required": "No owner bypass on edge-backed zone; genuinely cloud-local zones keep owner gate."
     }

@@ -1,6 +1,6 @@
 {
   "contract_version": "authority-v1",
-  "status": "0.9 implementation contract; unresolved cross-repo details listed in v1.md",
+  "status": "Decided defaults: CTO ruling and lead confirmation, 20 Nov 2026",
   "sources": {
     "edge_commit": "ec822b556a4bf789774a2e4deda7841d469dc631",
     "cloud_commit": "b002b807b32744979c118bf8f40b3136f2a75a32"
@@ -13,7 +13,8 @@
     "fixtures/authorization.json",
     "fixtures/revocation.json",
     "fixtures/pause-continuations.json",
-    "fixtures/decisions.json"
+    "fixtures/decisions.json",
+    "fixtures/admin-upgrade.json"
   ],
   "modes": [
     "local_only",
@@ -31,20 +32,36 @@
     "SUPER_ADMIN",
     "FLEET_READER"
   ],
-  "open_questions": [
-    "Q1",
-    "Q2",
-    "Q3",
-    "Q4",
-    "Q5",
-    "Q6",
-    "Q7",
-    "Q8",
-    "Q9"
-  ],
+  "open_questions": [],
   "validation": "node scripts/test-authority-contract.js",
-  "product_decisions_owner": "Phil",
-  "product_decisions_selected": false,
+  "product_decisions_owner": "CTO ruling; Phil may override R6/R7",
+  "product_decisions_selected": true,
   "model": "scripts/lib/authority-contract-model.js (test-only)",
-  "dependencies": "npm ci --prefix scripts --omit=dev --ignore-scripts"
+  "dependencies": "npm ci --prefix scripts --omit=dev --ignore-scripts",
+  "decision_ids": [
+    "R1",
+    "R2",
+    "R3",
+    "R4",
+    "R5",
+    "R6",
+    "R7",
+    "R8a",
+    "R8b"
+  ],
+  "policy_defaults": {
+    "installer": "owner_admin_radio",
+    "owner_system": "mapped_owner_or_admin",
+    "offline": "until_reconnect",
+    "prediction": "zone_write",
+    "stop_authority": "reduce_only_continuation",
+    "first_admin": "recorded_bootstrap_upgrade",
+    "clock": "persisted_high_water"
+  },
+  "ruling_date": "2026-11-20",
+  "actor_capability": "authority_actor_v1",
+  "phil_overridable_defaults": [
+    "R6",
+    "R7"
+  ]
 }

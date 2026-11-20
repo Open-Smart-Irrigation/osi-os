@@ -1,6 +1,6 @@
 {
   "contract_version": "authority-v1",
-  "representation": "Resolve input by recursively merging valid_defaults with case.input; arrays replace. Policies are explicit test choices, never activated recommendations. Validate resolved input with vectors.schema.json/$defs/authorityInput, execute normalized model, assert every expected field. effects counts permission for one logical application, not cloud acceptance or physical evidence.",
+  "representation": "Resolve input by recursive valid_defaults/case.input merge (arrays replace). Policies assert the CTO decided defaults of 20 Nov 2026; superseded alternatives are not active choices. Validate resolved input, execute normalized model, and assert every expected field. No runtime verifier is supplied.",
   "valid_defaults": {
     "origin": "edge",
     "mode": "linked_online",
@@ -9,15 +9,14 @@
     "stage": "apply",
     "now_ms": 1000,
     "clock_high_water_ms": 1000,
-    "authority_lease_until_ms": 5000,
     "policies": {
-      "installer": "scoped_installer",
+      "installer": "owner_admin_radio",
       "owner_system": "mapped_owner_or_admin",
-      "offline": "edge_commit_only",
+      "offline": "until_reconnect",
       "prediction": "zone_write",
-      "stop_authority": "current_rights",
-      "first_admin": "operator_provisioned",
-      "clock": "durable_high_water"
+      "stop_authority": "reduce_only_continuation",
+      "first_admin": "recorded_bootstrap_upgrade",
+      "clock": "persisted_high_water"
     },
     "actor": {
       "user_uuid": "11111111-1111-4111-8111-111111111111",
@@ -28,8 +27,8 @@
       "gateway_membership_confirmed": true,
       "zone_relation": "none",
       "enabled": true,
-      "installer": false,
-      "device_owner": false
+      "device_owner": false,
+      "kind": "user"
     },
     "session": {
       "kind": "local",
@@ -58,7 +57,8 @@
         "entity_name_commands_v1",
         "conditional_irrigation_v1",
         "linked_auth_sync_v1",
-        "force_edge_sync_v1"
+        "force_edge_sync_v1",
+        "authority_actor_v1"
       ],
       "source_scope": false,
       "target_scope": false,
@@ -86,7 +86,8 @@
     "service": {
       "transport_authorized": true,
       "binding_matches": true,
-      "credential_principal_authorized": true
+      "credential_principal_authorized": true,
+      "system_actor": "gateway_transport"
     }
   },
   "cases": [
@@ -101,8 +102,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -128,8 +128,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -155,8 +154,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -183,7 +181,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -210,8 +207,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -238,7 +234,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -265,8 +260,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -292,8 +286,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -316,8 +309,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -340,8 +332,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -365,7 +356,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -389,8 +379,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -414,7 +403,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -438,8 +426,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -462,8 +449,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -489,8 +475,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -516,8 +501,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -544,7 +528,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -571,8 +554,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -599,7 +581,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -626,8 +607,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -653,8 +633,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -677,8 +656,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -701,8 +679,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -726,7 +703,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -750,8 +726,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -775,7 +750,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -799,8 +773,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -823,8 +796,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -850,8 +822,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -877,8 +848,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -905,7 +875,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -932,8 +901,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -960,7 +928,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -987,8 +954,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1014,8 +980,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1038,8 +1003,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1062,8 +1026,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1087,7 +1050,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -1111,8 +1073,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1136,7 +1097,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -1160,8 +1120,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1184,8 +1143,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1212,8 +1170,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1240,8 +1197,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1264,8 +1220,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1288,8 +1243,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1316,8 +1270,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1344,8 +1297,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1368,8 +1320,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1392,8 +1343,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1420,8 +1370,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1448,8 +1397,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1472,8 +1420,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1496,8 +1443,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1524,8 +1470,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1552,8 +1497,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1576,8 +1520,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1600,8 +1543,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1628,8 +1570,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1656,8 +1597,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1680,8 +1620,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1704,8 +1643,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1732,8 +1670,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1760,8 +1697,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1784,8 +1720,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1808,8 +1743,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1836,8 +1770,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1864,8 +1797,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1888,8 +1820,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1912,8 +1843,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1940,8 +1870,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -1968,8 +1897,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -1992,8 +1920,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2016,8 +1943,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2044,8 +1970,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2072,8 +1997,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2096,8 +2020,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2120,8 +2043,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2148,8 +2070,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2176,8 +2097,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2200,8 +2120,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2224,8 +2143,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2252,8 +2170,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2280,8 +2197,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2304,8 +2220,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2328,8 +2243,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2356,8 +2270,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2384,8 +2297,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2408,8 +2320,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2432,8 +2343,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2460,8 +2370,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2488,8 +2397,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2512,8 +2420,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2536,8 +2443,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2564,8 +2470,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2592,8 +2497,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2616,8 +2520,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2640,8 +2543,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2668,8 +2570,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2696,8 +2597,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2720,8 +2620,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2744,8 +2643,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2772,8 +2670,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2800,8 +2697,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2824,8 +2720,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2848,8 +2743,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2876,8 +2770,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2904,8 +2797,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2928,8 +2820,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -2952,8 +2843,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -2980,8 +2870,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3008,8 +2897,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3032,8 +2920,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3056,8 +2943,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3084,8 +2970,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3112,8 +2997,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3136,8 +3020,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3160,8 +3043,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3188,8 +3070,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3216,8 +3097,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3240,8 +3120,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3264,8 +3143,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3292,8 +3170,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3320,8 +3197,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3344,8 +3220,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3368,8 +3243,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3396,8 +3270,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3424,8 +3297,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3448,8 +3320,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3472,8 +3343,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3500,8 +3370,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3528,8 +3397,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3552,8 +3420,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3576,8 +3443,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3604,8 +3470,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": true,
@@ -3632,8 +3497,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3656,8 +3520,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3680,8 +3543,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3704,8 +3566,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3728,8 +3589,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3752,8 +3612,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3776,8 +3635,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3800,8 +3658,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3824,8 +3681,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3848,8 +3704,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3872,8 +3727,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3896,8 +3750,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3920,8 +3773,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3944,8 +3796,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3968,8 +3819,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -3992,8 +3842,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4016,8 +3865,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4040,8 +3888,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4064,8 +3911,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4088,8 +3934,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4098,726 +3943,6 @@
       "expected": {
         "decision": "allow",
         "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-admin-radio_observations",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-researcher-radio_observations",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-viewer-radio_observations",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-edge-radio_observations",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-disabled-installer-edge-radio_observations",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-admin-radio_observations",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-researcher-radio_observations",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-viewer-radio_observations",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-cloud-radio_observations",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-disabled-installer-cloud-radio_observations",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_observations",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-admin-radio_configuration",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-researcher-radio_configuration",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-viewer-radio_configuration",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-edge-radio_configuration",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "radio-disabled-installer-edge-radio_configuration",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-admin-radio_configuration",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-researcher-radio_configuration",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-viewer-radio_configuration",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-cloud-radio_configuration",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "radio-disabled-installer-cloud-radio_configuration",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_configuration",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-admin-radio_survey",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-researcher-radio_survey",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-edge-viewer-radio_survey",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-edge-radio_survey",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "radio-disabled-installer-edge-radio_survey",
-      "input": {
-        "origin": "edge",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-admin-radio_survey",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "admin",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-researcher-radio_survey",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-deny-cloud-viewer-radio_survey",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "installer_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "radio-installer-cloud-radio_survey",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "granted",
-          "enabled": true,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "radio-disabled-installer-cloud-radio_survey",
-      "input": {
-        "origin": "cloud",
-        "mode": "linked_online",
-        "scoped_access": true,
-        "action": "radio_survey",
-        "actor": {
-          "gateway_role": "researcher",
-          "gateway_owner": false,
-          "zone_relation": "none",
-          "enabled": false,
-          "installer": true
-        },
-        "session": {
-          "signature_valid": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "account_disabled",
         "effects": 0
       }
     },
@@ -4833,7 +3958,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": false,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -4857,8 +3981,7 @@
           "gateway_role": "unknown",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4882,7 +4005,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": false,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -4906,8 +4028,7 @@
           "gateway_role": "unknown",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4931,7 +4052,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": false,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -4955,8 +4075,7 @@
           "gateway_role": "unknown",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -4979,8 +4098,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5004,7 +4122,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "resource": {
@@ -5032,7 +4149,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "device_owner": true,
           "ownership_proven": true
         },
@@ -5061,8 +4177,7 @@
           "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": false,
@@ -5089,8 +4204,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "resource": {
           "assigned": false,
@@ -5117,8 +4231,7 @@
           "gateway_role": "viewer",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5141,8 +4254,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5165,8 +4277,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5190,7 +4301,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "cloud_role": "ADMIN",
           "gateway_membership_confirmed": false,
           "local_actor_mapped": false
@@ -5217,7 +4327,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "cloud_role": "SUPER_ADMIN",
           "gateway_membership_confirmed": false,
           "local_actor_mapped": false
@@ -5244,7 +4353,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "cloud_role": "FLEET_READER",
           "gateway_membership_confirmed": false,
           "local_actor_mapped": false
@@ -5271,7 +4379,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "device_owner": true
         },
         "session": {
@@ -5298,8 +4405,7 @@
           "gateway_role": "researcher",
           "gateway_owner": false,
           "zone_relation": "granted",
-          "enabled": true,
-          "installer": false
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5326,7 +4432,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5355,7 +4460,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5386,7 +4490,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5415,7 +4518,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5446,7 +4548,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5475,7 +4576,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5506,7 +4606,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5535,7 +4634,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5566,7 +4664,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5592,7 +4689,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5620,7 +4716,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5646,7 +4741,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5674,7 +4768,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5700,7 +4793,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5728,7 +4820,6 @@
           "gateway_owner": false,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true
         },
@@ -5754,7 +4845,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "gateway_membership_confirmed": true,
           "local_actor_mapped": true,
           "gateway_ownership_proven": true,
@@ -5782,7 +4872,6 @@
           "gateway_owner": true,
           "zone_relation": "none",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -5807,7 +4896,6 @@
           "gateway_owner": true,
           "zone_relation": "owned",
           "enabled": true,
-          "installer": false,
           "ownership_proven": true
         },
         "session": {
@@ -5821,18 +4909,17 @@
       }
     },
     {
-      "id": "installer-no-zone-valve",
+      "id": "radio-admin-status-adds-no-valve-scope",
       "input": {
         "origin": "edge",
         "mode": "linked_online",
         "scoped_access": true,
         "action": "valve_open",
         "actor": {
-          "gateway_role": "researcher",
+          "gateway_role": "admin",
           "gateway_owner": false,
           "zone_relation": "none",
-          "enabled": true,
-          "installer": true
+          "enabled": true
         },
         "session": {
           "signature_valid": true
@@ -5864,215 +4951,6 @@
       }
     },
     {
-      "id": "owner-viewer-mapped_admin_only",
-      "input": {
-        "action": "system_reboot",
-        "policies": {
-          "owner_system": "mapped_admin_only"
-        },
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": true,
-          "ownership_proven": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "insufficient_role",
-        "effects": 0
-      }
-    },
-    {
-      "id": "installer-scoped_installer-researcher-none",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "scoped_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "researcher",
-          "zone_relation": "none"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
-      "id": "installer-scoped_installer-researcher-granted",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "scoped_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "researcher",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "installer-scoped_installer-viewer-none",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "scoped_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "none"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
-      "id": "installer-scoped_installer-viewer-granted",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "scoped_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "insufficient_role",
-        "effects": 0
-      }
-    },
-    {
-      "id": "viewer-survey-scoped_installer",
-      "input": {
-        "action": "radio_observations",
-        "policies": {
-          "installer": "scoped_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "installer-gateway_installer-researcher-none",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "gateway_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "researcher",
-          "zone_relation": "none"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "installer-gateway_installer-researcher-granted",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "gateway_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "researcher",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "installer-gateway_installer-viewer-none",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "gateway_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "none"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "installer-gateway_installer-viewer-granted",
-      "input": {
-        "action": "radio_configuration",
-        "policies": {
-          "installer": "gateway_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1
-      }
-    },
-    {
-      "id": "viewer-survey-gateway_installer",
-      "input": {
-        "action": "radio_observations",
-        "policies": {
-          "installer": "gateway_installer"
-        },
-        "actor": {
-          "installer": true,
-          "gateway_role": "viewer",
-          "zone_relation": "granted"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
       "id": "prediction-zone_write",
       "input": {
         "action": "prediction_setting",
@@ -6090,29 +4968,12 @@
       }
     },
     {
-      "id": "prediction-admin_zone_write",
-      "input": {
-        "action": "prediction_setting",
-        "actor": {
-          "zone_relation": "granted"
-        },
-        "policies": {
-          "prediction": "admin_zone_write"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "insufficient_role",
-        "effects": 0
-      }
-    },
-    {
-      "id": "fresh-flag-off-stored_admin_bootstrap",
+      "id": "fresh-flag-off-stored-admin",
       "input": {
         "action": "bootstrap",
         "scoped_access": false,
         "policies": {
-          "first_admin": "stored_admin_bootstrap"
+          "first_admin": "recorded_bootstrap_upgrade"
         },
         "resource": {
           "scope_mode": "legacy"
@@ -6130,12 +4991,12 @@
       }
     },
     {
-      "id": "existing-no-admin-stored_admin_bootstrap",
+      "id": "existing-users-close-public-bootstrap",
       "input": {
         "action": "bootstrap",
         "scoped_access": false,
         "policies": {
-          "first_admin": "stored_admin_bootstrap"
+          "first_admin": "recorded_bootstrap_upgrade"
         },
         "bootstrap": {
           "users_count": 2,
@@ -6149,86 +5010,23 @@
         "decision": "deny",
         "reason": "bootstrap_closed",
         "effects": 0,
-        "operator_recovery_required": true
+        "upgrade_required": true
       }
     },
     {
-      "id": "fresh-flag-off-operator_provisioned",
-      "input": {
-        "action": "bootstrap",
-        "scoped_access": false,
-        "policies": {
-          "first_admin": "operator_provisioned"
-        },
-        "resource": {
-          "scope_mode": "legacy"
-        },
-        "mode": "local_only",
-        "current": {
-          "linked": false
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 1,
-        "stored_role": "researcher"
-      }
-    },
-    {
-      "id": "existing-no-admin-operator_provisioned",
-      "input": {
-        "action": "bootstrap",
-        "scoped_access": false,
-        "policies": {
-          "first_admin": "operator_provisioned"
-        },
-        "bootstrap": {
-          "users_count": 2,
-          "enabled_admins": 0
-        },
-        "resource": {
-          "scope_mode": "legacy"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "bootstrap_closed",
-        "effects": 0,
-        "operator_recovery_required": true
-      }
-    },
-    {
-      "id": "disconnected-expired-lease-edge_commit_only",
+      "id": "offline-valid-session-no-authority-lease",
       "input": {
         "action": "read_history",
         "mode": "linked_offline",
         "now_ms": 6000,
         "clock_high_water_ms": 6000,
         "policies": {
-          "offline": "edge_commit_only"
+          "offline": "until_reconnect"
         }
       },
       "expected": {
         "decision": "allow",
         "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "disconnected-expired-lease-bounded_offline_lease",
-      "input": {
-        "action": "read_history",
-        "mode": "linked_offline",
-        "now_ms": 6000,
-        "clock_high_water_ms": 6000,
-        "policies": {
-          "offline": "bounded_offline_lease"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "authority_lease_expired",
         "effects": 0
       }
     },
@@ -6239,7 +5037,7 @@
         "now_ms": 9999,
         "clock_high_water_ms": 9999,
         "policies": {
-          "clock": "durable_high_water"
+          "clock": "persisted_high_water"
         }
       },
       "expected": {
@@ -6255,7 +5053,7 @@
         "now_ms": 10000,
         "clock_high_water_ms": 10000,
         "policies": {
-          "clock": "durable_high_water"
+          "clock": "persisted_high_water"
         }
       },
       "expected": {
@@ -6271,7 +5069,7 @@
         "now_ms": 10001,
         "clock_high_water_ms": 10001,
         "policies": {
-          "clock": "durable_high_water"
+          "clock": "persisted_high_water"
         }
       },
       "expected": {
@@ -6287,7 +5085,7 @@
         "now_ms": 500,
         "clock_high_water_ms": 10001,
         "policies": {
-          "clock": "durable_high_water"
+          "clock": "persisted_high_water"
         }
       },
       "expected": {
@@ -6306,90 +5104,7 @@
           "generation": 8
         },
         "policies": {
-          "clock": "durable_high_water"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "session_revoked",
-        "effects": 0
-      }
-    },
-    {
-      "id": "expiry-reject_rollback-before",
-      "input": {
-        "action": "read_history",
-        "now_ms": 9999,
-        "clock_high_water_ms": 9999,
-        "policies": {
-          "clock": "reject_rollback"
-        }
-      },
-      "expected": {
-        "decision": "allow",
-        "reason": "authorized",
-        "effects": 0
-      }
-    },
-    {
-      "id": "expiry-reject_rollback-equal",
-      "input": {
-        "action": "read_history",
-        "now_ms": 10000,
-        "clock_high_water_ms": 10000,
-        "policies": {
-          "clock": "reject_rollback"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "session_expired",
-        "effects": 0
-      }
-    },
-    {
-      "id": "expiry-reject_rollback-after",
-      "input": {
-        "action": "read_history",
-        "now_ms": 10001,
-        "clock_high_water_ms": 10001,
-        "policies": {
-          "clock": "reject_rollback"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "session_expired",
-        "effects": 0
-      }
-    },
-    {
-      "id": "rollback-expired-reject_rollback",
-      "input": {
-        "action": "read_history",
-        "now_ms": 500,
-        "clock_high_water_ms": 10001,
-        "policies": {
-          "clock": "reject_rollback"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "clock_rollback",
-        "effects": 0
-      }
-    },
-    {
-      "id": "rollback-generation-reject_rollback",
-      "input": {
-        "action": "read_history",
-        "now_ms": 500,
-        "clock_high_water_ms": 10001,
-        "current": {
-          "generation": 8
-        },
-        "policies": {
-          "clock": "reject_rollback"
+          "clock": "persisted_high_water"
         }
       },
       "expected": {
@@ -7871,7 +6586,9 @@
           "zone_relation": "granted"
         },
         "resource": {
-          "capabilities": []
+          "capabilities": [
+            "authority_actor_v1"
+          ]
         }
       },
       "expected": {
@@ -7966,7 +6683,9 @@
           "kind": "transport"
         },
         "actor": {
-          "gateway_role": "viewer"
+          "gateway_role": "viewer",
+          "kind": "system",
+          "user_uuid": null
         }
       },
       "expected": {
@@ -7985,6 +6704,10 @@
         },
         "service": {
           "binding_matches": false
+        },
+        "actor": {
+          "kind": "system",
+          "user_uuid": null
         }
       },
       "expected": {
@@ -8002,7 +6725,9 @@
           "kind": "transport"
         },
         "actor": {
-          "gateway_role": "viewer"
+          "gateway_role": "viewer",
+          "kind": "system",
+          "user_uuid": null
         }
       },
       "expected": {
@@ -8021,6 +6746,10 @@
         },
         "service": {
           "binding_matches": false
+        },
+        "actor": {
+          "kind": "system",
+          "user_uuid": null
         }
       },
       "expected": {
@@ -8494,106 +7223,6 @@
       }
     },
     {
-      "id": "pause-after-revoke-current_rights-issue-1",
-      "input": {
-        "origin": "cloud",
-        "action": "policy_pause",
-        "stage": "issue",
-        "policies": {
-          "stop_authority": "current_rights"
-        },
-        "actor": {
-          "zone_relation": "none"
-        },
-        "continuation": {
-          "accepted": true,
-          "trusted": true,
-          "reduce_only": true,
-          "binding_matches": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
-      "id": "pause-after-revoke-current_rights-issue-0",
-      "input": {
-        "origin": "cloud",
-        "action": "policy_pause",
-        "stage": "issue",
-        "policies": {
-          "stop_authority": "current_rights"
-        },
-        "actor": {
-          "zone_relation": "none"
-        },
-        "continuation": {
-          "accepted": true,
-          "trusted": true,
-          "reduce_only": false,
-          "binding_matches": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
-      "id": "pause-after-revoke-current_rights-apply-1",
-      "input": {
-        "origin": "cloud",
-        "action": "policy_pause",
-        "stage": "apply",
-        "policies": {
-          "stop_authority": "current_rights"
-        },
-        "actor": {
-          "zone_relation": "none"
-        },
-        "continuation": {
-          "accepted": true,
-          "trusted": true,
-          "reduce_only": true,
-          "binding_matches": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
-      "id": "pause-after-revoke-current_rights-apply-0",
-      "input": {
-        "origin": "cloud",
-        "action": "policy_pause",
-        "stage": "apply",
-        "policies": {
-          "stop_authority": "current_rights"
-        },
-        "actor": {
-          "zone_relation": "none"
-        },
-        "continuation": {
-          "accepted": true,
-          "trusted": true,
-          "reduce_only": false,
-          "binding_matches": true
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
       "id": "pause-after-revoke-reduce_only_continuation-issue-1",
       "input": {
         "origin": "cloud",
@@ -8858,30 +7487,9 @@
       },
       "expected": {
         "decision": "deny",
-        "reason": "gateway_authority_required",
-        "effects": 0
-      }
-    },
-    {
-      "id": "owner-unmapped-system-mapped_admin_only",
-      "input": {
-        "origin": "cloud",
-        "action": "system_reboot",
-        "actor": {
-          "gateway_role": "viewer",
-          "gateway_owner": true,
-          "ownership_proven": true,
-          "local_actor_mapped": false,
-          "gateway_membership_confirmed": false
-        },
-        "policies": {
-          "owner_system": "mapped_admin_only"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "gateway_authority_required",
-        "effects": 0
+        "reason": "paired_mapping_required",
+        "effects": 0,
+        "recovery_hint": "relink"
       }
     },
     {
@@ -8903,24 +7511,6 @@
       }
     },
     {
-      "id": "prediction-admin-without-zone-admin_zone_write",
-      "input": {
-        "action": "prediction_setting",
-        "actor": {
-          "gateway_role": "admin",
-          "zone_relation": "none"
-        },
-        "policies": {
-          "prediction": "admin_zone_write"
-        }
-      },
-      "expected": {
-        "decision": "deny",
-        "reason": "resource_not_found",
-        "effects": 0
-      }
-    },
-    {
       "id": "old-edge-linked-auth-format",
       "input": {
         "action": "service_linked_auth",
@@ -8930,6 +7520,10 @@
         },
         "resource": {
           "binding_contract_supported": false
+        },
+        "actor": {
+          "kind": "system",
+          "user_uuid": null
         }
       },
       "expected": {
@@ -9116,6 +7710,1187 @@
       "expected": {
         "decision": "deny",
         "reason": "service_binding_mismatch",
+        "effects": 0
+      }
+    },
+    {
+      "id": "clock-behind-high-water-expires-still-young-token",
+      "input": {
+        "action": "read_history",
+        "now_ms": 1000,
+        "clock_high_water_ms": 1500,
+        "session": {
+          "exp_ms": 10000
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "session_expired",
+        "effects": 0,
+        "http_status": 401
+      }
+    },
+    {
+      "id": "accepted-cancel-after-grant-loss",
+      "input": {
+        "origin": "cloud",
+        "action": "valve_cancel",
+        "actor": {
+          "zone_relation": "none"
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized_stop_continuation",
+        "effects": 1
+      }
+    },
+    {
+      "id": "accepted-stop-proof-cannot-open",
+      "input": {
+        "origin": "cloud",
+        "action": "valve_open",
+        "actor": {
+          "zone_relation": "none"
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "timed-close-with-open-return-not-stop-continuation",
+      "input": {
+        "origin": "cloud",
+        "action": "strega_timed",
+        "actor": {
+          "zone_relation": "none"
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-admin-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-researcher-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-viewer-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-gateway-owner-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-admin-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-0-researcher-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-viewer-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-gateway-owner-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-0-admin-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-0-researcher-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-viewer-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-0-gateway-owner-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-1-admin-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-researcher-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-viewer-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-gateway-owner-radio_observations",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-admin-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-1-researcher-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-viewer-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-gateway-owner-radio_configuration",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-1-admin-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-edge-1-researcher-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-viewer-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-edge-1-gateway-owner-radio_survey",
+      "input": {
+        "origin": "edge",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-0-admin-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-researcher-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-viewer-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-gateway-owner-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-admin-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-0-researcher-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-viewer-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-gateway-owner-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-0-admin-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-0-researcher-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-viewer-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-0-gateway-owner-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": false,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-1-admin-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-researcher-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-viewer-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-gateway-owner-radio_observations",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_observations",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-admin-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-1-researcher-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-viewer-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-gateway-owner-radio_configuration",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-1-admin-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "admin",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-1-researcher-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-viewer-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "granted"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-cloud-1-gateway-owner-radio_survey",
+      "input": {
+        "origin": "cloud",
+        "scoped_access": true,
+        "action": "radio_survey",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": true,
+          "zone_relation": "none"
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "radio-cloud-super-admin-no-bypass",
+      "input": {
+        "origin": "cloud",
+        "action": "radio_observations",
+        "actor": {
+          "gateway_role": "viewer",
+          "cloud_role": "SUPER_ADMIN"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-unpaired-owner-relink-hint",
+      "input": {
+        "origin": "cloud",
+        "action": "radio_observations",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": false,
+          "gateway_membership_confirmed": false
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "paired_mapping_required",
+        "recovery_hint": "relink",
+        "effects": 0
+      }
+    },
+    {
+      "id": "radio-disabled-admin-denied",
+      "input": {
+        "action": "radio_configuration",
+        "actor": {
+          "gateway_role": "admin",
+          "enabled": false
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "account_disabled",
+        "effects": 0
+      }
+    },
+    {
+      "id": "new-actor-capability-required",
+      "input": {
+        "origin": "cloud",
+        "action": "valve_open",
+        "actor": {
+          "zone_relation": "granted"
+        },
+        "resource": {
+          "capabilities": [
+            "conditional_irrigation_v1"
+          ]
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_capability_unavailable",
+        "effects": 0
+      }
+    },
+    {
+      "id": "system-actor-cannot-open-valve",
+      "input": {
+        "origin": "cloud",
+        "action": "valve_open",
+        "actor": {
+          "kind": "system",
+          "user_uuid": null
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "system_actor_not_allowed",
+        "effects": 0
+      }
+    },
+    {
+      "id": "human-actor-cannot-masquerade-as-linked-auth-system",
+      "input": {
+        "origin": "cloud",
+        "action": "service_linked_auth",
+        "session": {
+          "kind": "transport"
+        },
+        "actor": {
+          "kind": "user"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "system_actor_required",
+        "effects": 0
+      }
+    },
+    {
+      "id": "actorless-queued-valve_open-refused-at-upgrade",
+      "input": {
+        "origin": "cloud",
+        "action": "valve_open",
+        "actor": {
+          "kind": "legacy_actorless",
+          "user_uuid": null,
+          "gateway_owner": true,
+          "ownership_proven": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_missing_at_upgrade",
+        "effects": 0,
+        "command_result": "REJECTED_PERMANENT",
+        "attributed_actor": null
+      }
+    },
+    {
+      "id": "actorless-queued-system_reboot-refused-at-upgrade",
+      "input": {
+        "origin": "cloud",
+        "action": "system_reboot",
+        "actor": {
+          "kind": "legacy_actorless",
+          "user_uuid": null,
+          "gateway_owner": true,
+          "ownership_proven": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_missing_at_upgrade",
+        "effects": 0,
+        "command_result": "REJECTED_PERMANENT",
+        "attributed_actor": null
+      }
+    },
+    {
+      "id": "actorless-queued-service_linked_auth-refused-at-upgrade",
+      "input": {
+        "origin": "cloud",
+        "action": "service_linked_auth",
+        "actor": {
+          "kind": "legacy_actorless",
+          "user_uuid": null,
+          "gateway_owner": true,
+          "ownership_proven": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_missing_at_upgrade",
+        "effects": 0,
+        "command_result": "REJECTED_PERMANENT",
+        "attributed_actor": null
+      }
+    },
+    {
+      "id": "actorless-queued-policy_pause-refused-at-upgrade",
+      "input": {
+        "origin": "cloud",
+        "action": "policy_pause",
+        "actor": {
+          "kind": "legacy_actorless",
+          "user_uuid": null,
+          "gateway_owner": true,
+          "ownership_proven": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_missing_at_upgrade",
+        "effects": 0,
+        "command_result": "REJECTED_PERMANENT",
+        "attributed_actor": null
+      }
+    },
+    {
+      "id": "owner-unconfirmed-pairing-before-capability-relink-hint",
+      "input": {
+        "origin": "cloud",
+        "action": "system_reboot",
+        "actor": {
+          "gateway_owner": true,
+          "ownership_proven": true,
+          "local_actor_mapped": true,
+          "gateway_membership_confirmed": false
+        },
+        "resource": {
+          "capabilities": []
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "paired_mapping_required",
+        "recovery_hint": "relink",
+        "effects": 0
+      }
+    },
+    {
+      "id": "cloud-issue-does-not-strip-actor-without-capability",
+      "input": {
+        "origin": "cloud",
+        "stage": "issue",
+        "action": "valve_open",
+        "actor": {
+          "zone_relation": "granted"
+        },
+        "resource": {
+          "capabilities": [
+            "conditional_irrigation_v1"
+          ]
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_capability_unavailable",
+        "effects": 0
+      }
+    },
+    {
+      "id": "stop-proof-cannot-substitute-request-actor",
+      "input": {
+        "origin": "cloud",
+        "action": "policy_pause",
+        "actor": {
+          "user_uuid": "22222222-2222-4222-8222-222222222222",
+          "zone_relation": "none"
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "actor_binding_mismatch",
         "effects": 0
       }
     }

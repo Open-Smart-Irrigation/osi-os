@@ -1,118 +1,134 @@
 {
   "contract_version": "authority-v1",
-  "activation_rule": "No open choice is activated by a fixture default or recommendation. Every vector supplies a named test policy profile.",
+  "ruling_title": "CTO ruling on the K1 #700 open decisions",
+  "ruling_date": "2026-11-20",
+  "activation_rule": "These are decided implementation defaults. R6/Q1 and R7/Q3 are product defaults Phil may override explicitly; no override is inferred from an input flag.",
   "decisions": [
     {
-      "id": "Q1",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Installer grantor, viewer and radio scope",
-      "options": {
-        "scoped_installer": "Gateway admin grants a per-gateway entitlement. Radio visibility intersects current device/zone scope. Viewer+installer may survey/read only; radio writes also require writer role.",
-        "gateway_installer": "Gateway admin grants entitlement over all gateway radio data/tools, independent of farm role; viewer+installer may use radio tools without farm-write rights."
-      },
-      "recommended_option": "scoped_installer",
-      "recommendation_reason": "Preserves the existing device-scope boundary while making installer authority explicit."
+      "id": "R1",
+      "former_question": "Q7",
+      "ruling_item": "R1",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "stop_authority",
+      "selected_default": "reduce_only_continuation",
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "A previously accepted stop/pause remains actor/target-bound and recorded under the original actor with revocation noted. It only reduces watering; never opens, re-enables or extends. ACK and UI show application."
     },
     {
-      "id": "Q2",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Gateway owner admission and local proof",
-      "options": {
-        "mapped_owner_or_admin": "Enabled owner with durable ownership proof and confirmed local actor mapping, or current gateway admin; a mapped owner-as-viewer may use reboot/fan only.",
-        "mapped_admin_only": "Every system-command actor, including owner, must also be a current enabled gateway admin."
-      },
-      "recommended_option": "mapped_owner_or_admin",
-      "recommendation_reason": "Matches the recorded owner/admin product boundary while requiring an actual local actor. Neither option permits a missing mapping or caller-claim shortcut."
+      "id": "R2",
+      "former_question": "Q8",
+      "ruling_item": "R2",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "first_admin",
+      "selected_default": "recorded_bootstrap_upgrade",
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Fresh bootstrap stores admin in both flags. One recorded upgrade promotes only the original enabled bootstrap account if no enabled admin exists, with atomic audit/receipt/revocation and a release-note line. Missing/disabled original account uses operator recovery; never promote another account."
     },
     {
-      "id": "Q3",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Tolerated disconnected or stranded revocation exposure",
-      "options": {
-        "edge_commit_only": "Local sessions remain usable until edge account commit or finite token expiry; cloud shows pending/stranded explicitly. No bounded delivery guarantee.",
-        "bounded_offline_lease": "Current authenticated edge authority has a finite lease; sessions fail closed after lease expiry if revocation delivery is unavailable. Phil must approve the production duration."
-      },
-      "recommended_option": "bounded_offline_lease",
-      "recommendation_reason": "Bounds exposure even when the online gateway polling subject is disabled. CL2 should make installation-bound revocation delivery independent of a disabled human account; no lease duration is selected here."
+      "id": "R3",
+      "former_question": "Q2",
+      "ruling_item": "R3",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "owner_system",
+      "selected_default": "mapped_owner_or_admin",
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Gateway system commands require the enabled paired gateway owner or enabled gateway admin. An unpaired owner is refused with a re-link hint; resource ownership is no fallback (Phil 5c)."
     },
     {
-      "id": "Q5",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Prediction mutation authority for edge-backed zones",
-      "options": {
-        "zone_write": "Current enabled writer plus owned/granted zone for prediction-config, prediction-recompute and soil-profile refresh.",
-        "admin_zone_write": "Same zone scope plus current gateway admin for these mutations."
-      },
-      "recommended_option": "zone_write",
-      "recommendation_reason": "Uses the canonical zone mutation gate without an owner short-circuit; jobs remain cloud-local unless a typed edge command is issued."
+      "id": "R4",
+      "former_question": "Q5",
+      "ruling_item": "R4",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "prediction",
+      "selected_default": "zone_write",
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Every retained prediction setting follows normal enabled writer plus owned/granted-zone permission; remove the prediction owner shortcut. No product exceptions."
     },
     {
-      "id": "Q7",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Previously accepted reduce-only pause after requester loses authority",
-      "options": {
-        "reduce_only_continuation": "Apply a previously authorized, durable and actor/target-bound stop/pause after later loss of rights; record original actor. It can only disable/reduce watering, never open/re-enable or expand scope.",
-        "current_rights": "Recheck current writer+zone scope at issuance and application; terminally refuse after loss, show policy may remain enabled and offer reissue by a currently authorized actor."
-      },
-      "recommended_option": "reduce_only_continuation",
-      "recommendation_reason": "Lead recommendation: retain accepted stops without laundering authority into a new open or configuration write."
+      "id": "R5",
+      "former_question": "Q9",
+      "ruling_item": "R5",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "clock",
+      "selected_default": "persisted_high_water",
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Generation mismatch always denies. Keep a persisted time high-water mark; if clock is behind it, treat sessions as expired. Rollback never revives a token."
     },
     {
-      "id": "Q8",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "First admin with scoped access off",
-      "options": {
-        "stored_admin_bootstrap": "New zero-user bootstrap stores admin in either flag. Existing no-admin installations use explicit operator recovery, never silent promotion.",
-        "operator_provisioned": "Flag-off bootstrap retains researcher; operator must explicitly provision the first admin before Admin controls work. Existing installations use the same operator recovery."
-      },
-      "recommended_option": "stored_admin_bootstrap",
-      "recommendation_reason": "Lead recommendation: fresh systems have a supported Admin entry while upgrades keep identities and last-admin protection."
+      "id": "R6",
+      "former_question": "Q1",
+      "ruling_item": "R6",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "installer",
+      "selected_default": "owner_admin_radio",
+      "product_default": true,
+      "phil_may_override": true,
+      "override_owner": "Phil",
+      "rule": "Radio tools and raw radio data are limited to the enabled paired gateway owner and enabled gateway admins over the whole gateway. No installer role or entitlement. Member/viewer membership alone and cloud SUPER_ADMIN never authorize them. Sensor history and device GPS remain separate."
     },
     {
-      "id": "Q9",
-      "kind": "product",
-      "owner": "Phil",
-      "status": "open",
-      "selected_option": null,
-      "topic": "Clock rollback policy for sessions",
-      "options": {
-        "durable_high_water": "Use a durably persisted authorization-clock high-water mark for expiry; rollback cannot revive a token already expired at that mark.",
-        "reject_rollback": "Refuse session use while wall clock is below the durable high-water mark until clock recovery; no revival."
-      },
-      "recommended_option": "durable_high_water",
-      "recommendation_reason": "Keeps valid sessions usable within their original bound without allowing expiry revival. Generation mismatch denies under either choice and at every clock value."
+      "id": "R7",
+      "former_question": "Q3",
+      "ruling_item": "R7",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": "offline",
+      "selected_default": "until_reconnect",
+      "product_default": true,
+      "phil_may_override": true,
+      "override_owner": "Phil",
+      "rule": "Fence cloud sessions immediately. A disconnected gateway accepts local login without an offline time limit until reconnect; edge revocation commits then. Deliver through the gateway own non-human transport credential, unaffected by disabling a human polling principal."
     },
     {
-      "id": "Q4",
-      "kind": "implementation",
-      "owner": "EB2 + CL2 + EB5b",
-      "status": "open",
-      "topic": "Paired link-incarnation/credential-revision encoding, recovery and rollout. Required atomic semantics are fixed in v1; no legacy equal-version verifier replacement."
+      "id": "R8a",
+      "former_question": "Q4",
+      "ruling_item": "R8",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": null,
+      "selected_default": null,
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Durable link incarnation plus ordered credential revisions; atomically commit link/account/verifier/revocation; identical duplicates no-op, stale/conflicting updates fenced. Transport refresh is separate."
     },
     {
-      "id": "Q6",
-      "kind": "implementation",
-      "owner": "EB5a + CL2",
-      "status": "open",
-      "topic": "Actor/service envelope fields, capability rollout and legacy command disposition, including stop continuation proof. Missing actor is never inferred from owner."
+      "id": "R8b",
+      "former_question": "Q6",
+      "ruling_item": "R8",
+      "ruling_date": "2026-11-20",
+      "authority": "CTO ruling and lead confirmation, 20 Nov 2026",
+      "status": "decided_default",
+      "policy_dimension": null,
+      "selected_default": null,
+      "product_default": false,
+      "phil_may_override": false,
+      "override_owner": null,
+      "rule": "Human commands carry the gateway-local UUID behind authority_actor_v1, cloud deployed first. FORCE_EDGE_SYNC/SYNC_LINKED_AUTH carry a bound system actor. Queued pauses keep their recorded actor. Actorless queued commands are refused at upgrade and never assigned to the owner. Preserve protected ACK/mirror settlement."
     }
   ]
 }

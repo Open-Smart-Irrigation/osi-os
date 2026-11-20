@@ -93,60 +93,36 @@
         "clock_high_water_ms": {
           "type": "integer"
         },
-        "authority_lease_until_ms": {
-          "type": "integer"
-        },
         "policies": {
           "type": "object",
           "properties": {
             "installer": {
               "type": "string",
-              "enum": [
-                "scoped_installer",
-                "gateway_installer"
-              ]
+              "const": "owner_admin_radio"
             },
             "owner_system": {
               "type": "string",
-              "enum": [
-                "mapped_owner_or_admin",
-                "mapped_admin_only"
-              ]
+              "const": "mapped_owner_or_admin"
             },
             "offline": {
               "type": "string",
-              "enum": [
-                "edge_commit_only",
-                "bounded_offline_lease"
-              ]
+              "const": "until_reconnect"
             },
             "prediction": {
               "type": "string",
-              "enum": [
-                "zone_write",
-                "admin_zone_write"
-              ]
+              "const": "zone_write"
             },
             "stop_authority": {
               "type": "string",
-              "enum": [
-                "current_rights",
-                "reduce_only_continuation"
-              ]
+              "const": "reduce_only_continuation"
             },
             "first_admin": {
               "type": "string",
-              "enum": [
-                "stored_admin_bootstrap",
-                "operator_provisioned"
-              ]
+              "const": "recorded_bootstrap_upgrade"
             },
             "clock": {
               "type": "string",
-              "enum": [
-                "durable_high_water",
-                "reject_rollback"
-              ]
+              "const": "persisted_high_water"
             }
           },
           "required": [
@@ -164,7 +140,10 @@
           "type": "object",
           "properties": {
             "user_uuid": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "gateway_role": {
               "type": [
@@ -190,11 +169,16 @@
             "enabled": {
               "type": "boolean"
             },
-            "installer": {
-              "type": "boolean"
-            },
             "device_owner": {
               "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "user",
+                "system",
+                "legacy_actorless"
+              ]
             },
             "cloud_role": {
               "type": "string"
@@ -212,8 +196,8 @@
             "gateway_membership_confirmed",
             "zone_relation",
             "enabled",
-            "installer",
-            "device_owner"
+            "device_owner",
+            "kind"
           ],
           "additionalProperties": false
         },
@@ -323,8 +307,7 @@
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "uniqueItems": true
+              }
             },
             "source_scope": {
               "type": "boolean"
@@ -436,12 +419,16 @@
             },
             "credential_principal_authorized": {
               "type": "boolean"
+            },
+            "system_actor": {
+              "type": "string"
             }
           },
           "required": [
             "transport_authorized",
             "binding_matches",
-            "credential_principal_authorized"
+            "credential_principal_authorized",
+            "system_actor"
           ],
           "additionalProperties": false
         }
@@ -454,7 +441,6 @@
         "stage",
         "now_ms",
         "clock_high_water_ms",
-        "authority_lease_until_ms",
         "policies",
         "actor",
         "session",
@@ -574,25 +560,14 @@
             "transport_token": {
               "type": "string"
             },
-            "lease_until_ms": {
-              "type": "integer"
-            },
             "policies": {
               "type": "object",
               "properties": {
                 "clock": {
-                  "type": "string",
-                  "enum": [
-                    "durable_high_water",
-                    "reject_rollback"
-                  ]
+                  "const": "persisted_high_water"
                 },
                 "offline": {
-                  "type": "string",
-                  "enum": [
-                    "edge_commit_only",
-                    "bounded_offline_lease"
-                  ]
+                  "const": "until_reconnect"
                 }
               },
               "required": [
@@ -611,8 +586,7 @@
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "uniqueItems": true
+              }
             },
             "credential_snapshot": {
               "type": "object",
@@ -632,11 +606,24 @@
             },
             "transport_revision": {
               "type": "integer"
+            },
+            "cloud_sessions_valid": {
+              "type": "boolean"
+            },
+            "human_account_enabled": {
+              "type": "boolean"
+            },
+            "transport_subject_kind": {
+              "const": "gateway"
+            },
+            "upgrade_outcome": {
+              "type": "string"
             }
           },
           "required": [
             "account_uuid",
             "cloud_account",
+            "cloud_sessions_valid",
             "connected",
             "credential",
             "credential_revision",
@@ -646,8 +633,8 @@
             "gateway",
             "generation",
             "high_water_ms",
+            "human_account_enabled",
             "installation",
-            "lease_until_ms",
             "link_incarnation",
             "linked",
             "now_ms",
@@ -656,6 +643,7 @@
             "scheme",
             "transport_authorized",
             "transport_revision",
+            "transport_subject_kind",
             "transport_token",
             "used_incarnations"
           ],
@@ -1067,7 +1055,6 @@
                         "type": "boolean"
                       },
                       "role": {
-                        "type": "string",
                         "enum": [
                           "admin",
                           "researcher",
@@ -1226,22 +1213,6 @@
                 "type": "object",
                 "properties": {
                   "op": {
-                    "const": "transport_principal"
-                  },
-                  "authorized": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "authorized",
-                  "op"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "op": {
                     "const": "begin_scope_load"
                   },
                   "ticket": {
@@ -1286,15 +1257,7 @@
                   },
                   "input": {
                     "type": "object",
-                    "properties": {
-                      "action": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "action"
-                    ],
-                    "additionalProperties": false
+                    "minProperties": 1
                   },
                   "expected": {
                     "type": "object",
@@ -1331,6 +1294,39 @@
                   "op",
                   "target_uuid",
                   "trusted_operator"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "cloud_revoke"
+                  },
+                  "change": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "change",
+                  "op"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "assert_cloud_session"
+                  },
+                  "expected": {
+                    "type": "object",
+                    "minProperties": 1
+                  }
+                },
+                "required": [
+                  "expected",
+                  "op"
                 ],
                 "additionalProperties": false
               }
@@ -1371,11 +1367,7 @@
               "type": "boolean"
             },
             "stop_policy": {
-              "type": "string",
-              "enum": [
-                "current_rights",
-                "reduce_only_continuation"
-              ]
+              "const": "reduce_only_continuation"
             },
             "accepted_pause": {
               "type": "boolean"
@@ -1439,6 +1431,9 @@
             },
             "confirmed_policy_enabled": {
               "type": "boolean"
+            },
+            "revocation_noted": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1465,6 +1460,7 @@
             "policy_enabled",
             "policy_matches",
             "record_owner",
+            "revocation_noted",
             "stop_policy",
             "ui"
           ],
@@ -1594,22 +1590,6 @@
                 "type": "object",
                 "properties": {
                   "op": {
-                    "const": "reissue_pause"
-                  },
-                  "actor": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "actor",
-                  "op"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "op": {
                     "const": "change_binding"
                   },
                   "patch": {
@@ -1631,11 +1611,7 @@
                         "type": "boolean"
                       },
                       "stop_policy": {
-                        "type": "string",
-                        "enum": [
-                          "current_rights",
-                          "reduce_only_continuation"
-                        ]
+                        "const": "reduce_only_continuation"
                       },
                       "accepted_pause": {
                         "type": "boolean"
@@ -1699,6 +1675,9 @@
                       },
                       "confirmed_policy_enabled": {
                         "type": "boolean"
+                      },
+                      "revocation_noted": {
+                        "type": "boolean"
                       }
                     },
                     "required": [],
@@ -1717,6 +1696,189 @@
                 "properties": {
                   "op": {
                     "const": "delete_actor"
+                  }
+                },
+                "required": [
+                  "op"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "initial",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "adminUpgradeCase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "initial": {
+          "type": "object",
+          "properties": {
+            "scoped_access": {
+              "type": "boolean"
+            },
+            "original_bootstrap_uuid": {
+              "type": "string"
+            },
+            "original_bootstrap_verified": {
+              "type": "boolean"
+            },
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "user_uuid": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "generation": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "user_uuid",
+                  "role",
+                  "enabled",
+                  "generation"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "receipt": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "step": {
+                  "const": "bootstrap_admin_upgrade_v1"
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "target_uuid": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "step",
+                "outcome",
+                "target_uuid"
+              ],
+              "additionalProperties": false
+            },
+            "audit": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "event": {
+                    "const": "bootstrap_admin_upgrade"
+                  },
+                  "user_uuid": {
+                    "type": "string"
+                  },
+                  "ruling_date": {
+                    "const": "2026-11-20"
+                  }
+                },
+                "required": [
+                  "event",
+                  "user_uuid",
+                  "ruling_date"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "release_notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "release_note_line": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "accounts",
+            "audit",
+            "original_bootstrap_uuid",
+            "original_bootstrap_verified",
+            "receipt",
+            "release_note_line",
+            "release_notes",
+            "scoped_access"
+          ],
+          "additionalProperties": false
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "upgrade"
+                  },
+                  "commit": {
+                    "type": "boolean"
+                  },
+                  "expected": {
+                    "type": "object",
+                    "minProperties": 1
+                  }
+                },
+                "required": [
+                  "commit",
+                  "expected",
+                  "op"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "assert_state"
+                  },
+                  "expected": {
+                    "type": "object",
+                    "minProperties": 1
+                  }
+                },
+                "required": [
+                  "expected",
+                  "op"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "restart"
                   }
                 },
                 "required": [

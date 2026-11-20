@@ -15,11 +15,11 @@ The snapshot contains 166 HTTP entry nodes per profile: 73 inline HMAC implement
 | G3 | resolveScope/assertEnabledAccount/assertRole cache account state for 30 seconds. Invalidation tickets protect in-flight loads, but are not a durable session revocation barrier. |
 | G4 | Authorization before queued SQL, async work, writer acquisition or delayed physical dispatch does not prove current rights at apply time. Carry validated session identity and recheck at the final boundary. |
 | G5 | Device-owner SQL or ownedValve still refuses a zone grantee after a successful scope check (#451). Remove only after replacing it with current authorized resource targeting. |
-| G6 | No installer entitlement exists. Current network/radio gates admit ordinary scoped users or admins; hiding the GUI alone cannot enforce installer-only tools. |
+| G6 | Radio tools currently use device-scope/writer or admin gates inconsistently. CTO R6 requires the enabled paired gateway owner or enabled gateway admin in both flags, over the whole gateway. No installer role/entitlement or SUPER_ADMIN bypass. |
 | G7 | Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority. |
 | G8 | No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation. |
 | G9 | Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token. |
-| G11 | Edge GET /api/users lists accounts without grant assignments; no GET grant directory exists at this pin. The entire account/grant router is 404 with scoped access off, so Admin cannot inspect/revoke existing grants in every mode. |
+| G11 | Edge GET /api/users lacks grant assignments and flag-off account/grant administration returns 404. CTO R2 requires real admin on fresh bootstrap and one recorded original-bootstrap-only upgrade, plus audit/release note and operator fallback. |
 | G10 | Some verifiers allow absent/zero expiry or treat exp equality as valid. K1 requires bounded expiry and rejection at now >= exp. |
 | G12 | Public feature discovery, account-wide measurement export, ownerless legacy today-liters read and writer-only valve list have different admission paths; shared route groups cannot describe them as one bearer/scope gate. |
 
@@ -338,3 +338,24 @@ are required CL2 changes, not evidence that the pinned cloud is already conforma
 The rename adapter retains PATCH `/api/v1/devices/{deviceEui}`, but an edge-backed
 name requires `entity_name_commands_v1`, pending issuance and authoritative
 ACK/mirror settlement. Unbound cloud-local labels remain a separate owner path.
+
+## Decided defaults, 20 Nov 2026
+
+The baseline rows above remain a dated code audit. The current authority defaults
+are the CTO rulings R1–R8 in v1.md, including the lead-confirmed owner/admin-only
+radio rule and actorless-command refusal. There is no installer role/entitlement
+or legacy application path to add. R6/Q1 and R7/Q3 are product defaults Phil may
+override explicitly; no product question remains open.
+
+R2 adds exactly one recorded, audited promotion of the original enabled bootstrap
+account when an existing installation has no enabled admin. This is separate
+from fresh zero-user bootstrap, which stores admin in both flags. It never
+selects a later surviving account. Missing/disabled original bootstrap uses
+operator recovery, and the exact release-note line is in v1.md and the
+admin-upgrade fixture. Runtime migration/receipt work remains with EB5b/EB6.
+
+R8b uses the new authority_actor_v1 report for actor-bearing commands, with cloud
+acceptance deployed first. FORCE_EDGE_SYNC and SYNC_LINKED_AUTH use a system actor
+bound to the gateway's own non-human transport credential. Queued pauses retain
+the original recorded local actor; actorless queued records are refused at upgrade,
+never attributed to an owner. The protected ACK/mirror fence remains unchanged.
