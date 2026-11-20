@@ -89,6 +89,10 @@ SELECT count(*) FROM sync_link_state WHERE linked <> 0 OR server_url IS NOT NULL
 def snapshot(vm, radio_mode):
     receipt = checked(vm, f"""set -e
 {MOUNT_USB}
+radio_db=/srv/chirpstack/chirpstack.sqlite
+test -s "$radio_db"
+test "$(sqlite3 -readonly -batch -bail -cmd '.timeout 5000' "$radio_db" 'PRAGMA integrity_check;')" = ok
+test "$(redis-cli ping)" = PONG
 sqlite3 -readonly -batch -bail {DB} < snapshot.sql > /tmp/fixture.rows
 test -s /tmp/fixture.rows
 sha256sum /tmp/fixture.rows | cut -d ' ' -f 1
@@ -150,7 +154,6 @@ test -s "$backup"
         vm.reboot()
         ready(vm)
         version(vm, args.osi_version, args.chirpstack_version)
-        checked(vm, 'redis-cli ping | grep -qx PONG')
         checked(vm, 'test "$(readlink /srv/node-red/payloads/active)" != ' + shlex.quote(old_stamp))
         checked(vm, PAYLOAD)
         if sql(vm, LEDGER + "SELECT name FROM schema_migrations WHERE version = 80;").splitlines()[1:] != [
