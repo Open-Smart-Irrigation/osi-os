@@ -4,7 +4,7 @@ X2 retains thirteen `osi-valve-control` ingress exports and puts their implement
 
 Neither maintained `flows.json` is edited. X1 comes first; X2 still has no reservation. The five reviewed `osiLib` additions remain exactly one named binding each, with all other libraries unchanged.
 
-The frozen source is ec822b556. The original task started READY there, behind 0/ahead 0, with AGENTS.md revision c63103827; the preparation base later advanced to 1a984f31f for a runbook-only change. This fix round resumed the reviewed head 3825a576 against that same intended base: WARN for NO_FAST_CHECK, behind 0/ahead 1, clean. It deliberately keeps the reviewed branch and base.
+The frozen source is ec822b556. The original task started READY there, behind 0/ahead 0, with AGENTS.md revision c63103827; the preparation base later advanced to 1a984f31f for a runbook-only change. The first fix round resumed reviewed head 3825a576 against that intended base. Sol r3 follow-up rebased the branch onto main bda200db6, retaining its atomic flow writer and emulator gates. Post-rebase readiness is READY, behind 0/ahead 5, with the same AGENTS.md revision.
 
 ## Preserved behavior and approved exceptions
 
@@ -37,7 +37,7 @@ Unknown command types still return null; malformed cloud JSON still throws. Thes
 
 Real-loader tests compile the shipped `osi-lib` loader and independently remove command ingress, valve control or scope, then exercise first-failure and quarantine states on both profiles. All 554 frozen cases run for each dependency and state. An isolated valve-package copy proves that every existing export remains loadable without ingress, and that the index never imports X2 compatibility modules eagerly. Tests assert that pure ingress never consults the valve loader. The fallback image is generated from the entry sources and checked byte for byte in CI.
 
-The additive fixture has 22 cases per profile: snake-case and absent ACK metadata, missing gateway identity, VALVE_COMMAND minute fallbacks, interval defaults and explicit wire fields, numeric LSN50 mode, JWT_SECRET-only auth on all eight handlers, absent builder actor/zone, scope-resolver warnings, missing/non-numeric/null fan speed and callback-delivered close errors. Each has branch assertions as well as a frozen output hash. Capture validates the pinned source and uses a separate, write-once file. The old oracle-overwrite option is rejected. Every environment-selected evidence writer reserves a descriptor with exclusive creation before running and never reopens the pathname. Negative controls target each oracle through every writer, plus a symlink and a pathname-replacement race.
+The additive fixture has 22 cases per profile: snake-case and absent ACK metadata, missing gateway identity, VALVE_COMMAND minute fallbacks, interval defaults and explicit wire fields, numeric LSN50 mode, JWT_SECRET-only auth on all eight handlers, absent builder actor/zone, scope-resolver warnings, missing/non-numeric/null fan speed and callback-delivered close errors. Each has branch assertions as well as a frozen output hash. Capture validates the pinned source and uses a separate, write-once file. For first capture only, the additive file may be absent; the computed bytes must match its committed SHA-256 before exclusive creation. Other oracle inputs remain required. The old oracle-overwrite option is rejected. Every environment-selected evidence writer reserves a descriptor with exclusive creation before running and never reopens the pathname. Negative controls target each oracle through every writer, plus a symlink and a pathname-replacement race.
 
 Another 28 tests compare the immediate predecessor's frozen ingress with the proposed adapters over the shipped database and real valve/scope helpers. They record every SQL operation and result, queue RPC, node output, outbox row, run-log row and ACK in order. Scenarios cover all five command lanes, duplicate uplinks, restart while observed running, cancellation during reservation, downstream run-log INSERT failure, actual queue-read/flush/timeout/requeue failures, a scoped device lookup failure after successful access, and close callback errors. SQLite clock and random functions are deterministic. The separate UC512 dispatch tests remain in the existing safety lane.
 
@@ -47,7 +47,7 @@ Auth discovery follows verified adapters into the exact entry implementation and
 
 ## Handoff and staged CI
 
-The manifest permits only `func` and the five approved `libs` appends. The independent renderer validates the manifest, full node contract and source hash, refuses partial application, and is idempotent on the exact rendered set. Oracle inputs are pinned by committed content digests; the handoff reads the main-ancestry base 1a984f31f. No validator needs PR-only history. A fresh transport clone of a local squash-equivalent commit contains no PR head object or refs and runs parity plus handoff validation before and after application. A checked-in binary Git patch must equal its canonical diff byte for byte. The disposable staged tree checks forward and reverse application and every resulting file byte.
+The manifest permits only `func` and the five approved `libs` appends. The independent renderer validates the manifest, full node contract and source hash, refuses partial application, and is idempotent on the exact rendered set. Oracle inputs are pinned by committed content digests; the handoff reads the main-ancestry base bda200db6. No validator needs PR-only history. A fresh transport clone of a local squash-equivalent commit contains no PR head object or refs and runs parity plus handoff validation before and after application. A checked-in binary Git patch must equal its canonical diff byte for byte. The application command first applies the patch to a temporary index and compares every receipt file before changing the target. Any Git diagnostic fails, even with exit status zero. The disposable staged tree then checks actual forward, reverse and reapplication bytes, including both baseline files; it never writes renderer results over a failed application. The binary patch retains its required final blank separator. A path-specific Git attribute permits that separator.
 
 The patch includes the silent-catch baseline update from 65 to 59 per profile. Its receipt also records the DDL recount: 694, unchanged. These are staged with the flow replacement, never applied to the reserved files in this checkout. `node scripts/apply-valve-ingress-x2-adapters.js` validates the handoff without writing it. After X1 and the reservation, refresh the handoff against the approved base; the current whole-file pins deliberately refuse unrelated base drift.
 
@@ -121,3 +121,28 @@ The review's four findings supply the red evidence. This round keeps both reserv
 Sol r2 follow-up checks passed locally: 6,652 dependency-failure/export tests, including direct compatibility calls without ingress; 7,142 staged integration assertions plus 16 entry-point tests; and 947 module tests. Both pinned native runtimes passed 576 cases per profile against the primary and real missing/quarantined-ingress fallback. The extra-port and corrected returned-auth controls were rejected after their required assertions. The squash-only clone passed before/after parity and handoff checks and contained only squash/main-ancestry commit objects. Evidence-path controls cover all four writers, every oracle file, symlink aliases, duplicate writes and a pathname-replacement race. Logs use the r3 prefix in the evidence directory.
 
 This round elapsed 0.5228 hours, including shared osi-heavy admission waits. Exclusive engineering time was not measured. Flows reservation time remains 0.0000 hours.
+
+
+## Sol r3 fixes and rebase
+
+Both remaining findings are fixed in the handoff tooling. A raw cached-patch regression checks all four receipt files and the complete index tree after reverse application. Truncated and omitted-baseline controls exercise both working-tree and cached application; refusal must leave both targets unchanged. The first-capture regression deletes only the additive fixture in a disposable tree, recreates its exact committed bytes, rejects a second capture and refuses altered case records before creating a file. These tests run in the existing X2 CI handoff suite, including after staged application. The review records the original corrupt-binary-patch and ENOENT failures; they are the red evidence for this round.
+
+Rebasing retained main PRs #714, #716, #732 and #734. The conflicts were confined to module registration lists and loader tests; both Clover and command ingress remain registered. Range comparison shows no lost X2 behavior. Both flow files, all seven bundled DB images, migration files and baseline/allowance files match main. The four original oracle inputs and their digest pins match the reviewed head. The patch and receipt now reference reachable main bda200db6, and obsolete stacked-base workflow overrides are removed. X1 still precedes X2; no reservation was used.
+
+Local static checks passed: profile parity, helper registration, canonical handoff validation, generated fallback comparison, JavaScript parse checks, deployment shell syntax and diff whitespace. The first lookup used an incorrect verifier filename; rerunning the actual `verify-helper-registration.js` passed. No test success is inferred from that failed lookup.
+
+The focused local wrapper waited from 11:32:17 to 11:39:09 UTC without admission, behind two firmware builds, and was cancelled before running. Its proposed red/green, parity and module commands therefore produced no local results. The required frozen parity, squash-only validation and both pinned native matrices passed on GitHub at code head e90277512a; the staged characterization step was still running when evidence was recorded. Full sync, migrations, smoke and shell fixtures remain exact-head CI gates. No full local suite was queued, and the cancelled wrapper leaves no delayed test run.
+
+Logs: `r4-static.log` in the evidence directory. GitHub retains its own test results and traces; the final report identifies the publication head and its CI snapshot. Prior-round pass counts above describe those earlier heads, not a local rerun in this round.
+
+## Sol r3 fix-round timing
+
+Round start: 2026-11-21T11:24:25Z. Round stop: 2026-11-21T11:40:26Z.
+
+| Sub-step | UTC start | UTC stop | Hours |
+| --- | --- | --- | ---: |
+| Review, rebase and implementation | 2026-11-21T11:24:25Z | 2026-11-21T11:37:05Z | 0.2111 |
+| First publication and static verification | 2026-11-21T11:37:05Z | 2026-11-21T11:38:41Z | 0.0267 |
+| CI snapshot and evidence handoff | 2026-11-21T11:38:41Z | 2026-11-21T11:40:26Z | 0.0292 |
+
+This round elapsed 0.2669 hours through the implementation/evidence stop, including the unadmitted local test wait. Final documentation publication follows this stop. Exclusive engineering time was not measured. Flows reservation time remains 0.0000 hours.
