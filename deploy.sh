@@ -136,10 +136,7 @@ write_deploy_outcome() {
     outcome_code="$outcome_rc"
     outcome_verdict=refused
     outcome_reason="deploy refused before activation; inspect the deploy log"
-    if [ "${DEPLOY_RECOVERY_INCOMPLETE:-0}" = 1 ]; then
-        outcome_verdict=incomplete-recovery
-        outcome_reason="recovery is incomplete; inspect the deploy log and service state before restarting"
-    elif [ "${DEPLOY_HOLD_SERVICES:-0}" = 1 ] || [ "${identityd_deploy_state:-}" = fatal_hold ] || [ "${DEPLOY_OUTCOME_HOLD:-0}" = 1 ]; then
+    if [ "${DEPLOY_HOLD_SERVICES:-0}" = 1 ] || [ "${identityd_deploy_state:-}" = fatal_hold ] || [ "${DEPLOY_OUTCOME_HOLD:-0}" = 1 ]; then
         if [ "${DEPLOY_SERVICE_STATE:-unknown}" = stopped ] && [ "${DEPLOY_IDENTITYD_STATE:-unknown}" = stopped ]; then
             outcome_verdict=hold
             outcome_reason="services held stopped; inspect DEPLOY-HELD and the deploy log"
@@ -147,6 +144,9 @@ write_deploy_outcome() {
             outcome_verdict=incomplete-recovery
             outcome_reason="a required service stop was not proven; inspect the deploy log"
         fi
+    elif [ "${DEPLOY_RECOVERY_INCOMPLETE:-0}" = 1 ] || [ "${DEPLOY_IDENTITYD_RECOVERY_INCOMPLETE:-0}" = 1 ]; then
+        outcome_verdict=incomplete-recovery
+        outcome_reason="recovery is incomplete; inspect the deploy log and service state before restarting"
     elif [ "${ROLLBACK_RESTORED:-0}" = 1 ]; then
         outcome_verdict=auto-rollback
         outcome_reason="deploy failed; the compatible previous payload was restored and its readiness confirmed"
@@ -2019,7 +2019,7 @@ deploy_exit_handler() {
     if [ "${ROLLBACK_RESTORED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
         echo "OK: preserving the verified rollback pair while returning deploy failure" >&2
         if ! restore_identityd_prior_state; then
-            DEPLOY_RECOVERY_INCOMPLETE=1
+            DEPLOY_IDENTITYD_RECOVERY_INCOMPLETE=1
             DEPLOY_IDENTITYD_STATE=unknown
             echo "ERROR: identityd could not be restored after the verified rollback" >&2
         fi
@@ -2073,15 +2073,15 @@ deploy_exit_handler() {
         elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ]; then
             :
         elif ! restart_node_red; then
-            DEPLOY_RECOVERY_INCOMPLETE=1
-            DEPLOY_SERVICE_STATE=unknown
             [ "$exit_status" -ne 0 ] || exit_status=1
         fi
     fi
     if [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ] && ! restore_identityd_prior_state; then
-        DEPLOY_RECOVERY_INCOMPLETE=1
+        DEPLOY_IDENTITYD_RECOVERY_INCOMPLETE=1
         DEPLOY_IDENTITYD_STATE=unknown
         [ "$exit_status" -ne 0 ] || exit_status=1
+    elif [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ]; then
+        DEPLOY_IDENTITYD_RECOVERY_INCOMPLETE=0
     fi
     # The copy of the previous command-ledger files is kept until a deploy
     # succeeds; a failed one leaves it for the operator.
@@ -2108,12 +2108,14 @@ restart_node_red() {
     if [ "$node_red_restart_needed" != "1" ]; then
         return 0
     fi
+    DEPLOY_SERVICE_STATE=unknown
     echo "--- Restart Node-RED after schema migration ---"
     if /etc/init.d/node-red start; then
         node_red_restart_needed=0
         echo "OK"
         return 0
     fi
+    DEPLOY_RECOVERY_INCOMPLETE=1
     echo "ERROR: Node-RED did not start after schema migration" >&2
     return 1
 }
@@ -2424,6 +2426,7 @@ restart_previous_payload() {
     fi
     node_red_restart_needed=0
     ROLLBACK_RESTORED=1
+    DEPLOY_RECOVERY_INCOMPLETE=0
     DEPLOY_SERVICE_STATE=running
     PAYLOAD_FLIPPED=0
     echo "OK: rollback Node-RED readiness confirmed after ${probe_elapsed:-0}s"
@@ -4513,9 +4516,9 @@ if ! wait_for_identityd_ready; then
     echo "ERROR: identityd did not become ready after activation" >&2
     exit 1
 fi
-identityd_deploy_state="disarmed"
 DEPLOY_IDENTITYD_STATE=running
 [ "$PROBE_OK" != 0 ] || DEPLOY_SERVICE_STATE=running
+identityd_deploy_state="disarmed"
 echo "OK"
 
 echo ""

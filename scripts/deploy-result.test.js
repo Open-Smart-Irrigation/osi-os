@@ -147,3 +147,29 @@ exit 99
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test('a successful final identityd restore supersedes an earlier failed attempt', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-final-restore-'));
+  try {
+    const outcome = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+    const lifecycle = deploy.slice(deploy.indexOf('# identityd deploy lifecycle begin'), deploy.indexOf('# identityd deploy lifecycle end'));
+    const result = path.join(dir, 'result');
+    const script = `set -eu
+${outcome}
+${lifecycle}
+cleanup() { :; }
+restore_count=0
+restore_identityd_prior_state() { restore_count=$((restore_count + 1)); [ "$restore_count" -gt 1 ] || return 1; DEPLOY_IDENTITYD_STATE=running; }
+ROLLBACK_RESTORED=1
+DEPLOY_SERVICE_STATE=running
+DEPLOY_STAMP=attempt
+PREV_STAMP=old
+deploy_exit_handler 1
+`;
+    const run = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, SWAP_ROOT: dir, DEPLOY_OUTCOME_FILE: result } });
+    assert.equal(run.status, 1, run.stderr);
+    const receipt = fs.readFileSync(result, 'utf8');
+    assert.match(receipt, /^verdict=auto-rollback$/m);
+    assert.match(receipt, /^identityd_state=running$/m);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
