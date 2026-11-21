@@ -10,6 +10,7 @@ const originals = require('./fixtures/daily-scheduler/legacy-nodes.json');
 const adapters = require('./fixtures/daily-scheduler/adapters.json');
 const { writeExclusive } = require('./lib/daily-scheduler-oracles');
 function adaptFlows(flows) {
+  assert.deepStrictEqual(adapters, require('./lib/daily-scheduler-adapters').buildAdapters(), 'adapter preflight must equal canonical module source');
   const result = structuredClone(flows);
   for (const adapter of adapters) {
     const node = result.find(n => n.id === adapter.id);

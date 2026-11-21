@@ -8,6 +8,46 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ROOT, PROFILES } = require('./lib/daily-scheduler-harness');
 const { createExclusive, writeExclusive, verifyFrozen, sha, fixture } = require('./lib/daily-scheduler-oracles');
+const vm = require('node:vm');
+
+test('canonical validation runs once per composed adapter save', () => {
+  const adapters = require('./fixtures/daily-scheduler/adapters.json');
+  const legacy = require('./fixtures/daily-scheduler/legacy-nodes.json');
+  const { dependencies } = require('./lib/daily-scheduler-harness');
+  const seed = require('./lib/daily-scheduler-cases').cases().find(c => c.name === 'validate-save');
+  for (const profile of PROFILES) for (const variant of ['legacy', 'adapter', 'module']) {
+    const msg = structuredClone(seed.msg);
+    const body = JSON.stringify(msg.req_body);msg.req_body=body;
+    let parses=0,envelopes=0,envelope;
+    Object.defineProperty(msg,'osi',{configurable:true,get(){return envelope;},set(value){envelopes++;envelope=value;}});
+    const deps=dependencies(seed,profile);
+    const parse=JSON.parse;
+    try {
+      JSON.parse=function(text,...args){if(text===body)parses++;return parse.call(this,text,...args);};
+      const result=variant==='module'
+        ? require(path.join(ROOT,'conf',profile,'files/usr/share/node-red/osi-daily-scheduler')).verifyZoneOwnership(msg,deps)
+        : new vm.Script('(function(msg){'+(variant==='legacy'?legacy:adapters).find(n=>n.id===seed.id).func+'\n})(msg)').runInNewContext({...deps,msg,JSON});
+      assert.ok(result[0],profile+'/'+variant+' accepted');
+      assert.equal(parses,1,'string body parsed exactly once');
+      assert.equal(envelopes,1,'request envelope created exactly once');
+    } finally {JSON.parse=parse;}
+  }
+});
+
+test('UPSERT preflight reads its input once through the legacy guard', () => {
+  const { dependencies } = require('./lib/daily-scheduler-harness');
+  const seed = require('./lib/daily-scheduler-cases').cases().find(c => c.name === 'upsert-version-4-enabled-1');
+  for (const profile of PROFILES) for (const variant of ['legacy', 'adapter', 'module']) {
+    const msg=structuredClone(seed.msg),rows=msg.payload;let reads=0;
+    Object.defineProperty(msg,'payload',{get(){reads++;return rows;}});
+    const deps=dependencies(seed,profile);
+    const source=require('./fixtures/daily-scheduler/'+(variant==='legacy'?'legacy-nodes':'adapters')+'.json').find(n=>n.id===seed.id);
+    const result=variant==='module'
+      ? require(path.join(ROOT,'conf',profile,'files/usr/share/node-red/osi-daily-scheduler')).buildUpsert(msg,deps)
+      : new vm.Script('(function(msg){'+source.func+'\n})(msg)').runInNewContext({...deps,msg});
+    assert.ok(result[0]);assert.equal(reads,3,profile+'/'+variant+' runs the payload guard once');
+  }
+});
 
 test('evidence creation refuses existing files and symlinks without modifying the target', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'x1-exclusive-'));
@@ -111,7 +151,7 @@ function loadProbe(profile, fault, eager = false) {
 
 for (const profile of PROFILES) {
   test(profile + ': extraction dependency failure is isolated from existing packages', () => {
-    for (const fault of ['osi-daily-scheduler/schedule-save.js', 'osi-scheduler-mean-query/index.js']) {
+    for (const fault of ['osi-daily-scheduler/schedule-save.js', 'osi-daily-scheduler/preflight.js', 'osi-scheduler-mean-query/index.js']) {
       const run = loadProbe(profile, fault);
       assert.ifError(run.error); assert.equal(run.status, 0, run.stderr);
     }

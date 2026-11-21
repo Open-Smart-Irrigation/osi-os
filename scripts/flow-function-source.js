@@ -9,14 +9,16 @@ function delegated(node, nodeRedRoot) {
   assert.ok(call, 'unrecognized daily-scheduler adapter: ' + node.id);
   const fn = require(path.join(nodeRedRoot, 'osi-daily-scheduler'))[call[1]];
   assert.equal(typeof fn, 'function', 'missing daily-scheduler entry: ' + call[1]);
-  return { fn, args: call[2] };
+  const api = require(path.join(nodeRedRoot, 'osi-daily-scheduler'));
+  const preflight = { decodeToken: api.prepareDecodeToken, verifyZoneOwnership: api.prepareZoneOwnership, buildUpsert: api.prepareUpsert }[call[1]];
+  return { fn, args: call[2].replace(', preflight', ''), source: [preflight && preflight.toString(), fn.toString()].filter(Boolean).join('\n') };
 }
 function functionSource(node, nodeRedRoot) {
   const entry = delegated(node, nodeRedRoot);
-  return entry ? entry.fn.toString() : String(node.func || '');
+  return entry ? entry.source : String(node.func || '');
 }
 function inlineForMutation(node, nodeRedRoot) {
   const entry = delegated(node, nodeRedRoot);
-  return entry ? { ...node, func: entry.fn.toString() + '\nreturn ' + entry.fn.name + '(msg, ' + entry.args + ');' } : node;
+  return entry ? { ...node, func: entry.source + '\nreturn ' + entry.fn.name + '(msg, ' + entry.args + ');' } : node;
 }
 module.exports = { functionSource, inlineForMutation };

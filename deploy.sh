@@ -3238,6 +3238,10 @@ fetch_required "osi-daily-scheduler decision.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/decision.js" \
     "$MODULE_STAGE/osi-daily-scheduler/decision.js"
 
+fetch_required "osi-daily-scheduler preflight.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/preflight.js" \
+    "$MODULE_STAGE/osi-daily-scheduler/preflight.js"
+
 fetch_required "osi-daily-scheduler schedule-save.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-daily-scheduler/schedule-save.js" \
     "$MODULE_STAGE/osi-daily-scheduler/schedule-save.js"

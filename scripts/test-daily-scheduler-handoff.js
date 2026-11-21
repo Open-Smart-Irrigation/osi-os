@@ -8,6 +8,7 @@ const {cases}=require('./lib/daily-scheduler-cases');
 const {verifyFrozen,createExclusive}=require('./lib/daily-scheduler-oracles');
 const legacy=require('./fixtures/daily-scheduler/legacy-nodes.json');
 const adapters=require('./fixtures/daily-scheduler/adapters.json');
+const { flowState, restoreLegacy }=require('./lib/daily-scheduler-adapters');
 async function main() {
  verifyFrozen();
  const {stagedBaselines}=require('./lib/daily-scheduler-baselines');
@@ -15,7 +16,9 @@ async function main() {
  assert.deepStrictEqual(stagedBaselines(),JSON.parse(fs.readFileSync(baselineFile)),'fresh staged silent-catch and DDL counts equal handoff');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'x1-handoff-'));
  try {
-  for(const p of PROFILES) {const rel='conf/'+p+'/files/usr/share/flows.json';fs.mkdirSync(path.dirname(path.join(dir,rel)),{recursive:true});fs.copyFileSync(path.join(ROOT,rel),path.join(dir,rel));}
+  const states=[];
+  for(const p of PROFILES) {const rel='conf/'+p+'/files/usr/share/flows.json';const current=JSON.parse(fs.readFileSync(path.join(ROOT,rel)));states.push(flowState(current));if(states.at(-1)==='integrated')assert.deepStrictEqual(current,adaptFlows(current),'integrated file equals renderer');fs.mkdirSync(path.dirname(path.join(dir,rel)),{recursive:true});fs.writeFileSync(path.join(dir,rel),JSON.stringify(restoreLegacy(current),null,2)+'\n',{flag:'wx'});}
+  assert.equal(new Set(states).size,1,'profiles must have the same integration state');
   const patch=path.join(ROOT,'scripts/fixtures/daily-scheduler/evidence/flows-handoff.patch');
   execFileSync('git',['apply','--check',patch],{cwd:dir});execFileSync('git',['apply',patch],{cwd:dir});
   for(const p of PROFILES) {const rel='conf/'+p+'/files/usr/share/flows.json';const rendered=JSON.stringify(adaptFlows(JSON.parse(fs.readFileSync(path.join(ROOT,rel)))),null,2)+'\n';assert.equal(fs.readFileSync(path.join(dir,rel),'utf8'),rendered,'checked-in patch must equal renderer');

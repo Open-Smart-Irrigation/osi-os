@@ -60,6 +60,10 @@ function nativeBoundaryCases() {
  }
  for(let read=1;read<=7;read++) {const c=structuredClone(base.find(c=>c.name==='auth-scoped-none'));c.name='native-real-scope-read-'+read;c.failure=undefined;c.scopeReadFailure=read;all.push(c);}
  const spring=structuredClone(base.find(c=>c.name==='swt-mean-30'));spring.name='native-spring-jump';spring.now=Date.parse('2026-03-29T01:30:00Z');spring.msg.zone.last_triggered_at='2026-03-29T00:30:00Z';all.push(spring);
+ for(const failure of ['daily-load','daily-quarantined']) {
+  const c=structuredClone(base.find(c=>c.name==='auth-scoped-none'));c.name='native-scoped-invalid-zone-'+failure;c.msg.req.params.id='1.5';c.failure=failure;c.loaderOutage=true;all.push(c);
+ }
+ const scopeFirst=structuredClone(base.find(c=>c.name==='auth-scoped-none'));scopeFirst.name='native-scoped-invalid-zone-scope-load-first';scopeFirst.msg.req.params.id='1.5';scopeFirst.failure='scope-load-second';all.push(scopeFirst);
  return all;
 }
 module.exports.nativeBoundaryCases=nativeBoundaryCases;
