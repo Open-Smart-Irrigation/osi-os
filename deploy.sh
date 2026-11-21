@@ -1513,6 +1513,11 @@ seed_db_if_missing() {
         return 1
     fi
 
+    if ! ensure_sqlite3_cli; then
+        echo "ERROR: cannot validate a fresh database seed without the sqlite3 CLI; no seed was published" >&2
+        return 1
+    fi
+
     local seed_tmp check
     mkdir -p "$DB_DIR" || return 1
     seed_tmp="$(mktemp "$DB_PATH.osi-stage.XXXXXX")" || return 1
