@@ -348,7 +348,10 @@ Never restart the old healer to bypass a refusal.
    partial backup and receipt, exits nonzero and requires investigation before
    proceeding; a printed directory alone is not backup acceptance.
 
-2. Make the stopped-writer state survive a reboot **before** stopping services:
+2. The gateway must already have the `node-red` and `osi-identityd` init scripts.
+   Images without identityd need a separately qualified recovery; never bypass
+   preparation. Make the stopped-writer state survive a reboot **before**
+   stopping services:
 
    ```sh
    node scripts/repair-legacy-device-fk.js /data/db/farming.db --prepare-offline
@@ -418,8 +421,12 @@ Never restart the old healer to bypass a refusal.
    enablement, including the pending UCI default. It permits a bounded Node-RED
    health start only after checking the installed retirement flow and the repaired
    database. A compatible older payload containing the surgery cannot restart.
+   A recovery hold defers owed health checks until the new checker and init are
+   installed, so a first deployment never uses an old checker for that proof.
    After the check, or on any deploy failure, both writers remain stopped; reboot
-   cannot undo the hold. Only after a successful deploy, release the hold:
+   cannot undo the hold. Only after a successful deploy, release the hold from
+   a complete checkout at the **same revision as the retirement deploy**. A
+   mismatched checkout refuses safely and leaves the hold in place:
 
    ```sh
    sqlite3 -readonly /data/db/farming.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'

@@ -236,3 +236,33 @@ the new cases and every local migrations-workflow command. The shared runner is
 occupied by firmware work. These changes have passed syntax, whitespace,
 instruction-size and test-inventory checks; no new heavy pass is claimed yet.
 The flows handoff remains unapplied and the field count remains unknown.
+
+## Round 3 follow-up
+
+The independent Opus review of `b02b0558` approved the safety bar and closed all
+three round-2 findings. It still required CI repairs and a first-deployment hold
+fix. The installed old integrity checker accepts the new mode as a missing DB
+path and exits zero. A held deploy now defers the owed check and its fallback
+until the new checker and init are installed; it leaves the owed pair untouched.
+The regression uses that actual old checker and a start-recording old init.
+Both migrated and unmigrated owed plans must defer without starting it.
+
+Publication now orders the profile's hold-policy module, its index, then the
+Node-RED init. The unchanged dependency-fetch assertion can therefore prove the
+relative require, and a cut after either module publication leaves the index
+loadable. The runbook requires release from the same revision as the retirement
+deploy and names the installed service-script prerequisites.
+
+The stale tests retain their data, hash, restart and ordering assertions. They
+now recognize the guarded restart, the atomic swap-helper publisher and an owned
+interrupted repair lock. Seed race fixtures supply the CLI availability helper
+and DB directory, capture the complete staged image, then assert refusal at the
+publication fence, unchanged source bytes and private-stage cleanup.
+
+At this checkpoint, the full local migrations replay had reached cutover with
+one failed command: the populated qualification reproduced the five stale
+assertions from the review. The final follow-up replays that complete suite,
+the affected full deploy batch and sync verifier, the other stale-test files,
+and the new first-deploy regressions through osi-heavy. Final results and exact
+head CI are recorded in the PR body; the earlier queued status above describes
+the round-2 checkpoint, not a claim of a completed qualification.

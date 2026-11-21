@@ -538,7 +538,7 @@ test('every switch to the new payload is followed by the write, every switch bac
   // Each forward flip is followed by the write before the next restart.
   for (const i of forward) {
     const rest = lines.slice(i);
-    const restartAt = rest.findIndex((l) => /restart_node_red; then|\/etc\/init\.d\/node-red restart/.test(l));
+    const restartAt = rest.findIndex((l) => /restart_node_red; then|repair_health_start restart|\/etc\/init\.d\/node-red restart/.test(l));
     assert.ok(restartAt > 0, `no restart after the forward flip at line ${i + 1}`);
     assert.match(rest.slice(0, restartAt).join('\n'), /apply_release_firmware_version "\$\{DEPLOY_FIRMWARE_VERSION:-\}"/,
       `forward flip at line ${i + 1}`);

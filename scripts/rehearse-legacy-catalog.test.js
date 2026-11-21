@@ -400,7 +400,7 @@ test('option B deploy uses the shared catalog predicate and refuses before stop,
   const guard = deploy.indexOf('if ! check_live_db_readonly; then', start);
   assert.ok(guard > start && guard < deploy.indexOf('if ! fetch_migration_runner;', start));
   const early = deploy.indexOf('\ncheck_live_db_readonly || exit 1\n');
-  assert.ok(early > 0 && early < deploy.indexOf('cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp'));
+  assert.ok(early > 0 && early < deploy.indexOf('publish_boot_file "$swap_stage" /srv/node-red/.payload-swap.js'));
 });
 
 test('option B repairs a proven trigger-only legacy reference without rebuilding healthy child tables', async () => {
@@ -620,7 +620,9 @@ test('Sol review prepared power loss keeps independent originals and disables th
     assert.equal(child.signal, 'SIGKILL', child.stderr);
     reboot(root); // fresh shell dispatch, no state retained from prepareOffline
     assert.equal(fs.existsSync(path.join(root, 'started')), false, 'old writer must not enter its boot path');
-    assertHold(root);
+    const repairLock = fs.lstatSync(gatewayFile + '.legacy-device-fk-repair.lock');
+    assert.throws(() => assertHold(root), /incomplete repair evidence/);
+    assertHold(root, repairLock); // the interrupted owner still proves disabled boot entries
     const stage = fs.readFileSync(path.join(gatewayFile + '.legacy-device-fk-repair.lock', 'stage'), 'utf8').trim();
     const original = path.join(stage, 'original.db');
     assert.notEqual(fs.statSync(gatewayFile).ino, fs.statSync(original).ino);
@@ -782,14 +784,18 @@ test('Sol review a persistent handle also refuses missing-main WAL evidence befo
 for (const suffix of ['.legacy-device-fk-repair.lock', '-wal', '.legacy-device-fk-writer-hold']) {
   test(`Sol review recovery evidence arriving during seed staging (${suffix}) refuses the final move`, async () => {
     await withFixture('healthy', async (seed, dir) => {
+      const before = digest(seed);
       const target = path.join(dir, 'new-farming.db');
       const scratch = path.join(dir, 'stage'); fs.mkdirSync(scratch);
-      const script = shellFunction('seed_db_if_missing') + '\nDB_PATH="$1"; TMP_DIR="$2"; SEED_SOURCE="$3"; SUFFIX="$4"; SEED_DB_REL=seed\nfetch() { cp "$SEED_SOURCE" "$2"; : > "$DB_PATH$SUFFIX"; }\nseed_db_if_missing';
+      const script = shellFunction('seed_db_if_missing') + '\nDB_PATH="$1"; DB_DIR="${1%/*}"; TMP_DIR="$2"; SEED_SOURCE="$3"; SUFFIX="$4"; SEED_DB_REL=seed\nensure_sqlite3_cli() { command -v sqlite3 >/dev/null; }\nfetch() { cp "$SEED_SOURCE" "$2"; cp "$2" "$TMP_DIR/farming.db"; : > "$DB_PATH$SUFFIX"; }\nseed_db_if_missing';
       const r = spawnSync('sh', ['-c', script, 'seed', target, scratch, seed, suffix], { encoding: 'utf8' });
       assert.notEqual(r.status, 0, r.stderr);
+      assert.match(r.stderr, /could not publish database seed/, 'reach the final publication fence');
+      assert.equal(digest(seed), before, 'source seed remains byte-identical');
       assert.equal(fs.existsSync(target), false);
       assert.ok(fs.existsSync(target + suffix));
-      assert.equal(digest(path.join(scratch, 'farming.db')), digest(seed));
+      assert.equal(digest(path.join(scratch, 'farming.db')), before, 'captured complete same-directory stage matches source');
+      assert.deepEqual(fs.readdirSync(dir).filter(name => name.startsWith('new-farming.db.osi-stage.')), [], 'refused publisher cleans its private stage');
     });
   });
 }

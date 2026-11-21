@@ -4,14 +4,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, execFileSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { makeGateway, reboot, acceptRetiredPayload } = require('./fixtures/legacy-device-gateway');
 const { prepareOffline, assertHold, releaseHold } = require('./lib/legacy-device-repair-ops');
 const { retiredFunction, functionText } = require('./rehearse-legacy-catalog');
 const ROOT = path.resolve(__dirname, '..');
 const files = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
-const deploy = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+const deploy = process.env.EB19_WRITER_DEPLOY_REF
+  ? execFileSync('git', ['show', process.env.EB19_WRITER_DEPLOY_REF + ':deploy.sh'], { cwd: ROOT, encoding: 'utf8' })
+  : fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
 const fn = name => {
   const found = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(deploy);
   assert.ok(found, name); return found[0];
@@ -154,4 +156,57 @@ cleanup
   assert.equal(run.stdout,'node-red-stop\nidentityd-stop\n');
   assertHold(f.root); reboot(f.root);
   assert.equal(fs.existsSync(path.join(f.root,'started')),false);
+});
+
+for (const migrated of [0, 1]) {
+  test(`first held deploy defers owed health and fallback with old installed checker/init (migrated=${migrated})`, t => {
+    const f = setup(t);
+    const oldCheck = path.join(f.scratch, 'old-index.js');
+    fs.writeFileSync(oldCheck, execFileSync('git', ['show', 'bda200db621b997c6303144a3d3b1488d7cd85ef:conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js'], { cwd: ROOT }));
+    const oldResult = spawnSync(process.execPath, [oldCheck, '--repair-health-check', f.dbPath, f.flows], { cwd: f.scratch, encoding: 'utf8' });
+    assert.equal(oldResult.status, 0, oldResult.stderr);
+    assert.match(oldResult.stderr, /ok-missing/, 'old checker accepts an unknown mode without a health proof');
+    const oldInit = path.join(f.root, 'mock-init');
+    fs.writeFileSync(oldInit, '#!/bin/sh\necho old-init-start >> "$IPKG_INSTROOT/started"\n', { mode: 0o700 });
+    const begin = deploy.indexOf('# owed health check begin');
+    const end = deploy.indexOf('# owed health check end', begin);
+    assert.ok(begin >= 0 && end > begin);
+    const script = fn('recovery_hold_present') + fn('repair_health_start').replace('/usr/share/node-red/osi-db-integrity/index.js', oldCheck) + fn('run_owed_health_check') + `
+set -eu
+schema_compatibility_metadata() { echo '0|'; }
+swap_call() { if [ "$1" = owedCheckPlan ]; then echo 'owed|${migrated}|fallback|restore'; else echo "$1" >> "$IPKG_INSTROOT/actions"; fi; }
+mark_node_red_log() { :; }
+check_node_red_start() { NODE_RED_START_VERDICT=failed; NODE_RED_START_REASON=fixture; }
+hold_node_red_stopped() { echo stopped >> "$IPKG_INSTROOT/actions"; }
+hold_identityd_stopped() { echo identityd-stopped >> "$IPKG_INSTROOT/actions"; }
+record_deploy_hold() { echo hold >> "$IPKG_INSTROOT/actions"; }
+GUI_ROOT="$SWAP_ROOT/gui"
+${deploy.slice(begin, end)}
+`;
+    const run = command(f, script);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /HELD: deferring owed health check/);
+    assert.equal(fs.existsSync(path.join(f.root, 'started')), false, 'old init must never start under the hold');
+    assert.equal(fs.existsSync(path.join(f.root, 'actions')), false, 'owed metadata and fallback pair stay untouched');
+    assertHold(f.root);
+    reboot(f.root);
+    assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+  });
+}
+
+test('boot publication orders hold policy, checker, then init so every cut keeps dependencies loadable', t => {
+  const policy = deploy.indexOf('fetch_required "Database recovery hold policy"');
+  const checker = deploy.indexOf('fetch_required "Boot database integrity check"');
+  const init = deploy.indexOf('fetch_required "Node-RED init script"');
+  assert.ok(policy > 0 && checker > policy && init > checker, 'install recovery-hold.js before index.js before node-red.init');
+  const f = setup(t);
+  const installed = path.join(f.scratch, 'installed'); fs.mkdirSync(installed);
+  const target = path.join(installed, 'index.js');
+  fs.writeFileSync(target, execFileSync('git', ['show', 'bda200db621b997c6303144a3d3b1488d7cd85ef:conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js'], { cwd: ROOT }));
+  for (const name of ['recovery-hold.js', 'index.js']) {
+    fs.copyFileSync(path.join(files, 'usr/share/node-red/osi-db-integrity', name), path.join(installed, name));
+    const loaded = spawnSync(process.env.EB19_STOCK_NODE || process.execPath, ['-e', 'require(process.argv[1]); console.log("loadable")', target], { encoding: 'utf8' });
+    assert.equal(loaded.status, 0, 'cut after ' + name + ': ' + loaded.stderr);
+    assert.equal(loaded.stdout.trim(), 'loadable');
+  }
 });

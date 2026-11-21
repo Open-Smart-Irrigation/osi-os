@@ -3134,7 +3134,11 @@ else
     owed_schema=""
 fi
 owed_plan="$(swap_call owedCheckPlan "${owed_schema%%|*}" "${owed_schema#*|}" 2>/dev/null || true)"
-if [ -n "$owed_plan" ]; then
+if recovery_hold_present; then
+    # The installed checker/init may predate this protocol on a first deploy.
+    # Leave the owed pair untouched until the new checker and init are installed.
+    echo "HELD: deferring owed health check ($owed_plan) until the retirement payload is installed; writers remain stopped"
+elif [ -n "$owed_plan" ]; then
     owed_payload="${owed_plan%%|*}"
     owed_rest="${owed_plan#*|}"
     owed_migrated="${owed_rest%%|*}"
@@ -4091,9 +4095,6 @@ fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
     "/srv/node-red/settings.js" 644 || exit 1
 
-fetch_required "Node-RED init script" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red" 755 || exit 1
 # A previous image may still have a seed script left to run. Update those
 # consumers before replacing the recovery writer an existing service can call.
 if [ -e /etc/uci-defaults/97_osi_db_seed ]; then
@@ -4107,12 +4108,16 @@ if [ -e /etc/uci-defaults/98_osi_node_red_seed ]; then
         "/etc/uci-defaults/98_osi_node_red_seed" 755 || exit 1
 fi
 
+# Publish dependencies before their consumers; each file uses atomic publication.
+fetch_required "Database recovery hold policy" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/recovery-hold.js" \
+    "/usr/share/node-red/osi-db-integrity/recovery-hold.js" 644 || exit 1
 fetch_required "Boot database integrity check" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
     "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
-fetch_required "Database recovery hold policy" \
-    "lib/osi-migrate/recovery-hold.js" \
-    "/usr/share/node-red/osi-db-integrity/recovery-hold.js" 644 || exit 1
+fetch_required "Node-RED init script" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
+    "/etc/init.d/node-red" 755 || exit 1
 
 fetch_required "Boot database integrity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-db-integrity" \
