@@ -30,6 +30,7 @@ function fixture(profile, kind) {
   const io = {
     fs: {
       existsSync: p => files.has(p),
+      readdirSync: p => [...files.keys()].filter(file=>path.dirname(file)===p).map(file=>path.basename(file)),
       readFileSync: p => { if(!files.has(p)) throw Object.assign(new Error('missing'),{code:'ENOENT'}); return files.get(p); },
       openSync(p, flags) {const fd=nextFd++; descriptors.set(fd,p); if(flags==='wx')files.set(p,''); return fd;},
       writeFileSync(p,data,options) {
@@ -113,7 +114,7 @@ for(const profile of ['bcm2712','bcm2709']) for(const kind of ['link','disconnec
     await restarted.recoverAccountConfigOnStart({osiDb:f.osiDb,...f.io,warn(){}});
     assert.equal(f.files.has(journalPath),false);
     assert.equal([...f.files.keys()].filter(p=>p.startsWith(requestDir)&&p.endsWith('.json')).length,1);
-    assert.equal(restarted.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
+    assert.equal(restarted.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true,'queued account request keeps transport blocked until the daemon takes over');
   });
 }
 
@@ -161,6 +162,98 @@ for(const profile of ['bcm2712','bcm2709']) test(`${profile}: recovery matches t
   assert.equal(result[0],null);assert.equal(result[1],null);assert.equal(result[2],msg);
   assert.equal(msg._alRecoveredReply.serverUsername,'target');
 });
+
+function operationMessage(f, stage) {
+  return stage==='build'
+    ? {authUserId:1,authUsername:'local',_alState:{al_local_username:'local',al_local_user_id:1,al_server_url:f.marker.context.server_url,al_action:'link',al_server_username:'target',al_gateway_device_eui:f.marker.context.gateway_device_eui,al_gateway_device_eui_confidence:'authoritative'}}
+    : {_unlinkAuth:{userId:1,username:'local'}};
+}
+async function queueCommittedRestart(f, kind, publication) {
+  await f.commit();
+  if(publication==='retry') {
+    const [ok,error]=await f.publish();
+    assert.equal(ok,null);assert.equal(error.statusCode,503);
+    f.setFailure(null);
+    const result=await f.helper.accountLinkStage(kind==='link'?'build':'disconnect',f.deps(operationMessage(f,kind==='link'?'build':'disconnect')));
+    assert.equal(result[1],null,'pending journal recovery can still return its saved reply');
+    if(kind==='link')assert.ok(result[2]);else assert.ok(result[0]);
+  } else {
+    f.setFailure(null);
+    const [ok,error]=await f.publish();assert.ok(ok);assert.equal(error,null);
+  }
+  assert.equal(f.files.has(journalPath),false);
+  assert.equal(f.files.has('/var/run/osi-identity-restart.json'),false,'daemon is paused after publication');
+  assert.equal([...f.files.keys()].filter(p=>p.startsWith(requestDir)&&p.endsWith('.json')).length,1);
+}
+function daemonTakesOver(f) {
+  // Match identityd's handoff: publish the sentinel before removing requests.
+  f.files.set('/var/run/osi-identity-restart.json',JSON.stringify({reason:f.marker.kind==='link'?'account_link':'account_unlink',phase:'restart_pending'}));
+  for(const file of f.files.keys()) if(path.dirname(file)===requestDir && file.endsWith('.json')) f.files.delete(file);
+}
+function assertCloudBlocked(f) {
+  for(const target of f.flows.filter(n=>n.type==='mqtt out'&&n.broker==='ec43625ea99685a6')) {
+    const guard=f.flows.find(n=>n.id==='account-cloud-guard-'+target.id);
+    const fn=new vm.Script('(function(msg,node,global,osiLib){'+guard.func+'\n})').runInNewContext();
+    const d=f.deps({payload:{fixture:true}});
+    assert.equal(fn(d.msg,d.node,d.global,d.osiLib),null,'queued request or sentinel blocks the actual cloud MQTT output guard');
+  }
+  assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true,'REST/history use the same blocked predicate');
+}
+async function assertOperationsBlocked(f) {
+  const before=f.getWrites();
+  for(const stage of ['build','disconnect']) {
+    const msg=operationMessage(f,stage),d=f.deps(msg);
+    const n=f.flows.find(n=>n.id===(stage==='build'?'al-link-build-req':'al-unlink-db'));
+    const fn=new vm.Script('(async function(msg,node,flow,env,global,osiDb,osiLib){'+n.func+'\n})').runInNewContext({Buffer,Date,Math});
+    const [ok,error]=await fn(d.msg,d.node,d.flow,d.env,d.global,d.osiDb,d.osiLib);
+    assert.equal(ok,null);assert.equal(error.statusCode,503,'another account operation must be refused before cloud authentication or database writes');
+    if(stage==='disconnect') assert.equal(error.payload.applied,false,'a refused new operation must not claim it was applied');
+  }
+  assert.equal(f.getWrites(),before);
+}
+
+for(const profile of ['bcm2712','bcm2709']) for(const kind of ['link','disconnect']) for(const publication of ['normal','retry']) {
+  test(`${profile} ${kind} ${publication}: daemon handoff blocks MQTT from publication through request consumption`,async()=>{
+    const f=fixture(profile,kind);await queueCommittedRestart(f,kind,publication);
+    assertCloudBlocked(f);
+    daemonTakesOver(f);assertCloudBlocked(f);
+  });
+  test(`${profile} ${kind} ${publication}: daemon handoff refuses subsequent account operations`,async()=>{
+    const f=fixture(profile,kind);await queueCommittedRestart(f,kind,publication);
+    await assertOperationsBlocked(f);
+    daemonTakesOver(f);await assertOperationsBlocked(f);
+  });
+}
+
+for(const profile of ['bcm2712','bcm2709']) {
+  test(`${profile}: ordered account restart reads cover publication and daemon consumption during the check`,()=>{
+    const f=fixture(profile,'link'), reads=[];
+    f.io.fs.existsSync=p=>{reads.push(p);return f.files.has(p);};
+    f.io.fs.readdirSync=p=>{reads.push(p);return [];};
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
+    assert.deepEqual(reads,[journalPath,requestDir,'/var/run/osi-identity-restart.json'],'journal, request queue, then sentinel');
+    // Publication completes after the journal read but before the queue read.
+    f.io.fs.readdirSync=p=>['account_link-fixture.json'];
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true);
+    // identityd consumes the request during readdir, so only its sentinel remains.
+    f.io.fs.readdirSync=p=>{daemonTakesOver(f);return [];};
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true,'sentinel must be read after the request queue');
+  });
+  test(`${profile}: restart queue read errors fail closed; missing directory and unrelated files do not block`,()=>{
+    const f=fixture(profile,'link'), warnings=[];
+    for(const code of ['EACCES','EIO','ENOTDIR']) {
+      f.io.fs.readdirSync=()=>{throw Object.assign(new Error('fixture queue failure'),{code});};
+      assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn:t=>warnings.push(t)}),true);
+    }
+    assert.equal(warnings.length,3);
+    f.io.fs.readdirSync=()=>{throw Object.assign(new Error('missing fixture queue'),{code:'ENOENT'});};
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
+    f.io.fs.readdirSync=()=>['account_link-fixture.json.unique.tmp','chirpstack_bootstrap-fixture.json'];
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
+    f.io.fs.readdirSync=()=>['account_unlink-fixture.json'];
+    assert.equal(f.helper.gatewayWorkBlocked({fs:f.io.fs,warn(){},accountConfig:false}),true,'in-flight account stages also refuse a queued restart');
+  });
+}
 
 for(const profile of ['bcm2712','bcm2709']) test(`${profile}: every cloud MQTT publication is blocked by an unresolved restart receipt`,async()=>{
   const f=fixture(profile,'link');await f.commit();

@@ -66,7 +66,7 @@ function runtime(p) {
   const node = { warn: (m) => warnings.push(String(m)), error: (m) => errors.push(String(m)), status: () => {}, log: () => {} };
   const flow = { get: (key) => flowState[key], set: (key, value) => { flowState[key] = value; } };
   const env = { get: (key) => ({ DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active', FIRMWARE_VERSION: 'test-build', OSI_SCOPED_ACCESS: '0' }[key] || '') };
-  const global = { get: (key) => (key === 'fs' ? { existsSync: () => false } : undefined) };
+  const global = { get: (key) => (key === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined) };
   const osiLib = {
     require(name) {
       if (Object.prototype.hasOwnProperty.call(p.helpers, name)) return { ok: true, value: p.helpers[name] };

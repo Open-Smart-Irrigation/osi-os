@@ -139,7 +139,7 @@ const q = (sql, params) => new Promise((resolve, reject) => db.all(sql, params, 
 const run = (sql, params) => new Promise((resolve, reject) => db.run(sql, params, (error) => error ? reject(error) : resolve()));
 const close = () => new Promise((resolve) => db.close(() => resolve()));
 try {
-  const configIo = { fs: global.get('fs'), cp: global.get('cp') };
+  const configIo = { fs: global.get('fs'), cp: global.get('cp'), warn: text => node.warn(text) };
   const recovery = await recoverAccountConfig(db, configIo);
   if (recovery.recovered && recovery.committed) {
     if (recovery.kind !== 'link' || recovery.username !== localUsername || recovery.serverUrl !== serverUrl || recovery.requestedUsername !== username) {
@@ -151,6 +151,7 @@ try {
     flow.set('history_sync_v1_confirmed', false);
     return [null, null, msg];
   }
+  assertAccountRestartSettled(configIo);
   preflightAccountConfig(configIo);
   let installationRows = await q('SELECT installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, recovery_operation_uuid FROM installation_identity WHERE singleton_id=1', []);
   if (installationRows.length === 0) {
@@ -830,10 +831,16 @@ async function configCommitMatches(tx, marker) {
     && ['server_url','cloud_user_id','gateway_device_eui','installation_uuid'].every(key => String(peer[key]) === String(context[key]));
 }
 
-function accountRestartRetryError() {
-  const error = new Error('The previous account change was recovered and its restart was queued; retry after the restart');
-  error.code = 'account_restart_queued'; error.statusCode = 503; error.applied = true;
+function accountRestartRetryError(applied = true) {
+  const error = new Error('A gateway restart is pending; retry after the restart');
+  error.code = 'account_restart_queued'; error.statusCode = 503; error.applied = applied;
   return error;
+}
+
+function assertAccountRestartSettled({fs, warn = console.warn}) {
+  // Recovery must run first so a matching committed retry can return its saved
+  // reply. New operations cannot use credentials from the previous boot.
+  if (gatewayWorkBlocked({fs, warn, accountConfig: false})) throw accountRestartRetryError(false);
 }
 
 function publishAccountRestart({fs, requestId, kind, warn = console.warn}) {
@@ -897,6 +904,7 @@ async function accountConfigTransaction(db, options, mutate) {
   requireConfigIo(options);
   const prior = await recoverAccountConfig(db, options);
   if (prior.recovered && prior.committed) throw accountRestartRetryError();
+  assertAccountRestartSettled(options);
   let journal = null;
   let committed = false;
   try {
@@ -1000,13 +1008,21 @@ module.exports.recoverAccountConfigOnStart = recoverAccountConfigOnStart;
 function gatewayWorkBlocked({fs, warn, accountConfig = true}) {
   try {
     if (!fs) throw new Error('fs global is unavailable');
+    // Read in handoff order: publication precedes journal removal, and identityd
+    // writes its sentinel before consuming a queued request. Reversing these
+    // reads could miss both sides of either transition.
+    if (accountConfig && fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) return true;
+    let requests;
+    try { requests = fs.readdirSync('/var/run/osi-node-red-restart-requests'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; requests = []; }
+    if (requests.some(name => /^account_(?:link|unlink)-.+\.json$/.test(name))) return true;
     // Only existence matters. Never adopt the daemon cache's candidate EUI.
     if (fs.existsSync('/var/run/osi-identity-restart.json')) {
       try { JSON.parse(fs.readFileSync('/var/run/osi-identity-restart.json', 'utf8')); }
       catch (error) { warn('Gateway identity restart state is unreadable; blocking identity-sensitive work'); }
       return true;
     }
-    return accountConfig && (activeAccountOperation !== null || fs.existsSync(ACCOUNT_CONFIG_JOURNAL));
+    return accountConfig && activeAccountOperation !== null;
   } catch (error) {
     warn('Gateway identity or account configuration is unreadable; blocking identity-sensitive work');
     return true;

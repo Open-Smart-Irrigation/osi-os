@@ -363,7 +363,7 @@ function buildHarness(store, nowMs, outboxRows = OUTBOX_ROWS) {
       osiDb: { Database },
       env: { get: (key) => ({ DEVICE_EUI: 'AABBCCDDEEFF0003', DEVICE_EUI_CONFIDENCE: 'authoritative' }[key]) },
       flow: { get: (k) => store.get(k), set: (k, v) => { store.set(k, v); } },
-      global: { get: (k) => (k === 'fs' ? { existsSync: () => false, readFileSync: () => '{}' } : undefined) },
+      global: { get: (k) => (k === 'fs' ? { existsSync: () => false, readdirSync: () => [], readFileSync: () => '{}' } : undefined) },
       node: { warn: (m) => warnings.push(String(m)), error: (m) => warnings.push(String(m)), log: () => {} },
       // The builder loads the conditional replication helper through osi-lib (a hard dependency
       // on this branch); the real module runs against the fake DB, which reports no peer.

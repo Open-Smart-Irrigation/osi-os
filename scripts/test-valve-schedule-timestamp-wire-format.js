@@ -168,7 +168,7 @@ async function runSyncOutboxBuildFunc(func, db, envValues) {
   const nodeApi = { error() {}, warn() {}, status() {} };
   const flowApi = { get: (k) => flowState.get(k), set: (k, v) => flowState.set(k, v) };
   const envApi = { get: (k) => (Object.prototype.hasOwnProperty.call(envValues, k) ? envValues[k] : undefined) };
-  const globalApi = { get: (k) => (k === 'fs' ? { existsSync: () => false } : undefined) };
+  const globalApi = { get: (k) => (k === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined) };
   const result = await fn(msg, nodeApi, flowApi, envApi, globalApi);
   return result;
 }

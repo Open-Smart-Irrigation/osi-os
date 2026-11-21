@@ -526,7 +526,7 @@ async function batchTieCase(profile, earlierCount) {
       const result = await executeFunction(loadNode('sync-outbox-build', profile.flowsPath), Object.assign({
         msg: {},
         db: f.first,
-        globals: { fs: { existsSync: () => false } },
+        globals: { fs: { existsSync: () => false, readdirSync: () => [] } },
         env: { DEVICE_EUI: GATEWAY, DEVICE_EUI_CONFIDENCE: 'active', DEVICE_EUI_SOURCE: 'test' },
         flowState: { outboxFlushInFlightAt: 0, sync_state: {} }
       }, libs));
@@ -577,7 +577,7 @@ async function batchTieCase(profile, earlierCount) {
           DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active',
           OSI_SCOPED_ACCESS: '0', AUTH_TOKEN_SECRET: SECRET
         },
-        globals: { fs: { existsSync: () => false } }
+        globals: { fs: { existsSync: () => false, readdirSync: () => [] } }
       }, libs, { libOverrides: Object.assign({}, libs.libOverrides, { osiCloudHttp: cloud }) }));
       assert.deepEqual(result.errors, []);
       assert.ok(msg.statusCode === 200 || msg.statusCode === 207, JSON.stringify(msg.payload));
@@ -634,7 +634,7 @@ async function forceDeliveryCase(profile) {
         DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active',
         OSI_SCOPED_ACCESS: '0', AUTH_TOKEN_SECRET: SECRET
       },
-      globals: { fs: { existsSync: () => false } }
+      globals: { fs: { existsSync: () => false, readdirSync: () => [] } }
     }, libs, { libOverrides: Object.assign({}, libs.libOverrides, { osiCloudHttp: cloud }) }));
     assert.deepEqual(forced.errors, []);
     const queued = Array.isArray(forced.result) ? forced.result[1] : null;

@@ -199,3 +199,64 @@ command-node shapes already present on the reviewed head. Their speculative edit
 were discarded. The journal-command generator's approved shape comparison now
 recognizes only the added cloud ACK guard, and its current-flow idempotence probe
 passes. No SQL or schema checksum was changed.
+
+## Round-2 daemon handoff correction
+
+Sol's second review closed the publication-failure P1 and found a later gap at
+7d2ff7c72: after publication removed the journal, a queued account request did
+not block transport or another account operation. The reviewer's local probe
+reproduced this for both link and disconnect, before identityd wrote its sentinel.
+
+The shared helper now reads the journal, queued account requests and identity
+sentinel in that order. Publication precedes journal removal; identityd publishes
+the sentinel before deleting a request. Each handoff therefore retains a blocker.
+Missing queue directories are empty; other queue-read failures block. Temporary
+files and bootstrap requests are excluded. New account work checks this fence
+after recovery and before remote authentication preparation or local mutation.
+Recovery can still publish a pending journal and return its saved reply.
+
+Both module copies are identical. This correction makes no flows.json edit:
+both files retain SHA-256
+`3452f2a9b61c348b9869ec284e7a3f7ac07985a0a84bd73211af1668a02e4f10`.
+The publisher, identityd request contract and delays remain unchanged, as do the
+frozen boot and migration-preflight bodies. No cloud or account-policy change.
+
+Readiness initially reported WARN at 7d2ff7c72, behind 14/ahead 3 from main
+bda200db6. Rebase completed cleanly. Range-diff showed all three prior commits
+unchanged; the rebased parent helper matches the reviewed helper byte-for-byte.
+Readiness then reported READY at 3e06414b8, behind 0/ahead 3, with AGENTS.md
+revision c63103827f. Main's startup-flow recovery changes remain intact.
+
+The restart-obligation suite now defines 52 cases. Its 20 new cases cover both
+operations and profiles, normal and recovery publication with identityd paused,
+all six MQTT guards, subsequent link/disconnect refusal, sentinel takeover,
+queue-read faults and handoff read order. The SQLite account-link suite adds four
+cases for the same committed-state handoff, for 36 total. Existing fixtures now
+represent an empty request queue or a completed daemon restart where needed.
+
+Local behavioral execution did not start. The baseline command queued through
+`osi-heavy wait --contain --scratch-tmpfs 1G --need-gib 8 --` behind a live
+firmware build and another waiting firmware build. The implementer cancelled only
+its own waiting wrapper before pushing. No new RED/GREEN or SQLite suite pass is
+claimed for this correction. The preceding review's reproduction is independent
+evidence of the defect; GitHub CI on the corrective head runs both test suites
+and is the full-suite gate under the current brief.
+
+| Local command | Result |
+|---|---|
+| `node scripts/verify-profile-parity.js` | PASS, all parity checks |
+| `node scripts/verify-live-gateway-identity.js` | PASS, live identity verification |
+| `node scripts/verify-flows-size-ratchet.js` | PASS, 3,085,262 characters vs main's 3,173,796 |
+| `node scripts/verify-no-new-silent-catch.js` | PASS |
+| `node scripts/verify-no-stray-ddl.js` | PASS |
+| `node scripts/flows-bare-require-scan.js` | PASS |
+| `node scripts/verify-flows-fn-parse.js` | PASS |
+| `node scripts/verify-flows-sandbox.js` | PASS |
+| `node scripts/verify-helper-registration.js` | PASS |
+| `node scripts/verify-test-inventory.js` | PASS |
+| `scripts/check-mqtt-topics.sh` | PASS |
+| `node scripts/verify-doc-hygiene.js` | PASS |
+| Anti-slop checker on changed prose | PASS |
+
+The draft stays with the assigned Sol reviewer for re-review. K1 policy, B9 GUI
+and the earlier cross-repo deferrals remain outside this correction.

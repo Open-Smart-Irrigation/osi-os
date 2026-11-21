@@ -40,6 +40,7 @@ function fixtureIo(store) {
   const fakeFs = {
     existsSync(p) { return p === '/data/db/osi-account-link-config.json' ? files.has(p) : fs.existsSync(p); },
     readFileSync(p,enc) { return files.has(p) ? files.get(p) : fs.readFileSync(p,enc); },
+    readdirSync(p) { return [...files.keys()].filter(file=>path.dirname(file)===p).map(file=>path.basename(file)); },
     openSync(p,flags) { const fd=nextFd++; descriptors.set(fd,p); if(flags==='wx') files.set(p,''); return fd; },
     writeFileSync(p,data) { files.set(typeof p==='number'?descriptors.get(p):p,String(data)); },
     closeSync(fd) { descriptors.delete(fd); }, fsyncSync() {},
@@ -55,6 +56,12 @@ function fixtureIo(store) {
     return '';
   }};
   const io={fs:fakeFs,cp,files,config}; gatewayIo.set(store,io); return io;
+}
+
+function completeFixtureRestart(io) {
+  // These legacy tests continue after a completed daemon-owned service restart.
+  // The paused-daemon handoff itself is covered by the restart-obligation suite.
+  for(const file of io.files.keys()) if(file.startsWith('/var/run/osi-node-red-restart-requests/')) io.files.delete(file);
 }
 
 const root = path.resolve(__dirname, '..');
@@ -946,6 +953,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
         assert.equal(native.prepare('SELECT password_hash FROM users WHERE id=1').get().password_hash,'local-hash');
         native.close();
         await executeFunctionNode(findNode(flows,'al-link-clear-state'),finalized,{flowStore,scope:{osiDb:fixture.helper,osiLib}});
+        completeFixtureRestart(fixtureIo(flowStore));
       }
     } finally { fixture.cleanup(); }
   });
@@ -989,6 +997,42 @@ async function acceptTarget(f,flows,msg) {
 }
 
 for (const profile of ['bcm2712','bcm2709']) {
+  for(const kind of ['link','disconnect']) test(`${profile}: real ${kind} commit remains fenced through the daemon handoff`,async()=>{
+    const f=linkedConsistencyFixture(),flows=readFlows(profile);
+    try {
+      if(kind==='link') {
+        const msg=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+        const [done,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),msg,f);
+        assert.ok(done);assert.equal(error,null);
+      } else {
+        const [done,error]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+        assert.ok(done);assert.equal(error,null);
+        const [published,failed]=await executeFunctionNode(findNode(flows,'al-unlink-restart-node-red'),done,f);
+        assert.ok(published);assert.equal(failed,null);
+      }
+      const before=localSnapshot(f);
+      assert.equal(before.user.auth_mode,kind==='link'?'server':'local');
+      assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+      assert.equal([...f.io.files.keys()].filter(p=>p.startsWith('/var/run/osi-node-red-restart-requests/')&&p.endsWith('.json')).length,1);
+      const fsExists=f.io.fs.existsSync,fsRead=f.io.fs.readFileSync;
+      let sentinel=false;
+      f.io.fs.existsSync=p=>p==='/var/run/osi-identity-restart.json'?sentinel:fsExists(p);
+      f.io.fs.readFileSync=(p,enc)=>p==='/var/run/osi-identity-restart.json'?'{}':fsRead(p,enc);
+      for(const phase of ['queued','sentinel']) {
+        if(phase==='sentinel') {sentinel=true;completeFixtureRestart(f.io);}
+        for(const target of flows.filter(n=>n.type==='mqtt out'&&n.broker==='ec43625ea99685a6')) {
+          assert.equal(await executeFunctionNode(findNode(flows,'account-cloud-guard-'+target.id),{payload:{fixture:true}},f),null,phase+' blocks MQTT');
+        }
+        assert.equal(await executeFunctionNode(findNode(flows,'sync-refresh-build'),{},f),null,phase+' blocks credential refresh');
+        const [link,linkError]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+        assert.equal(link,null);assert.equal(linkError.statusCode,503);
+        const [disconnect,disconnectError]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+        assert.equal(disconnect,null);assert.equal(disconnectError.statusCode,503);
+        assert.deepEqual(localSnapshot(f),before,'refused operations leave committed state unchanged');
+      }
+    } finally {f.cleanup();}
+  });
+
   test(`${profile}: disconnect SQL failure leaves user, peer, dirty keys and MQTT unchanged`, async()=>{
     const f=linkedConsistencyFixture(); const flows=readFlows(profile);
     const before=localSnapshot(f);
@@ -1095,6 +1139,8 @@ test('interrupted config journals restore before commit and finish after commit;
       assert.equal(result.committed,committed);
       assert.deepEqual(Object.fromEntries([...f.io.config].map(([k,v])=>[k.split('.').at(-1),v])),committed?after:before);
       assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+      assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true,'published recovery still blocks until the daemon restart');
+      completeFixtureRestart(f.io);
       assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
     } finally { await db.close(); f.cleanup(); }
   }
@@ -1113,6 +1159,10 @@ test('failed config restoration retains the journal and blocks further remote wo
     const [remote,blocked]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
     assert.equal(remote,null); assert.ok(blocked);
     failing=false;
+    const [newRequest,pendingRestart]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+    assert.equal(newRequest,null);assert.equal(pendingRestart.statusCode,503);
+    assert.equal(pendingRestart.payload.reason,'account_restart_queued');
+    completeFixtureRestart(f.io);
     const retry=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
     const [linked,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),retry,f);
     assert.equal(error,null); assert.ok(linked);

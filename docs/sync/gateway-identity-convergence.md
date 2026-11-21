@@ -55,3 +55,14 @@ publication removes the receipt; the identity daemon then owns the restart using
 the existing `account_link`/10-second or `account_unlink`/2-second three-field
 request contract. The identity sentinel still blocks linking and finalization,
 including when it appears while cloud authentication is in flight.
+
+Publication keeps the transport fence in place through the queued account
+request. The shared predicate reads the durable journal, queued `account_link`
+or `account_unlink` requests, then the identity sentinel, in that order. The
+publisher writes the request before removing the journal; identityd writes its
+sentinel before consuming the request. A delayed daemon therefore leaves MQTT,
+REST/history and subsequent account operations blocked throughout the handoff.
+An absent request directory is empty; other queue-read failures block. A pending
+journal can still recover and return its saved reply before the helper refuses
+new account operations. Temporary publications and bootstrap requests do not
+count as queued account requests.

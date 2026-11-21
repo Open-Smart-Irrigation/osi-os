@@ -83,3 +83,26 @@ simulation output. MQTT nodes and broker configuration stay byte-identical to
 the reviewed head; ChirpStack downlinks keep their routes. ACK wiring pins name
 the new guard, and the journal-command generator preserves it on an idempotent
 run. The heartbeat function and independent health-sampling path are unchanged.
+## Round-2 daemon handoff fence
+
+The recovery receipt currently stops blocking when publication succeeds. The
+queued account request must carry the fence until identityd writes its sentinel.
+Update `gatewayWorkBlocked` in the installation helper to read the journal,
+account request queue and sentinel in that order. Missing queue directories are
+empty; other read failures block. Ignore temporary publications and unrelated
+bootstrap requests. Keep the three-field request and existing delays unchanged.
+
+Link/disconnect must recover a pending journal and return its saved reply before
+checking the queued-request fence for new operations. In-flight finalization also
+checks the queue and sentinel. No flow-body change is needed for these module
+guards; mirror the helper byte-for-byte.
+
+Extend `test-account-link-restart-obligation.js` with both profiles and operations,
+normal publication and publication after recovery, with identityd paused. Check
+all cloud MQTT guards and both subsequent account operations. Then write the
+sentinel before consuming the request and repeat the checks. Inject consumption
+during the queue read to pin read order. Run the new cases against 7d2ff7c72 for
+RED, then the correction for GREEN through the heavy wrapper. Update affected
+fixtures to represent queue contents and the recovery documentation. Run focused
+account-link tests and static parity/identity/ratchet checks; exact-head CI owns
+the full suites. The assigned Sol re-review follows the draft push.
