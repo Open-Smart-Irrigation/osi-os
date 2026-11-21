@@ -3,17 +3,7 @@
 START=99
 
 BOOTSTRAP_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
-BOOTSTRAP_UPDATED="/srv/node-red/chirpstack-bootstrap.js"
-
-updated_bootstrap_verified() {
-	local receipt="${BOOTSTRAP_UPDATED}.atomic-sha256"
-	local expected actual
-	[ -f "$BOOTSTRAP_UPDATED" ] && [ ! -L "$BOOTSTRAP_UPDATED" ] || return 1
-	[ -f "$receipt" ] && [ ! -L "$receipt" ] || return 1
-	expected="$(cat "$receipt")" || return 1
-	actual="$(sha256sum "$BOOTSTRAP_UPDATED")" || return 1
-	[ "$expected" = "${actual%% *}" ]
-}
+BOOTSTRAP_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 
 stamp_valid() {
 	[ -f /etc/osi-bootstrap.done ] || return 1
@@ -33,12 +23,10 @@ start() {
 
 	local bootstrap_script=""
 	local provisioned_this_boot=0
-	# Sysupgrade may retain a legacy writer at this path. Only prefer a
-	# copy attested by the atomic deploy installer.
-	if updated_bootstrap_verified; then
-		bootstrap_script="$BOOTSTRAP_UPDATED"
-	elif [ -f "$BOOTSTRAP_ROM" ]; then
+	if [ -f "$BOOTSTRAP_ROM" ]; then
 		bootstrap_script="$BOOTSTRAP_ROM"
+	elif [ -f "$BOOTSTRAP_FALLBACK" ]; then
+		bootstrap_script="$BOOTSTRAP_FALLBACK"
 	fi
 
 	if [ -z "$bootstrap_script" ]; then
@@ -63,12 +51,11 @@ start() {
 
 	logger -t osi-bootstrap "running $(basename "$bootstrap_script")..."
 	if node "$bootstrap_script"; then
-		if touch /etc/osi-bootstrap.done && sync; then
+		if touch /etc/osi-bootstrap.done; then
 			provisioned_this_boot=1
 			logger -t osi-bootstrap "bootstrap completed successfully"
 		else
-			rm -f /etc/osi-bootstrap.done
-			logger -t osi-bootstrap "bootstrap completed but stamp write or sync failed, will retry next boot"
+			logger -t osi-bootstrap "bootstrap completed but stamp write failed, will retry next boot"
 		fi
 	else
 		logger -t osi-bootstrap "bootstrap failed, will retry next boot"

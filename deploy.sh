@@ -92,8 +92,18 @@ COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
+ATOMIC_WRITER_SHA256="0c35ebfc83f590ea5e365051dcfe2d4f1ad74fdf0c55e981f83f36ddbcad9842"
+PAYLOAD_SWAP_SHA256="95870eb4928a64b7a83b0c3588463c137448efe0152cd41c61db715a4d5f8eef"
 OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
+# Require complete shell entry points. A truncated script can still parse.
+NODE_RED_INIT_SHA256="2608d45cba55d06cf52b097077629af08f8ece83f087079df1fcfc7c3c979f4a"
+GATEWAY_IDENTITY_HELPER_SHA256="ada77aaa7c4c2fdccf0a674e7297f4f1425fa5fa6e80f479a338c0d20d4dba07"
+IDENTITY_DAEMON_SHA256="4159788616507fe77e73b671524917687dc5077efc962b6a621bc8a6afad1e7d"
+IDENTITY_INIT_SHA256="5ab8396e08c055e4108abcbdc6736e6db8aae275e72e34ed62f733b9143f7cf0"
+IDENTITY_ENABLE_SHA256="00d533b264baaa5ec25a42db39bb67ee04f12205f856fc98de5fc41bdab9a45d"
+BOOTSTRAP_INIT_SHA256="61b657b8e1f19438972042733973139f7734f56ffcdf22f59771e4f9304d82f8"
+IRRIGATION_CLOCK_HOOK_SHA256="8d5c5a47803633ad59aa686a9b243ad6c37afc74e8b13aa94e910e068e3d044c"
 export SWAP_ROOT
 
 # One deploy at a time. The lock is a link in /var/run (gone after a reboot)
@@ -197,107 +207,36 @@ file_sha256() {
     node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
-# Boot entry points are exchanged as complete files on their destination
-# filesystem. In particular a partial download cannot truncate the old init.
-publish_boot_file() {
-    node - "$1" "$2" "$3" <<'NODE'
-const fs = require('node:fs');
-const path = require('node:path');
-const [stage, target, mode] = process.argv.slice(2);
-const expected = Number.parseInt(mode, 8);
-const dir = fs.openSync(path.dirname(target), 'r');
-try {
-  const fd = fs.openSync(stage, 'r');
-  try {
-    fs.fchmodSync(fd, expected);
-    const metadata = fs.fstatSync(fd);
-    if (!metadata.isFile() || metadata.size === 0 || (metadata.mode & 0o7777) !== expected) {
-      throw new Error('invalid staged boot file: ' + target);
-    }
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  const previous = fs.lstatSync(target, { throwIfNoEntry: false }) &&
-    target + '.tmp-' + require('node:crypto').randomUUID() + '.previous';
-  if (previous) fs.linkSync(target, previous);
-  try {
-    fs.renameSync(stage, target);
-  } catch (error) {
-    if (previous) fs.unlinkSync(previous);
-    fs.fsyncSync(dir);
-    throw error;
-  }
-  try {
-    fs.fsyncSync(dir);
-  } catch (error) {
-    if (previous) fs.renameSync(previous, target);
-    else fs.unlinkSync(target);
-    fs.fsyncSync(dir);
-    throw error;
-  }
-  if (previous) {
-    try {
-      fs.unlinkSync(previous);
-      fs.fsyncSync(dir);
-    } catch (error) {
-      console.warn('Boot file committed but rollback cleanup failed: ' + error.message);
-    }
-  }
-} finally {
-  fs.closeSync(dir);
-}
-NODE
-}
-
-publish_bootstrap_receipt() {
-    local script="$1" receipt="$1.atomic-sha256" stage
-    stage="$(mktemp "$receipt.osi-stage.XXXXXX")" || return 1
-    if ! { file_sha256 "$script" > "$stage" && publish_boot_file "$stage" "$receipt" 644; }; then
-        rm -f "$stage"
+verify_download_pin() {
+    if [ "$(file_sha256 "$1")" != "$2" ]; then
+        echo "ERROR: ${1##*/} did not match its SHA-256 pin; refusing deploy" >&2
         return 1
     fi
 }
 
-# Live destinations supply a mode and are checked before publication. The
-# three-argument form downloads only to private deploy or payload staging.
+# Download into private scratch. Publish from there through a file staged in
+# the live target's real directory, so curl can never truncate the live file.
+publish_download() {
+    mkdir -p "$(dirname "$2")" || return 1
+    node "$TMP_DIR/osi-atomic-write.js" "$1" "$2" "$3" "${4:-}"
+}
+
 fetch_required() {
-    local label="$1" src="$2" dest="$3" stage= rc=0
+    local label="$1" src="$2" dest="$3" stage rc=0
     echo "--- $label ---"
-    if [ "$#" -gt 3 ]; then
-        mkdir -p "${dest%/*}" || return 1
-        stage="$(mktemp "$dest.osi-stage.XXXXXX")" || return 1
+    if [ "$#" -ge 4 ]; then
+        stage="$(mktemp "$TMP_DIR/live-download.XXXXXX")" || return 1
         fetch "$src" "$stage" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            publish_download "$stage" "$dest" "$4" "${5:-}" || rc=$?
+        fi
+        rm -f "$stage" || rc=1
     else
         fetch "$src" "$dest" || rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        [ -z "${stage:-}" ] || rm -f "$stage"
-        echo "ERROR: could not fetch $src (exit $rc)" >&2
+        echo "ERROR: could not fetch $src or publish its download (exit $rc)" >&2
         return "$rc"
-    fi
-    if [ "$#" -gt 3 ]; then
-        case "$dest" in
-            *.js) node --check < "$stage" || rc=$? ;;
-            *.json)
-                node -e '
-                  const data = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-                  const valid = process.argv[2] === "edge-channels.json"
-                    ? Array.isArray(data)
-                    : data !== null && typeof data === "object" && !Array.isArray(data);
-                  if (!valid) throw new Error("unexpected runtime JSON shape");
-                ' "$stage" "${dest##*/}" || rc=$?
-                ;;
-            *) sh -n "$stage" || rc=$? ;;
-        esac
-        if [ "$rc" -eq 0 ]; then
-            publish_boot_file "$stage" "$dest" "$4" || rc=$?
-        fi
-        rm -f "$stage" || rc=1
-        if [ "$rc" -ne 0 ]; then
-            echo "ERROR: could not install $src (exit $rc)" >&2
-            return "$rc"
-        fi
     fi
     echo "OK"
 }
@@ -368,18 +307,9 @@ install_irrigation_clock_hook() {
         esac
     fi
 
-    mkdir -p "$(dirname "$IRRIGATION_CLOCK_HOOK")" || return 1
-    if ! fetch_required "conditional irrigation NTP clock hook" \
+    fetch_required "conditional irrigation NTP clock hook" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/hotplug.d/ntp/70-osi-irrigation-clock" \
-        "/etc/hotplug.d/ntp/70-osi-irrigation-clock"; then
-        restore_inactive_clock_hook
-        return 1
-    fi
-    if ! chmod 0755 "$IRRIGATION_CLOCK_HOOK"; then
-        echo "ERROR: could not activate conditional irrigation NTP clock hook" >&2
-        restore_inactive_clock_hook
-        return 1
-    fi
+        "$IRRIGATION_CLOCK_HOOK" 755 "$IRRIGATION_CLOCK_HOOK_SHA256" || return 1
     if [ "$hook_was_active" = "1" ]; then
         echo "OK: existing executable clock hook refreshed without sysntpd restart"
         return 0
@@ -787,14 +717,14 @@ enable_osi_bootstrap() {
 # and rewrite the env file. "Provisioned" uses the service's own test (stamp
 # plus a sensors application UUID in the env file).
 print_bootstrap_note() {
-    if [ -f "$BOOTSTRAP_SCRIPT_FALLBACK" ]; then
-        pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
-    else
+    if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
         pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+    else
+        pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
     fi
     echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
     echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."
-    echo "NOTE: osi-bootstrap uses the updated /srv/node-red script when its deploy receipt verifies, then the firmware copy."
+    echo "NOTE: osi-bootstrap may still prefer an older ROM script; this deploy does not replace it."
     if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
        grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
         echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
@@ -1499,10 +1429,6 @@ verify_native_sqlite3_after_npm() {
 
 seed_db_if_missing() {
     echo "--- farming.db ---"
-    if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
-        echo "HELD: Database recovery is incomplete. Refusing to seed $DB_PATH." >&2
-        return 1
-    fi
     if [ -e "$DB_PATH" ]; then
         echo "SKIP: existing live database preserved at $DB_PATH"
         return 0
@@ -1513,72 +1439,17 @@ seed_db_if_missing() {
         return 1
     fi
 
-    if ! ensure_sqlite3_cli; then
-        echo "ERROR: cannot validate a fresh database seed without the sqlite3 CLI; no seed was published" >&2
-        return 1
+    seed_tmp="$TMP_DIR/farming.db"
+    fetch "$SEED_DB_REL" "$seed_tmp"
+    if command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$seed_tmp" "PRAGMA integrity_check;" | grep -qx "ok"
     fi
-
-    local seed_tmp check
-    mkdir -p "$DB_DIR" || return 1
-    seed_tmp="$(mktemp "$DB_PATH.osi-stage.XXXXXX")" || return 1
-    if ! fetch "$SEED_DB_REL" "$seed_tmp"; then
-        rm -f "$seed_tmp"
-        echo "ERROR: could not fetch $SEED_DB_REL" >&2
-        return 1
+    if [ -e "$DB_PATH" ]; then
+        echo "SKIP: existing live database appeared during deploy and was preserved at $DB_PATH"
+        return 0
     fi
-    if ! check="$(sqlite3 -batch -bail -readonly "$seed_tmp" 'PRAGMA integrity_check;')" ||
-        [ "$check" != ok ] || [ ! -s "$seed_tmp" ]; then
-        rm -f "$seed_tmp"
-        echo "ERROR: downloaded database seed failed integrity_check" >&2
-        return 1
-    fi
-    if ! node - "$seed_tmp" "$DB_PATH" <<'NODE'
-  const fs = require('node:fs');
-  const path = require('node:path');
-  const [stage, target] = process.argv.slice(2);
-  const fd = fs.openSync(stage, 'r');
-  try {
-    fs.fchmodSync(fd, 0o644);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  const dir = fs.openSync(path.dirname(target), 'r');
-  try {
-    for (const suffix of ['.osi-recovery', '-wal', '-shm', '-journal']) {
-      if (fs.lstatSync(target + suffix, { throwIfNoEntry: false })) {
-        throw new Error('database recovery record or sidecar appeared before seeding: ' + suffix);
-      }
-    }
-    let published = false;
-    try {
-      fs.linkSync(stage, target);
-      published = true;
-    } catch (error) {
-      if (error.code !== 'EEXIST' || !fs.lstatSync(target).isFile()) throw error;
-    }
-    if (published) {
-      try {
-        fs.fsyncSync(dir);
-      } catch (error) {
-        fs.unlinkSync(target);
-        fs.fsyncSync(dir);
-        throw error;
-      }
-      console.log('OK: seeded new database at ' + target);
-    } else {
-      console.log('SKIP: a live database appeared during deploy and was preserved');
-    }
-  } finally {
-    fs.closeSync(dir);
-  }
-NODE
-    then
-        rm -f "$seed_tmp"
-        echo "ERROR: could not publish database seed" >&2
-        return 1
-    fi
-    rm -f "$seed_tmp" || return 1
+    mv "$seed_tmp" "$DB_PATH"
+    echo "OK: seeded new database at $DB_PATH"
 }
 
 node_red_restart_needed=0
@@ -2305,10 +2176,6 @@ cleanup_failed_first_payload() {
 # pre-migration checkpoint, which therefore never touches a refused file.
 DAMAGED_DB_DOC="docs/operations/damaged-farm-database.md"
 check_live_db_readonly() {
-    if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
-        echo "HELD: Database recovery is incomplete. Resolve $DB_PATH.osi-recovery before deploying." >&2
-        return 1
-    fi
     [ -e "$DB_PATH" ] || return 0
     command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
     if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
@@ -2937,17 +2804,18 @@ run_native_sqlite3_preflight || exit 1
 
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+verify_download_pin "$SWAP_JS" "$PAYLOAD_SWAP_SHA256" || exit 1
 same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
 # A damaged database is refused here, before anything on the gateway changes.
 check_live_db_readonly || exit 1
 gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
-swap_stage="$(mktemp /srv/node-red/.payload-swap.js.osi-stage.XXXXXX)"
-if ! { cp "$SWAP_JS" "$swap_stage" && node --check < "$swap_stage" &&
-       publish_boot_file "$swap_stage" /srv/node-red/.payload-swap.js 644; }; then
-    rm -f "$swap_stage"
-    echo "ERROR: could not keep the payload swap helper for node-red.init; refusing before any file is replaced" >&2
+fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js" "$TMP_DIR/osi-atomic-write.js"
+verify_download_pin "$TMP_DIR/osi-atomic-write.js" "$ATOMIC_WRITER_SHA256" || exit 1
+if ! { publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js" 644 &&
+       publish_download "$SWAP_JS" "/srv/node-red/.payload-swap.js" 644; }; then
+    echo "ERROR: could not install the atomic writer or payload swap helper" >&2
     exit 1
 fi
 echo "OK"
@@ -3082,14 +2950,10 @@ tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"
 # discards the stage.
 DISCARD_STAGE_ON_EXIT=1
 swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null
-swap_call sealPristineFlows "$DEPLOY_STAMP" "$STAGED_FLOWS" >/dev/null
 # The release each payload belongs to, for the HELD restore command, which
 # puts osi-server.cloud.firmware_version back with the payload it returns to.
 [ -z "${DEPLOY_FIRMWARE_VERSION:-}" ] || printf '%s\n' "$DEPLOY_FIRMWARE_VERSION" > "$PAYLOADS_ROOT/$DEPLOY_STAMP/release-version"
 PREV_STAMP="$(swap_call currentStamp || true)"
-if [ -z "$PREV_STAMP" ] && swap_call flowRecoveryHeld; then
-    PREV_STAMP="$(swap_call activeStamp || true)"
-fi
 PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
 # legacy payload capture begin
 if [ -n "${PREV_STAMP:-}" ] && [ ! -d "$GUI_ROOT" ]; then
@@ -3937,53 +3801,28 @@ fetch_required "Node-RED settings.js" \
 
 fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red" 755 || exit 1
-# A previous image may still have a seed script left to run. Update those
-# consumers before replacing the recovery writer an existing service can call.
-if [ -e /etc/uci-defaults/97_osi_db_seed ]; then
-    fetch_required "Outstanding first-boot database seed guard" \
-        "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/97_osi_db_seed" \
-        "/etc/uci-defaults/97_osi_db_seed" 755 || exit 1
-fi
-if [ -e /etc/uci-defaults/98_osi_node_red_seed ]; then
-    fetch_required "Outstanding first-boot runtime seed guard" \
-        "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/98_osi_node_red_seed" \
-        "/etc/uci-defaults/98_osi_node_red_seed" 755 || exit 1
-fi
-
-fetch_required "Boot database integrity check" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
-    "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
-
-fetch_required "Boot database integrity service" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-db-integrity" \
-    "/etc/init.d/osi-db-integrity" 755 || exit 1
-
+    "/etc/init.d/node-red" 755 "$NODE_RED_INIT_SHA256" || exit 1
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
-    "/usr/libexec/osi-gateway-identity.sh" 755 || exit 1
+    "/usr/libexec/osi-gateway-identity.sh" 755 "$GATEWAY_IDENTITY_HELPER_SHA256" || exit 1
 
 fetch_required "Gateway identity daemon" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
-    "/usr/libexec/osi-identityd.sh" 755 || exit 1
+    "/usr/libexec/osi-identityd.sh" 755 "$IDENTITY_DAEMON_SHA256" || exit 1
 
 fetch_required "Gateway identity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
-    "/etc/init.d/osi-identityd" 755 || exit 1
+    "/etc/init.d/osi-identityd" 755 "$IDENTITY_INIT_SHA256" || exit 1
 
 fetch_required "Gateway identity service enable script" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
-    "/etc/uci-defaults/94_osi_identityd_enable" 755 || exit 1
+    "/etc/uci-defaults/94_osi_identityd_enable" 755 "$IDENTITY_ENABLE_SHA256" || exit 1
 
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
     "/srv/node-red/chirpstack-bootstrap.js" 644 || exit 1
-if ! publish_bootstrap_receipt "$BOOTSTRAP_SCRIPT_FALLBACK"; then
-    echo "ERROR: could not publish the bootstrap deploy receipt" >&2
-    exit 1
-fi
 
 # issue-183 early secure begin
 if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
@@ -3997,7 +3836,7 @@ fi
 
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
-    "/etc/init.d/osi-bootstrap" 755 || exit 1
+    "/etc/init.d/osi-bootstrap" 755 "$BOOTSTRAP_INIT_SHA256" || exit 1
 enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
@@ -4008,7 +3847,7 @@ fi
 rm -f /etc/init.d/osi-gateway-gps /usr/bin/osi-gateway-gps.js
 echo "OK"
 
-seed_db_if_missing || exit 1
+seed_db_if_missing
 
 fetch_required "Node-RED runtime package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \

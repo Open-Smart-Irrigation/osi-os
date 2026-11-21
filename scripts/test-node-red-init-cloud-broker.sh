@@ -35,11 +35,14 @@ SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/osi-cloud-broker-test.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT INT TERM
 
 # Copy the init and move every absolute path it writes to into the sandbox.
+mkdir -p "$SANDBOX/usr/share/node-red"
+cp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js "$SANDBOX/usr/share/node-red/"
 sed \
     -e "s#/srv/#$SANDBOX/srv/#g" \
     -e "s#/data/#$SANDBOX/data/#g" \
     -e "s#/var/run/#$SANDBOX/var/run/#g" \
     -e "s#/usr/libexec/#$SANDBOX/usr/libexec/#g" \
+    -e "s#/usr/share/node-red/osi-atomic-write.js#$SANDBOX/usr/share/node-red/osi-atomic-write.js#g" \
     "$INIT" > "$SANDBOX/node-red.init"
 
 # ---------------------------------------------------------------------------
@@ -121,7 +124,7 @@ HARNESS
 
 write_flows() {
     mkdir -p "$SANDBOX/srv/node-red"
-    printf '[{"id":"%s","type":"mqtt-broker","name":"OSI Cloud Broker","broker":"%s","port":"443","clientid":"device_${DEVICE_EUI}"},{"id":"fixture","type":"tab"},{"id":"route","type":"http in","z":"fixture","url":"/api/fixture","method":"get"}]\n' \
+    printf '[{"id":"%s","type":"mqtt-broker","name":"OSI Cloud Broker","broker":"%s","port":"443","clientid":"device_${DEVICE_EUI}"}]\n' \
         "$BROKER_NODE_ID" "$1" > "$SANDBOX/srv/node-red/flows.json"
 }
 

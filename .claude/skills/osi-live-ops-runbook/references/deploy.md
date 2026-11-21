@@ -226,10 +226,9 @@ dev workstation unless noted.
      The CLI's `ENV_FILE` override is for direct use only. Updated and replaced files are
      root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
      existing backup is retained. Text repair requires lossless UTF-8.
-   - Deploy installs the bootstrap writer at `/srv/node-red/chirpstack-bootstrap.js`
-     as a synced, atomic replacement. The updated `osi-bootstrap` service
-     selects that copy first. A factory image without a deployed copy uses
-     `/usr/share/node-red/chirpstack-bootstrap.js`.
+   - Deploy updates `/srv/node-red/` but does not replace the image's ROM
+     `/usr/share/node-red/` writer. `osi-bootstrap` continues to prefer that
+     ROM file whenever it exists; only a new image supplies an updated ROM copy.
    - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
      none (a codec already there is left alone), a new `OSI CLOVER Sensor`
      profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`

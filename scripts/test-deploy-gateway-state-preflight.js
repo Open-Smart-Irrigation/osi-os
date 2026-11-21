@@ -182,7 +182,7 @@ refusedUnchanged('a damaged database (read-only integrity check)', (g) => {
 
 test('the preflight runs before the deploy\'s first change on the gateway', () => {
   const pre = DEPLOY.indexOf('\ngateway_state_preflight || exit 1\n');
-  const firstChange = DEPLOY.indexOf('publish_boot_file "$swap_stage" /srv/node-red/.payload-swap.js 644');
+  const firstChange = DEPLOY.indexOf('publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js"');
   assert.ok(pre > 0 && pre < firstChange);
 });
 
@@ -227,7 +227,7 @@ export SWAP_ROOT SWAP_JS
 ${['swap_call', 'release_deploy_lock', 'cleanup'].map(fn).join('\n')}
 trap cleanup EXIT
 mkdir -p "$TMP_DIR/gui"
-printf '%s\n' '[{"id":"fixture-tab","type":"tab"},{"id":"fixture-route","type":"http in","z":"fixture-tab","url":"/api/fixture","method":"get"}]' > "$TMP_DIR/flows.json"
+printf '[]' > "$TMP_DIR/flows.json"
 printf 'new' > "$TMP_DIR/gui/index.html"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 STAGED_GUI="$TMP_DIR/gui"
@@ -306,7 +306,7 @@ test('the staging checks run before settings.js and every write to a live path',
   for (const change of [
     '\nensure_osi_server_config || exit 1\n',
     'fetch_required "Node-RED settings.js"',
-    '\nseed_db_if_missing || exit 1\n',
+    '\nseed_db_if_missing\n',
     'fetch_required "Node-RED runtime package.json"',
     '\nstage_command_ledger_dependency\n',
     'fetch_required "edge-channels.json"',

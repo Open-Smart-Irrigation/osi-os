@@ -5,11 +5,10 @@ STOP=
 USE_PROCD=0
 
 start() {
-  local report rc=0
-  report="$(node /usr/share/node-red/osi-db-integrity/index.js 2>&1)" || rc=$?
-  [ -z "$report" ] || logger -t osi-db-integrity "$report"
-  if [ "$rc" -ne 0 ]; then
-    logger -t osi-db-integrity "database recovery check exited $rc"
-    return "$rc"
+  if node /usr/share/node-red/osi-db-integrity/index.js 2>&1 | logger -t osi-db-integrity; then
+    :
+  else
+    logger -t osi-db-integrity "check exited non-zero (unrecoverable or fatal); boot continues"
   fi
+  return 0
 }

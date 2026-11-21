@@ -655,13 +655,6 @@ function decodeEnvUtf8(bytes) {
   return text;
 }
 
-// Both publishers flush a fully written staging inode before publication.
-function writeAndSyncStage(fd, content, verifyWritten = () => {}) {
-  fs.writeFileSync(fd, content);
-  verifyWritten();
-  fs.fsyncSync(fd);
-}
-
 function publishEnvContent(directory, name, content, snapshot, publication) {
   const operation = 'publishEnvContent';
   const state = directory.state;
@@ -723,11 +716,11 @@ function publishEnvContent(directory, name, content, snapshot, publication) {
       || initial.uid !== 0 || initial.gid !== 0 || (initial.mode & 0o7777) !== 0o600) {
       throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
     }
-    writeAndSyncStage(stageFd, candidateBytes, () => {
-      const written = fs.fstatSync(stageFd);
-      if (written.size !== candidateBytes.length) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'BYTE_COUNT_MISMATCH', published: state.published, publication: state.publication });
-      phase = 'flush';
-    });
+    fs.writeFileSync(stageFd, candidateBytes);
+    const written = fs.fstatSync(stageFd);
+    if (written.size !== candidateBytes.length) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'BYTE_COUNT_MISMATCH', published: state.published, publication: state.publication });
+    phase = 'flush';
+    fs.fsyncSync(stageFd);
     stageFileIdentity = fs.fstatSync(stageFd);
     if (!checkedEnvStat(stageFileIdentity) || stageFileIdentity.size !== candidateBytes.length) {
       throw new CredentialEnvError({ operation, phase: 'verify', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
@@ -926,8 +919,7 @@ function patchSettingsJs() {
     console.log(`  ⚠ settings.js not found at ${CFG.settingsJs} — skipping patch`);
     return;
   }
-  const target = fs.realpathSync(CFG.settingsJs);
-  let src = fs.readFileSync(target, 'utf8');
+  let src = fs.readFileSync(CFG.settingsJs, 'utf8');
   if (src.includes(ENV_LOADER_MARKER)) {
     console.log('  ✓ settings.js already patched');
     return;
@@ -959,54 +951,8 @@ try {
   } else {
     src = loader + src;
   }
-  const { uid, gid, mode } = fs.statSync(target);
-  const temporary = target + '.tmp-' + require('crypto').randomUUID();
-  const dir = fs.openSync(path.dirname(target), 'r');
-  let staged = false;
-  try {
-    const fd = fs.openSync(temporary, 'wx', 0o600);
-    staged = true;
-    try {
-      fs.fchownSync(fd, uid, gid);
-      fs.fchmodSync(fd, mode & 0o7777);
-      writeAndSyncStage(fd, src);
-    } finally {
-      fs.closeSync(fd);
-    }
-    const previous = temporary + '.previous';
-    fs.linkSync(target, previous);
-    try {
-      fs.renameSync(temporary, target);
-      staged = false;
-    } catch (error) {
-      fs.unlinkSync(previous);
-      fs.fsyncSync(dir);
-      throw error;
-    }
-    try {
-      fs.fsyncSync(dir);
-    } catch (error) {
-      try {
-        fs.renameSync(previous, target);
-        fs.fsyncSync(dir);
-      } catch (rollbackError) {
-        throw new Error(error.message + '. Settings rollback could not be synced: ' + rollbackError.message);
-      }
-      throw error;
-    }
-    try {
-      fs.unlinkSync(previous);
-      fs.fsyncSync(dir);
-    } catch (error) {
-      console.warn('Could not finish settings rollback-link cleanup: ' + error.message);
-    }
-  } finally {
-    try {
-      if (staged) fs.rmSync(temporary, { force: true });
-    } finally {
-      fs.closeSync(dir);
-    }
-  }
+  const { writeAtomic } = require('/usr/share/node-red/osi-atomic-write.js');
+  writeAtomic(CFG.settingsJs, src);
   console.log('  ✓ settings.js patched to load env file on startup');
 }
 

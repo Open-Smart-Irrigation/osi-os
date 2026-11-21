@@ -48,9 +48,10 @@ function nodePathForShell() {
 
 function watermarkReceiverHarness(root, source, incomingFlows, incomingGui, receiverSource, receiverTarget, setup = '') {
   const fetchStart = DEPLOY.indexOf('fetch() {');
-  const fetchEnd = DEPLOY.indexOf('\n# The hotplug hook', fetchStart);
-  assert.ok(fetchStart >= 0 && fetchEnd > fetchStart, 'deploy.sh fetch functions must remain extractable');
-  const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd);
+  const fetchEnd = DEPLOY.indexOf('\n}\n\nfetch_required', fetchStart) + 3;
+  const requiredStart = DEPLOY.indexOf('fetch_required() {');
+  const requiredEnd = DEPLOY.indexOf('\n}\n\nsame_fs_or_die', requiredStart) + 3;
+  const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd) + '\n' + DEPLOY.slice(requiredStart, requiredEnd);
   return `set -eu
 BASE=file://${source}
 SWAP_ROOT=${JSON.stringify(root)}
