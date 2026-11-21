@@ -6,7 +6,7 @@ const {adaptFlows}=require('./valve-ingress-x2-renderer');
 const {countSilentCatchesInFlow}=require('../verify-no-new-silent-catch');
 const {countMarkers,textSourcesFromContent}=require('../verify-no-stray-ddl');
 const ROOT=path.resolve(__dirname,'../..');
-const SOURCE='1a984f31fabc28b60ba7695087984e1758dbe0f1';
+const SOURCE='bda200db621b997c6303144a3d3b1488d7cd85ef';
 const FLOW_PATHS=['bcm2712','bcm2709'].map(p=>`conf/full_raspberrypi_bcm27xx_${p}/files/usr/share/flows.json`);
 const SILENT='scripts/fixtures/silent-catch-baseline.json',DDL='scripts/verify-no-stray-ddl-baseline.json';
 const PATCH='scripts/fixtures/valve-ingress-x2/handoff.patch', RECEIPT='scripts/fixtures/valve-ingress-x2/handoff.json';
@@ -48,7 +48,10 @@ function canonicalPatch(files){
   return require('./valve-ingress-x2-patch-codec').canonicalBinaryPatch(result.stdout.replace(/^diff --git a\/a\/(.+) b\/b\/(.+)$/gm,'diff --git a/$1 b/$2').replace(/^--- a\/a\//gm,'--- a/').replace(/^\+\+\+ b\/b\//gm,'+++ b/').trimEnd()+'\n');
  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }
-function receipt(files){return {source:SOURCE,files:files.map(f=>({path:f.rel,beforeSha256:sha(f.before),afterSha256:sha(f.after)})),silentCatchCounts:{bcm2712:59,bcm2709:59},ddlTotal:694};}
+function receipt(files){
+ const silent=JSON.parse(files.find(f=>f.rel===SILENT).after),ddl=JSON.parse(files.find(f=>f.rel===DDL).after);
+ return {source:SOURCE,files:files.map(f=>({path:f.rel,beforeSha256:sha(f.before),afterSha256:sha(f.after)})),silentCatchCounts:Object.fromEntries(Object.entries(silent.profiles).map(([name,value])=>[name,value.silentCatchCount])),ddlTotal:ddl.total};
+}
 function verifyHandoff(root=ROOT){
  const files=canonicalHandoff();
  assert.equal(fs.readFileSync(path.join(ROOT,PATCH),'utf8'),canonicalPatch(files),'checked-in patch differs from canonical renderer');
@@ -63,5 +66,6 @@ function verifyHandoff(root=ROOT){
  assert.equal(states.size,1,'partial handoff application');
  return {files,state:[...states][0]};
 }
-function writeHandoff(root){const {files,state}=verifyHandoff(root);if(state==='rendered')return;for(const f of files)fs.writeFileSync(path.join(root,f.rel),f.after);}
-module.exports={ROOT,PATCH,RECEIPT,FLOW_PATHS,canonicalHandoff,canonicalPatch,receipt,verifyHandoff,writeHandoff};
+const {applyReceiptPatch}=require('./valve-ingress-x2-apply');
+function writeHandoff(root){const {files,state}=verifyHandoff(root);if(state==='rendered')return;applyReceiptPatch(root,files,{patch:path.join(ROOT,PATCH)});}
+module.exports={applyReceiptPatch,SOURCE,ROOT,PATCH,RECEIPT,FLOW_PATHS,canonicalHandoff,canonicalPatch,receipt,verifyHandoff,writeHandoff};

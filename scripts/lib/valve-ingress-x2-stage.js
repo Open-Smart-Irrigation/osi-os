@@ -21,10 +21,13 @@ function stagedTree({applyHandoff=true}={}){
   git(['update-ref','refs/remotes/origin/main',git(['rev-parse','origin/main']).trim()],dir);
   if(applyHandoff){
   const {state,files}=handoff.verifyHandoff(dir);
-  if(state==='legacy')git(['apply','--check',handoff.PATCH],dir);
+  const patch=path.join(handoff.ROOT,handoff.PATCH);
+  if(state==='legacy')handoff.writeHandoff(dir);
+  for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.after,'actual applied content: '+file.rel);
+  handoff.applyReceiptPatch(dir,files,{patch,reverse:true});
+  for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.before,'actual reversed content: '+file.rel);
   handoff.writeHandoff(dir);
-  for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.after);
-  git(['apply','--reverse','--check',handoff.PATCH],dir);
+  for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.after,'actual reapplied content: '+file.rel);
   }
   git(['add','-A'],dir);
   return {dir,close(){fs.rmSync(dir,{recursive:true,force:true});}};

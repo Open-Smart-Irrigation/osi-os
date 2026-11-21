@@ -5,7 +5,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {execFileSync,spawnSync}=require('node:child_process');
 const {stagedTree}=require('./lib/valve-ingress-x2-stage');
-const ROOT=path.resolve(__dirname,'..'),BASE='1a984f31fabc28b60ba7695087984e1758dbe0f1';
+const ROOT=path.resolve(__dirname,'..'),BASE=require('./lib/valve-ingress-x2-handoff').SOURCE;
 function main(){
  const source=stagedTree({applyHandoff:false}),fresh=fs.mkdtempSync(path.join(os.tmpdir(),'x2-squash-clone-'));
  const git=(args,cwd=source.dir,options={})=>execFileSync('git',args,{cwd,encoding:'utf8',maxBuffer:8*1024*1024,stdio:['pipe','pipe','pipe'],...options});

@@ -3846,7 +3846,7 @@ fetch_required "osi-valve-control live-wrappers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js" \
     "$MODULE_STAGE/osi-valve-control/live-wrappers.js"
 
-# X2 entry points load with index.js; stage every dependency before activation.
+# Stage X2 compatibility files alongside index.js; direct calls load them lazily.
 fetch_required "osi-valve-control command-ingress.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/command-ingress.js" \
     "$MODULE_STAGE/osi-valve-control/command-ingress.js"

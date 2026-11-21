@@ -43,6 +43,7 @@ function canonicalBinaryPatch(patch){
   const raw=inflateSync(decode(payload));assert.equal(raw.length,Number(header[1]),'Git payload size');
   result.push(...encode(storedZlib(raw)));
  }
- return result.join('\n').trimEnd()+'\n';
+ // A blank separator terminates the final Git binary hunk.
+ return result.join('\n').trimEnd()+'\n\n';
 }
 module.exports={canonicalBinaryPatch,decode,encode,storedZlib};

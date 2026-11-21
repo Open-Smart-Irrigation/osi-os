@@ -10,12 +10,6 @@ on:
 permissions:
   contents: read
 
-# Prepared handoff on the reviewed base; update all three at X1 integration.
-env:
-  OSI_FLOWS_SIZE_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
-  OSI_DDL_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
-  OSI_MIGRATIONS_BASE_REF: '1a984f31fabc28b60ba7695087984e1758dbe0f1'
-
 jobs:
   characterization:
     runs-on: ubuntu-latest

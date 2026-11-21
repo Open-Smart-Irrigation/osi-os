@@ -6,12 +6,12 @@ const {cases,assertBranch}=require('./lib/valve-ingress-x2-additive-cases');
 const {execute}=require('./lib/valve-ingress-x2-harness');
 const {adaptFlows,entryBridge,comparable}=require('./lib/valve-ingress-x2-adapters');
 const file=path.join(FIXTURE,'additive-hashes.json');
-const {pinnedSource}=require('./lib/valve-ingress-x2-frozen');
+const {pinnedSource,assertOracleContent,ADDITIVE}=require('./lib/valve-ingress-x2-frozen');
 async function main(){
  const capture=process.argv[2];assert.ok(!capture||capture==='--capture-additive='+file,'capture requires the distinct additive fixture path');
  if(capture)assert.ok(!fs.existsSync(file),'additive capture is write-once');
  const writeEvidence=require('./lib/valve-ingress-x2-evidence').createEvidenceWriter('X2_ADDITIVE_EVIDENCE');
- pinnedSource();
+ pinnedSource({allowMissingAdditive:!!capture});
  const tcases=cases(),hashes={},evidence=[];
  for(const profile of ['bcm2712','bcm2709']){
   const share=path.join(ROOT,`conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share`),moduleRoot=path.join(share,'node-red/osi-valve-control');
@@ -30,7 +30,10 @@ async function main(){
   }
  }
  const record={source:baseline.source,casesSha256:digest(tcases),hashes};
- if(capture)fs.writeFileSync(file,JSON.stringify(record,null,2)+'\n',{flag:'wx'});
+ if(capture){
+  const bytes=JSON.stringify(record,null,2)+'\n';assertOracleContent(ADDITIVE,bytes);
+  fs.writeFileSync(file,bytes,{flag:'wx'});
+ }
  else assert.deepEqual(record,JSON.parse(fs.readFileSync(file)),'additive legacy capture changed');
  writeEvidence(evidence);
  console.log(`X2 additive: ${tcases.length} branch-asserted cases x 2 profiles identical`);
