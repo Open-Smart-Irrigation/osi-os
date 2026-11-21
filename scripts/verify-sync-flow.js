@@ -3564,7 +3564,7 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPS
 expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT"', 'captures an existing flows and GUI pair before first activation');
-expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
+expectFileIncludes('deploy.sh', deployScript, '"/etc/init.d/node-red" 755 || exit 1', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
 expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
 expectFileIncludes('deploy.sh', deployScript, 'wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', 'verifies the named Node-RED service has stopped before migrating');

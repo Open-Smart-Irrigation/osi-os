@@ -188,8 +188,7 @@ deploy_time() {
 }
 
 fetch() {
-    src="$1"
-    dest="$2"
+    local src="$1" dest="$2"
     mkdir -p "$(dirname "$dest")"
     curl -fsSLo "$dest" "$BASE/$src"
 }
@@ -198,16 +197,30 @@ file_sha256() {
     node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
+# Download into private scratch. Publish from there through a file staged in
+# the live target's real directory, so curl can never truncate the live file.
+publish_download() {
+    mkdir -p "$(dirname "$2")" || return 1
+    node "$TMP_DIR/osi-atomic-write.js" "$1" "$2" "$3"
+}
+
 fetch_required() {
-    label="$1"
-    src="$2"
-    dest="$3"
+    local label="$1" src="$2" dest="$3" stage rc=0
     echo "--- $label ---"
-    fetch "$src" "$dest" || {
-        fetch_rc=$?
-        echo "ERROR: could not fetch $src (exit $fetch_rc)" >&2
-        return "$fetch_rc"
-    }
+    if [ "$#" -eq 4 ]; then
+        stage="$(mktemp "$TMP_DIR/live-download.XXXXXX")" || return 1
+        fetch "$src" "$stage" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            publish_download "$stage" "$dest" "$4" || rc=$?
+        fi
+        rm -f "$stage" || rc=1
+    else
+        fetch "$src" "$dest" || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "ERROR: could not fetch $src or publish its download (exit $rc)" >&2
+        return "$rc"
+    fi
     echo "OK"
 }
 
@@ -277,18 +290,9 @@ install_irrigation_clock_hook() {
         esac
     fi
 
-    mkdir -p "$(dirname "$IRRIGATION_CLOCK_HOOK")" || return 1
-    if ! fetch_required "conditional irrigation NTP clock hook" \
+    fetch_required "conditional irrigation NTP clock hook" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/hotplug.d/ntp/70-osi-irrigation-clock" \
-        "/etc/hotplug.d/ntp/70-osi-irrigation-clock"; then
-        restore_inactive_clock_hook
-        return 1
-    fi
-    if ! chmod 0755 "$IRRIGATION_CLOCK_HOOK"; then
-        echo "ERROR: could not activate conditional irrigation NTP clock hook" >&2
-        restore_inactive_clock_hook
-        return 1
-    fi
+        "$IRRIGATION_CLOCK_HOOK" 755 || return 1
     if [ "$hook_was_active" = "1" ]; then
         echo "OK: existing executable clock hook refreshed without sysntpd restart"
         return 0
@@ -2789,9 +2793,11 @@ check_live_db_readonly || exit 1
 gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
-if ! { cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp && mv -f /srv/node-red/.payload-swap.js.tmp /srv/node-red/.payload-swap.js; }; then
-    rm -f /srv/node-red/.payload-swap.js.tmp
-    echo "ERROR: could not keep the payload swap helper for node-red.init; refusing before any file is replaced" >&2
+fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js" "$TMP_DIR/osi-atomic-write.js"
+if ! { node --check "$TMP_DIR/osi-atomic-write.js" && node --check "$SWAP_JS" &&
+       publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js" 644 &&
+       publish_download "$SWAP_JS" "/srv/node-red/.payload-swap.js" 644; }; then
+    echo "ERROR: could not install the atomic writer or payload swap helper" >&2
     exit 1
 fi
 echo "OK"
@@ -3773,37 +3779,32 @@ ensure_osi_server_config || exit 1
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
-    "/srv/node-red/settings.js"
+    "/srv/node-red/settings.js" 644 || exit 1
 
 fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red"
-chmod 755 /etc/init.d/node-red
+    "/etc/init.d/node-red" 755 || exit 1
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
-    "/usr/libexec/osi-gateway-identity.sh"
-chmod 755 /usr/libexec/osi-gateway-identity.sh
+    "/usr/libexec/osi-gateway-identity.sh" 755 || exit 1
 
 fetch_required "Gateway identity daemon" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
-    "/usr/libexec/osi-identityd.sh"
-chmod 755 /usr/libexec/osi-identityd.sh
+    "/usr/libexec/osi-identityd.sh" 755 || exit 1
 
 fetch_required "Gateway identity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
-    "/etc/init.d/osi-identityd"
-chmod 755 /etc/init.d/osi-identityd
+    "/etc/init.d/osi-identityd" 755 || exit 1
 
 fetch_required "Gateway identity service enable script" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
-    "/etc/uci-defaults/94_osi_identityd_enable"
-chmod 755 /etc/uci-defaults/94_osi_identityd_enable
+    "/etc/uci-defaults/94_osi_identityd_enable" 755 || exit 1
 
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
-    "/srv/node-red/chirpstack-bootstrap.js"
+    "/srv/node-red/chirpstack-bootstrap.js" 644 || exit 1
 
 # issue-183 early secure begin
 if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
@@ -3817,8 +3818,7 @@ fi
 
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
-    "/etc/init.d/osi-bootstrap"
-chmod 755 /etc/init.d/osi-bootstrap
+    "/etc/init.d/osi-bootstrap" 755 || exit 1
 enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
@@ -3833,53 +3833,53 @@ seed_db_if_missing
 
 fetch_required "Node-RED runtime package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json" \
-    "/srv/node-red/package.json"
+    "/srv/node-red/package.json" 644 || exit 1
 
 fetch_required "Node-RED runtime package-lock.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" \
-    "/srv/node-red/package-lock.json"
+    "/srv/node-red/package-lock.json" 644 || exit 1
 
 stage_command_ledger_dependency
 
 fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
-    "/srv/node-red/edge-channels.json"
+    "/srv/node-red/edge-channels.json" 644 || exit 1
 
 fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
-    "/srv/node-red/codecs/strega_gen1_decoder.js"
+    "/srv/node-red/codecs/strega_gen1_decoder.js" 644 || exit 1
 
 fetch_required "STREGA Gen2 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen2_decoder.js" \
-    "/srv/node-red/codecs/strega_gen2_decoder.js"
+    "/srv/node-red/codecs/strega_gen2_decoder.js" 644 || exit 1
 
 fetch_required "LSN50 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js" \
-    "/srv/node-red/codecs/dragino_lsn50_decoder.js"
+    "/srv/node-red/codecs/dragino_lsn50_decoder.js" 644 || exit 1
 
 fetch_required "S2120 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js" \
-    "/srv/node-red/codecs/sensecap_s2120_decoder.js"
+    "/srv/node-red/codecs/sensecap_s2120_decoder.js" 644 || exit 1
 
 fetch_required "LoRain codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js" \
-    "/srv/node-red/codecs/aquascope_lorain_decoder.js"
+    "/srv/node-red/codecs/aquascope_lorain_decoder.js" 644 || exit 1
 
 fetch_required "UC512 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/milesight_uc512_decoder.js" \
-    "/srv/node-red/codecs/milesight_uc512_decoder.js"
+    "/srv/node-red/codecs/milesight_uc512_decoder.js" 644 || exit 1
 
 fetch_required "SDI12 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
-    "/srv/node-red/codecs/dragino_sdi12_decoder.js"
+    "/srv/node-red/codecs/dragino_sdi12_decoder.js" 644 || exit 1
 
 fetch_required "Tektelic KIWI/CLOVER codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
-    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
+    "/srv/node-red/codecs/tektelic_agriculture_decoder.js" 644 || exit 1
 
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
-    "/srv/node-red/codecs/agroscope_uplink_transform.js"
+    "/srv/node-red/codecs/agroscope_uplink_transform.js" 644 || exit 1
 
 # issue-183 Gen2 begin
 if [ -f "$CHIRPSTACK_ENV_FILE" ] && \

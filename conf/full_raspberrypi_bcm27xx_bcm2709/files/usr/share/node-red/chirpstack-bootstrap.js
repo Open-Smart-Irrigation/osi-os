@@ -951,7 +951,8 @@ try {
   } else {
     src = loader + src;
   }
-  fs.writeFileSync(CFG.settingsJs, src, 'utf8');
+  const { writeAtomic } = require('/usr/share/node-red/osi-atomic-write.js');
+  writeAtomic(CFG.settingsJs, src);
   console.log('  ✓ settings.js patched to load env file on startup');
 }
 

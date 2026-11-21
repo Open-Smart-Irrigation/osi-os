@@ -182,7 +182,7 @@ refusedUnchanged('a damaged database (read-only integrity check)', (g) => {
 
 test('the preflight runs before the deploy\'s first change on the gateway', () => {
   const pre = DEPLOY.indexOf('\ngateway_state_preflight || exit 1\n');
-  const firstChange = DEPLOY.indexOf('cp "$SWAP_JS" /srv/node-red/.payload-swap.js.tmp');
+  const firstChange = DEPLOY.indexOf('publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js"');
   assert.ok(pre > 0 && pre < firstChange);
 });
 

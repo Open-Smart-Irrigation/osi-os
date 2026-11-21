@@ -610,8 +610,16 @@ try {
     }
   }
 
-  if (credsChanged) fs.writeFileSync(credFile, JSON.stringify(creds));
-  if (flowsChanged) fs.writeFileSync(flowFile, JSON.stringify(flows, null, 2) + '\n');
+  const { writeAtomic } = require('/usr/share/node-red/osi-atomic-write.js');
+  if (credsChanged) {
+    writeAtomic(credFile, JSON.stringify(creds), { mode: 0o600 });
+  } else {
+    const metadata = fs.statSync(credFile, { throwIfNoEntry: false });
+    if (metadata && (metadata.mode & 0o7777) !== 0o600) {
+      writeAtomic(credFile, fs.readFileSync(credFile), { mode: 0o600 });
+    }
+  }
+  if (flowsChanged) writeAtomic(flowFile, JSON.stringify(flows, null, 2) + '\n');
 } catch (error) {
   console.error('[node-red.init] unable to update MQTT runtime config:', error.message);
 }

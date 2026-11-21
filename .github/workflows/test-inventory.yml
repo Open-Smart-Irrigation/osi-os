@@ -48,6 +48,7 @@ jobs:
             scripts/fixtures/device-integration/uc512/codec.test.js \
             scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
+            scripts/test-atomic-runtime-writes.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
       - name: Shell tests
         run: |

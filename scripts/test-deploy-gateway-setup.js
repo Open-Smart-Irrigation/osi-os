@@ -719,7 +719,7 @@ test('the early secure invocation selects the canonical env file and stops on it
 });
 
 test('deploy.sh enables the service where it installs it, with the init script\'s stamp test', () => {
-  const install = DEPLOY.indexOf('chmod 755 /etc/init.d/osi-bootstrap');
+  const install = DEPLOY.indexOf('"/etc/init.d/osi-bootstrap" 755 || exit 1');
   const call = DEPLOY.indexOf('\nenable_osi_bootstrap\n', install);
   const nextStep = DEPLOY.indexOf('--- Remove legacy gateway GPS sidecar ---', install);
   assert.ok(install > 0 && call > install && call < nextStep,

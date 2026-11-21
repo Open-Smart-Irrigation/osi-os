@@ -50,10 +50,8 @@ function runFixture(fixture, options = {}) {
 set +e
 eval "$INSTALLER_SOURCE"
 fetch_required() {
-  # The deploy function's destination is the real target path.  The harness
-  # redirects that copy into its isolated target while retaining the literal
-  # production call-site in deploy.sh.
-  cp "$HOOK_SOURCE" "$IRRIGATION_CLOCK_HOOK"
+  mkdir -p "$(dirname "$3")"
+  cp "$HOOK_SOURCE" "$3" && chmod "$4" "$3"
 }
 install_irrigation_clock_hook >"$INSTALL_STDOUT" 2>"$INSTALL_STDERR"
 printf '%s' "$?" >"$INSTALL_STATUS"
