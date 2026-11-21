@@ -88,7 +88,11 @@ for (const fragment of [
 excludes(manifestMark.toUpperCase(), 'DELETE FROM', 'Mark History Manifest ACK');
 // Cover the delegated SQL too. This scans the whole helper, including functions
 // called by queueManifestRepairs; dynamic table names also fail the allowlist.
-for (const deletion of historySource.matchAll(/\bDELETE\s+FROM\s+(\S+)/gi)) {
+const cursorCleanupSql = "DELETE FROM app_settings WHERE key IN (SELECT key FROM app_settings WHERE key>='history_repair_cursor:' AND key<'history_repair_cursor;' ORDER BY key LIMIT 32)";
+includes(historySource, cursorCleanupSql, 'bounded legacy cursor metadata cleanup');
+// Exempt only this exact, prefix-scoped, bounded metadata statement. Any other
+// app_settings deletion and every source-history deletion remain forbidden.
+for (const deletion of historySource.replace(cursorCleanupSql, '').matchAll(/\bDELETE\s+FROM\s+(\S+)/gi)) {
   assert.strictEqual(deletion[1], 'sync_history_quarantine', 'history helper may delete only synthetic repair quarantine markers');
 }
 

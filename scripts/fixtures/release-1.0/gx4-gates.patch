@@ -1,0 +1,396 @@
+diff --git a/docs/contracts/history-router/cases/card-summary.expected.json b/docs/contracts/history-router/cases/card-summary.expected.json
+index 72eb99349..d602c2ffb 100644
+--- a/docs/contracts/history-router/cases/card-summary.expected.json
++++ b/docs/contracts/history-router/cases/card-summary.expected.json
+@@ -16,8 +16,7 @@
+           "soil-profile",
+           "line-chart",
+           "calendar",
+-          "irrigation-response",
+-          "advanced"
++          "irrigation-response"
+         ],
+         "supportedRanges": [
+           "12h",
+@@ -78,8 +77,7 @@
+           "growth-timeline",
+           "line-chart",
+           "stress-events",
+-          "calendar",
+-          "advanced"
++          "calendar"
+         ],
+         "supportedRanges": [
+           "12h",
+@@ -139,8 +137,7 @@
+         "views": [
+           "line-chart",
+           "daily-min-max",
+-          "calendar",
+-          "advanced"
++          "calendar"
+         ],
+         "supportedRanges": [
+           "12h",
+@@ -206,8 +203,7 @@
+         "defaultView": "event-timeline",
+         "views": [
+           "event-timeline",
+-          "calendar",
+-          "advanced"
++          "calendar"
+         ],
+         "supportedRanges": [
+           "12h",
+diff --git a/scripts/test-history-response-headers.js b/scripts/test-history-response-headers.js
+index 40429bdcb..5b6339f69 100644
+--- a/scripts/test-history-response-headers.js
++++ b/scripts/test-history-response-headers.js
+@@ -70,17 +70,22 @@ function readProfile(profile) {
+   const flows = JSON.parse(fs.readFileSync(path.join(share, 'flows.json'), 'utf8'));
+   const byId = new Map(flows.map((node) => [node.id, node]));
+   const csv = byId.get('history-zone-export-csv-http');
+-  const workspace = flows.find((node) => node.type === 'http in' && node.method === 'get' && node.url === '/api/history/workspaces');
++  const cards = byId.get('history-zone-cards-http');
++  const cardData = byId.get('history-zone-card-data-http');
++  for (const { url, type } of flows) {
++    if (type === 'http in') assert.doesNotMatch(url, /\/history\/(?:workspaces(?:\/|$)|.*\/advanced$)|\/analysis\/views(?:\/|$)/);
++  }
+   const router = byId.get('history-api-router-fn');
+   const response = byId.get('history-api-response');
+   const options = byId.get('device-options-http');
+   const optionsResponse = byId.get('device-options-response');
+-  assert.ok(csv && workspace && router && response && options && optionsResponse);
++  assert.ok(csv && cards && cardData && router && response && options && optionsResponse);
+   assert.deepEqual(csv.wires, [[router.id]]);
+-  assert.deepEqual(workspace.wires, [[router.id]]);
++  assert.deepEqual(cards.wires, [[router.id]]);
++  assert.deepEqual(cardData.wires, [[router.id]]);
+   assert.deepEqual(router.wires, [[response.id]]);
+   assert.deepEqual(options.wires, [[optionsResponse.id]]);
+-  return { share, csv, workspace, router, response, options, optionsResponse };
++  return { share, csv, cards, cardData, router, response, options, optionsResponse };
+ }
+
+ function database() {
+@@ -222,7 +227,7 @@ async function withServer(config, raw, source, work) {
+     },
+   };
+   require(source)(RED);
+-  for (const definition of [config.response, config.optionsResponse, config.csv, config.workspace, config.options]) {
++  for (const definition of [config.response, config.optionsResponse, config.csv, config.cards, config.cardData, config.options]) {
+     assert.ok(types[definition.type], 'loaded real ' + definition.type + ' constructor');
+     nodes.set(definition.id, new types[definition.type](definition));
+   }
+@@ -287,13 +292,27 @@ for (const profile of ['bcm2712', 'bcm2709']) {
+       disposition(csv, CSV_NAME);
+       assertCors(csv);
+
++      const cards = await request('GET', '/api/history/zones/13/cards', token);
++      console.log(JSON.stringify({ profile, case: 'cards', ...cards }));
++      assert.equal(cards.status, 200);
++      assert.deepEqual(cards.seen, [config.cards.id, config.router.id, config.response.id]);
++      const summary = JSON.parse(cards.body);
++      assert.equal(summary.generatedAt, FIXED_NOW);
++      assert.equal(summary.zoneId, 13);
++      assert.ok(summary.cards.length);
++      for (const card of summary.cards) assert.ok(!card.views.includes('advanced'), card.cardId);
++      contentType(cards, 'application/json'); disposition(cards); assertCors(cards);
++
++      const advancedPath = '/api/history/zones/13/cards/' + encodeURIComponent(summary.cards[0].cardId) + '/data?view=advanced';
++      const advanced = await request('GET', advancedPath, token);
++      assert.equal(advanced.status, 404);
++      assert.deepEqual(advanced.seen, [config.cardData.id, config.router.id, config.response.id]);
++      assert.deepEqual(JSON.parse(advanced.body), { error: 'Not found' });
++      contentType(advanced, 'application/json'); disposition(advanced); assertCors(advanced);
++
+       const workspace = await request('GET', '/api/history/workspaces', token);
+-      console.log(JSON.stringify({ profile, case: 'workspace', ...workspace }));
+-      assert.equal(workspace.status, 200);
+-      assert.deepEqual(workspace.seen, [config.workspace.id, config.router.id, config.response.id]);
+-      assert.equal(workspace.body, '{"generatedAt":"2026-07-03T12:00:00.000Z","workspaces":[]}');
+-      assert.deepEqual(JSON.parse(workspace.body), { generatedAt: FIXED_NOW, workspaces: [] });
+-      contentType(workspace, 'application/json'); disposition(workspace); assertCors(workspace);
++      assert.equal(workspace.status, 404);
++      assert.deepEqual(workspace.seen, []);
+
+       const anonymous = await request('GET', csvPath);
+       console.log(JSON.stringify({ profile, case: 'anonymous', ...anonymous }));
+diff --git a/scripts/verify-history-api-contract.js b/scripts/verify-history-api-contract.js
+index 8bf8df770..d3d3cfad2 100644
+--- a/scripts/verify-history-api-contract.js
++++ b/scripts/verify-history-api-contract.js
+@@ -19,14 +19,8 @@ const REQUIRED_ENDPOINTS = [
+   ['GET', '/api/history/zones/:zoneId/export.csv'],
+   ['GET', '/api/history/export.csv'],
+   ['GET', '/api/history/zones/:zoneId/cards/:cardId/data'],
+-  ['GET', '/api/history/zones/:zoneId/cards/:cardId/advanced'],
+   ['GET', '/api/history/gateways/:gatewayEui/cards'],
+   ['GET', '/api/history/gateways/:gatewayEui/cards/:cardId/data'],
+-  ['GET', '/api/history/gateways/:gatewayEui/cards/:cardId/advanced'],
+-  ['GET', '/api/history/workspaces'],
+-  ['POST', '/api/history/workspaces'],
+-  ['PUT', '/api/history/workspaces/:id'],
+-  ['DELETE', '/api/history/workspaces/:id'],
+   ['PUT', '/api/history/zones/:zoneId/cards/:cardId/preferences'],
+   ['POST', '/api/history/zones/:zoneId/cards/:cardId/opened'],
+   ['PUT', '/api/history/gateways/:gatewayEui/cards/:cardId/preferences'],
+@@ -34,10 +28,7 @@ const REQUIRED_ENDPOINTS = [
+   ['POST', '/api/history/rollups/run'],
+   ['GET', '/api/system/features'],
+   ['GET', '/api/analysis/channels'],
+-  ['POST', '/api/analysis/series'],
+-  ['GET', '/api/analysis/views'],
+-  ['POST', '/api/analysis/views'],
+-  ['DELETE', '/api/analysis/views/:id']
++  ['POST', '/api/analysis/series']
+ ].map(([method, url]) => ({ method, url }));
+
+ const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
+diff --git a/scripts/verify-scoped-access.js b/scripts/verify-scoped-access.js
+index da662512e..48349ae8f 100644
+--- a/scripts/verify-scoped-access.js
++++ b/scripts/verify-scoped-access.js
+@@ -182,14 +182,9 @@ const INLINE_ACCOUNT_CHECKS = new Map([
+   ...[
+     'history-zone-cards-http',
+     'history-zone-card-data-http',
+-    'history-zone-card-advanced-http',
+     'history-zone-card-preferences-http',
+     'history-zone-card-opened-http',
+     'history-zone-export-csv-http',
+-    'history-workspaces-get-http',
+-    'history-workspaces-post-http',
+-    'history-workspaces-put-http',
+-    'history-workspaces-delete-http',
+   ].map((id) => [
+     id,
+     'history-api-router-fn reads users.disabled_at itself (scopeCheckForRoute) and ' +
+@@ -223,9 +218,6 @@ const FILTERING_ENTRIES = new Map([
+
+ const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING, ...KNOWN_GAPS.keys()]);
+
+-// The admin's saved analysis view in the analysis-views-delete-http fixture;
+-// the outcome rule points :id at it.
+-const FOREIGN_ANALYSIS_VIEW_ID = '2';
+ const probeDeviceType = (type) => "UPDATE devices SET type_id = '" + type + "' WHERE deveui = '" + PROBE_DEVEUI + "';";
+ const PROBE_GRANT_UUID = '00000000-0000-4000-8000-00000000c001';
+ const PROBE_ZONE2_UUID = '00000000-0000-4000-8000-00000000c003';
+@@ -422,14 +414,6 @@ const REQUEST_FIXTURES = {
+       zone_uuid: FOREIGN_ZONE_UUID, layout_code: 'open_field', base_sync_version: 0,
+     }],
+   },
+-  'analysis-views-post-http': { body: { view: { name: 'Probe view' } } },
+-  // The caller's own saved view (id 1, the default :id) beside one of the
+-  // admin's, so a delete that ignored the owner filter would show.
+-  'analysis-views-delete-http': {
+-    setupSql: 'INSERT INTO analysis_views (id, user_id, owner_user_uuid, name, view_json) VALUES ' +
+-      "(1, 2, '" + PROBE_CALLER_UUID + "', 'Probe view', '{}'), (" + FOREIGN_ANALYSIS_VIEW_ID + ", 1, '" +
+-      PROBE_ADMIN_UUID + "', 'Foreign view', '{}');",
+-  },
+   'history-all-zones-export-csv-http': {
+     query: { scope: 'allZones', from: '2026-01-01', to: '2026-01-01', granularity: 'daily' },
+   },
+@@ -587,7 +571,7 @@ const WRITE_TARGETS = new Map([
+       'gateway; admin-only with scoped access on',
+   }]),
+   ...[
+-    'history-gateway-cards-http', 'history-gateway-card-data-http', 'history-gateway-card-advanced-http',
++    'history-gateway-cards-http', 'history-gateway-card-data-http',
+     'history-gateway-card-preferences-http', 'history-gateway-card-opened-http',
+   ].map((id) => [id, { object: 'admin', reason: 'gateway-wide history is admin-only (P2)' }]),
+   [
+@@ -614,14 +598,6 @@ const WRITE_TARGETS = new Map([
+     'journal-custom-vocab-put-http',
+     { object: 'own', reason: 'custom terms are read and written through owner filters' },
+   ],
+-  [
+-    'analysis-views-delete-http',
+-    {
+-      object: 'own',
+-      reason: 'the :id is a saved analysis view; the delete is filtered by the caller\'s user id, so only ' +
+-        'the caller\'s own view can go',
+-    },
+-  ],
+   [
+     'journal-plot-group-put-http',
+     {
+@@ -634,14 +610,6 @@ const WRITE_TARGETS = new Map([
+ // Write entries that need no write-role decision, each with its reason.
+ const NO_WRITE_ROLE_NEEDED = new Map([
+   ['analysis-series-http', 'a read sent as POST (the query is the body); it writes nothing'],
+-  [
+-    'analysis-views-post-http',
+-    'saves the caller\'s own analysis view, filtered by owner; no farm data changes',
+-  ],
+-  [
+-    'analysis-views-delete-http',
+-    'deletes the caller\'s own analysis view, filtered by owner; no farm data changes',
+-  ],
+   [
+     'improvement-requests-post-http',
+     'files a support request owned by the caller; any enabled role may report a problem, ' +
+@@ -922,7 +890,6 @@ function foreignParams(entry) {
+   if (/^\/api\/journal\/plot-groups\/:uuid\b/.test(url)) variants.push({ uuid: FOREIGN_GROUP_UUID });
+   if (/^\/api\/journal\/entries\/:uuid\b/.test(url)) variants.push({ uuid: FOREIGN_ENTRY_UUID });
+   if (/^\/api\/users\/:uuid\b/.test(url)) variants.push({ uuid: PROBE_ADMIN_UUID });
+-  if (/^\/api\/analysis\/views\/:id\b/.test(url)) variants.push({ id: FOREIGN_ANALYSIS_VIEW_ID });
+   return variants;
+ }
+
+--- a/scripts/test-release-1.0-surfaces.js
++++ b/scripts/test-release-1.0-surfaces.js
+@@ -6,7 +6,6 @@
+ const path = require('node:path');
+ const test = require('node:test');
+ const { executeFunction, makeAuthHeader, profilePaths, seedScopedDb } = require('./lib/scoped-access-harness');
+-const { stageGx4Flows } = require('./fixtures/release-1.0/stage-gx4-flows');
+ const { removeRoutes, editFunction } = require('./fixtures/release-1.0/gx4-flows.patch.json');
+
+ const EUI = 'A840410000000001';
+@@ -47,18 +46,16 @@
+   return handler;
+ }
+
+-const stagedProfiles = [];
++const shippedProfiles = [];
+ for (const profile of ['bcm2712', 'bcm2709']) {
+   const { flowsPath, nodeRedModules } = profilePaths(profile);
+   const source = fs.readFileSync(flowsPath, 'utf8');
+   const flows = JSON.parse(source);
+   const run = (node, db, msg, overrides = {}) => executeFunction(node, { db, msg, env, nodeRedModules, ...overrides });
+   const node = (id) => flows.find((candidate) => candidate.id === id);
+-  // The lead can remove the staging call after landing both rewired profiles.
+-  const staged = stageGx4Flows(source);
+-  stagedProfiles.push(JSON.stringify(staged));
+-  async function http(flow, db, msg) {
+-    const handler = requestHandler(flow, msg.req.method, msg.req.path);
++  shippedProfiles.push(source);
++  async function http(db, msg) {
++    const handler = requestHandler(flows, msg.req.method, msg.req.path);
+     if (!handler) return { statusCode: 404 }; // No registered Node-RED HTTP input.
+     const { result, errors } = await run(handler, db, msg);
+     assert.deepEqual(errors, []);
+@@ -209,7 +206,7 @@
+       ];
+
+       for (const { scope, base, zoneId, params, gatewayEui } of scopes) {
+-        const summary = await http(staged, db, request('GET', `${base}/cards`, params));
++        const summary = await http(db, request('GET', `${base}/cards`, params));
+         assert.equal(summary.statusCode, 200);
+         assert.ok(summary.payload.cards.length);
+         for (const card of summary.payload.cards) {
+@@ -221,7 +218,7 @@
+         const cardPath = `${base}/cards/${card.cardId}`;
+
+         // A new mixed write applies the pin while ignoring the deferred view.
+-        const newPin = await http(staged, db, request('PUT', `${cardPath}/preferences`, cardParams, {},
++        const newPin = await http(db, request('PUT', `${cardPath}/preferences`, cardParams, {},
+           { pinned: true, last_view_mode: 'advanced' }));
+         assert.equal(newPin.statusCode, 200);
+         assert.equal(newPin.payload.pinned, true);
+@@ -237,12 +234,12 @@
+           WHERE user_id = 2 AND scope_type = ? AND zone_id IS ? AND gateway_eui IS ? AND card_id = ?
+         `).run(scope, zoneId, gatewayEui, card.cardId);
+
+-        const pin = await http(staged, db, request('PUT', `${cardPath}/preferences`, cardParams, {},
++        const pin = await http(db, request('PUT', `${cardPath}/preferences`, cardParams, {},
+           { pinned: false, lastViewMode: ' advanced ' }));
+         assert.equal(pin.statusCode, 200);
+         assert.equal(pin.payload.pinned, false);
+         assert.equal(pin.payload.lastViewMode, null);
+-        const opened = await http(staged, db, request('POST', `${cardPath}/opened`, cardParams, {},
++        const opened = await http(db, request('POST', `${cardPath}/opened`, cardParams, {},
+           { last_view_mode: card.defaultView }));
+         assert.equal(opened.statusCode, 200);
+         assert.equal(opened.payload.openCount, 1);
+@@ -251,7 +248,7 @@
+         assert.deepEqual({ ...getPreference.get(scope, card.cardId) },
+           { pinned: 0, open_count: 1, last_view_mode: 'advanced' });
+
+-        const updatedSummary = await http(staged, db, request('GET', `${base}/cards`, params));
++        const updatedSummary = await http(db, request('GET', `${base}/cards`, params));
+         const updatedCard = updatedSummary.payload.cards.find((item) => item.cardId === card.cardId);
+         assert.equal(updatedCard.ordering.pinned, false);
+         assert.ok(!updatedCard.views.includes('advanced'));
+@@ -261,9 +258,9 @@
+     }
+   });
+
+-  test(`${profile}: staged GX4 cut refuses deferred HTTP requests and keeps the ordinary paths`, async () => {
+-    assert.equal(staged.find((entry) => entry.id === editFunction.id).type, 'function');
+-    for (const entry of staged.filter((candidate) => candidate.type === 'http in')) {
++  test(`${profile}: shipped GX4 cut refuses deferred HTTP requests and keeps the ordinary paths`, async () => {
++    assert.equal(flows.find((entry) => entry.id === editFunction.id).type, 'function');
++    for (const entry of flows.filter((candidate) => candidate.type === 'http in')) {
+       assert.doesNotMatch(entry.url, unavailable);
+     }
+     const db = seedScopedDb(EUI);
+@@ -291,7 +288,7 @@
+       `).run(soilSourceKey);
+       for (const route of removeRoutes) {
+         const url = route.url.replaceAll(/:[a-zA-Z]+/g, '1');
+-        const result = await http(staged, db, request(route.method.toUpperCase(), url, {}, {}, {
++        const result = await http(db, request(route.method.toUpperCase(), url, {}, {}, {
+           name: 'Existing view', workspace: { layout: 'stacked' }, viewJson: { mode: 'correlation' },
+         }));
+         assert.equal(result.statusCode, 404, `${route.method} ${url}`);
+@@ -300,41 +297,41 @@
+       assert.equal(db.prepare('SELECT view_json FROM analysis_views WHERE id = 1').get().view_json, '{"mode":"correlation"}');
+       const card = { zoneId: '1', cardId: 'z-1:soil:root-zone' };
+       const url = `/api/history/zones/1/cards/${card.cardId}/data`;
+-      const denied = await http(staged, db, request('GET', url, card, { view: ' advanced ' }));
++      const denied = await http(db, request('GET', url, card, { view: ' advanced ' }));
+       assert.equal(denied.statusCode, 404);
+       assert.equal(denied.payload.error, 'Not found');
+       const gatewayCard = { gatewayEui: GATEWAY, cardId: 'gateway-hub' };
+       const gateway = `/api/history/gateways/${GATEWAY}/cards/${gatewayCard.cardId}/data`;
+-      const gatewayDenied = await http(staged, db, request('GET', gateway, gatewayCard, { view: 'advanced' }));
++      const gatewayDenied = await http(db, request('GET', gateway, gatewayCard, { view: 'advanced' }));
+       assert.equal(gatewayDenied.statusCode, 404);
+       assert.equal(gatewayDenied.payload.error, 'Not found');
+
+-      const cards = await http(staged, db, request('GET', '/api/history/zones/1/cards', { zoneId: '1' }));
++      const cards = await http(db, request('GET', '/api/history/zones/1/cards', { zoneId: '1' }));
+       assert.equal(cards.statusCode, 200);
+       assert.ok(cards.payload.cards.length);
+       const range = { range: 'custom', from: '2026-11-19T00:00:00Z', to: '2026-11-20T00:00:00Z' };
+       const irrigation = cards.payload.cards.find((entry) => entry.cardType === 'irrigation');
+-      const events = await http(staged, db, request('GET', `/api/history/zones/1/cards/${irrigation.cardId}/data`,
++      const events = await http(db, request('GET', `/api/history/zones/1/cards/${irrigation.cardId}/data`,
+         { zoneId: '1', cardId: irrigation.cardId }, { ...range, view: 'event-timeline' }));
+       assert.equal(events.statusCode, 200);
+       assert.deepEqual(events.payload.events.map((entry) => [entry.label, entry.metadata.durationMinutes]), [['OPEN_FOR_DURATION', 2]]);
+       const soil = cards.payload.cards.find((entry) => entry.cardType === 'soil');
+-      const rollups = await http(staged, db, request('GET', `/api/history/zones/1/cards/${soil.cardId}/data`,
++      const rollups = await http(db, request('GET', `/api/history/zones/1/cards/${soil.cardId}/data`,
+         { zoneId: '1', cardId: soil.cardId }, { ...range, view: 'line-chart', aggregation: 'daily' }));
+       assert.equal(rollups.statusCode, 200);
+       assert.equal(rollups.payload.series.find((entry) => entry.channelKey === 'swt_1').points[0].mean, 32);
+
+-      const catalog = await http(staged, db, request('GET', '/api/analysis/channels'));
++      const catalog = await http(db, request('GET', '/api/analysis/channels'));
+       assert.equal(catalog.statusCode, 200);
+       assert.ok(Array.isArray(catalog.payload.channels));
+-      const series = await http(staged, db, request('POST', '/api/analysis/series', {}, {}, {
++      const series = await http(db, request('POST', '/api/analysis/series', {}, {}, {
+         selectors: [{ seriesId: catalog.payload.channels.find((entry) => entry.availability === 'available').seriesId }],
+         range: { mode: 'relative', label: '24h', from: '2026-11-19T00:00:00Z', to: '2026-11-20T00:00:00Z' }, aggregation: 'auto',
+       }));
+       assert.equal(series.statusCode, 200, JSON.stringify(series.payload));
+       assert.equal(series.payload.series.length, 1);
+       for (const exportUrl of ['/api/history/zones/1/export.csv', '/api/history/export.csv']) {
+-        const exported = await http(staged, db, request('GET', exportUrl, { zoneId: '1' }, {
++        const exported = await http(db, request('GET', exportUrl, { zoneId: '1' }, {
+           from: '2026-11-20', to: '2026-11-20', scope: 'allZones',
+         }));
+         assert.equal(exported.statusCode, 200, JSON.stringify(exported.payload));
+@@ -346,6 +343,6 @@
+   });
+ }
+
+-test('the two staged flows remain byte-identical', () => {
+-  assert.equal(stagedProfiles[0], stagedProfiles[1]);
++test('the two shipped flows remain byte-identical', () => {
++  assert.equal(shippedProfiles[0], shippedProfiles[1]);
+ });

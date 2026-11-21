@@ -1,0 +1,135 @@
+{
+  "removeRoutes": [
+    {
+      "id": "history-zone-card-advanced-http",
+      "method": "get",
+      "url": "/api/history/zones/:zoneId/cards/:cardId/advanced",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-gateway-card-advanced-http",
+      "method": "get",
+      "url": "/api/history/gateways/:gatewayEui/cards/:cardId/advanced",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-get-http",
+      "method": "get",
+      "url": "/api/history/workspaces",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-post-http",
+      "method": "post",
+      "url": "/api/history/workspaces",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-put-http",
+      "method": "put",
+      "url": "/api/history/workspaces/:id",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "history-workspaces-delete-http",
+      "method": "delete",
+      "url": "/api/history/workspaces/:id",
+      "wires": [
+        [
+          "history-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-delete-http",
+      "method": "delete",
+      "url": "/api/analysis/views/:id",
+      "wires": [
+        [
+          "portable-history-api-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-get-http",
+      "method": "get",
+      "url": "/api/analysis/views",
+      "wires": [
+        [
+          "analysis-api-router-fn"
+        ]
+      ]
+    },
+    {
+      "id": "analysis-views-post-http",
+      "method": "post",
+      "url": "/api/analysis/views",
+      "wires": [
+        [
+          "analysis-api-router-fn"
+        ]
+      ]
+    }
+  ],
+  "editFunction": {
+    "id": "history-api-router-fn",
+    "replacements": [
+      {
+        "before": "  if (requestMethod === 'GET' && /^\\/api\\/history\\/zones\\/[^/]+\\/cards\\/[^/]+\\/advanced$/.test(requestPath)) {\n    phaseStartedAt = Date.now();\n    const scopeContext = await getOwnedZoneContext(q, auth, HR.parseZoneId(msg.req.params && msg.req.params.zoneId));\n    const card = findCard(scopeContext, String(msg.req.params && msg.req.params.cardId || '').trim());\n    markPhase('context', phaseStartedAt);\n    phaseStartedAt = Date.now();\n    const result = await buildAdvancedPayload(q, scopeContext, card, msg.req.query || {});\n    markPhase('advanced', phaseStartedAt);\n    logLabel = 'history zone card advanced';\n    logAggregation = result.meta.aggregation;\n    logSource = result.meta.source;\n    return respond(200, result.payload);\n  }\n\n  if (requestMethod === 'GET' && /^\\/api\\/history\\/gateways\\/[^/]+\\/cards\\/[^/]+\\/advanced$/.test(requestPath)) {\n    phaseStartedAt = Date.now();\n    const scopeContext = await getGatewayContext(q, auth, normalizeGatewayEui(msg.req.params && msg.req.params.gatewayEui));\n    const card = findCard(scopeContext, String(msg.req.params && msg.req.params.cardId || '').trim());\n    markPhase('context', phaseStartedAt);\n    phaseStartedAt = Date.now();\n    const result = await buildAdvancedPayload(q, scopeContext, card, msg.req.query || {});\n    markPhase('advanced', phaseStartedAt);\n    logLabel = 'history gateway card advanced';\n    logAggregation = result.meta.aggregation;\n    logSource = result.meta.source;\n    return respond(200, result.payload);\n  }\n\n",
+        "after": ""
+      },
+      {
+        "before": "  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  markPhase('auth', phaseStartedAt);\n",
+        "after": "  const auth = verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization);\n  markPhase('auth', phaseStartedAt);\n  if (requestPath.endsWith('/data') && String(msg.req.query?.view || '').trim() === 'advanced') return respond(404, { error: 'Not found' });\n"
+      },
+      {
+        "before": "    views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response', 'advanced'],",
+        "after": "    views: ['soil-profile', 'line-chart', 'calendar', 'irrigation-response'],"
+      },
+      {
+        "before": "    views: ['growth-timeline', 'line-chart', 'stress-events', 'calendar', 'advanced'],",
+        "after": "    views: ['growth-timeline', 'line-chart', 'stress-events', 'calendar'],"
+      },
+      {
+        "before": "    views: ['line-chart', 'daily-min-max', 'calendar', 'advanced'],",
+        "after": "    views: ['line-chart', 'daily-min-max', 'calendar'],"
+      },
+      {
+        "before": "    views: ['event-timeline', 'calendar', 'advanced'],",
+        "after": "    views: ['event-timeline', 'calendar'],"
+      },
+      {
+        "before": "    views: ['status-overview', 'advanced'],",
+        "after": "    views: ['status-overview'],"
+      },
+      {
+        "before": "  const nextLastViewMode = body && Object.prototype.hasOwnProperty.call(body, 'lastViewMode') ? String(body.lastViewMode || '').trim() || null : (body && Object.prototype.hasOwnProperty.call(body, 'last_view_mode') ? String(body.last_view_mode || '').trim() || null : (existing ? existing.last_view_mode : null));",
+        "after": "  const storedView = existing?.last_view_mode ?? null;\n  const requestedView = body && Object.prototype.hasOwnProperty.call(body, 'lastViewMode') ? String(body.lastViewMode || '').trim() || null : (body && Object.prototype.hasOwnProperty.call(body, 'last_view_mode') ? String(body.last_view_mode || '').trim() || null : storedView);\n  // Keep deferred preferences for 1.1 while accepting pin and opened updates.\n  const nextLastViewMode = requestedView === 'advanced' || storedView === 'advanced' ? storedView : requestedView;"
+      },
+      {
+        "before": "    lastViewMode: row.last_view_mode || null,",
+        "after": "    lastViewMode: row.last_view_mode === 'advanced' ? null : row.last_view_mode || null,"
+      }
+    ]
+  }
+}

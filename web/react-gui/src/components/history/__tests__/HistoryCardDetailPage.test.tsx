@@ -8,6 +8,12 @@ import App from '../../../App';
 import { historyAPI, irrigationZonesAPI, systemAPI, zoneExportAPI } from '../../../services/api';
 import type { HistoryCardSummary } from '../../../history/types';
 
+// Existing tests exercise the deferred modes as component behavior.
+const release = vi.hoisted(() => ({ expandedViewsEnabled: true }));
+vi.mock('../../../history/expandedDataViews', () => ({
+  get EXPANDED_DATA_VIEWS_ENABLED() { return release.expandedViewsEnabled; },
+}));
+
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.detail.backToHistory': 'Back to history',
@@ -396,6 +402,8 @@ function gatewayCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSu
 
 describe('History card detail route', () => {
   beforeEach(() => {
+    release.expandedViewsEnabled = true;
+    mockViewport({});
     vi.clearAllMocks();
     window.localStorage.setItem('auth_token', 'test-token');
     window.localStorage.setItem('username', 'operator');
@@ -554,6 +562,47 @@ describe('History card detail route', () => {
       writable: true,
       value: undefined,
     });
+  });
+
+  it.each([
+    [390, true, 'soil', 'soil-profile'],
+    [768, true, 'environment', 'line-chart'],
+    [1440, true, 'soil', 'soil-profile'],
+    [1024, false, 'soil', 'soil-profile'],
+    [1440, false, 'environment', 'line-chart'],
+  ] as const)('retains the basic %s px card with mobile UA=%s and a stale advanced default', async (width, mobile, cardType, view) => {
+    release.expandedViewsEnabled = false;
+    vi.stubGlobal('innerWidth', width);
+    vi.stubGlobal('navigator', { userAgentData: { mobile } });
+    vi.stubEnv('VITE_HISTORY_UPLOT_SOIL_ENABLED', 'true');
+    mockViewport({ isDesktop: width >= 1024 });
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true, historyComparisonEnabled: true, historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: true, historyCloudAiEnabled: true,
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12, generatedAt: '2026-05-31T10:00:00Z',
+      cards: [zoneCard({ cardType, defaultView: 'advanced', views: [view, 'advanced'] })],
+    });
+
+    try {
+      renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone?view=advanced');
+      await waitFor(() => expect(firstZoneCardDataRequest()).toEqual(expect.objectContaining({ view, overlays: [] })));
+      expect(historyAPI.getZoneCardAdvanced).not.toHaveBeenCalled();
+      expect(document.querySelector('.uplot')).toBeNull();
+      expect(window.__osiMobileHistoryDiagnostics).toBeUndefined();
+      expect(screen.queryByTestId('mode-compare')).toBeNull();
+      if (mobile) {
+        fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+        expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Advanced View' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+        await waitFor(() => expect(zoneExportAPIMock.download).toHaveBeenCalled());
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('loads the route-backed full-screen detail by zone and encoded card id', async () => {

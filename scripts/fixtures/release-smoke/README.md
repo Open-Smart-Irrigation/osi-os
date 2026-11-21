@@ -25,6 +25,15 @@ directory: `results.json` contains assertions and observations, `runtime.log`
 contains each completed case, and `seed.log` records the seed/migration build.
 GitHub retains these logs and the summary as an artifact for seven days.
 
+## Candidate emulator runs
+
+Before sending the real-device sheet to Phil, run the full Pi 4 and Pi 5
+acceptance suites locally through `osi-heavy`. Match each green receipt to
+the candidate revision and that board's image checksum. Hosted Release Runtime
+Smoke runs the emulator host tests. VM acceptance takes place on the build
+workstation at the candidate stage.
+[Pi 4 runbook](../../../docs/build/raspi4-emulator-acceptance.md) · [Pi 5 runbook](../../../docs/build/raspi5-emulator-acceptance.md).
+
 ## Two deployed runtimes
 
 The shared version declarations are the three workflow-level `OSI_SMOKE_*_VERSION`

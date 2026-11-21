@@ -632,6 +632,24 @@ async function observeAcquisition(db, input) {
   return db.transaction(tx => observeAcquisitionTx(tx, input));
 }
 
+async function recipePollHasDevices({ db, flow, node }) {
+  const rows = await db.all("SELECT COUNT(*) AS n FROM devices WHERE type_id='DRAGINO_SDI12' AND deleted_at IS NULL");
+  const deviceCount = Number(rows[0]?.n) || 0;
+  if (deviceCount === 0) {
+    // An installation without SDI-12 devices needs no ChirpStack poll (#252).
+    // Log the transition to zero and remind the operator every 30 minutes.
+    const lastCount = flow.get('sdi12_recipe_poll_last_device_count');
+    const lastNoticeAt = flow.get('sdi12_recipe_poll_no_devices_noticed_at') || 0;
+    const nowMs = Date.now();
+    if (lastCount !== 0 || nowMs - lastNoticeAt >= 30 * 60 * 1000) {
+      node.log('SDI12 recipe poll skipped: no DRAGINO_SDI12 devices on this gateway');
+      flow.set('sdi12_recipe_poll_no_devices_noticed_at', nowMs);
+    }
+  }
+  flow.set('sdi12_recipe_poll_last_device_count', deviceCount);
+  return deviceCount !== 0;
+}
+
 async function recordRejectedAcquisition(db, input, effects = {}) {
   return db.transaction(async tx => {
     const { claimEffect } = require('../osi-uplink-dedup-guard/durable');
@@ -658,6 +676,7 @@ module.exports = {
   applyDesiredRecipe,
   rollbackCompatibleRecipe,
   pollDeployments,
+  recipePollHasDevices,
   observeAcquisition,
   recordRejectedAcquisition,
   projectDeployment,

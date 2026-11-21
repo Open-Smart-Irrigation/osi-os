@@ -7910,3 +7910,7 @@ CREATE TABLE IF NOT EXISTS uplink_effect_receipts (
   effect TEXT NOT NULL,
   PRIMARY KEY (deveui, uplink_key, effect)
 );
+
+-- SDI-12 transmission archive retention (migration 0083).
+CREATE INDEX IF NOT EXISTS idx_sdi12_transmissions_receipt_time
+  ON sdi12_transmissions(received_at, id);

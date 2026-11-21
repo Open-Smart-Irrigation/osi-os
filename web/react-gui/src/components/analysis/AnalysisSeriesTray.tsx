@@ -1,3 +1,4 @@
+import { analysisSourceKey } from '../../analysis/types';
 import { useId, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -34,10 +35,6 @@ function isWeatherChannel(channel: AnalysisCatalogEntry): boolean {
   return channel.sourceKind !== 'device';
 }
 
-function fallbackSourceKey(channel: AnalysisCatalogEntry): string {
-  return `${channel.hubEui ?? ''}|${channel.zoneId ?? 'unassigned'}|${channel.sourceKind}:${channel.cardType}:${channel.sourceKey}`;
-}
-
 function sourceGroupName(group: SourceGroup): string | null {
   return group.source?.name ?? group.name;
 }
@@ -62,7 +59,7 @@ function groupChannels(channels: AnalysisCatalogEntry[], sources: DeviceSource[]
   const addChannel = (channel: AnalysisCatalogEntry) => {
     const source = channel.deviceSourceId ? sourceById.get(channel.deviceSourceId) ?? null : null;
     const weather = isWeatherChannel(channel);
-    const key = channel.deviceSourceId ?? fallbackSourceKey(channel);
+    const key = analysisSourceKey(channel);
     let sourceGroup = sourceGroups.get(key);
     if (!sourceGroup) {
       sourceGroup = { key, name: channel.deviceName, source, channels: [], weather };

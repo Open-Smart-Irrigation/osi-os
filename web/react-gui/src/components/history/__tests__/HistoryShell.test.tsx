@@ -10,6 +10,12 @@ import { ThematicCardCarousel } from '../ThematicCardCarousel';
 import { systemAPI, historyAPI, irrigationZonesAPI } from '../../../services/api';
 import type { HistoryCardSummary, HistoryWorkspace, HistoryWorkspaceRecord } from '../../../history/types';
 
+// Existing tests exercise the deferred modes as component behavior.
+const release = vi.hoisted(() => ({ expandedViewsEnabled: true }));
+vi.mock('../../../history/expandedDataViews', () => ({
+  get EXPANDED_DATA_VIEWS_ENABLED() { return release.expandedViewsEnabled; },
+}));
+
 const { translateForTest, scopeState } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.nav.legacyDashboard': 'Legacy dashboard',
@@ -213,6 +219,7 @@ function workspace(overrides: Partial<HistoryWorkspace> = {}): HistoryWorkspace 
 
 describe('History shell', () => {
   beforeEach(() => {
+    release.expandedViewsEnabled = true;
     vi.clearAllMocks();
     scopeState.loading = false;
     scopeState.isScoped = false;
@@ -332,6 +339,27 @@ describe('History shell', () => {
         updatedAt: '2026-05-31T10:02:00Z',
       } as unknown as HistoryWorkspaceRecord;
     });
+  });
+
+  it('keeps one desktop card and ignores enabled workspace and comparison features in 1.0', async () => {
+    release.expandedViewsEnabled = false;
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true, historyComparisonEnabled: true, historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: true, historyCloudAiEnabled: true,
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 1, generatedAt: '2026-05-31T10:00:00Z',
+      cards: [card({ defaultView: 'advanced', views: ['advanced', 'soil-profile'] })],
+    });
+
+    renderWithProviders(React.createElement(HistoryDashboard));
+    await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
+      1, 'soil-zone-1', expect.objectContaining({ view: 'soil-profile', overlays: [] }),
+    ));
+    expect(historyAPI.getWorkspaces).not.toHaveBeenCalled();
+    expect(screen.queryByText('Saved workspaces')).toBeNull();
+    expect(screen.queryByTestId('history-comparison-panel')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'history.viewMode.advanced' })).toBeNull();
   });
 
   it.each([

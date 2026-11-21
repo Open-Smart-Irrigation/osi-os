@@ -12,7 +12,7 @@
   "admin": "Admin",
   "adminMenu": {
     "users": "Usuarios",
-    "grants": "Permisos"
+    "grants": "Permisos de acceso"
   },
   "account": "Cuenta",
   "accountMenu": {
@@ -38,5 +38,9 @@
     "zones": "Zonas",
     "data": "Datos",
     "journal": "Diario"
+  },
+  "header": {
+    "menu": "Menú",
+    "primaryNavigation": "Navegación principal"
   }
 }

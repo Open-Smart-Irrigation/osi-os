@@ -127,6 +127,7 @@ execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-cont
 execFileSync(process.execPath, [path.resolve(__dirname, 'test-terra-selection-edge-acceptance.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'verify-history-api-contract.test.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-scoped-access.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'test-release-1.0-surfaces.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'installation-recovery-adapter.test.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
@@ -3625,7 +3626,7 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPS
 expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT"', 'captures an existing flows and GUI pair before first activation');
-expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
+expectFileIncludes('deploy.sh', deployScript, '"/etc/init.d/node-red" 755 || exit 1', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
 expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
 expectFileIncludes('deploy.sh', deployScript, 'wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', 'verifies the named Node-RED service has stopped before migrating');
@@ -3900,8 +3901,8 @@ if (fs.existsSync(osiNodeRedSeedPath)) {
 } else {
   fail(`missing 98_osi_node_red_seed at ${osiNodeRedSeedPath}`);
 }
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package.json" "$DST/package.json"', 'seeds Node-RED package manifest before runtime startup');
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package-lock.json" "$DST/package-lock.json"', 'seeds Node-RED package lock before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, "'package.json', 'package-lock.json'", 'seeds both Node-RED package manifests before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'fs.linkSync(temporary, target)', 'publishes complete Node-RED files only when the destination is absent');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/$module"', 'seeds local helper package directories for file dependencies');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/node_modules/$module"', 'seeds local helper packages into runtime node_modules');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'rm -rf "$DST/$module" "$DST/node_modules/$module"', 'replaces stale helper copies in both package locations');
@@ -4054,7 +4055,7 @@ expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script no
 expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, marking done', 'missing-script success path');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done && sync; then', 'init script syncs the stamp before reporting successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates the restart request on successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60', 'init script requests a coordinated restart after successful provisioning');

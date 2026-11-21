@@ -130,3 +130,7 @@ assert.equal(commandCheck({...nullVersionPause, expected_policy_version: '1'}), 
 const malformed = {...envelopes[0], request_id: 'not-a-uuid'};
 assert.equal(commandCheck(malformed), false, 'malformed request_id must be rejected by AJV');
 console.log('test-conditional-irrigation-contract: OK (Draft-07 AJV positive/negative typed resources and UPSERT/PAUSE/RETRY envelopes, canonical sets, tombstone, nested raw-field rejection)');
+
+// K3 vectors share the existing conditional-contract CI gate. This validates
+// fixtures and executes only their pinned baseline adapters, not future behavior.
+require('./verify-valve-command-fixtures');

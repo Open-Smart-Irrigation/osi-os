@@ -912,10 +912,25 @@ async function repairProgress(q) {
   return { historyRepairPendingByTable: await pendingRepairCounts(q), historyRepairUnresolvedByTable: await unresolvedRepairCounts(q) };
 }
 
+function repairPosition(comparison) {
+  return [comparison.tableName, comparison.segmentKey];
+}
+
+function compareRepairPositions(left, right) {
+  for (let i = 0; i < 2; i++) {
+    if (left[i] < right[i]) return -1;
+    if (left[i] > right[i]) return 1;
+  }
+  return 0;
+}
+
 async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gatewayEui, request = null, currentClock = null, clock = () => performance.now() }) {
   const REPAIR_CAP = 2000;
+  const COMPARISON_CAP = 500;
   request = request || { generatedAt: now };
-  if (comparisons.length > 500) throw new Error('history manifest answer exceeds 500 segments');
+  if (comparisons.length > COMPARISON_CAP) throw new Error('history manifest answer exceeds 500 segments');
+  // A request from another link/epoch must not inspect or age its successor.
+  if (obsoleteManifest(request, {}, currentClock)) return { repairCount: 0, repairSkipped: 0, examinedRows: 0, examinedSegments: 0, quarantinedSegments: 0 };
   const sentSegments = new Map((request.segments || []).map(segment => [JSON.stringify([segment.tableName,segment.segmentKey]),segment]));
   const started = clock();
   const deadline = () => {
@@ -923,16 +938,31 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       const error = new Error('manifest work deadline'); error.code = 'MANIFEST_BUDGET'; throw error;
     }
   };
-  const pageKey = 'history_repair_cursor:' + crypto.createHash('sha256').update(JSON.stringify([request.scope || null, comparisons.map(c => c && [c.tableName,c.segmentKey])])).digest('hex');
-  const saved = (await q('SELECT value FROM app_settings WHERE key=?', [pageKey]))[0];
-  let index = saved ? Number(saved.value) : 0;
-  if (!Number.isInteger(index) || index < 0 || index >= comparisons.length) index = 0;
+  // Segment ranks make traversal independent of page membership. One indexed
+  // lookup reads examination ranks for at most 500 checkpoints.
+  const scope = request.scope || null;
+  const ranked = comparisons.filter(Boolean).map(comparison => ({ comparison,
+    key: 'history_repair_segment:' + JSON.stringify(repairPosition(comparison)) }));
+  const ranks = new Map();
+  if (ranked.length) {
+    const previous = await q("SELECT key,CASE WHEN json_valid(value) THEN json_extract(value,'$.lastExamined.scope') END AS scope,CASE WHEN json_valid(value) THEN json_extract(value,'$.lastExamined.order') END AS examined_order FROM app_settings WHERE key IN (" + ranked.map(() => '?').join(',') + ')', ranked.map(entry => entry.key));
+    for (const row of previous) if (row.scope === scope && Number.isSafeInteger(row.examined_order) && row.examined_order > 0) ranks.set(row.key, row.examined_order);
+  }
+  const examination = { scope, order: Math.max(0, ...ranks.values()) + 1 };
+  comparisons = ranked.sort((left, right) => (ranks.get(left.key) || 0) - (ranks.get(right.key) || 0) ||
+    compareRepairPositions(repairPosition(left.comparison), repairPosition(right.comparison))).map(entry => entry.comparison);
+  const saveExaminedState = (tx, key, state) => saveRepairState(tx, key, { ...state, lastExamined: examination }, now);
+  const skippedCheckpoints = new Set();
+  const obsoleteCheckpoints = new Set();
+  let index = 0, inspectedComparisons = 0;
   let repairCount = 0, repairSkipped = 0, examinedRows = 0, examinedSegments = 0, quarantinedSegments = 0;
   const pendingRepair = {};
-  while (index < comparisons.length && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
+  // Obsolete candidates cost bounded inspection, not one of the 32 work slots.
+  // Their traversal ranks are aged on exit, including a deadline exit.
+  while (index < comparisons.length && inspectedComparisons < COMPARISON_CAP && examinedSegments < MANIFEST_REPAIR_LIMITS.segments) {
     if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds || examinedRows >= MANIFEST_REPAIR_LIMITS.rows || repairCount >= REPAIR_CAP) break;
     const comparison = comparisons[index];
-    examinedSegments++;
+    inspectedComparisons++;
     if (!comparison) { index++; continue; }
     const table = comparison.tableName, segment = comparison.segmentKey;
     definition(table);
@@ -940,21 +970,23 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
     const sent = sentSegments.get(JSON.stringify([table, segment]));
     const reportedFingerprint = sent ? manifestFingerprint(sent) : null;
     const prior = repairState(((await q('SELECT value FROM app_settings WHERE key=?', [checkpoint]))[0] || {}).value);
-    if (obsoleteManifest(request, prior, currentClock)) { index++; continue; }
+    if (obsoleteManifest(request, prior, currentClock)) { obsoleteCheckpoints.add(checkpoint); index++; continue; }
+    if (clock() - started >= MANIFEST_REPAIR_LIMITS.milliseconds) break;
+    examinedSegments++;
     const matched = comparison.repairRequested === false && Array.isArray(comparison.mismatchFields) && comparison.mismatchFields.length === 0;
     if (matched) {
       await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return; }
         await clearRepairQuarantine(tx, table, segment);
-        await saveRepairState(tx, checkpoint, { version: 2, round: 0, scope: request.scope, lastRequest: request.clock, matchedAt: now }, now);
+        await saveExaminedState(tx, checkpoint, { version: 2, round: 0, scope: request.scope, lastRequest: request.clock, matchedAt: now });
       });
       index++; continue;
     }
-    if (comparison.repairRequested !== true) { index++; continue; }
-    if (prior.unresolved && reportedFingerprint && prior.fingerprint === reportedFingerprint && (!request.scope || prior.scope === request.scope)) { quarantinedSegments++; index++; continue; }
+    if (comparison.repairRequested !== true) { skippedCheckpoints.add(checkpoint); index++; continue; }
+    if (prior.unresolved && reportedFingerprint && prior.fingerprint === reportedFingerprint && (!request.scope || prior.scope === request.scope)) { quarantinedSegments++; skippedCheckpoints.add(checkpoint); index++; continue; }
     if (pendingRepair[table] == null) pendingRepair[table] = Number(((await q("SELECT COUNT(*) AS n FROM sync_history_dirty_keys INDEXED BY idx_sync_history_pending WHERE peer_node='cloud' AND table_name=? AND status='pending'", [table]))[0] || {}).n || 0);
-    if (pendingRepair[table] >= REPAIR_CAP) { repairSkipped++; index++; continue; }
+    if (pendingRepair[table] >= REPAIR_CAP) { repairSkipped++; skippedCheckpoints.add(checkpoint); index++; continue; }
     const lookup = segmentQuery(table, segment);
     const remaining = MANIFEST_REPAIR_LIMITS.rows - examinedRows;
     const limit = examinedRows === 0 ? MANIFEST_REPAIR_LIMITS.oversizedRows + 1 : remaining + 1;
@@ -967,13 +999,13 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       await db.transaction(async tx => {
         const state = { ...prior, version: 2, scope: request.scope, fingerprint: reportedFingerprint, unresolved: 'segment_row_limit', lastRequest: request.clock, round: MANIFEST_REPAIR_LIMITS.rounds };
         await quarantineRepair(tx, table, segment, state, now);
-        await saveRepairState(tx, checkpoint, state, now);
+        await saveExaminedState(tx, checkpoint, state);
       });
       quarantinedSegments++; index++; break;
     }
-    // Table capacity defers only this segment. Advancing the page lets other
-    // tables proceed; the page wraps back to retry it after its pending work drains.
-    if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) { repairSkipped++; index++; continue; }
+    // Table capacity defers only this segment. Aging its examination lets
+    // other work proceed; it stays eligible when the pending work drains.
+    if (pendingRepair[table] > 0 && pendingRepair[table] + rows.length > REPAIR_CAP) { repairSkipped++; skippedCheckpoints.add(checkpoint); index++; continue; }
     if ((rows.length > remaining && examinedRows !== rows.length) || (repairCount > 0 && repairCount + rows.length > REPAIR_CAP)) break;
     let attemptedFingerprint = reportedFingerprint;
     try {
@@ -984,7 +1016,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       deadline();
       const added = await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return 0;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return 0; }
         const existing = [];
         for (const row of prepared) {
           deadline();
@@ -999,7 +1031,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
           state.unresolved = state.unresolved || 'round_limit';
           state.lastRequest = request.clock;
           await quarantineRepair(tx, table, segment, state, now);
-          await saveRepairState(tx, checkpoint, state, now);
+          await saveExaminedState(tx, checkpoint, state);
           quarantinedSegments++; return 0;
         }
         if (state.unresolved === 'work_deadline') { delete state.unresolved; await clearRepairQuarantine(tx, table, segment); }
@@ -1013,7 +1045,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
           count++;
         }
         deadline();
-        await saveRepairState(tx, checkpoint, { ...state, version: 2, scope: request.scope, fingerprint, budgetFailures: 0, lastRequest: request.clock, startedAt: state.startedAt || now }, now);
+        await saveExaminedState(tx, checkpoint, { ...state, version: 2, scope: request.scope, fingerprint, budgetFailures: 0, lastRequest: request.clock, startedAt: state.startedAt || now });
         return count;
       });
       repairCount += added;
@@ -1025,7 +1057,7 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
       // repeatedly unserviceable segment becomes explicit unresolved work.
       await db.transaction(async tx => {
         const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
-        if (obsoleteManifest(request, state, currentClock)) return;
+        if (obsoleteManifest(request, state, currentClock)) { obsoleteCheckpoints.add(checkpoint); return; }
         // A failed attempt belongs to its link and content, even if preparation
         // expired before the normal generation check. In that case the request
         // manifest is the available content fingerprint.
@@ -1041,13 +1073,31 @@ async function queueManifestRepairs({ comparisons, db, q, sourceQuery, now, gate
         if (state.budgetFailures >= MANIFEST_REPAIR_LIMITS.rounds) {
           state.unresolved = 'work_deadline'; await quarantineRepair(tx, table, segment, state, now); quarantinedSegments++; index++;
         }
+        if (state.budgetFailures >= MANIFEST_REPAIR_LIMITS.rounds) state.lastExamined = examination;
         await saveRepairState(tx, checkpoint, state, now);
       });
       break;
     }
   }
   repairSkipped += comparisons.slice(index).filter(c => c && c.repairRequested === true).length;
-  await db.transaction(async tx => tx.run('INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at', [pageKey, String(index >= comparisons.length ? 0 : index), now]));
+  await db.transaction(async tx => {
+    // Capacity/quarantine skips were examined too. Do not let them monopolize
+    // the first 32 slots, and keep obsolete requests behind the existing fence.
+    for (const checkpoint of skippedCheckpoints) {
+      const state = repairState((await tx.get('SELECT value FROM app_settings WHERE key=?', [checkpoint]) || {}).value);
+      if (obsoleteManifest(request, state, currentClock)) obsoleteCheckpoints.add(checkpoint);
+      else await saveExaminedState(tx, checkpoint, state);
+    }
+    // Flush the inspection trace even after expiry. One indexed UPDATE ages at
+    // most 500 keys, touching only lastExamined: no fenced fields or timestamp.
+    // The request's link/epoch was checked before inspection; MAX prevents
+    // rank rewind if another examination already advanced a checkpoint.
+    const obsoleteKeys = [...obsoleteCheckpoints];
+    if (obsoleteKeys.length) await tx.run("UPDATE app_settings SET value=json_set(value,'$.lastExamined',json_object('scope',?,'order',MAX(?,COALESCE(json_extract(value,'$.lastExamined.order'),0)+1))) WHERE key IN (" + obsoleteKeys.map(() => '?').join(',') + ") AND json_valid(value) AND json_extract(value,'$.version')=2", [scope, examination.order, ...obsoleteKeys]);
+    // No page cursor is retained. Remove old hashes and v2/v3 range state in
+    // indexed batches without parsing their potentially unbounded JSON.
+    await tx.run("DELETE FROM app_settings WHERE key IN (SELECT key FROM app_settings WHERE key>='history_repair_cursor:' AND key<'history_repair_cursor;' ORDER BY key LIMIT 32)");
+  });
   return { repairCount, repairSkipped, examinedRows, examinedSegments, quarantinedSegments };
 }
 

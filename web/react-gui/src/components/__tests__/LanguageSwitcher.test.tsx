@@ -36,7 +36,7 @@ describe('LanguageSwitcher', () => {
     render(<LanguageSwitcher triggerClassName="px-6 py-3 text-lg w-full" />);
 
     const trigger = screen.getByRole('button', { name: 'English' });
-    expect(trigger).toHaveClass('w-full');
+    expect(trigger).toHaveClass('w-full', 'border', 'border-[var(--text-tertiary)]');
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);

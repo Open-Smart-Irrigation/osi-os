@@ -181,3 +181,5 @@ describe('AppHeader Network tab', () => {
     expect(screen.getByRole('link', { name: 'Network' })).not.toHaveAttribute('aria-current');
   });
 });
+
+vi.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => <button>Language</button> }));

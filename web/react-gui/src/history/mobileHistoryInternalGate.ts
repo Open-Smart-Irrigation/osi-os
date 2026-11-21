@@ -1,11 +1,4 @@
-export function mobileHistoryInternalEnabled(value: unknown): boolean {
-  return value === 'true';
-}
-
-export const MOBILE_HISTORY_INTERNAL_ENABLED = mobileHistoryInternalEnabled(
-  import.meta.env.VITE_MOBILE_HISTORY_INTERNAL,
-);
-
-export const MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED = mobileHistoryInternalEnabled(
-  import.meta.env.VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS,
-);
+// The release Vite config fixes this to false. Only the internal matrix config
+// builds the experimental charts and their diagnostics.
+export const MOBILE_HISTORY_INTERNAL_ENABLED =
+  typeof __OSI_INTERNAL_PHONE_CHARTS__ !== 'undefined' && __OSI_INTERNAL_PHONE_CHARTS__;

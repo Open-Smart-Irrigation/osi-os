@@ -25,6 +25,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'agronomy-daily',
     'agroscope-uplink-transform',
     'chirpstack',
+    'clover-soil',
     'crop-kc',
     'daily-scheduler',
     'dendro-analytics',
@@ -69,6 +70,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['uplink-dedup'], 'osi-uplink-dedup-guard');
   assert.equal(osiLib.NAME_TO_PATH['history-sync'], 'osi-history-sync-helper');
   assert.equal(osiLib.NAME_TO_PATH['chirpstack'], 'osi-chirpstack-helper');
+  assert.equal(osiLib.NAME_TO_PATH['clover-soil'], 'osi-clover-soil');
   assert.equal(osiLib.NAME_TO_PATH['dendro-analytics'], 'osi-dendro-analytics');
   assert.equal(osiLib.NAME_TO_PATH['zone-env'], 'osi-zone-env');
   assert.equal(osiLib.NAME_TO_PATH['weather-provider'], 'osi-weather-provider');

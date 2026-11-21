@@ -3,6 +3,7 @@ dist
 .DS_Store
 /build/
 /build-canary/
+/build-mobile-history-internal/
 /demo-build/
 /test-results/
 /playwright-report/

@@ -60,6 +60,7 @@ const NAME_TO_PATH = {
   'entity-name': 'osi-entity-name',
   'uc512-normalize': 'osi-uc512-normalize',
   'lsn50-normalize': 'osi-lsn50-normalize',
+  'clover-soil': 'osi-clover-soil',
   'sdi12-archive': 'osi-sdi12-archive',
   'sdi12-normalize': 'osi-sdi12-normalize',
   'sdi12-recipe': 'osi-sdi12-recipe',

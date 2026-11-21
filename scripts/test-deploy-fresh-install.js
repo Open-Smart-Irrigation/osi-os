@@ -154,6 +154,7 @@ apply_release_firmware_version() { echo "STUB apply_release_firmware_version $*"
 fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 0; }
 
 DAMAGED_DB_DOC=docs/operations/damaged-farm-database.md
+${extractFunction('ensure_sqlite3_cli')}
 ${extractFunction('check_live_db_readonly')}
 ${extractFunction('checkpoint_live_db')}
 ${extractFunction('schema_compatibility_metadata')}

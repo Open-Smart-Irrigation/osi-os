@@ -24,6 +24,7 @@ jobs:
       - run: node scripts/verify-s2120-codec.js
       - run: node scripts/verify-sdi12-codec.js
       - run: node scripts/verify-tektelic-agriculture-codec.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-clover-soil/index.test.js
       - run: node scripts/verify-codec-robustness.js
       - run: node scripts/verify-device-integration.js
       - run: node scripts/verify-profile-parity.js
