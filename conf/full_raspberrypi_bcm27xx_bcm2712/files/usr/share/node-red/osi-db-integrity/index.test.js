@@ -113,9 +113,11 @@ test('the live SQLite open cannot create a database that disappeared after the p
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const dbPath = makeDb(dir, 'farming?fixture.db');
   const stat = fs.lstatSync;
+  let mainPathChecks = 0;
   t.mock.method(fs, 'lstatSync', (filename, ...options) => {
     const result = stat(filename, ...options);
-    if (filename === dbPath) fs.unlinkSync(dbPath);
+    // Remove the file after the last path check, just before SQLite opens it.
+    if (filename === dbPath && ++mainPathChecks === 2) fs.unlinkSync(dbPath);
     return result;
   });
   await assert.rejects(runBootIntegrityCheck(dbPath), /restoration refused/);

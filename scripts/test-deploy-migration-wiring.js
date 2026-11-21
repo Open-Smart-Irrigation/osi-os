@@ -374,7 +374,7 @@ test('rollback waits for the same Node-RED readiness used by forward activation'
   const rollbackStart = indexOf('    # payload rollback begin');
   const rollbackEnd = indexOf('    # payload rollback end', rollbackStart);
   const rollback = deploy.slice(rollbackStart, rollbackEnd);
-  const restartIdx = rollback.indexOf('NODE_RED_INIT" restart');
+  const restartIdx = rollback.indexOf('if ! repair_health_start restart; then');
   const readinessIdx = rollback.indexOf('wait_for_node_red_health');
   assert.ok(restartIdx >= 0, 'rollback must restart Node-RED after restoring the pair');
   assert.ok(readinessIdx > restartIdx, 'rollback must wait for Node-RED readiness after restart');

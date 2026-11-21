@@ -279,7 +279,7 @@ expectIncludes('deploy.sh', deploySource,
   'trap \'deploy_exit_handler $?\' EXIT\n    trap \'exit 130\' INT\n    trap \'exit 143\' TERM',
   'uses one EXIT cleanup path with signal-specific exit status');
 expectIncludes('deploy.sh', deploySource,
-  'if ! identityd_service enable; then\n    echo "ERROR: failed to enable identityd" >&2\n    exit 1\nfi\nidentityd_service start\nif ! wait_for_identityd_ready; then',
+  'if recovery_hold_present; then\n    hold_node_red_stopped || exit 1\n    quiesce_identityd_instance || exit 1\n    echo "HELD: retirement payload checked; writers and autostart remain stopped until explicit --release-hold"\nelse\n    if ! identityd_service enable; then\n        echo "ERROR: failed to enable identityd" >&2\n        exit 1\n    fi\n    identityd_service start\n    if ! wait_for_identityd_ready; then',
   'final activation starts only after the quiescence gap and waits for readiness');
 expectCondition(identityEnabledAt >= 0 && identityReadyAt > identityEnabledAt,
   'deploy.sh: final readiness follows identityd enable/start',
