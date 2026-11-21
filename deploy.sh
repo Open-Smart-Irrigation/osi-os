@@ -1519,6 +1519,22 @@ verify_native_sqlite3_after_npm() {
     return 1
 }
 
+ensure_sqlite3_cli() {
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v opkg >/dev/null 2>&1; then
+        echo "sqlite3 CLI absent; installing sqlite3-cli via opkg"
+        opkg update >/dev/null 2>&1 || true
+        opkg install sqlite3-cli >/dev/null 2>&1 || true
+    fi
+    if command -v sqlite3 >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "ERROR: sqlite3 CLI unavailable and could not be installed; refusing schema migration" >&2
+    return 1
+}
+
 seed_db_if_missing() {
     echo "--- farming.db ---"
     if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
@@ -2363,22 +2379,6 @@ checkpoint_live_db() {
         echo "See docs/operations/damaged-farm-database.md (osi-os repository) before deploying again." >&2
         return 1
     fi
-}
-
-ensure_sqlite3_cli() {
-    if command -v sqlite3 >/dev/null 2>&1; then
-        return 0
-    fi
-    if command -v opkg >/dev/null 2>&1; then
-        echo "sqlite3 CLI absent; installing sqlite3-cli via opkg"
-        opkg update >/dev/null 2>&1 || true
-        opkg install sqlite3-cli >/dev/null 2>&1 || true
-    fi
-    if command -v sqlite3 >/dev/null 2>&1; then
-        return 0
-    fi
-    echo "ERROR: sqlite3 CLI unavailable and could not be installed; refusing schema migration" >&2
-    return 1
 }
 
 # Checks a fetched CHECKSUMS.json ($1 = manifest) or the files it names
