@@ -9,7 +9,10 @@ import subprocess
 import tempfile
 import time
 
-from minimal_flows import CUT_RECEIPT, INIT, has_atomic_publish, prepare_probe_release, verify_disk
+from archives import verified_archive
+from minimal_flows import (
+    CUT_RECEIPT, INIT, derive_probe_image, has_atomic_publish, prepare_probe_release, verify_disk,
+)
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
@@ -230,9 +233,8 @@ def main(argv=None):
     ap.add_argument('--candidate', type=Path)
     ap.add_argument('--candidate-sha256')
     ap.add_argument('--tools-revision', help='pinned Git commit of the emulator tools checkout')
-    ap.add_argument('--minimal-probe-image', type=Path,
-                    help='separate factory archive built with the test-only minimal flows probe')
-    ap.add_argument('--minimal-probe-sha256')
+    ap.add_argument('--openwrt-host-tools', type=Path,
+                    help='OpenWrt staging_dir/host used to derive the minimal factory probe')
     ap.add_argument('--osi-version', required=True)
     ap.add_argument('--chirpstack-version', required=True)
     ap.add_argument('--release', type=Path, required=True,
@@ -278,10 +280,6 @@ def main(argv=None):
             args.customer_source = external_path(Path(customer_source))
     except (OSError, ValueError, RuntimeError):
         ap.error('run root and private inputs must resolve to existing paths outside any Git tree')
-    if args.candidate is not None:
-        with args.candidate.open('rb') as stream:
-            if hashlib.file_digest(stream, 'sha256').hexdigest() != args.candidate_sha256:
-                ap.error('candidate SHA-256 mismatch')
     try:
         tools_revision = tools_checkout_revision(args.tools_revision)
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
@@ -295,7 +293,7 @@ def main(argv=None):
         f'revision={args.release_revision}\ntools_revision={tools_revision}\n'
         f'candidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
-        f'offline_flows_capability={capability}\nminimal_probe_sha256={args.minimal_probe_sha256}\n'
+        f'offline_flows_capability={capability}\n'
         f'flows_power_cut_only={args.flows_power_cut_only}\n'
         f'upgrade_boot_safety_only={args.upgrade_boot_safety_only}\n'
         f'customer_fixture_only={args.customer_fixture_only}\n')
@@ -362,6 +360,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         record(row)
 
     media=None
+    fixture_archives = {}
 
     def candidate_media():
         nonlocal media
@@ -369,16 +368,23 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             media = build_media(release, scratch, revision=args.release_revision)
         return media
 
+    def fixture_archive(old):
+        if old not in fixture_archives:
+            folder = args.fixtures/f'v{old}'
+            images = sorted(folder.glob('*rpi5*.img.gz'))
+            if len(images) != 1:
+                raise ValueError(f'expected one Pi 5 fixture archive for {old}')
+            image = images[0]
+            entries = [line.split(maxsplit=1) for line in (folder/'SHA256SUMS').read_text().splitlines()]
+            matches = [entry[0] for entry in entries if len(entry) == 2 and entry[1].lstrip('*') == image.name]
+            if len(matches) != 1 or not re.fullmatch(r'[0-9a-f]{64}', matches[0]):
+                raise ValueError('fixture checksum manifest must identify exactly one archive digest')
+            fixture_archives[old] = verified_archive(
+                image, matches[0], scratch/f'fixture-{old}.img.gz', label='fixture archive')
+        return fixture_archives[old]
+
     def verify_upgrade(old, *, cut_at=None, recovery=None, transfer=None):
-        folder = args.fixtures/f'v{old}'
-        images = sorted(folder.glob('*rpi5*.img.gz'))
-        if len(images) != 1:
-            raise ValueError(f'expected one Pi 5 fixture archive for {old}')
-        image = images[0]
-        with image.open('rb') as stream:
-            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if [digest, image.name] not in [line.split() for line in (folder/'SHA256SUMS').read_text().splitlines()]:
-            raise ValueError('fixture SHA-256 mismatch')
+        image = fixture_archive(old)
         minimal = cut_at == CUT_RECEIPT
         scenario = transfer or recovery or ('minimal-cut' if minimal else 'flows-cut' if cut_at else None)
         upgrade_media = build_media(probe_release, scratch/'minimal-media',
@@ -392,7 +398,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             else:
                 guest.start()
             ready(guest)
-            previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer, release=release)
+            previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer,
+                               release=probe_release if minimal else release)
             if recovery == 'zero':
                 verify_zero_recovery(guest, release, previous)
                 return 'pristine recovery preserved trigger definitions, fixture and API'
@@ -411,7 +418,9 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         try:
             receipt = vm.start(before_console=CUT_RECEIPT, flow_cut=phase)
             committed = verify_disk(vm, receipt, phase=phase, factory=True,
-                                    shipped_old=candidate_payload.flows.encode())
+                                    shipped_old=candidate_payload.flows.encode(),
+                                    shipped_init=probe_init_digest.encode(),
+                                    shipped_writer=candidate_payload.writer.encode())
             vm.start()
             observed = read_factory_payload(vm)
             record(f'Factory probe ROM ({phase}): {observed.receipt()}')
@@ -426,8 +435,16 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
     image_capability = None
     try:
+        candidate = None
+        if getattr(args, 'candidate', None) is not None:
+            try:
+                candidate = verified_archive(args.candidate, args.candidate_sha256,
+                                             scratch/'verified-candidate.img', label='candidate archive')
+            except (OSError, ValueError) as error:
+                record(str(error))
+                return summarize(aborted=True)
         if not focused:
-            vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram,
+            vm = Guest(scratch/'candidate', candidate, args.qemu, args.ram,
                        receipts=run/'candidate', direct_io=True)
             try:
                 try:
@@ -450,18 +467,17 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                         record(f'Candidate factory ROM: {candidate_payload.receipt()}')
                         if candidate_payload.init != hashlib.sha256((release/INIT).read_bytes()).hexdigest():
                             raise ValueError('candidate factory ROM init differs from the offline source')
-                        if not args.minimal_probe_image or not re.fullmatch(r'[0-9a-f]{64}', args.minimal_probe_sha256 or ''):
-                            raise ValueError('minimal qualification requires --minimal-probe-image and --minimal-probe-sha256')
-                        if args.minimal_probe_sha256 == args.candidate_sha256:
-                            raise ValueError('the minimal probe must be a separate factory image')
-                        probe_image = external_path(args.minimal_probe_image, off_tmp=True)
-                        with probe_image.open('rb') as stream:
-                            if hashlib.file_digest(stream, 'sha256').hexdigest() != args.minimal_probe_sha256:
-                                raise ValueError('minimal probe image SHA-256 mismatch')
+                        if args.openwrt_host_tools is None:
+                            raise ValueError('minimal qualification requires --openwrt-host-tools')
+                        host_tools = args.openwrt_host_tools.resolve(strict=True)
                         probe_release = scratch/'probe-release'
                         probe_init_digest = prepare_probe_release(release, probe_release)
+                        probe_image = scratch/'derived-probe.img'
+                        probe_sha256 = derive_probe_image(candidate, release, probe_release,
+                                                          probe_image, host_tools)
+                        record(f'Derived probe SHA-256: {probe_sha256} from candidate {args.candidate_sha256}')
                         (scratch/'minimal-media').mkdir()
-                    except (OSError, ValueError, RuntimeError) as error:
+                    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
                         record(str(error))
                         return summarize(aborted=True)
                 stock_cases(vm, args, test)
@@ -473,7 +489,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
                 def check_cut():
                     case = label.replace(' ', '-')
-                    vm = Guest(scratch/case, args.candidate, args.qemu, args.ram,
+                    vm = Guest(scratch/case, candidate, args.qemu, args.ram,
                                receipts=run/case, direct_io=True)
                     try:
                         if not first_boot:

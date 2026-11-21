@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import acceptance
+from archives import verified_archive
 import boot_safety
 import customer_fixture
 import minimal_flows
@@ -52,7 +53,23 @@ class FlowTests(unittest.TestCase):
                               'Valve open and outcome', 'Reboot persistence', 'Power cut 1', 'Power cut 3'):
                     record(label, lambda: None)
 
-            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest') as guest,
+            def stage(source, checksum, destination, *, label):
+                result = verified_archive(source, checksum, destination, label=label)
+                if source == image:
+                    replacement = root/'replacement.img.gz'
+                    replacement.write_bytes(b'replacement archive')
+                    replacement.replace(image)
+                return result
+
+            guest = Mock()
+
+            def open_guest(_work, archive, *_args, **_options):
+                self.assertNotEqual(archive, image)
+                self.assertEqual(archive.read_bytes(), b'factory')
+                return guest
+
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest', side_effect=open_guest),
+                  patch.object(acceptance, 'verified_archive', side_effect=stage),
                   patch.dict(os.environ, {'OSI_FLOWS_CAPABILITY': 'minimal'}),
                   patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY) as checked,
                   patch.object(acceptance, 'stock_cases', side_effect=stock),
@@ -65,9 +82,9 @@ class FlowTests(unittest.TestCase):
                     '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1',
                     '--release', str(root), '--release-revision', revision,
                     '--fixtures', str(root), '--run-root', str(root),
-                    '--minimal-probe-image', str(image), '--minimal-probe-sha256', digest,
+                    '--openwrt-host-tools', str(root),
                 ])
-            checked.assert_called_once_with(guest.return_value, 'cat /rom/etc/init.d/node-red')
+            checked.assert_called_once_with(guest, 'cat /rom/etc/init.d/node-red')
             result_file = next(root.glob('pi5-acceptance-*/results.log'))
             result = result_file.read_text()
             revision = acceptance.tools_checkout_revision(None)
@@ -243,6 +260,7 @@ class FlowTests(unittest.TestCase):
             image.write_bytes(b'fixture')
             (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
             args = SimpleNamespace(fixtures=fixtures, candidate=image, qemu=None, ram=8,
+                                   candidate_sha256=hashlib.sha256(b'fixture').hexdigest(),
                                    release_revision='a'*40, osi_version='0.8.3',
                                    flows_power_cut_only=True, customer_fixture_only=False,
                                    upgrade_boot_safety_only=False)
@@ -263,19 +281,18 @@ class FlowTests(unittest.TestCase):
                 init = root/minimal_flows.INIT
                 init.parent.mkdir(parents=True)
                 init.write_text(minimal_flows.ATOMIC_PUBLISH + '\n')
-                probe = root/'probe.img.gz'
-                probe.write_bytes(b'probe')
+                image = root/'candidate.img.gz'
+                image.write_bytes(b'factory archive bytes')
                 for version in acceptance.UPGRADE_VERSIONS:
                     folder = root/f'v{version}'
                     folder.mkdir()
                     (folder/'rpi5.img.gz').write_bytes(b'fixture')
                     (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
-                args = SimpleNamespace(candidate=None, qemu=None, ram=8, fixtures=root,
+                args = SimpleNamespace(candidate=image, qemu=None, ram=8, fixtures=root,
                                        flows_power_cut_only=False, customer_fixture_only=False,
                                        upgrade_boot_safety_only=False, release_revision='a'*40,
-                                       osi_version='0.8.3', candidate_sha256=hashlib.sha256(b'factory').hexdigest(),
-                                       minimal_probe_image=probe,
-                                       minimal_probe_sha256=hashlib.sha256(b'probe').hexdigest())
+                                       osi_version='0.8.3', candidate_sha256=hashlib.sha256(image.read_bytes()).hexdigest(),
+                                       openwrt_host_tools=root)
 
                 def stock(_guest, _args, record, **_options):
                     for label in acceptance.BASE_CASES[:-2]:
@@ -293,8 +310,15 @@ class FlowTests(unittest.TestCase):
                     probe_payload = replace(probe_payload, **{fault: 'e'*64})
                 checked = [minimal_flows.ATOMIC_PUBLISH, digest_receipt(candidate),
                            digest_receipt(probe_payload), digest_receipt(probe_payload)]
-                with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
-                      patch.object(acceptance, 'external_path', return_value=probe),
+                def derive(archive, _release, _probe, output, _tools):
+                    self.assertNotEqual(archive, image)
+                    self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), args.candidate_sha256)
+                    output.write_bytes(b'derived from ' + archive.read_bytes())
+                    return hashlib.sha256(output.read_bytes()).hexdigest()
+
+                guest = Mock()
+                with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest', guest),
+                      patch.object(acceptance, 'derive_probe_image', side_effect=derive) as derive_image,
                       patch.object(acceptance, 'prepare_probe_release', return_value='d'*64),
                       patch.object(acceptance, 'checked', side_effect=checked),
                       patch.object(acceptance, 'wait_for_api') as api,
@@ -305,6 +329,10 @@ class FlowTests(unittest.TestCase):
                         disk.side_effect = RuntimeError('clone failed')
                     self.assertEqual(acceptance.run_cases(args, root, root, root, 'minimal', False),
                                      int(fault != 'none'))
+                derive_image.assert_called_once()
+                self.assertEqual(guest.call_args_list[0].args[1], derive_image.call_args.args[0])
+                self.assertEqual(sum(call.args[1] == derive_image.call_args.args[3]
+                                     for call in guest.call_args_list), 2)
                 self.assertEqual([call.kwargs['phase'] for call in disk.call_args_list],
                                  ['committed', 'before-dir-sync'])
                 self.assertTrue(all(call.kwargs['shipped_old'] == candidate.flows.encode()
@@ -322,11 +350,34 @@ class FlowTests(unittest.TestCase):
 
     def test_factory_cut_refuses_a_marker_with_unrelated_starting_flows(self):
         vm = Mock()
-        receipt = (b'committed', b'a'*64, b'b'*64, b'image')
+        receipt = (b'committed', b'a'*64, b'b'*64, b'image', b'd'*64, b'e'*64)
         with self.assertRaisesRegex(RuntimeError, 'factory marker old digest'):
-            minimal_flows.verify_disk(vm, receipt, phase='committed', factory=True, shipped_old=b'c'*64)
+            minimal_flows.verify_disk(vm, receipt, phase='committed', factory=True, shipped_old=b'c'*64,
+                                      shipped_init=b'd'*64, shipped_writer=b'e'*64)
         vm.stop.assert_called_once_with(cut=True)
         vm.verify_cut_disk.assert_not_called()
+
+    def test_factory_cut_refuses_an_overlay_writer_or_init(self):
+        for init, writer in ((b'c'*64, b'e'*64), (b'd'*64, b'c'*64)):
+            with self.subTest(init=init, writer=writer):
+                vm = Mock()
+                receipt = (b'committed', b'a'*64, b'b'*64, b'image', init, writer)
+                with self.assertRaisesRegex(RuntimeError, 'different running init or atomic writer'):
+                    minimal_flows.verify_disk(vm, receipt, phase='committed', factory=True, shipped_old=b'a'*64,
+                                              shipped_init=b'd'*64, shipped_writer=b'e'*64)
+                vm.stop.assert_called_once_with(cut=True)
+                vm.verify_cut_disk.assert_not_called()
+
+    def test_cli_rejects_a_separate_probe_archive(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as result:
+            acceptance.main([
+                '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1', '--release', 'release',
+                '--release-revision', 'a'*40, '--fixtures', 'fixtures', '--run-root', 'evidence',
+                '--minimal-probe-image', 'independent.img.gz',
+            ])
+        self.assertEqual(result.exception.code, 2)
+        self.assertIn('unrecognized arguments: --minimal-probe-image', stderr.getvalue())
 
     def test_tools_revision_refuses_checkout_mismatch_and_changes(self):
         root = acceptance.HERE.parents[1]
@@ -490,12 +541,14 @@ class BoundaryTests(unittest.TestCase):
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({candidate: digest}))
             (manifest.parent/candidate).write_bytes(sql)
-            files, identity = customer_fixture.verified_inputs(image, root, root)
+            staged_image, files, identity = customer_fixture.verified_inputs(image, root, root, root/'verified')
+            self.assertNotEqual(staged_image, image)
+            self.assertEqual(staged_image.read_bytes(), image.read_bytes())
             self.assertNotIn(customer_fixture.PROVENANCE, files)
             self.assertEqual(identity['legacy_archive_migration_sha256'], digest)
             manifest.write_text(json.dumps({candidate: 'a'*64}))
             with self.assertRaisesRegex(ValueError, 'does not match candidate migration 0080'):
-                customer_fixture.verified_inputs(image, root, root)
+                customer_fixture.verified_inputs(image, root, root, root/'rejected')
 
 
 class ProgressTests(unittest.TestCase):

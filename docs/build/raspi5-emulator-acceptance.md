@@ -98,26 +98,19 @@ an offline upgrade from 0.8.1. A shell-only clone must contain the complete
 old or new flows at the expected path. Normal startup of the original must
 serve the patched flows and return HTTP 401 from `/api/me`.
 
-Use the unmodified candidate archive and offline tree for the baseline cases.
-Make a separate disposable source export for the test factory image:
+Pass the candidate archive and the SHA-256 from its build receipt. Add
+`--openwrt-host-tools "$OPENWRT_HOST_TOOLS"`, pointing to the OpenWrt
+`staging_dir/host` from the build. The runner copies and verifies the
+candidate and fixture archives in private scratch before extraction.
+It derives the probe from the verified candidate copy, retaining the boot
+partition and replacing only the Node-RED init file in the SquashFS tree.
+The original and derived image digests appear in the run receipts.
 
-```bash
-python3 -B "$GATE_TREE/tools/raspi5/minimal_flows.py" "$OFFLINE_RELEASE_TREE" "$PROBE_SOURCE"
-```
-
-The command checks the original init's deploy pin, adds the console marker
-and updates the pin in the export. Build the same board's test factory image
-from the candidate revision with the export's instrumented Node-RED init.
-Keep that image and the probe source outside Git trees. Run the full gate
-with `--minimal-probe-image "$PROBE_FACTORY_IMAGE"` and
-`--minimal-probe-sha256 "$PROBE_FACTORY_SHA256"` in addition to the ordinary
-candidate arguments. The runner checks both archives' ROM digests for the
-atomic writer and seed `flows.json`. The candidate's ROM init must match
-the offline source, and the probe's ROM init must match the instrumented
-copy of that source. The factory cut marker's starting flows digest must
-match the candidate's ROM seed. The runner records the digests and prepares
-the instrumented upgrade bundle in scratch from the same offline source.
-Keep the probe image separate from the release assets.
+The candidate's ROM init must match the offline source. The derived image
+must preserve the ROM writer and seed flows and carry the instrumented init.
+The cut marker records the starting flows and the running init and writer
+digests. The runner checks them before accepting clone evidence. It also
+derives the instrumented offline bundle from the deployment tree in scratch.
 
 ### Customer-line 0.7.0 image fixture (PROVISIONAL)
 

@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from minimal_flows import CUT_RECEIPT, verify_disk
+from minimal_flows import CUT_RECEIPT, INIT, verify_disk
 
 DB = '/data/db/farming.db'
 SEED = """
@@ -140,13 +140,17 @@ def run(vm, old_version, new_version, *, cut_at=None, transfer=None, release=Non
     if cut_at == CUT_RECEIPT:
         candidate_flows = release/'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
         shipped_old = hashlib.sha256(candidate_flows.read_bytes()).hexdigest().encode()
+        shipped_init = hashlib.sha256((release/INIT).read_bytes()).hexdigest().encode()
+        writer = candidate_flows.parent/'node-red/osi-atomic-write.js'
+        shipped_writer = hashlib.sha256(writer.read_bytes()).hexdigest().encode()
     code, receipt = vm.command('set -e\n'+CANDIDATE_INSTALL, 2400, until=cut_at)
     if cut_at is not None and code is None:
         # This is the candidate init's first publication on the upgraded
         # payload. The installer is still running, so cut without a guest call.
         if cut_at == CUT_RECEIPT:
             receipt = verify_disk(vm, receipt, phase='committed', factory=False,
-                                  old_stamp=old_stamp, shipped_old=shipped_old)
+                                  old_stamp=old_stamp, shipped_old=shipped_old,
+                                  shipped_init=shipped_init, shipped_writer=shipped_writer)
         else:
             vm.stop(cut=True)
             if receipt[1] in (b'image', old_stamp):

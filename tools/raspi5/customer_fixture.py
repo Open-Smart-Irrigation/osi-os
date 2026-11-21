@@ -7,6 +7,7 @@ import shlex
 import tarfile
 import time
 
+from archives import verified_archive
 from suite_vm import Guest, external_path
 from upgrade_suite import DB, MOUNT_USB, build_media, checked, sql
 
@@ -65,7 +66,7 @@ class FixtureFailure(RuntimeError):
     """A fixed diagnostic or validated numeric result safe for shared output."""
 
 
-def verified_inputs(image, source, release):
+def verified_inputs(image, source, release, staging):
     checksums = {}
     for line in external_path(source/'SHA256SUMS').read_text().splitlines():
         parts = line.split(maxsplit=1)
@@ -76,11 +77,12 @@ def verified_inputs(image, source, release):
         if name in checksums:
             raise ValueError('duplicate private SHA256SUMS entry')
         checksums[name] = digest
-    files = {name: external_path(source/name) for name in (*FILES, PROVENANCE)}
-    for name, path in [(image.name, external_path(image)), *files.items()]:
-        with path.open('rb') as stream:
-            if hashlib.file_digest(stream, 'sha256').hexdigest() != checksums.get(name):
-                raise ValueError('private fixture input SHA-256 mismatch')
+    staging.mkdir(mode=0o700)
+    factory = verified_archive(external_path(image), checksums.get(image.name),
+                               staging/'factory.img', label='private factory archive')
+    files = {name: verified_archive(external_path(source/name), checksums.get(name),
+                                    staging/name, label='private fixture input')
+             for name in (*FILES, PROVENANCE)}
     provenance = json.loads(files.pop(PROVENANCE).read_text())
     pins = {'factory_image_sha256': image.name, 'legacy_bundle_sha256': 'customer.tar.gz'}
     if not isinstance(provenance, dict) or set(provenance) != {'rom_gui_sha256', 'legacy_revision', *pins}:
@@ -118,7 +120,7 @@ def verified_inputs(image, source, release):
 
     identity = dict(provenance, legacy_archive_migration_sha256=legacy_checksum,
                     inputs_sha256={name: checksums[name] for name in (*FILES, PROVENANCE)})
-    return files, identity
+    return factory, files, identity
 
 
 def ledger_ok(vm):
@@ -260,14 +262,14 @@ def run(args, scratch, receipts, release, ready):
     log = evidence/'progress.jsonl'
     write_receipt(log, event='phase', phase='prepare')
     try:
-        files, identity = verified_inputs(args.customer_image, args.customer_source, release)
+        factory, files, identity = verified_inputs(args.customer_image, args.customer_source, release, work/'verified')
     except (OSError, ValueError, RuntimeError, tarfile.TarError, IndexError, AttributeError):
         raise FixtureFailure('private fixture provenance, manifest or checksum verification failed') from None
     identity['candidate_revision'] = args.release_revision
     (evidence/'inputs.json').write_text(json.dumps(identity, indent=2)+'\n')
     media = build_media(release, work, revision=args.release_revision, extra_files=files, quiet=True)
     write_receipt(log, event='phase', phase='boot-0.7.0')
-    vm = Guest(work/'guest', args.customer_image, args.qemu, args.ram, upgrade=media,
+    vm = Guest(work/'guest', factory, args.qemu, args.ram, upgrade=media,
                receipts=evidence, private=True)
     try:
         vm.start()
