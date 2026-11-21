@@ -13,6 +13,11 @@ if [ ! -f "$SEED_SRC" ]; then
     exit 0
 fi
 
+if [ -e "$DATA_DB.osi-recovery" ] || [ -L "$DATA_DB.osi-recovery" ]; then
+    logger -t osi-db-seed "HELD: database recovery in progress. Refusing to seed $DATA_DB."
+    exit 1
+fi
+
 if [ -f "$DATA_DB" ]; then
     logger -t osi-db-seed "$DATA_DB already exists, skipping seed"
     exit 0
@@ -28,7 +33,44 @@ for sidecar in "$DATA_DB-wal" "$DATA_DB-shm" "$DATA_DB-journal"; do
 done
 
 mkdir -p "$DATA_DIR" || { logger -t osi-db-seed "cannot create $DATA_DIR"; exit 1; }
-cp "$SEED_SRC" "$DATA_DB" || { logger -t osi-db-seed "copy failed"; exit 1; }
+# A complete, synced new inode becomes visible in one step. linkSync refuses
+# an existing target, even if it appeared after the checks above.
+if ! node - "$SEED_SRC" "$DATA_DB" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
+const [source, target] = process.argv.slice(2);
+const dir = path.dirname(target);
+const temporary = path.join(dir, '.farming-seed-' + randomUUID());
+fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
+try {
+  const fd = fs.openSync(temporary, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const parent = fs.openSync(dir, 'r');
+  try {
+    fs.linkSync(temporary, target);
+    try {
+      fs.fsyncSync(parent);
+    } catch (error) {
+      fs.unlinkSync(target);
+      fs.fsyncSync(parent);
+      throw error;
+    }
+  } finally {
+    fs.closeSync(parent);
+  }
+} finally {
+  fs.unlinkSync(temporary);
+}
+NODE
+then
+    logger -t osi-db-seed "atomic seed failed"
+    exit 1
+fi
 
 logger -t osi-db-seed "seeded $DATA_DB from $SEED_SRC"
 exit 0
