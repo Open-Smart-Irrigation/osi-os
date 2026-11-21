@@ -29,8 +29,32 @@ function freshImageSeed() {
       [dst, path.join(dst, 'node_modules')].some(dir =>
         fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink())) ||
       ['-wal', '-shm', '-journal', '.osi-recovery'].some(suffix => hasEntry(liveDb + suffix))) return false;
-  return hasEntry(flowSeed)?.isFile() && hasEntry(imageDb)?.isFile() && hasEntry(liveDb)?.isFile() &&
-    fs.readFileSync(imageDb).equals(fs.readFileSync(liveDb));
+  if (!hasEntry(flowSeed)?.isFile()) return false;
+  const imageEntry = hasEntry(imageDb);
+  const liveEntry = hasEntry(liveDb);
+  if (!imageEntry?.isFile() || !liveEntry?.isFile() || imageEntry.size !== liveEntry.size) return false;
+
+  let imageFd;
+  let liveFd;
+  try {
+    imageFd = fs.openSync(imageDb, 'r');
+    liveFd = fs.openSync(liveDb, 'r');
+    const image = Buffer.alloc(64 * 1024);
+    const live = Buffer.alloc(image.length);
+    for (let offset = 0; offset < imageEntry.size; offset += image.length) {
+      const length = Math.min(image.length, imageEntry.size - offset);
+      if (fs.readSync(imageFd, image, 0, length, offset) !== length ||
+          fs.readSync(liveFd, live, 0, length, offset) !== length ||
+          !image.subarray(0, length).equals(live.subarray(0, length))) return false;
+    }
+    return fs.fstatSync(imageFd).size === imageEntry.size && fs.fstatSync(liveFd).size === liveEntry.size;
+  } catch (error) {
+    console.error('WARN: could not prove factory flow ownership: ' + error.message);
+    return false;
+  } finally {
+    if (liveFd !== undefined) fs.closeSync(liveFd);
+    if (imageFd !== undefined) fs.closeSync(imageFd);
+  }
 }
 
 const dir = fs.openSync(dst, 'r');
@@ -81,6 +105,33 @@ function publish(target, write) {
 }
 NODE
 
+# Sync the named trees bottom-up, followed by their containing directories.
+# A symlink is published by syncing its parent. Never sync its target here.
+seed_sync_paths() {
+    node - "$@" <<'NODE'
+  const fs = require('fs');
+  const path = require('path');
+  const entries = process.argv.slice(2);
+  const separator = entries.indexOf('--');
+  function syncEntry(file, recursive) {
+    const metadata = fs.lstatSync(file);
+    if (metadata.isSymbolicLink()) return;
+    if (!metadata.isDirectory() && !metadata.isFile()) throw new Error('cannot sync nonregular seed entry: ' + file);
+    if (recursive && metadata.isDirectory()) {
+      for (const name of fs.readdirSync(file)) syncEntry(path.join(file, name), true);
+    }
+    const fd = fs.openSync(file, 'r');
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  for (const file of entries.slice(0, separator)) syncEntry(file, true);
+  for (const directory of entries.slice(separator + 1)) syncEntry(directory, false);
+NODE
+}
+
 # The image's helpers, codecs, node files, edge-channels.json and node_modules are copied
 # once per image install, at its first boot, before the sqlite3 block can
 # refuse. A refusing seed exits 1 and runs again at every boot, and a deploy
@@ -90,23 +141,28 @@ NODE
 # disk before it. A successful seed removes it.
 SEED_COPIED=/etc/osi-node-red-seed.copied
 if [ -e "$SEED_COPIED" ]; then SEED_COPY=0; else SEED_COPY=1; fi
+set --
 
 if [ "$SEED_COPY" = 1 ] && [ -f "$SRC/edge-channels.json" ]; then
     cp "$SRC/edge-channels.json" "$DST/edge-channels.json"
+    set -- "$@" "$DST/edge-channels.json"
 fi
 
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/codecs" ]; then
     mkdir -p "$DST/codecs"
     cp -a "$SRC/codecs/." "$DST/codecs/"
+    set -- "$@" "$DST/codecs"
 fi
 
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/nodes" ]; then
     mkdir -p "$DST/nodes"
     cp -a "$SRC/nodes/." "$DST/nodes/"
+    set -- "$@" "$DST/nodes"
 fi
 
 if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/node_modules" ]; then
     cp -a "$SRC/node_modules/." "$DST/node_modules/"
+    set -- "$@" "$DST/node_modules"
 fi
 
 for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-watermark-binding osi-command-ledger osi-scoped-access-commands osi-zone-commands osi-device-commands osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-radio-helper osi-network-api osi-installation-location-helper osi-installation-helper osi-history-router osi-health-helper osi-lib osi-module-defaults osi-journal osi-journal-replication osi-device-writer osi-uplink-dedup-guard osi-uc512-normalize osi-lsn50-normalize osi-matric-potential osi-sdi12-normalize osi-sdi12-commissioning osi-sdi12-recipe osi-sdi12-reassemble osi-sdi12-archive osi-valve-control osi-irrigation-policy osi-system-settings osi-scope-helper osi-local-password-reset osi-scheduler-mean-query osi-rejection-recovery osi-entity-name osi-weather-provider osi-crop-kc osi-station-hours osi-rain osi-agronomy-daily osi-watermark-helper; do
@@ -121,16 +177,19 @@ for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-wate
         rm -rf "$DST/$module" "$DST/node_modules/$module"
         cp -a "$SRC/$module" "$DST/$module"
         cp -a "$SRC/$module" "$DST/node_modules/$module"
+        set -- "$@" "$DST/$module" "$DST/node_modules/$module"
     fi
 done
 
 if [ "$SEED_COPY" = 1 ]; then
-    if ! sync; then
+    if ! seed_sync_paths "$@" -- "$DST/node_modules" "$DST" "${DST%/*}"; then
         echo 'ERROR: sync failed before recording the image copy' >&2
         exit 1
     fi
-    if ! touch "$SEED_COPIED"; then
-        echo "WARN: could not write $SEED_COPIED; a refusing seed copies the image again at the next boot" >&2
+    if ! touch "$SEED_COPIED" || ! seed_sync_paths "$SEED_COPIED" -- "${SEED_COPIED%/*}"; then
+        rm -f "$SEED_COPIED"
+        echo "ERROR: could not commit $SEED_COPIED; retry seed" >&2
+        exit 1
     fi
 fi
 
@@ -208,6 +267,10 @@ seed_sqlite3_restore_original() {
        [ "$(seed_sqlite3_restore_id "$seed_restore_d")" != "$seed_restore_expected" ]; then
         echo 'ERROR: seed restore identity differs; retained rollback marker for inspection' >&2
         seed_sqlite3_report_paths "$seed_restore_o" "$seed_restore_d" "$seed_restore_d/original"
+        return 1
+    fi
+    if ! seed_sync_paths "$seed_restore_d" -- "${seed_restore_o%/*}" "${seed_restore_d%/*}"; then
+        echo 'ERROR: could not sync the restored sqlite3; rollback marker retained' >&2
         return 1
     fi
     return 0
@@ -372,6 +435,10 @@ seed_sqlite3_recover() {
             seed_sqlite3_report_paths "$SEED_B" "$seed_d" "$seed_d/original"
             return 1
         fi
+        if seed_sqlite3_present "$seed_d" && ! seed_sync_paths "$seed_d" -- "$SEED_B" "$DST/node_modules"; then
+            echo "ERROR: could not sync sqlite3; rollback metadata retained at $SEED_B" >&2
+            return 1
+        fi
         seed_sqlite3_clear_metadata_backup || return 1
         if seed_sqlite3_present "$seed_d"; then
             echo "WARN: cleared metadata-only seed rollback; $seed_d was not touched; retry seed" >&2
@@ -403,6 +470,10 @@ seed_sqlite3_recover() {
     fi
     seed_sqlite3_pin || return 1
     if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+        if ! seed_sync_paths "$seed_d" -- "$SEED_B" "$DST/node_modules"; then
+            echo "ERROR: could not sync the recovered sqlite3; rollback retained at $SEED_B" >&2
+            return 1
+        fi
         if ! seed_sqlite3_remove_backup "$SEED_B"; then
             echo "ERROR: verified seed final but backup cleanup may be partial: $SEED_B" >&2
             return 1
@@ -573,7 +644,7 @@ seed_native_sqlite3() {
     fi
     # The stage scan refuses a payload beside an incomplete owner line, so the
     # line must be on disk before the copy starts.
-    if ! sync; then
+    if ! seed_sync_paths "$seed_s/.owner" -- "$seed_s" "$DST/node_modules"; then
         echo 'ERROR: could not sync the seed stage owner' >&2
         return 1
     fi
@@ -614,7 +685,7 @@ seed_native_sqlite3() {
     fi
     # The rollback scan refuses a candidate identity beside an incomplete
     # owner line, so the line must be on disk before the identity is written.
-    if ! sync; then
+    if ! seed_sync_paths "$seed_b/.owner" -- "$seed_b" "$DST/node_modules"; then
         echo 'ERROR: could not sync the seed rollback owner' >&2
         return 1
     fi
@@ -631,7 +702,7 @@ seed_native_sqlite3() {
     # Recovery reads the owner line, the identity, the marker and the copied
     # files after the renames below. Without a flush, power loss can keep a
     # committed rename while those bytes are still unwritten.
-    if ! sync; then
+    if ! seed_sync_paths "$seed_s" "$seed_b" -- "$DST/node_modules"; then
         echo 'ERROR: could not sync the seed sqlite3 candidate before promotion' >&2
         return 1
     fi
@@ -669,9 +740,8 @@ seed_native_sqlite3() {
         seed_sqlite3_rollback_failed_final "$seed_b"
         return 1
     fi
-    if ! sync; then
+    if ! seed_sync_paths "$seed_d" -- "$seed_s" "$seed_b" "$DST/node_modules"; then
         echo "ERROR: could not sync the promoted sqlite3; rollback retained at $seed_b" >&2
-        seed_sqlite3_rollback_failed_final "$seed_b"
         return 1
     fi
     if ! seed_sqlite3_remove_stage "$seed_s"; then

@@ -40,18 +40,23 @@ Look with: `logread | grep -E 'SQLITE_CORRUPT|malformed|osi-db-startup'`
 
 Measured on a device with two pages of a 103 MiB file overwritten, under the fixed release: the gateway kept answering. The GUI, login, the valve list, zones and schedules answered, and a valve CLOSE was accepted. Requests that read a damaged table fail: there, the device list answered `500 {"error":"device-api failed","message":"Error: SQLITE_CORRUPT: database disk image is malformed"}`. The error line came at every start and the stats answer read `"status":"damaged"`, also after a reboot. Nothing was moved, renamed, restored or deleted. Which requests fail depends on which pages are damaged.
 
-### Boot recovery hold
+### Manual recovery hold
 
-If the boot integrity check finds corruption, it records
+The integrity service does not dispatch the checker at boot in 0.8.3
+(#717). A manual check that finds corruption records
 `/data/db/farming.db.osi-recovery` before it stages a backup. It opens the
 copy read-only for an integrity check and syncs it before moving the damaged
 database and sidecars. It clears the record after the restored database and
 recovery report reach storage. If the operation is interrupted, the record
 holds Node-RED and both seeding paths even when `farming.db` is absent.
 
-Use the backup and validation procedure below to resolve this hold. Keep the
-record while investigating. Clear it only after the operator has restored
-and verified the intended farm database and its sidecar state.
+Keep the recovery record in place through the whole repair. If the live
+database is missing, preserve the matching `farming.db.corrupt-*` files
+and their sidecars in the step 2 evidence directory before selecting a
+backup in step 4(a). If a replacement is already installed and sound,
+verify that it is the intended farm database and perform the integrity,
+relations and schedule checks from step 5 on a copy. Step 6 clears the
+record after verification.
 
 ### Files beside the database
 
@@ -180,7 +185,10 @@ sqlite3 -readonly "$BK/farming.db" "PRAGMA quick_check(10);"
 sqlite3 -readonly "$BK/farming.db" "SELECT max(version) FROM schema_migrations;"
 ```
 
-Write both answers into the session log. If `quick_check` answers `ok` here, the file is sound and the signs had another cause: stop and ask (look at `dmesg | grep -i error` for the SD card).
+Write both answers into the session log. If `quick_check` answers `ok` and a
+recovery record exists, follow the verified-replacement path above. When
+there is no recovery record and the check answers `ok`, stop and investigate
+the original symptoms (look at `dmesg | grep -i error` for the SD card).
 
 ## 4. Choose one way, with the owner
 
@@ -311,7 +319,16 @@ done
 The devices are also registered in ChirpStack, which keeps its own database. Then move the damaged file aside so the deploy seeds a new, empty one:
 
 ```sh
-mkdir -p /data/db/replaced && mv /data/db/farming.db* /data/db/replaced/
+if [ -e /data/db/farming.db.osi-recovery ] || [ -L /data/db/farming.db.osi-recovery ]; then
+  echo "STOP: recovery is held; preserve the hold and arrange a separate owner-approved reset"
+else
+  R=$(mktemp -d /data/db/replaced.XXXXXX) || exit 1
+  for f in farming.db farming.db-wal farming.db-shm farming.db-journal; do
+    if [ -e "/data/db/$f" ] || [ -L "/data/db/$f" ]; then
+      mv "/data/db/$f" "$R/" || exit 1
+    fi
+  done
+fi
 ```
 
 Zones, devices and schedules are then entered again in the GUI. The saved `config-*.sql` files are a record to read from, not files to load.
@@ -383,6 +400,45 @@ C=/data/db/farming.db.restore
    It must print `in place` and `ok`. Node-RED stays stopped until step 6.
 
 ## 6. Put the fixed release on, in the same session
+
+If a recovery record exists, keep Node-RED stopped and verify the installed
+replacement and its sidecars before removing the record. The replacement
+must have passed step 5 and be confirmed with the owner. Stop if a nonempty
+WAL or rollback journal remains. Retain it with the evidence until its
+contents are understood.
+
+```sh
+node - /data/db/farming.db <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
+const { pathToFileURL } = require('url');
+const db = process.argv[2];
+if (!fs.lstatSync(db).isFile()) throw new Error('STOP: installed database is not a regular file');
+for (const suffix of ['-wal', '-journal']) {
+  const sidecar = fs.lstatSync(db + suffix, { throwIfNoEntry: false });
+  if (sidecar && (!sidecar.isFile() || sidecar.size)) throw new Error('STOP: preserve ' + db + suffix);
+}
+const uri = pathToFileURL(db);
+uri.searchParams.set('immutable', '1');
+const args = ['-batch', '-bail', '-readonly', uri.href];
+const check = pragma => execFileSync('sqlite3', [...args, pragma], { encoding: 'utf8' }).trim();
+if (check('PRAGMA integrity_check;') !== 'ok' || check('PRAGMA foreign_key_check;')) {
+  throw new Error('STOP: the installed database failed validation');
+}
+const fd = fs.openSync(db, 'r');
+const dir = fs.openSync(path.dirname(db), 'r');
+try {
+  fs.fsyncSync(fd);
+  fs.fsyncSync(dir);
+  fs.unlinkSync(db + '.osi-recovery');
+  fs.fsyncSync(dir);
+} finally {
+  fs.closeSync(dir);
+  fs.closeSync(fd);
+}
+NODE
+```
 
 A repaired file under the old two-copy code can be damaged again, so the release goes on now. Run the deploy the way this gateway gets it (tunnel or bundle). On a sound file the output passes the point where it stopped before:
 

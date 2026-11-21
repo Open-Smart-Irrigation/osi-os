@@ -44,7 +44,7 @@ function backupDb(dbPath, { keep = 5 } = {}) {
   const backupPath = `${dbPath}.bak-${stamp}`;
   publishAtomic(backupPath, file => {
     execFileSync('sqlite3', [dbPath, `.backup ${sqliteDotQuote(file)}`], SQLITE_EXEC_OPTIONS);
-    const check = execFileSync('sqlite3', ['-readonly', file, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+    const check = checkStandalone(file, 'integrity_check');
     if (check !== 'ok') throw new Error(`backup integrity_check failed: ${check}`);
   }, { exclusive: true });
   try {
@@ -77,12 +77,20 @@ function liveQuickCheck(dbPath) {
   return result === 'ok' && fs.statSync(dbPath).size >= 100;
 }
 
+// A standalone backup has no committed sidecars. An immutable read prevents
+// SQLite from creating empty WAL files that would make a retry skip it.
+function checkStandalone(file, pragma) {
+  const uri = pathToFileURL(file);
+  uri.searchParams.set('immutable', '1');
+  return execFileSync('sqlite3', ['-batch', '-bail', '-readonly', uri.href,
+    `PRAGMA ${pragma};`], SQLITE_EXEC_OPTIONS).trim();
+}
+
 function backupQuickCheck(dbPath) {
   try {
     if (!fs.lstatSync(dbPath).isFile() || fs.statSync(dbPath).size < 100) return false;
     if (['-wal', '-shm', '-journal'].some(suffix => fs.lstatSync(dbPath + suffix, { throwIfNoEntry: false }))) return false;
-    return execFileSync('sqlite3', ['-batch', '-bail', '-readonly',
-      dbPath, 'PRAGMA quick_check;'], SQLITE_EXEC_OPTIONS).trim() === 'ok';
+    return checkStandalone(dbPath, 'quick_check') === 'ok';
   } catch {
     return false;
   }
@@ -211,6 +219,19 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   }
 
   recordHold(marker);
+  // A concurrent recovery can finish between our first check and acquiring
+  // the hold. Recheck before replacing anything under the exclusive marker.
+  let liveRecovered;
+  try {
+    liveRecovered = liveQuickCheck(dbPath);
+  } catch (error) {
+    clearHold(marker);
+    throw error;
+  }
+  if (liveRecovered) {
+    clearHold(marker);
+    return { status: 'ok' };
+  }
   const goodBackup = findPassingBackup(dbPath);
   if (!goodBackup) {
     const stampPath = writeStamp(dbPath, { event: 'unrecoverable', timestamp: new Date(now).toISOString() });
@@ -222,7 +243,7 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   const candidate = path.join(staging, 'candidate');
   try {
     fs.copyFileSync(goodBackup, candidate, fs.constants.COPYFILE_EXCL);
-    const check = execFileSync('sqlite3', ['-readonly', candidate, 'PRAGMA integrity_check;'], SQLITE_EXEC_OPTIONS).trim();
+    const check = checkStandalone(candidate, 'integrity_check');
     if (!fs.statSync(candidate).size || check !== 'ok') throw new Error('staged restore failed integrity_check');
     const fd = fs.openSync(candidate, 'r');
     try {

@@ -145,7 +145,7 @@ test('corrupt DB + passing backup: recovered', async () => {
 test('an interrupted restore copy cannot publish a partial database', async t => {
   const dir = scratch();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const dbPath = makeDb(dir);
+  const dbPath = makeWalDb(dir);
   const backup = makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
   corrupt(dbPath);
   const original = fs.readFileSync(dbPath);
@@ -156,8 +156,28 @@ test('an interrupted restore copy cannot publish a partial database', async t =>
   });
   await assert.rejects(runBootIntegrityCheck(dbPath), /injected copy failure/);
   assert.deepEqual(fs.readFileSync(dbPath), original);
+  for (const suffix of ['-wal', '-shm', '-journal']) assert.equal(fs.existsSync(backup + suffix), false);
   assert.equal(fs.readdirSync(dir).some(name => name.startsWith('.integrity-restore-')), false);
   assert.equal((await runBootIntegrityCheck(dbPath)).status, 'held');
+});
+
+test('a late recovery hold cannot replace a database that another restore already repaired', async t => {
+  const dir = scratch();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = makeDb(dir);
+  makeBackup(dbPath, '2026-01-01T00-00-00-000Z');
+  const repaired = makeDb(dir, 'repaired.db');
+  execFileSync('sqlite3', [repaired, "UPDATE t SET x = 'latest committed';"], EXEC_OPTS);
+  corrupt(dbPath);
+  const open = fs.openSync;
+  t.mock.method(fs, 'openSync', (file, flags, ...args) => {
+    if (file === dbPath + '.osi-recovery' && flags === 'wx') fs.copyFileSync(repaired, dbPath);
+    return open(file, flags, ...args);
+  });
+  assert.equal((await runBootIntegrityCheck(dbPath)).status, 'ok');
+  assert.equal(fs.existsSync(dbPath + '.osi-recovery'), false);
+  assert.ok(!fs.readdirSync(dir).some(name => name.includes('.corrupt-')));
+  assert.equal(execFileSync('sqlite3', [dbPath, 'SELECT x FROM t;'], EXEC_OPTS).trim(), 'latest committed');
 });
 
 test('corrupt DB + newest backup also corrupt, older one passes: restores older', async () => {
