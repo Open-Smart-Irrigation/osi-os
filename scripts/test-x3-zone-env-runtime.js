@@ -7,6 +7,7 @@ const {execute,LEGACY,PROFILES,FIXTURES,share}=require('./lib/x3-zone-env-harnes
 const {cases:extra,assertCase}=require('./lib/x3-zone-env-extra-cases');
 const {compare,assertOriginalBlobs}=require('./lib/x3-parity-contract');
 const {adaptNode}=require('./x3-zone-env-adapters');
+const {assertNativeLoaderReply}=require('./lib/x3-loader-replies');
 function plain(value) { return JSON.parse(JSON.stringify(value, (key,v)=>key==='stack'?undefined:v&&typeof v==='object'&&typeof v.message==='string'&&typeof v.name==='string'?{name:v.name,message:v.message}:v)); }
 async function main() {
  assertOriginalBlobs();
@@ -116,7 +117,7 @@ async function main() {
      if(!c.loaderChange) {
       compare(before.actual,actual,profile+' '+c.name+' native adapter');cardinality(native,before.reference,c.name);
       assert.deepEqual(native,before.native,c.name+' native outputs, Catch messages and error arguments');
-     } else { assert.equal(native.outputs.flat().length,1);assert.equal(native.caught.length,1); }
+     } else { assertNativeLoaderReply(c.node,native.outputs,actual.result);assert.equal(native.caught.length,1);assert.equal(native.errorCalls.length,1); }
     }
     count++;
    }
@@ -130,6 +131,13 @@ async function main() {
    await execute(PROFILES[0],changed,c,executor);
    assert.throws(()=>cardinality(lastNative,baseline,'mutation'),/cardinality/,'native duplicate/two-port control must fail');
   }
+  const loadCase=extra.find(c=>c.node==='get-actuations-query'&&c.loaderChange);
+  const query=adaptNode(LEGACY.find(n=>n.id===loadCase.node));
+  const wrong={...query,func:query.func.replace('return [null, msg];\n}\nreturn loaded.value.','return [msg, null];\n}\nreturn loaded.value.')};
+  assert.notEqual(wrong.func,query.func);
+  const expectedLoad=await execute(PROFILES[0],query,loadCase);
+  await execute(PROFILES[0],wrong,loadCase,executor);
+  assert.throws(()=>assertNativeLoaderReply(loadCase.node,lastNative.outputs,expectedLoad.result),/cardinality/,'native 503 success-port mutation must fail');
   console.log(`X3 native Node-RED ${version} / Node ${process.versions.node}: ${count} traces, both profiles and native cardinality/Catch controls; TZ=${process.env.TZ}`);
  } finally {
   realCrypto.randomBytes=originals.randomBytes;realCrypto.timingSafeEqual=originals.timingSafeEqual;http.request=originals.http;https.request=originals.https;

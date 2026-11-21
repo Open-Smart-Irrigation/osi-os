@@ -165,10 +165,14 @@ async function execute(profile, source, c, executor) {
       const failure = selected ? selected.failure : c.httpFailure;
       const fail = failure && (!c.failSharedOnly || url.includes('environment-bundles'));
       if (fail === 'timeout' || fail && failure === 'timeout') return req.timeout();
-      if (fail && failure === 'network') return req.destroy(new Error('fixture network failure'));
-      const res = new EventEmitter(); res.statusCode = fail && failure === 'status' ? 503 : 200;
+      if (fail && failure === 'network') return req.destroy(new Error(selected?.failureMessage || 'fixture network failure'));
+      const res = new EventEmitter(); res.statusCode = fail && failure === 'status' ? selected?.statusCode || 503 : 200;
       callback(res);
-      process.nextTick(() => { res.emit('data', fail && failure === 'malformed' ? '{' : fail && failure === 'empty' ? '' : fail && failure === 'shape' ? '{}' : JSON.stringify(weather(url, c, bundle))); res.emit('end'); });
+      process.nextTick(() => {
+        const body = selected?.responseBody ?? (fail && failure === 'malformed' ? '{' : fail && failure === 'empty' ? '' : fail && failure === 'shape' ? '{}' : JSON.stringify(weather(url, c, bundle)));
+        if (c.captureProviderResponse) { item.responseBody = body; item.responseStatus = res.statusCode; }
+        res.emit('data', body); res.emit('end');
+      });
     });
     return req;
   } });

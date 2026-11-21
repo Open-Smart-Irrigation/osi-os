@@ -1,5 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
+const { assertLoaderReply } = require('./x3-loader-replies');
 const NOW = '2026-10-25T01:30:00.000Z';
 const s = value => value == null ? 'NULL' : "'" + String(value).replace(/'/g, "''") + "'";
 const ENV = 'zone-env-fn', TODAY = 'strega-today-liters-fn', QUERY = 'get-actuations-query', FORMAT = 'get-actuations-response';
@@ -87,7 +88,7 @@ function assertCase(c, result, after=false) {
  const e=c.expect,m=reply(result),p=m&&m.payload,tag=c.name;
  const status=c.loaderChange&&!after?e.legacyStatus:e.status;
  if(status!==undefined) assert.equal(m?.statusCode,status,tag+' status');
- if(c.loaderChange&&after) { assert.deepEqual(p,{message:'Internal error'},tag); assert.equal(result.diagnostics.filter(d=>d.kind==='error').length,1,tag+' diagnostic'); return; }
+ if(c.loaderChange&&after) { assertLoaderReply(c.node,result.result); if(c.node===QUERY&&result.msg) assert.deepEqual(result.result,[null,result.msg],tag+' exact error pair'); assert.equal(result.diagnostics.filter(d=>d.kind==='error').length,1,tag+' diagnostic'); return; }
  for(const [field,path] of [['online',['online','source']],['forecast',['forecast','source']],['display',['display','mode']],['location',['location','source']],['sharedGeneratedAt',['display','sharedGeneratedAt']],['sharedObservedAt',['display','sharedObservedAt']]]) if(e[field]!==undefined) assert.equal(path.reduce((v,k)=>v?.[k],p),e[field],tag+' '+field);
  if(e.zoneName) assert.equal(p.zoneName,e.zoneName,tag);
  if(e.error) assert.equal(p.error,e.error,tag);

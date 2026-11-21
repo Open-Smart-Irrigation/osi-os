@@ -35,11 +35,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Install pinned runtime
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
-      - name: X3 extraction parity on the image function-node runtime
+      - name: X3 applied handoff parity on the image function-node runtime
         env:
           TZ: UTC
           X3_NODE_RED_DIR: ${{ github.workspace }}/scripts/fixtures/release-smoke/node_modules/node-red
-        run: node scripts/verify-x3-zone-env-handoff.js --runtime-only
+        run: node scripts/test-x3-zone-env-integration.js --runtime-only
       - name: Node file serializes the flows' SQLite connection (three package layouts)
         run: node --test scripts/test-sqlite-serialize-node-file.js
       - name: Deploy keeps a working node file when its fetch fails
@@ -105,11 +105,11 @@ jobs:
         run: npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
       - name: Install pinned packages for the node-file layouts and external lock holder
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
-      - name: X3 extraction parity on the stock function-node runtime
+      - name: X3 applied handoff parity on the stock function-node runtime
         env:
           TZ: UTC
           X3_NODE_RED_DIR: ${{ github.workspace }}/scripts/fixtures/release-smoke-stock/node_modules/node-red
-        run: node scripts/verify-x3-zone-env-handoff.js --runtime-only
+        run: node scripts/test-x3-zone-env-integration.js --runtime-only
       - name: Node file serializes the flows' SQLite connection on both runtimes
         run: node scripts/test-release-smoke-stock-node-file.js
       - name: Start stock runtime with the deploy-style user install

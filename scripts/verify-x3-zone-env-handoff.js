@@ -7,12 +7,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { renderHandoff, renderPatch, HANDOFF_FILES } = require('./x3-zone-env-adapters');
+const { renderHandoff, renderPatch, HANDOFF_FILES, handoffState } = require('./x3-zone-env-adapters');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'x3-handoff-'));
 const sources = new Map();
 try {
   for (const relative of HANDOFF_FILES) sources.set(relative, fs.readFileSync(path.join(root, relative), 'utf8'));
+  const state = handoffState();
+  if (state === 'legacy') {
   renderHandoff(scratch);
   // The submitted patch is a reviewed artifact, not a second untested renderer.
   const submitted = fs.readFileSync(path.join(__dirname, 'fixtures/x3-zone-env/adapter-handoff.patch'), 'utf8');
@@ -29,8 +31,10 @@ try {
   if(patched.error) throw patched.error;
   assert.equal(patched.status, 0, patched.stdout + patched.stderr);
   for (const relative of HANDOFF_FILES) assert.ok(fs.readFileSync(path.join(patchTree, relative)).equals(fs.readFileSync(path.join(scratch, relative))), 'patch/render bytes differ: ' + relative);
+  }
+  console.log('X3 handoff state: ' + state + ' (adapters, metadata and recounts coherent)');
   const preload = path.join(__dirname, 'lib/x3-flows-read-overlay.cjs');
-  const env = { ...process.env, X3_REPO_ROOT: root, X3_RENDER_ROOT: scratch,
+  const env = state === 'integrated' ? { ...process.env } : { ...process.env, X3_REPO_ROOT: root, X3_RENDER_ROOT: scratch,
     NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require=' + preload].filter(Boolean).join(' ') };
   // The direct scan has no CLI entry point: call its exported scanner and use
   // a negative control so a no-op command cannot manufacture a pass signal.
@@ -47,14 +51,14 @@ console.log('flows-bare-require-scan: OK (both staged profiles; negative control
       'verify-flows-size-ratchet.js', 'test-flows-wiring.js', 'test-task5b2-projections.js',
       'verify-osi-lib-db-caller-binding.js', 'verify-osi-lib-db-caller-binding.test.js',
       'verify-auth-flag-off-hermetic.js', 'verify-auth-flag-off-hermetic.test.js',
-      'test-x3-zone-env-revision.js', 'test-x3-zone-env-packaging.js', 'verify-sync-flow.js'].map(gate => ['scripts/' + gate]),
+      'test-x3-zone-env-revision.js', 'test-x3-zone-env-packaging.js', 'test-x3-zone-env-round2.js', 'verify-sync-flow.js'].map(gate => ['scripts/' + gate]),
   ];
-  for (const args of commands.filter(args => !process.argv.includes('--affected') || args[0] !== 'scripts/verify-sync-flow.js')) {
+  for (const args of commands.filter(args => !process.argv.includes('--check-only')).filter(args => !process.argv.includes('--affected') || args[0] !== 'scripts/verify-sync-flow.js')) {
     const result = spawnSync(process.execPath, args, { cwd: root, env: { ...env, TZ: args.includes('--non-utc') ? 'Europe/Zurich' : process.env.TZ || 'UTC' }, stdio: 'inherit' });
     if (result.error) throw result.error;
     assert.equal(result.status, 0, 'handoff gate failed: ' + (args[0] === '-e' ? 'bare-require scan' : args[0]));
   }
-  console.log('X3 staged handoff gates: OK (repository flows untouched)');
+  console.log('X3 handoff gates: OK (' + state + '; repository flows untouched)');
 } finally {
   for (const [relative, original] of sources) assert.equal(fs.readFileSync(path.join(root, relative), 'utf8'), original, 'reserved flow changed during verification');
   fs.rmSync(scratch, { recursive: true, force: true });

@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { assertNewEvidencePath, writeEvidence } = require('./lib/x3-evidence-writer');
 const { LEGACY, PROFILES, share, execute } = require('./lib/x3-zone-env-harness');
+const { assertLoaderReply } = require('./lib/x3-loader-replies');
 const { adaptNode, METHODS } = require('./x3-zone-env-adapters');
 
 test('evidence destinations cannot replace files, hard links or symbolic links', () => {
@@ -77,6 +78,8 @@ for (const profile of PROFILES) test(profile + ': failed lazy entry point keeps 
       const failed = await execute(profile, adapter, { node: source.id });
       const message = Array.isArray(failed.result) ? failed.result.find(Boolean) : failed.result;
       assert.equal(failed.thrown, undefined);
+      assertLoaderReply(source.id, failed.result, source.id === 'zone-env-fn' ? { error: 'module_unavailable', module: 'zone-env', message: 'fixture lazy entry unavailable' } : { message: 'Internal error' });
+      if(source.id==='get-actuations-query') assert.deepEqual(failed.result,[null,failed.msg]);
       assert.equal(message.statusCode, 503);
       assert.deepEqual(message.payload, source.id === 'zone-env-fn' ? { error: 'module_unavailable', module: 'zone-env', message: 'fixture lazy entry unavailable' } : { message: 'Internal error' });
       assert.equal(failed.closes, source.id === 'zone-env-fn' ? 1 : 0);

@@ -66,6 +66,41 @@ const ROOT = fs.realpathSync(path.resolve(__dirname, '..'));
 const FLOW_PATHS = ['bcm2712', 'bcm2709'].map(p => `conf/full_raspberrypi_bcm27xx_${p}/files/usr/share/flows.json`);
 const BASELINES = ['scripts/fixtures/silent-catch-baseline.json', 'scripts/verify-no-stray-ddl-baseline.json'];
 const HANDOFF_FILES = [...FLOW_PATHS, ...BASELINES];
+const RECOUNT_NOTE = '; X3 moves six catches into visible module diagnostics; recount on the candidate, land this baseline only with its flows swap.';
+function handoffState(root = ROOT) {
+  const states = new Set();
+  const { countSilentCatchesInFlow } = require('./verify-no-new-silent-catch');
+  const { countMarkers, textSourcesFromContent } = require('./verify-no-stray-ddl');
+  const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+  const flows = new Map(FLOW_PATHS.map(relative => [relative, JSON.parse(read(relative))]));
+  for (const [relative, nodes] of flows) for (const original of legacy) {
+    const matches = nodes.filter(n => n.id === original.id);
+    assert.equal(matches.length, 1, 'missing/duplicate X3 node: ' + original.id);
+    const node = matches[0];
+    const state = node.func === original.func ? 'legacy' : 'integrated';
+    assert.deepEqual(node, state === 'legacy' ? original : adaptNode(original), 'unreviewed X3 adapter/metadata: ' + relative + ' ' + original.id);
+    states.add(state);
+  }
+  assert.equal(states.size, 1, 'partial X3 handoff application');
+  const state = [...states][0];
+  const silent = JSON.parse(read(BASELINES[0]));
+  for (const entry of Object.values(silent.profiles)) {
+    assert.ok(flows.has(entry.path), 'unknown silent-catch profile');
+    assert.equal(entry.silentCatchCount, countSilentCatchesInFlow(flows.get(entry.path)).silentCatchCount, 'partial/stale silent-catch recount: ' + entry.path);
+  }
+  assert.equal(Object.keys(silent.profiles).length, 2, 'both silent-catch profiles required');
+  assert.equal(silent.generatedFrom.split(RECOUNT_NOTE).length - 1, state === 'integrated' ? 1 : 0, 'partial/stale X3 recount provenance');
+  const ddl = JSON.parse(read(BASELINES[1]));
+  assert.deepEqual(Object.keys(ddl.files).sort(), [...FLOW_PATHS, 'deploy.sh'].sort(), 'DDL recount scope');
+  let total = 0;
+  for (const relative of Object.keys(ddl.files)) {
+    const counts = countMarkers(textSourcesFromContent(relative, read(relative)));
+    assert.deepEqual(ddl.files[relative], counts, 'partial/stale DDL recount: ' + relative);
+    total += counts.total;
+  }
+  assert.equal(ddl.total, total, 'partial/stale DDL total');
+  return state;
+}
 function renderHandoff(requested) {
   assert.ok(requested && path.isAbsolute(requested), 'pass an absolute scratch directory');
   const normalized = path.resolve(requested);
@@ -84,7 +119,7 @@ function renderHandoff(requested) {
   const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, BASELINES[0])));
   const { countSilentCatchesInFlow } = require('./verify-no-new-silent-catch');
   for (const entry of Object.values(baseline.profiles)) entry.silentCatchCount = countSilentCatchesInFlow(JSON.parse(fs.readFileSync(path.join(scratch, entry.path)))).silentCatchCount;
-  baseline.generatedFrom += '; X3 moves six catches into visible module diagnostics; recount on the candidate, land this baseline only with its flows swap.';
+  if (!baseline.generatedFrom.includes(RECOUNT_NOTE)) baseline.generatedFrom += RECOUNT_NOTE;
   const silentPath = path.join(scratch, BASELINES[0]);
   fs.mkdirSync(path.dirname(silentPath), { recursive: true });
   fs.writeFileSync(silentPath, JSON.stringify(baseline, null, 2) + '\n');
@@ -105,4 +140,4 @@ function renderPatch(scratch) {
   }).join('');
 }
 if (require.main === module) process.stdout.write(renderPatch(process.argv[2]));
-module.exports = { adaptNode, applyTo, body, METHODS, renderHandoff, renderPatch, HANDOFF_FILES, FLOW_PATHS, BASELINES };
+module.exports = { adaptNode, applyTo, body, METHODS, renderHandoff, renderPatch, HANDOFF_FILES, FLOW_PATHS, BASELINES, handoffState, RECOUNT_NOTE };

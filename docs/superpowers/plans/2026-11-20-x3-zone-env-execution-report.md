@@ -276,3 +276,43 @@ time from the recorded start is **0:22:53** (0.38 h), including osi-heavy queue
 waits, the fresh clone and serial runtime verification. Active subparts were not
 separately timed. Reservation cost remains **0.00 h**; publication and GitHub CI
 follow this stop.
+
+## Sol round 2 correction
+
+UTC start: **2026-11-21T11:27:30Z**. The branch was rebased onto current main
+`bda200db62`, including #714, #716, #732 and #734. Resume readiness reports READY
+at `e5d97571c`, zero behind and six ahead, with AGENTS.md revision `c63103827f`.
+The stale startup JSON was retained by the launcher; the fresh readiness output
+is the record for this continuation.
+
+The handoff now validates one complete legacy or integrated state. Every X3
+node must match its full frozen or approved adapter metadata, both baselines
+must match fresh counts, and the provenance note must occur exactly once after
+the swap. Mixed profiles/nodes or stale baselines fail. Patch equality and
+application checks remain required before the swap. After the swap the verifier
+runs the same gates directly against committed adapters and recounts. Rendering
+the integrated state is idempotent. The shared DDL counter exports use X2's
+`require.main` guard and export pattern verbatim.
+
+A new disposable committed-checkout test follows X2's staging pattern. It applies
+the actual patch, rejects stale-patch and partial-swap mutations, then reruns the
+post-swap verifier, non-UTC parity and an independent squash clone. CI also runs
+the full verifier on that applied candidate. Both release-runtime jobs run their
+X3 native leg against the applied candidate, including UTC and Europe/Zurich.
+The reservation worktree's flows and active baselines are never written.
+
+The four provider warning sites log a fixed provider/operation prefix followed
+only by a bounded status and reason. Raw error text stays internal to preserve
+legacy fallback, cache/SQL order and replies. Synthetic authentication bodies,
+malformed responses and network errors test that secret markers reach the
+transport but never warnings. Query loader failures now require the exact
+`[null, message]` pair, status 503 and payload; native checks require `[0, 1]`
+cardinality and the exact message. Wrong-success-port mutations must fail both.
+
+Qualification status at this implementation checkpoint: syntax, inventory and
+built-in documentation hygiene pass. The review supplies the three failing
+reproducers. A separate local red probe was cancelled before execution; the
+single consolidated focused qualification job is queued in osi-heavy behind the
+Pi 5 firmware build holding the slot since `08:53:18Z`. No local parity or native
+pass is claimed for this round until that job runs. Full suites stay in exact-head
+GitHub CI, and no permission escalation or permission request was used.

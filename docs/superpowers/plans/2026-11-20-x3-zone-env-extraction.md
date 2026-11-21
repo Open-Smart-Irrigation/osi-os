@@ -127,3 +127,19 @@ approved 503 adapter fallback. Register these tests and run parity and the
 staged affected handoff from an independent clone of a local squash-equivalent
 commit, whose only parent is in main ancestry and whose object store contains no
 PR-only commits.
+
+## Round 2: verify both handoff states
+
+Detect the complete legacy or integrated adapter state, including full node
+metadata and matching silent-catch/DDL recounts. Reject mixed nodes or stale
+baselines. Compare the patch and renderer only in the legacy state; in the
+integrated state verify committed files directly and run the same gates. Keep
+baseline provenance idempotent. A disposable committed checkout applies the
+actual patch, rejects partial/stale mutations and runs the post-swap normal,
+native and squash checks. The reservation worktree remains unchanged.
+
+Provider diagnostics retain the fixed provider/operation prefix and report only
+an HTTP status and bounded reason. Preserve the original errors internally so
+fallbacks, SQL/cache order and replies remain identical. Direct and native loader
+checks must pin the query failure to error port 2 with its exact 503 payload;
+wrong-port mutations must fail those checks.

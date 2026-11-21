@@ -133,9 +133,11 @@ jobs:
           TZ=UTC node scripts/test-x3-zone-env-additive.js
           TZ=Europe/Zurich node scripts/test-x3-zone-env-additive.js
           node scripts/test-x3-zone-env-revision.js
+          node scripts/test-x3-zone-env-round2.js
           node --test scripts/test-x3-zone-env-packaging.js
           node scripts/verify-x3-zone-env-handoff.js
           node scripts/test-x3-zone-env-squash.js
+          node scripts/test-x3-zone-env-integration.js --full
           node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-env-unknown-rain.js
           node scripts/test-zone-env-rain-policy.js

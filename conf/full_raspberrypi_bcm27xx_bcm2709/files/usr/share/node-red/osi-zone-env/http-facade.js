@@ -4,6 +4,17 @@
 // All request state and runtime services are injected per invocation.
 const runProjection = require('./run-projection');
 
+// Provider errors may contain authentication response bodies. Never copy the
+// message into diagnostics: retain only a bounded status and fixed category.
+function providerFailureReason(error) {
+  const message = String(error && error.message || '');
+  const http = /^HTTP ([1-5][0-9]{2})(?:$|:)/.exec(message);
+  if (http) return 'status=' + http[1] + ' reason=http_error';
+  if (message === 'timeout') return 'status=none reason=timeout';
+  if (error && error.name === 'SyntaxError') return 'status=none reason=invalid_response';
+  return 'status=none reason=request_failed';
+}
+
 function environmentSummary(msg, { db, ZE, osiLib, crypto, httpLib, httpsLib, env, node, global, Date = globalThis.Date }) {
 return (async () => {
 function getAuthSecret() {
@@ -480,11 +491,11 @@ async function resolveOnlineCurrent(zone, location, nowIso) {
   let payload = null;
   try {
     payload = await fetchOpenAgriCurrent(baseUrl, bearerToken, username, password, location.latitude, location.longitude);
-  } catch (error) { node.warn('zone-env OpenAgri current failed: ' + String(error && error.message || error)); }
+  } catch (error) { node.warn('zone-env OpenAgri current failed: ' + providerFailureReason(error)); }
   if (!payload) {
     try {
       payload = await fetchOpenMeteoCurrent(location.latitude, location.longitude, location.timezone);
-    } catch (error) { node.warn('zone-env Open-Meteo current failed: ' + String(error && error.message || error)); }
+    } catch (error) { node.warn('zone-env Open-Meteo current failed: ' + providerFailureReason(error)); }
   }
   if (payload) {
     const expiresAt = new Date(new Date(nowIso).getTime() + ttlMinutes * 60000).toISOString();
@@ -548,10 +559,10 @@ async function resolveForecast(zone, location, crop, nowIso) {
   let supplement = null;
   try {
     primary = await fetchOpenAgriForecast(baseUrl, bearerToken, username, password, location.latitude, location.longitude);
-  } catch (error) { node.warn('zone-env OpenAgri forecast failed: ' + String(error && error.message || error)); }
+  } catch (error) { node.warn('zone-env OpenAgri forecast failed: ' + providerFailureReason(error)); }
   try {
     supplement = await fetchOpenMeteoForecast(location.latitude, location.longitude, location.timezone);
-  } catch (error) { node.warn('zone-env Open-Meteo forecast failed: ' + String(error && error.message || error)); }
+  } catch (error) { node.warn('zone-env Open-Meteo forecast failed: ' + providerFailureReason(error)); }
   const merged = ZE.mergeForecasts(primary, supplement, { nowMs: Date.now() });
   if (merged) {
     const expiresAt = new Date(new Date(nowIso).getTime() + ttlMinutes * 60000).toISOString();
