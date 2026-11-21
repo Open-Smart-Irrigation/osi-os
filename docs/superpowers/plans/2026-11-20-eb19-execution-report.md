@@ -199,3 +199,40 @@ sudo's environment reset. A launcher-construction check is red on `3cf0a90fb`
 and green with the correction. The stock-profile cases include that regression;
 the local qualification is rerun for the launcher follow-up. Recovery code is
 unchanged by this test-environment correction.
+
+## Round 2 integration with atomic publication
+
+Rebased the seven EB19 commits onto `bda200db`, including #714. No ordered SQL,
+seed image or flows file changed. The deploy seed keeps its same-directory
+staging, fsync and exclusive publication, with every recovery marker checked
+again inside the publisher. Factory seeding and boot integrity defer to retained
+EB19 evidence too; a marker arriving during restore staging keeps the original
+main file in place.
+
+The durable writer hold now uses `.osi-recovery`, shared with boot integrity.
+Legacy EB19 names remain refusal aliases. Preparation still disables and verifies
+both installed boot entries, covering old software already on a gateway. Deploy
+suppresses identityd enablement and its pending UCI default until explicit
+release. Every automatic Node-RED start checks the installed retirement payload
+and repaired database; the init repeats the check after pending-switch repair.
+The original cleanup trap covers an owed health start before the later deploy
+exit handler is installed. Failed deploys leave the writers stopped.
+
+Release requires the active payload's healthy state and a durable health receipt
+bound to its real flow path and SHA-256. It consumes only the reviewed pending
+enable script and restores the recorded enablement. A cut during release can be
+retried: the tool re-establishes disabled boot entries before verification, then
+finishes restoration and receipt archival. Internal repair rechecks prove their
+own lock's device and inode; deploy and health starts still refuse that lock.
+
+The absent-main fence now runs before the native adapter opens. Late migration
+entry checks recovery evidence before its missing-DB return, and compatibility
+metadata uses an existing-file-only read. Committed WAL and SHM bytes must remain
+intact when the main file is absent.
+
+Added native-adapter, publication-race and writer-handoff regressions. Validation
+is queued as one serial osi-heavy batch, including the original qualification,
+the new cases and every local migrations-workflow command. The shared runner is
+occupied by firmware work. These changes have passed syntax, whitespace,
+instruction-size and test-inventory checks; no new heavy pass is claimed yet.
+The flows handoff remains unapplied and the field count remains unknown.

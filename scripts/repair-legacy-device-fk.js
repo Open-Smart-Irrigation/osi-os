@@ -72,9 +72,9 @@ function assertNoOpenHandles(file) {
     }
   }
 }
-function assertGatewayStopped(file, root = '/') {
+function assertGatewayStopped(file, root = '/', ownedLock) {
   if (file !== path.join(root, '/data/db/farming.db')) return;
-  assertHold(root);
+  assertHold(root, ownedLock);
   for (const name of ['node-red', 'osi-identityd']) {
     const response = JSON.parse(execFileSync('ubus', ['call', 'service', 'list', JSON.stringify({ name })], { encoding: 'utf8' }));
     if (!response || typeof response !== 'object' || Array.isArray(response)) throw new Error('unknown procd service state');
@@ -229,7 +229,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
   if (apply) { assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file); }
   const originalState = sourceState(file);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-report-'));
-  let db, stage, lock, published = false, publicationCommitted = false;
+  let db, stage, lock, ownedLock, published = false, publicationCommitted = false;
   try {
     let candidate = path.join(scratch, 'copy.db');
     fs.copyFileSync(file, candidate, fs.constants.COPYFILE_EXCL);
@@ -248,6 +248,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     db.close(); db = null;
     lock = file + '.legacy-device-fk-repair.lock';
     fs.mkdirSync(lock, { mode: 0o700 }); // EEXIST refuses interrupted/concurrent attempts
+    ownedLock = fs.lstatSync(lock);
     sync(path.dirname(file));
     stage = fs.mkdtempSync(path.join(path.dirname(file), '.legacy-device-fk-repair-'));
     const record = { source: file, originalSha256: originalState.sha256, phase: 'copying', fieldCount: 'unknown' };
@@ -289,7 +290,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     record.preservation = Object.fromEntries(Object.entries(before).map(([name, w]) => [name, { rows: w.count, digest: w.digest }]));
     record.phase = 'verified'; receipt();
     await checkpoint('verified');
-    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file);
+    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot, ownedLock); assertNoOpenHandles(file);
     assertEqual(sourceState(file), originalState, 'source changed before backup');
     const backupRoot = path.resolve(backupDir);
     let existing = backupRoot;
@@ -310,7 +311,7 @@ async function repair({ dbPath, apply = false, writersStopped = false, backupDir
     const preparedState = sourceState(file);
     record.phase = 'prepared'; receipt();
     await checkpoint('prepared');
-    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot); assertNoOpenHandles(file);
+    assertNoSidecars(file); assertGatewayStopped(file, gatewayRoot, ownedLock); assertNoOpenHandles(file);
     assertEqual(sourceState(file), preparedState, 'source changed before atomic swap');
     assertEqual(hashFile(file), record.originalSha256, 'source bytes changed before atomic swap');
     assertNoSidecars(candidate);

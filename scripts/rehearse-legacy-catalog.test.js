@@ -532,7 +532,7 @@ for (const kind of ['partial-healing-view', 'benign-substring', 'benign-unicode-
     });
   });
 }
-for (const suffix of ['-wal', '-shm', '-journal', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold']) {
+for (const suffix of ['-wal', '-shm', '-journal', '.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold']) {
   for (const link of [false, true]) {
     test(`Sol review absent main + ${suffix} ${link ? 'dangling link' : 'file'} refuses library, deploy and seeding`, async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eb19-absent-evidence-'));
@@ -608,7 +608,7 @@ test('Sol review prepared power loss keeps independent originals and disables th
     fs.unlinkSync(path.join(root, 'started'));
     const gatewayFile = path.join(root, 'data/db/farming.db');
     fs.copyFileSync(file, gatewayFile);
-    await assert.rejects(tool().repair({ ...options(gatewayFile, dir), gatewayRoot: root }), /writer-hold|receipt/);
+    await assert.rejects(tool().repair({ ...options(gatewayFile, dir), gatewayRoot: root }), /writer-hold|receipt|hold/);
     assert.equal(digest(gatewayFile), digest(file));
     const held = prepareOffline({ root });
     assert.ok(held.services.every(s => s.enabled));
@@ -729,7 +729,7 @@ test('Sol review writer hold release refuses old payload and failed validation, 
     const flows = path.join(root, 'srv/node-red/flows.json');
     fs.writeFileSync(flows, JSON.stringify([{ id: 'sync-init-fn', func: 'PRAGMA writable_schema=ON' }]));
     await assert.rejects(releaseHold({ root, verify: async () => {} }), /retired boot surgery/);
-    fs.writeFileSync(flows, JSON.stringify([{ id: 'sync-init-fn', func: 'return msg;' }]));
+    require('./fixtures/legacy-device-gateway').acceptRetiredPayload(root);
     await assert.rejects(releaseHold({ root, verify: async () => { throw new Error('invalid ledger'); } }), /invalid ledger/);
     assertHold(root);
     const released = await releaseHold({ root, verify: async () => {} });
@@ -801,7 +801,7 @@ test('Sol review missing stock SQLite refuses before any offline preparation or 
     const r = spawnSync(process.env.EB19_STOCK_NODE, ['-e', 'require(process.argv[1]).prepareOffline({root:process.argv[2]})', path.join(ROOT, 'scripts/lib/legacy-device-repair-ops.js'), root], { env: { ...process.env, PATH: bin }, encoding: 'utf8' });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /sqlite3.*ENOENT|ENOENT.*sqlite3/);
-    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.legacy-device-fk-writer-hold')), false);
+    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.osi-recovery')), false);
     assert.equal(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(f => /^S/.test(f)).length, 2);
     assert.equal(fs.existsSync(path.join(root, 'started')), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -812,7 +812,7 @@ test('Sol review a pending boot enable script refuses before autostart changes',
     const root = require('./fixtures/legacy-device-gateway').makeGateway(path.join(dir, 'gateway'));
     fs.writeFileSync(path.join(root, 'etc/uci-defaults/94_enable'), '/etc/init.d/osi-identityd enable\n');
     assert.throws(() => require('./lib/legacy-device-repair-ops').prepareOffline({ root }), /pending service enablement/);
-    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.legacy-device-fk-writer-hold')), false);
+    assert.equal(fs.existsSync(path.join(root, 'data/db/farming.db.osi-recovery')), false);
     assert.equal(fs.readdirSync(path.join(root, 'etc/rc.d')).filter(f => /^S/.test(f)).length, 2);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

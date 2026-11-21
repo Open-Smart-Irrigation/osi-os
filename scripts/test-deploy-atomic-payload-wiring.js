@@ -239,7 +239,7 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
   const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
   const rollbackStart = indexOf('# payload rollback begin');
   const rollbackIdx = deploy.indexOf('swap_call flipTo "$PREV_STAMP"', rollbackStart);
-  const restartIdx = deploy.indexOf('"$NODE_RED_INIT" restart', rollbackIdx);
+  const restartIdx = deploy.indexOf('repair_health_start restart', rollbackIdx);
   const discardIdx = deploy.indexOf('discardPayload "$DEPLOY_STAMP"', rollbackStart);
 
   assert.ok(prevIdx < flipIdx, 'previous payload must be captured before the new flip');

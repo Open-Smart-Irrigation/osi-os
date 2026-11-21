@@ -35,4 +35,14 @@ function reboot(root) {
     if (result.status !== 0) throw new Error(result.stderr);
   }
 }
-module.exports = { makeGateway, reboot };
+function acceptRetiredPayload(root, func = 'return msg;') {
+  const nodeRoot = path.join(root, 'srv/node-red');
+  const payload = path.join(nodeRoot, 'payloads', 'retired');
+  fs.mkdirSync(payload, { recursive: true });
+  fs.writeFileSync(path.join(payload, 'flows.json'), JSON.stringify([{ id: 'sync-init-fn', func }]));
+  fs.unlinkSync(path.join(nodeRoot, 'flows.json'));
+  fs.symlinkSync('payloads/retired/flows.json', path.join(nodeRoot, 'flows.json'));
+  fs.writeFileSync(path.join(nodeRoot, 'payload-state.json'), JSON.stringify({ format: 1, active: 'retired', state: 'healthy' }));
+  require('../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity').recordRepairHealth(path.join(root, 'data/db/farming.db'), path.join(nodeRoot, 'flows.json'));
+}
+module.exports = { makeGateway, reboot, acceptRetiredPayload };

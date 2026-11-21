@@ -359,13 +359,17 @@ Never restart the old healer to bypass a refusal.
    ```
 
    Preparation durably records both services' prior enablement under
-   `/data/db/farming.db.legacy-device-fk-writer-hold/`, disables autostart through
+   `/data/db/farming.db.osi-recovery/`, disables autostart through
    the installed init scripts, fsyncs the rc.d directory and verifies no start
    link remains. This covers the old software already installed: its boot entry
    is no longer selected by OpenWrt rcS. Pending first-boot scripts that could
    enable these services refuse preparation. Preparation does not stop them.
    An incomplete preparation retains its receipt for investigation; do not guess
-   prior enablement or delete the hold. Apply on the gateway rechecks the durable
+   prior enablement or delete the hold. This is the same recovery marker that
+   boot integrity, factory seeding and deployment honor. A generic integrity
+   recovery marker is not an EB19 receipt and cannot authorize this repair.
+   Historical EB19 lock or writer-hold names also refuse and require receipt
+   inspection. Apply on the gateway rechecks the durable
    hold as well as procd and open file handles. Stop other writers too. A separate
    privileged actor must not start or enable services during recovery.
 
@@ -410,7 +414,12 @@ Never restart the old healer to bypass a refusal.
    hard-links the source to retained evidence. Keep the writer hold in place.
 
 5. Verify the database, then deploy the reviewed retirement payload and complete
-   its acceptance checks. Only after a successful deploy, release the hold:
+   its acceptance checks. Deployment preserves the hold and suppresses identityd
+   enablement, including the pending UCI default. It permits a bounded Node-RED
+   health start only after checking the installed retirement flow and the repaired
+   database. A compatible older payload containing the surgery cannot restart.
+   After the check, or on any deploy failure, both writers remain stopped; reboot
+   cannot undo the hold. Only after a successful deploy, release the hold:
 
    ```sh
    sqlite3 -readonly /data/db/farming.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'
@@ -423,7 +432,11 @@ Never restart the old healer to bypass a refusal.
    repair lock, an installed flow still containing the boot surgery, failed
    integrity/FK checks or an unverified ledger/fingerprint head. It restores
    exactly the recorded service enablement and archives the hold receipt. It
-   does not start services; the deploy owns activation. Keep all backups and
+   consumes only the reviewed pending identityd enable script so it cannot later
+   override a service that was originally disabled. An unknown script refuses.
+   Release does not start services. Start the required services explicitly after
+   release, repeat the health check, and leave originally disabled services
+   disabled. Keep all backups and
    receipts through acceptance. Do not bypass a remaining schema refusal.
 
 An interrupted repair retains `/data/db/farming.db.legacy-device-fk-repair.lock`.
