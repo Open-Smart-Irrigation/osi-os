@@ -105,7 +105,11 @@ const a = process.argv.slice(2);
 const dest = a[a.indexOf('-fsSLo') + 1];
 const rel = a[a.length - 1].replace(/^http:\\/\\/localhost:[0-9]+\\//, '');
 const fail = (process.env.FAIL_DEST || '').split(',').filter(Boolean);
-if (fail.some((f) => dest.endsWith(f))) process.exit(22);
+const liveDest = dest.replace(/\\.osi-stage\\.[A-Za-z0-9]+$/, '');
+if (fail.some((f) => liveDest.endsWith(f))) {
+  fs.writeFileSync(dest, 'partial transfer');
+  process.exit(22);
+}
 const src = rel === 'react_gui.tar.gz' ? ${JSON.stringify(path.join(root, 'react_gui.tar.gz'))} : path.join(${JSON.stringify(REPO)}, rel);
 if (!fs.existsSync(src) || !fs.statSync(src).isFile()) process.exit(22);
 fs.mkdirSync(path.dirname(dest), { recursive: true });
