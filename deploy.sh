@@ -3846,6 +3846,104 @@ fetch_required "osi-valve-control live-wrappers.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js" \
     "$MODULE_STAGE/osi-valve-control/live-wrappers.js"
 
+# Stage X2 compatibility files alongside index.js; direct calls load them lazily.
+fetch_required "osi-valve-control command-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/command-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/command-ingress.js"
+
+fetch_required "osi-valve-control command-routing.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/command-routing.js" \
+    "$MODULE_STAGE/osi-valve-control/command-routing.js"
+
+fetch_required "osi-valve-control manual-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/manual-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/manual-ingress.js"
+
+fetch_required "osi-valve-control cancel-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/cancel-ingress.js"
+
+fetch_required "osi-valve-control service-interval-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-interval-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-interval-ingress.js"
+
+fetch_required "osi-valve-control service-model-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-model-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-model-ingress.js"
+
+fetch_required "osi-valve-control service-timed-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-timed-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-timed-ingress.js"
+
+fetch_required "osi-valve-control service-magnet-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-magnet-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-magnet-ingress.js"
+
+fetch_required "osi-valve-control service-partial-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-partial-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-partial-ingress.js"
+
+fetch_required "osi-valve-control service-flush-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/service-flush-ingress.js" \
+    "$MODULE_STAGE/osi-valve-control/service-flush-ingress.js"
+
+fetch_required "osi-valve-control run-log-adapters.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/run-log-adapters.js" \
+    "$MODULE_STAGE/osi-valve-control/run-log-adapters.js"
+
+# Independent command ingress must remain available when valve-control is quarantined.
+fetch_required "osi-command-ingress package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/package.json" \
+    "$MODULE_STAGE/osi-command-ingress/package.json"
+
+fetch_required "osi-command-ingress index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/index.js" \
+    "$MODULE_STAGE/osi-command-ingress/index.js"
+
+fetch_required "osi-command-ingress command-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/command-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/command-ingress.js"
+
+fetch_required "osi-command-ingress command-routing.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/command-routing.js" \
+    "$MODULE_STAGE/osi-command-ingress/command-routing.js"
+
+fetch_required "osi-command-ingress manual-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/manual-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/manual-ingress.js"
+
+fetch_required "osi-command-ingress cancel-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/cancel-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/cancel-ingress.js"
+
+fetch_required "osi-command-ingress service-interval-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-interval-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-interval-ingress.js"
+
+fetch_required "osi-command-ingress service-model-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-model-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-model-ingress.js"
+
+fetch_required "osi-command-ingress service-timed-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-timed-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-timed-ingress.js"
+
+fetch_required "osi-command-ingress service-magnet-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-magnet-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-magnet-ingress.js"
+
+fetch_required "osi-command-ingress service-partial-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-partial-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-partial-ingress.js"
+
+fetch_required "osi-command-ingress service-flush-ingress.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/service-flush-ingress.js" \
+    "$MODULE_STAGE/osi-command-ingress/service-flush-ingress.js"
+
+fetch_required "osi-command-ingress run-log-adapters.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress/run-log-adapters.js" \
+    "$MODULE_STAGE/osi-command-ingress/run-log-adapters.js"
+
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
     "$MODULE_STAGE/osi-system-settings/package.json"

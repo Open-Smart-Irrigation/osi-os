@@ -54,7 +54,7 @@ function findFunctionNode(flows, name) {
 function assertFunctionNode(name) {
     const node = findFunctionNode(readFlows(), name);
     if (!node) throw new Error(`Missing function node "${name}"`);
-    return node;
+    return require('./lib/valve-ingress-x2-source').resolvedNode(node);
 }
 
 function assertNodeLib(node, varName, moduleName) {
@@ -259,6 +259,8 @@ function assertCancelPath() {
         n.type === 'function' && n.name === 'Cancel STREGA Actuation'
     );
     if (!fn) throw new Error('Missing function node "Cancel STREGA Actuation"');
+    const implementation = require('./lib/valve-ingress-x2-source').resolvedNode(fn);
+    fn.func = implementation.func;
     assertAsyncOsiDb(fn);
     assertNodeLib(fn, 'crypto', 'crypto');
     assertNodeLib(fn, 'chirpstack', 'osi-chirpstack-helper');

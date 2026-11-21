@@ -373,11 +373,13 @@ runQuietNodeScript('test-journal-v2-config.js', 'journal v2 startup media config
 runQuietNodeScript('test-journal-v2-worker.js', 'journal v2 durable worker behavior passes');
 
 function findNodeByName(name) {
-  return flows.find((node) => node.name === name);
+  const node = flows.find((node) => node.name === name);
+  return node && require('./lib/valve-ingress-x2-source').resolvedNode(node);
 }
 
 function findNodeById(id) {
-  return flows.find((node) => node.id === id);
+  const node = flows.find((node) => node.id === id);
+  return node && require('./lib/valve-ingress-x2-source').resolvedNode(node);
 }
 
 function expectIncludes(nodeName, needle, description) {
@@ -1091,6 +1093,7 @@ async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPa
 function makeUplinkDedupOsiLibStub() {
   return {
     require: (name) => {
+      if (name === 'command-ingress') return { ok:true, value:require('./../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress') };
       if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
       return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
     },
@@ -1098,7 +1101,7 @@ function makeUplinkDedupOsiLibStub() {
 }
 
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
-  const node = findNodeById(nodeId);
+  const node = flows.find(node=>node.id===nodeId);
   if (!node) {
     throw new Error(`missing node ${nodeId}`);
   }
