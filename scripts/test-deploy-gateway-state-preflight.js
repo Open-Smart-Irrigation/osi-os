@@ -145,7 +145,7 @@ test('a gateway in order passes, and the preflight changes nothing on it', () =>
 
 refusedUnchanged('the database is missing but its sidecar files are there', (g) => {
   fs.writeFileSync(`${g.db}-wal`, 'orphan');
-}, /farming\.db is missing but SQLite sidecar files exist; .*refusing before anything is changed/);
+}, /missing database with recovery evidence at .*farming\.db-wal; preserve it and investigate\. No database repair or migration was applied\./);
 
 refusedUnchanged('the clock hook needs sysntpd, which is missing', (g) => {
   fs.rmSync(g.sysntpd);

@@ -1,5 +1,12 @@
 #!/bin/sh
 
+# Retain this defaults script while recovery owns service enablement.
+for suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+    if [ -e "/data/db/farming.db$suffix" ] || [ -L "/data/db/farming.db$suffix" ]; then
+        logger -t osi-identityd "HELD: defer boot enablement until explicit repair release"
+        exit 1
+    fi
+done
 identityd_queued=0
 [ -e /etc/rc.d/S98osi-identityd ] && identityd_queued=1
 

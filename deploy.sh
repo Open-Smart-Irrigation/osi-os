@@ -120,6 +120,13 @@ release_deploy_lock() {
 }
 
 cleanup() {
+    # The owed health check runs before the later lifecycle trap takes over.
+    # Its first held start arms cleanup, so a staging failure also stops it.
+    if [ "${HELD_HEALTH_STARTED:-0}" = 1 ]; then
+        hold_node_red_stopped || echo "ERROR: cannot prove held health writer stopped" >&2
+        quiesce_identityd_instance || echo "ERROR: cannot prove held identityd stopped" >&2
+        HELD_HEALTH_STARTED=0
+    fi
     # A refusal between staging and the exit handler's takeover (it discards
     # the stage itself) leaves no staged payload behind, nor the links
     # linkNewModules made into it.
@@ -1538,14 +1545,24 @@ ensure_sqlite3_cli() {
 seed_db_if_missing() {
     echo "--- farming.db ---"
     if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
-        echo "HELD: Database recovery is incomplete. Refusing to seed $DB_PATH." >&2
+        if [ ! -f "$DB_PATH" ] || ! check_live_db_readonly; then
+            echo "HELD: Database recovery is incomplete. Refusing to seed $DB_PATH." >&2
+            return 1
+        fi
+    fi
+    if [ -e "$DB_PATH.legacy-device-fk-repair.lock" ] || [ -L "$DB_PATH.legacy-device-fk-repair.lock" ]; then
+        echo "ERROR: incomplete legacy device FK repair; inspect its receipt using .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair before seeding." >&2
+        return 1
+    fi
+    if [ -e "$DB_PATH.legacy-device-fk-writer-hold" ] || [ -L "$DB_PATH.legacy-device-fk-writer-hold" ]; then
+        echo "ERROR: missing database with a durable writer hold; preserve recovery evidence before seeding." >&2
         return 1
     fi
     if [ -e "$DB_PATH" ]; then
         echo "SKIP: existing live database preserved at $DB_PATH"
         return 0
     fi
-    if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then
+    if [ -e "$DB_PATH-wal" ] || [ -L "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -L "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ] || [ -L "$DB_PATH-journal" ]; then
         echo "ERROR: $DB_PATH is missing but SQLite sidecar files exist." >&2
         echo "Refusing to seed; inspect $DB_DIR before continuing." >&2
         return 1
@@ -1583,7 +1600,7 @@ seed_db_if_missing() {
   }
   const dir = fs.openSync(path.dirname(target), 'r');
   try {
-    for (const suffix of ['.osi-recovery', '-wal', '-shm', '-journal']) {
+    for (const suffix of ['.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold', '-wal', '-shm', '-journal']) {
       if (fs.lstatSync(target + suffix, { throwIfNoEntry: false })) {
         throw new Error('database recovery record or sidecar appeared before seeding: ' + suffix);
       }
@@ -1625,7 +1642,34 @@ node_red_restart_needed=0
 IDENTITYD_LOCK_PATH="/var/run/osi-identityd.lock"
 identityd_deploy_state="untouched"
 
+recovery_hold_present() {
+    for recovery_suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+        if [ -e "$DB_PATH$recovery_suffix" ] || [ -L "$DB_PATH$recovery_suffix" ]; then return 0; fi
+    done
+    return 1
+}
+
+repair_health_start() {
+    if recovery_hold_present; then
+        # Both this gate and the installed init validate the current pair.
+        # An old but schema-compatible payload must never restart under hold.
+        node /usr/share/node-red/osi-db-integrity/index.js --repair-health-check "$DB_PATH" "${SWAP_ROOT:-/srv/node-red}/flows.json" || return 1
+        HELD_HEALTH_STARTED=1
+        OSI_LEGACY_REPAIR_HEALTH=1 "${NODE_RED_INIT:-/etc/init.d/node-red}" "$@"
+    else
+        "${NODE_RED_INIT:-/etc/init.d/node-red}" "$@"
+    fi
+}
+
 identityd_service() {
+    case "$1" in
+        enable|start|restart)
+            if recovery_hold_present; then
+                echo "HELD: identityd enable/start deferred until scripts/repair-legacy-device-fk.js --release-hold" >&2
+                return 1
+            fi
+            ;;
+    esac
     /etc/init.d/osi-identityd "$@"
 }
 
@@ -1687,6 +1731,10 @@ hold_identityd_stopped() {
 }
 
 restore_identityd_prior_state() {
+    if recovery_hold_present; then
+        quiesce_identityd_instance || return 1
+        return 0
+    fi
     case "$identityd_deploy_state" in
         untouched|disarmed|fatal_hold)
             return 0
@@ -1874,12 +1922,16 @@ check_node_red_start() {
 run_owed_health_check() {
     swap_call writePayloadState "${owed_payload:-}" unverified "its owed health check is running" deploy.sh >/dev/null || true
     mark_node_red_log
-    if ! "$NODE_RED_INIT" restart; then
+    if ! repair_health_start restart; then
         NODE_RED_START_VERDICT=failed
         NODE_RED_START_REASON="the Node-RED restart failed"
         return 1
     fi
     check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}" "${NODE_RED_HEALTH_TIMEOUT:-30}"
+    if recovery_hold_present; then
+        hold_node_red_stopped || return 1
+        HELD_HEALTH_STARTED=0
+    fi
     [ "$NODE_RED_START_VERDICT" != failed ]
 }
 
@@ -1904,7 +1956,7 @@ restore_as_found() {
     if [ -n "${DEPLOY_STAMP:-}" ] && [ "$DEPLOY_STAMP" != "$raf_active" ]; then
         swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
     fi
-    if ! "$NODE_RED_INIT" restart || ! wait_for_node_red_health "${NODE_RED_HEALTH_TIMEOUT:-30}"; then
+    if ! repair_health_start restart || ! wait_for_node_red_health "${NODE_RED_HEALTH_TIMEOUT:-30}"; then
         echo "ERROR: Node-RED did not come back on payloads/$raf_active as found" >&2
         return 1
     fi
@@ -1917,6 +1969,13 @@ deploy_exit_handler() {
     exit_status="$1"
     trap - EXIT INT TERM
     set +e
+    if recovery_hold_present; then
+        hold_node_red_stopped || true
+        quiesce_identityd_instance || true
+        identityd_deploy_state="fatal_hold"
+        cleanup
+        exit "$exit_status"
+    fi
     if [ "${ROLLBACK_RESTORED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
         echo "OK: preserving the verified rollback pair while returning deploy failure" >&2
         if ! restore_identityd_prior_state; then
@@ -2000,7 +2059,7 @@ restart_node_red() {
         return 0
     fi
     echo "--- Restart Node-RED after schema migration ---"
-    if /etc/init.d/node-red start; then
+    if repair_health_start start; then
         node_red_restart_needed=0
         echo "OK"
         return 0
@@ -2153,11 +2212,19 @@ process.stdout.write(`${head}|${manifest.map((m) => `${m.version}:${m.checksum}`
 }
 
 schema_compatibility_metadata() {
-    if schema_compatibility_metadata_raw="$(sqlite3 "$DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
+    if [ ! -f "$DB_PATH" ]; then
+        echo "ERROR: missing database; refusing compatibility read" >&2
+        return 1
+    fi
+    if schema_compatibility_metadata_raw="$(sqlite3 -readonly "$DB_PATH" "SELECT COALESCE((SELECT MAX(version) FROM schema_migrations WHERE status='applied'),0) || '|' || COALESCE((SELECT group_concat(version || ':' || checksum, ',') FROM (SELECT version, checksum FROM schema_migrations WHERE status='applied' ORDER BY version)), '')" 2>/dev/null)"; then
         printf '%s\n' "$schema_compatibility_metadata_raw"
         return 0
     fi
-    if sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;" 2>/dev/null | grep -qx '1'; then
+    if ! scm_table="$(sqlite3 -readonly "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;" 2>/dev/null)"; then
+        echo "ERROR: could not inspect compatibility catalog" >&2
+        return 1
+    fi
+    if [ "$scm_table" = 1 ]; then
         echo "ERROR: could not read schema_migrations compatibility metadata" >&2
         return 1
     fi
@@ -2293,7 +2360,7 @@ restart_previous_payload() {
         return 1
     fi
     swap_call writePayloadState "$PREV_STAMP" healthy "returned to after payloads/${DEPLOY_STAMP:-?} failed" deploy.sh >/dev/null || true
-    if ! "$NODE_RED_INIT" restart; then
+    if ! repair_health_start restart; then
         echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
         return 1
     fi
@@ -2344,17 +2411,66 @@ cleanup_failed_first_payload() {
 DAMAGED_DB_DOC="docs/operations/damaged-farm-database.md"
 check_live_db_readonly() {
     if [ -e "$DB_PATH.osi-recovery" ] || [ -L "$DB_PATH.osi-recovery" ]; then
-        echo "HELD: Database recovery is incomplete. Resolve $DB_PATH.osi-recovery before deploying." >&2
+        if [ ! -f "$DB_PATH" ] || ! node - "$DB_PATH.osi-recovery" <<'NODE'
+const fs = require('fs'), path = require('path');
+const marker = process.argv[2];
+try {
+  if (!fs.lstatSync(marker).isDirectory() || fs.lstatSync(marker).isSymbolicLink()) throw Error('not an owned hold');
+  const record = JSON.parse(fs.readFileSync(path.join(marker, 'receipt.json'), 'utf8'));
+  const names = ['osi-identityd', 'node-red'];
+  if (record.kind !== 'legacy-device-fk' || record.phase !== 'disabled' || !Array.isArray(record.services) || record.services.length !== names.length || record.services.some((s,i) => s.name !== names[i] || typeof s.enabled !== 'boolean')) throw Error('incomplete writer hold');
+} catch (error) { console.error('HELD: ' + error.message); process.exit(1); }
+NODE
+        then
+            echo "HELD: Database recovery is incomplete. Inspect $DB_PATH.osi-recovery and follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair before deploying." >&2
+            return 1
+        fi
+        for repair_service in osi-identityd node-red; do
+            if /etc/init.d/"$repair_service" enabled; then
+                echo "HELD: writer autostart changed during repair; preserve the hold" >&2
+                return 1
+            else
+                repair_enabled_status=$?
+                if [ "$repair_enabled_status" -ne 1 ]; then
+                    echo "HELD: cannot prove writer autostart disabled; preserve the hold" >&2
+                    return 1
+                fi
+            fi
+        done
+    fi
+    if [ -e "$DB_PATH.legacy-device-fk-writer-hold" ] || [ -L "$DB_PATH.legacy-device-fk-writer-hold" ]; then
+        echo "HELD: historical repair writer hold; inspect its receipt and follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair" >&2
         return 1
     fi
-    [ -e "$DB_PATH" ] || return 0
+    if [ -e "$DB_PATH.legacy-device-fk-repair.lock" ] || [ -L "$DB_PATH.legacy-device-fk-repair.lock" ]; then
+        echo "ERROR: incomplete offline legacy device FK repair. Keep writers stopped and inspect its retained receipt; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
+        return 1
+    fi
+    if [ ! -e "$DB_PATH" ]; then
+        for cldb_suffix in '' -wal -shm -journal .legacy-device-fk-writer-hold; do
+            if [ -e "$DB_PATH$cldb_suffix" ] || [ -L "$DB_PATH$cldb_suffix" ]; then
+                echo "ERROR: missing database with recovery evidence at $DB_PATH$cldb_suffix; preserve it and investigate. No database repair or migration was applied." >&2
+                return 1
+            fi
+        done
+        return 0
+    fi
     command -v sqlite3 >/dev/null 2>&1 || ensure_sqlite3_cli || return 1
     if ! cldb_result="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" 'PRAGMA integrity_check;' 2>&1)"; then
-        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        echo "ERROR: $DB_PATH could not be opened for its integrity check: $(printf '%s' "$cldb_result" | head -n 2). This check applied no database repair or migration; SQLite may rebuild -shm. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
         return 1
     fi
     if [ "$cldb_result" != "ok" ]; then
-        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). Nothing was changed. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        echo "ERROR: $DB_PATH failed its integrity check: $(printf '%s' "$cldb_result" | head -n 3). This check applied no database repair or migration; SQLite may rebuild -shm. Copy the database with its -wal and -shm files before anything else, and follow $DAMAGED_DB_DOC." >&2
+        return 1
+    fi
+    # EB19: read-only and before checkpoints, ledger writes or payload changes.
+    if ! cldb_legacy="$(sqlite3 -readonly -cmd '.timeout 30000' "$DB_PATH" "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','trigger','index','view') AND ((' ' || lower(coalesce(sql,'')) || ' ') GLOB ('*[^a-z0-9_$' || char(128) || '-' || char(1114111) || ']devices_old[^a-z0-9_$' || char(128) || '-' || char(1114111) || ']*') OR lower(tbl_name) = 'devices_old') ORDER BY type, name" 2>&1)"; then
+        echo "ERROR: could not inspect the legacy device catalog: $cldb_legacy. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
+        return 1
+    fi
+    if [ -n "$cldb_legacy" ]; then
+        echo "ERROR: legacy devices_old catalog references. Run scripts/repair-legacy-device-fk.js <db> --report offline; follow .claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair. This check applied no database repair or migration; SQLite may rebuild -shm." >&2
         return 1
     fi
 }
@@ -2486,6 +2602,8 @@ fetch_migration_runner() {
         fingerprints.js \
         index.js \
         ledger.js \
+        legacy-device-catalog.js \
+        recovery-hold.js \
         runner-iface.js \
         runner.js \
         sql-normalize.js
@@ -2526,11 +2644,15 @@ fetch_reconciliation_assets() {
 
 run_schema_migration() {
     echo "--- Edge schema migration runner ---"
+    check_live_db_readonly || return 1
     if [ ! -e "$DB_PATH" ]; then
         echo "SKIP: no live database at $DB_PATH"
         return 0
     fi
     if ! ensure_sqlite3_cli; then
+        return 1
+    fi
+    if ! check_live_db_readonly; then
         return 1
     fi
     if ! command -v node >/dev/null 2>&1; then
@@ -3012,7 +3134,11 @@ else
     owed_schema=""
 fi
 owed_plan="$(swap_call owedCheckPlan "${owed_schema%%|*}" "${owed_schema#*|}" 2>/dev/null || true)"
-if [ -n "$owed_plan" ]; then
+if recovery_hold_present; then
+    # The installed checker/init may predate this protocol on a first deploy.
+    # Leave the owed pair untouched until the new checker and init are installed.
+    echo "HELD: deferring owed health check ($owed_plan) until the retirement payload is installed; writers remain stopped"
+elif [ -n "$owed_plan" ]; then
     owed_payload="${owed_plan%%|*}"
     owed_rest="${owed_plan#*|}"
     owed_migrated="${owed_rest%%|*}"
@@ -3058,7 +3184,7 @@ if [ -n "$owed_plan" ]; then
         swap_call writePayloadState "$owed_fallback" healthy "payloads/$owed_payload failed its owed health check; returned to this payload" deploy.sh >/dev/null || true
         if ! swap_call flipTo "$owed_fallback" "$GUI_ROOT" >/dev/null || \
            ! swap_call verifyPair "$owed_fallback" "$GUI_ROOT" >/dev/null || \
-           ! "$NODE_RED_INIT" restart; then
+           ! repair_health_start restart; then
             echo "ERROR: could not return to payloads/$owed_fallback; refusing the deploy" >&2
             exit 1
         fi
@@ -3969,9 +4095,6 @@ fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
     "/srv/node-red/settings.js" 644 || exit 1
 
-fetch_required "Node-RED init script" \
-    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red" 755 || exit 1
 # A previous image may still have a seed script left to run. Update those
 # consumers before replacing the recovery writer an existing service can call.
 if [ -e /etc/uci-defaults/97_osi_db_seed ]; then
@@ -3985,6 +4108,13 @@ if [ -e /etc/uci-defaults/98_osi_node_red_seed ]; then
         "/etc/uci-defaults/98_osi_node_red_seed" 755 || exit 1
 fi
 
+# Publish dependencies before their consumers; each file uses atomic publication.
+fetch_required "Database recovery hold policy" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/recovery-hold.js" \
+    "/usr/share/node-red/osi-db-integrity/recovery-hold.js" 644 || exit 1
+fetch_required "Node-RED init script" \
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
+    "/etc/init.d/node-red" 755 || exit 1
 fetch_required "Boot database integrity check" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
     "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
@@ -4267,7 +4397,7 @@ if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
     # Flipped just above: the restart below must read the new version.
     apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
     mark_node_red_log
-    /etc/init.d/node-red restart || true
+    repair_health_start restart || true
 else
     echo "OK: Node-RED already restarted on the activated pair during migration"
 fi
@@ -4304,6 +4434,9 @@ if [ "$PROBE_OK" = "0" ]; then
         echo "WARN: could not record payloads/$DEPLOY_STAMP as healthy; the next deploy will not return to it" >&2
     fi
     swap_call writePayloadState "$DEPLOY_STAMP" healthy "its deploy health check passed" deploy.sh >/dev/null || true
+    if recovery_hold_present; then
+        node /usr/share/node-red/osi-db-integrity/index.js --record-repair-health "$DB_PATH" "${SWAP_ROOT:-/srv/node-red}/flows.json" || exit 1
+    fi
     swap_call clearLegacyCapture >/dev/null || true
     swap_call prunePayloads "$PAYLOAD_KEEP_N" >/dev/null
 elif [ "$PROBE_OK" = "unverified" ]; then
@@ -4342,7 +4475,7 @@ else
         fi
         swap_call markFailed "$DEPLOY_STAMP" "its deploy health check failed" >/dev/null || true
         swap_call writePayloadState "$PREV_STAMP" healthy "returned to after payloads/$DEPLOY_STAMP failed its health check" deploy.sh >/dev/null || true
-        if ! "$NODE_RED_INIT" restart; then
+        if ! repair_health_start restart; then
             node_red_restart_needed=0
             echo "ERROR: Node-RED failed to restart on the restored payload pair; leaving it stopped" >&2
             exit 1
@@ -4378,14 +4511,20 @@ fi
 # self-check verdict end
 
 echo "--- Gateway identity supervisor ---"
-if ! identityd_service enable; then
-    echo "ERROR: failed to enable identityd" >&2
-    exit 1
-fi
-identityd_service start
-if ! wait_for_identityd_ready; then
-    echo "ERROR: identityd did not become ready after activation" >&2
-    exit 1
+if recovery_hold_present; then
+    hold_node_red_stopped || exit 1
+    quiesce_identityd_instance || exit 1
+    echo "HELD: retirement payload checked; writers and autostart remain stopped until explicit --release-hold"
+else
+    if ! identityd_service enable; then
+        echo "ERROR: failed to enable identityd" >&2
+        exit 1
+    fi
+    identityd_service start
+    if ! wait_for_identityd_ready; then
+        echo "ERROR: identityd did not become ready after activation" >&2
+        exit 1
+    fi
 fi
 identityd_deploy_state="disarmed"
 echo "OK"
