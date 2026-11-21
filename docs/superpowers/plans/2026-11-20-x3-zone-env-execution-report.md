@@ -316,3 +316,22 @@ single consolidated focused qualification job is queued in osi-heavy behind the
 Pi 5 firmware build holding the slot since `08:53:18Z`. No local parity or native
 pass is claimed for this round until that job runs. Full suites stay in exact-head
 GitHub CI, and no permission escalation or permission request was used.
+
+The first CI candidate exposed a shallow-checkout assumption in the new runtime
+staging test: `origin/main` was unavailable. Both release jobs now fetch full
+ancestry. Their applied-handoff native legs passed on `ae34d85c33`. The earlier
+sync candidate `7bb16c43a1` also passed the actual applied handoff's full verifier,
+non-UTC parity and independent squash proof, with all 18 response-marker/port
+tests passing in both states. These are CI observations, not local passes.
+Partial-state mutation controls now run even when the test starts integrated,
+so main keeps testing those controls after the slot.
+
+Publication checkpoint UTC stop: **2026-11-21T12:16:20Z**. Elapsed from the recorded
+start: **0:48:50** (0.81 h), including the shared-slot wait and CI triage.
+Reservation-window cost is **0.00 h**. Mandatory local qualification remains
+blocked/queued behind the other firmware job; this is not a completed local
+verification record. Its one queued wrapper runs the focused pre/post checks,
+Node 20 module tests and both native runtimes serially, and records its starting
+head to reject a changing checkout. Scratch is retained for that queued job.
+No other job was cancelled or changed. The final publication commit records
+this checkpoint only; exact-head CI and renewed review remain merge gates.
