@@ -40,7 +40,7 @@ test('discovery finds a healthy population of auth/scope-gated nodes (regression
   // Every discovered node really does reference the literal call this
   // verifier is built around -- pins the regex against silent rot.
   for (const node of targets) {
-    assert.match(node.func, SCOPE_CALL_RE, `${node.id} matched discovery but not SCOPE_CALL_RE on re-check`);
+    assert.match(require('./lib/x3-implementation-source').implementationSource(node, path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red')), SCOPE_CALL_RE, `${node.id} matched discovery but not SCOPE_CALL_RE on re-check`);
   }
 });
 
@@ -143,4 +143,29 @@ test('verifyProfile reports the target count alongside failures', async () => {
   const { targetCount, failures } = await verifyProfile(PROFILE);
   assert.ok(targetCount >= MIN_EXPECTED_NODES);
   assert.deepEqual(failures, []);
+});
+
+for (const [id, method] of [['zone-env-fn','environmentSummary'], ['strega-today-liters-fn','todayLiters'], ['get-actuations-query','queryActuations']]) {
+  test('X3 real facade flag-off sentinel inside ' + method, async () => {
+    const { adaptNode } = require('./x3-zone-env-adapters');
+    const adapter = adaptNode(loadFlows().find(n => n.id === id));
+    const api = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env');
+    assert.equal((await checkNode(adapter)).outcome, 'pass');
+    const original = api[method];
+    try {
+      api[method] = function(msg, deps) { deps.osiLib.require('scope'); return original(msg, deps); };
+      const result = await checkNode(adapter);
+      assert.equal(result.outcome, 'scope-helper-touched');
+      // Exercise filesystem fallback independently; checkNode stops at its first failure.
+      const { runOnce, makeEnv, makeGlobalStub } = require('./verify-auth-flag-off-hermetic');
+      assert.equal((await runOnce(adapter, makeEnv(''), makeGlobalStub('fs-fallback'))).outcome, 'scope-helper-touched');
+    } finally { api[method] = original; }
+  });
+}
+
+test('X3 discovery retains every pre-extraction auth handler', () => {
+ const flows=loadFlows();
+ const candidate=require('./x3-zone-env-adapters').applyTo(flows);
+ assert.deepEqual(findAuthGatedNodes(candidate).map(n=>n.id).sort(),findAuthGatedNodes(flows).map(n=>n.id).sort());
+ for(const id of ['zone-env-fn','strega-today-liters-fn','get-actuations-query']) assert.ok(findAuthGatedNodes(candidate).some(n=>n.id===id));
 });

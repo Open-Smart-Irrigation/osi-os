@@ -49,8 +49,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { implementationSource } = require('./lib/x3-implementation-source');
+const { METHODS } = require('./x3-zone-env-adapters');
 
 const ROOT = path.resolve(__dirname, '..');
+const X3_ROOT = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
 const PROFILES = [
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
@@ -69,7 +72,7 @@ const SCOPE_CALL_RE = /osiLib\.require\(\s*['"]scope['"]\s*\)/;
 
 function findAuthGatedNodes(flows) {
   return flows.filter(
-    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(n.func)
+    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(implementationSource(n, X3_ROOT))
   );
 }
 
@@ -141,16 +144,19 @@ class ScopeHelperTouchedError extends Error {}
 // { ok: true, value: <auto-stub> }, matching osiLib.require's real
 // { ok, value | error } contract shape.
 function makeOsiLibStub() {
-  return {
+  const resolver = { touched: 0,
     require(name) {
       if (name === 'scope') {
+        resolver.touched++;
         throw new ScopeHelperTouchedError(
           `osiLib.require('scope') was reached on the flag-off (OSI_SCOPED_ACCESS unset) code path`
         );
       }
+      if (name === 'zone-env') return { ok: true, value: require(path.join(X3_ROOT, 'osi-zone-env')) };
       return { ok: true, value: makeAutoStub(`osiLib.require(${JSON.stringify(name)}).value`) };
     },
   };
+  return resolver;
 }
 
 function makeEnv(configuredSecret) {
@@ -256,9 +262,22 @@ function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub) {
 // { outcome: 'pass' | 'scope-helper-touched' | 'unscannable', detail }.
 async function runOnce(node, envStub, globalStub) {
   const msgStub = makeMsg();
+  const x3 = !!METHODS[node.id];
+  if (x3) {
+    const secret = envStub.get('AUTH_TOKEN_SECRET') || Buffer.alloc(48, 0x5a).toString('hex');
+    const payload = Buffer.from(JSON.stringify({ userId: 1, username: 'hermetic-test-user', exp: Date.now() + 60000 })).toString('base64url');
+    msgStub.req.headers.authorization = 'Bearer ' + payload + '.' + crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+    msgStub.req.params = { zone_id: '1', deveui: 'A840410000000001' };
+    msgStub.payload = [{ id: 1 }];
+  }
   const nodeStub = makeNodeStub();
   const { paramNames, paramValues } = buildSandboxParams(node.libs, envStub, globalStub, msgStub, nodeStub);
 
+  if (x3 && paramNames.includes('crypto')) paramValues[paramNames.indexOf('crypto')] = { ...crypto, randomBytes: size => Buffer.alloc(size, 0x5a) };
+  const resolver = paramValues[paramNames.indexOf('osiLib')];
+  // Extracted HTTP handlers can catch the sentinel themselves. Observe those
+  // X3 touches even when caught; retain the existing driver contract for other
+  // routes rather than changing unrelated authorization probes in this fix.
   let fn;
   try {
     // eslint-disable-next-line no-new-func
@@ -285,8 +304,10 @@ async function runOnce(node, envStub, globalStub) {
         clearTimeout(timer);
       }
     }
+    if (x3 && resolver.touched) throw new ScopeHelperTouchedError("osiLib.require('scope') was reached on the flag-off code path");
     return { outcome: 'pass', detail: 'completed without resolving the scope helper' };
   } catch (error) {
+    if (x3 && resolver.touched) return { outcome: 'scope-helper-touched', detail: "osiLib.require('scope') was reached on the flag-off code path" };
     if (error instanceof ScopeHelperTouchedError) {
       return { outcome: 'scope-helper-touched', detail: error.message };
     }
