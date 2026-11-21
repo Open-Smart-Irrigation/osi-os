@@ -1,6 +1,6 @@
 """OSI factory image acceptance tests. Invoke via acceptance.sh."""
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import os
 import re
@@ -20,6 +20,9 @@ BASE_CASES = ('Cold boot', 'First account and login', 'WM1302 uplinks',
               'Valve open and outcome', 'Reboot persistence',
               'Power cut 1', 'Power cut 2', 'Power cut 3',
               *(f'Upgrade {version}' for version in UPGRADE_VERSIONS))
+ROM_INIT = '/rom/etc/init.d/node-red'
+ROM_WRITER = '/rom/usr/share/node-red/osi-atomic-write.js'
+ROM_FLOWS = '/rom/usr/share/flows.json'
 FLOWS_CAPABILITY = 'function persistFlowHold('
 FLOWS_CASES = ('Flows cut on first boot', 'Flows cut on later boot', 'Flows cut after upgrade')
 ZERO_CASE = 'A. Zeroed upgraded flows preserve migration 0073'
@@ -51,7 +54,50 @@ def flows_capability(init):
 
 
 def read_image_capability(vm):
-    return flows_capability(checked(vm, 'cat /rom/etc/init.d/node-red'))
+    return flows_capability(checked(vm, f'cat {ROM_INIT}'))
+
+
+@dataclass(frozen=True)
+class FactoryPayload:
+    init: str
+    writer: str
+    flows: str
+
+    def receipt(self):
+        return f'init={self.init} writer={self.writer} flows={self.flows}'
+
+
+def read_factory_payload(vm):
+    paths = (ROM_INIT, ROM_WRITER, ROM_FLOWS)
+    files = ' '.join(paths)
+    output = checked(vm, f"""for file in {files}; do
+test -f "$file" && test "$(readlink -f "$file")" = "$file" || exit 1
+done
+sha256sum {files}""")
+    receipts = [line.split() for line in output.splitlines()]
+    if len(receipts) != len(paths) or any(
+        len(row) != 2 or row[1] != path or not re.fullmatch(r'[0-9a-f]{64}', row[0])
+        for row, path in zip(receipts, paths)
+    ):
+        raise RuntimeError('invalid factory ROM payload digest receipt')
+    return FactoryPayload(*(row[0] for row in receipts))
+
+
+def tools_checkout_revision(expected):
+    git = ['git', '-C', str(HERE)]
+    root, revision = subprocess.check_output(
+        git + ['rev-parse', '--show-toplevel', 'HEAD'], text=True).splitlines()
+    if Path(root)/'tools/raspi5' != HERE or not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise ValueError('emulator tools must run from their own Git checkout')
+    if expected is not None:
+        if revision != expected:
+            raise ValueError('tools checkout HEAD differs from --tools-revision')
+        changed = subprocess.check_output(
+            git + ['status', '--porcelain', '--untracked-files=normal', '--', '.',
+                   '../raspi4'], text=True)
+        if changed:
+            raise ValueError('emulator tools differ from the pinned checkout')
+    return revision
 
 
 @dataclass(frozen=True)
@@ -183,6 +229,7 @@ def main(argv=None):
     ap=argparse.ArgumentParser()
     ap.add_argument('--candidate', type=Path)
     ap.add_argument('--candidate-sha256')
+    ap.add_argument('--tools-revision', help='pinned Git commit of the emulator tools checkout')
     ap.add_argument('--minimal-probe-image', type=Path,
                     help='separate factory archive built with the test-only minimal flows probe')
     ap.add_argument('--minimal-probe-sha256')
@@ -235,11 +282,18 @@ def main(argv=None):
         with args.candidate.open('rb') as stream:
             if hashlib.file_digest(stream, 'sha256').hexdigest() != args.candidate_sha256:
                 ap.error('candidate SHA-256 mismatch')
+    try:
+        tools_revision = tools_checkout_revision(args.tools_revision)
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        ap.error(f'cannot verify tools checkout revision: {error}')
     os.umask(0o077)
     run=Path(tempfile.mkdtemp(prefix='pi5-acceptance-',dir=args.run_root))
     print(run,flush=True)
+    (run/'results.log').write_text(
+        f'Candidate revision: {args.release_revision}\nTools revision: {tools_revision}\n')
     (run/'inputs.txt').write_text(
-        f'revision={args.release_revision}\ncandidate_sha256={args.candidate_sha256}\n'
+        f'revision={args.release_revision}\ntools_revision={tools_revision}\n'
+        f'candidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
         f'offline_flows_capability={capability}\nminimal_probe_sha256={args.minimal_probe_sha256}\n'
         f'flows_power_cut_only={args.flows_power_cut_only}\n'
@@ -356,13 +410,16 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         vm = Guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
         try:
             receipt = vm.start(before_console=CUT_RECEIPT, flow_cut=phase)
-            committed = verify_disk(vm, receipt, phase=phase, factory=True)
+            committed = verify_disk(vm, receipt, phase=phase, factory=True,
+                                    shipped_old=candidate_payload.flows.encode())
             vm.start()
+            observed = read_factory_payload(vm)
+            record(f'Factory probe ROM ({phase}): {observed.receipt()}')
+            expected_probe = replace(candidate_payload, init=probe_init_digest)
+            if observed != expected_probe:
+                raise RuntimeError('factory probe ROM init, writer or starting flows differs from the candidate binding')
             wait_for_api(vm)
             vm.verify_flows_receipt(committed)
-            digest = checked(vm, 'sha256sum /etc/init.d/node-red').split()[0]
-            if digest != probe_init_digest:
-                raise RuntimeError('probe image init differs from the instrumented candidate source')
             return 'clone held complete old or new flows and /api/me returned 401'
         finally:
             vm.stop()
@@ -389,6 +446,10 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                     return summarize(aborted=True)
                 if image_capability == 'minimal':
                     try:
+                        candidate_payload = read_factory_payload(vm)
+                        record(f'Candidate factory ROM: {candidate_payload.receipt()}')
+                        if candidate_payload.init != hashlib.sha256((release/INIT).read_bytes()).hexdigest():
+                            raise ValueError('candidate factory ROM init differs from the offline source')
                         if not args.minimal_probe_image or not re.fullmatch(r'[0-9a-f]{64}', args.minimal_probe_sha256 or ''):
                             raise ValueError('minimal qualification requires --minimal-probe-image and --minimal-probe-sha256')
                         if args.minimal_probe_sha256 == args.candidate_sha256:

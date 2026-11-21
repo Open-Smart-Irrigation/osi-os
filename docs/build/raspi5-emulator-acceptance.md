@@ -9,6 +9,11 @@ candidate, previous factory images and the workstation's offline deployment cach
 
 ## Prepare the inputs
 
+Set `GATE_TREE` to a separate tools checkout from `main` and `GATE_SHA`
+to its pinned full commit SHA. Keep that checkout under the build directory.
+The candidate image and offline deployment tree come from the release build
+receipt and can use a different commit.
+
 Build the `raspi5b` QEMU once via `osi-heavy` using the pinned tools, or reuse the
 matching build. Keep `dtmerge` and `rpi5-bl31.bin` beside its executable. Install
 host `qemu-system-x86_64` with the user-network backend, mtools, dosfstools,
@@ -26,7 +31,7 @@ in each of `v0.8.0/` and `v0.8.1/`. Use factory inputs and synthetic test data.
 ## Run the gate
 
 ```bash
-tools/raspi5/acceptance.sh \
+"$GATE_TREE/tools/raspi5/acceptance.sh" --tools-revision "$GATE_SHA" \
   --candidate "$PI5_FACTORY_IMAGE" --candidate-sha256 "$PI5_FACTORY_SHA256" \
   --osi-version "$OSI_VERSION" --chirpstack-version "$CHIRPSTACK_VERSION" \
   --release "$OFFLINE_RELEASE_TREE" --release-revision "$CANDIDATE_SHA" \
@@ -42,7 +47,7 @@ restricted to the emulated link and a host-loopback GUI forward. The radio
 exchanges simulated frames over a Unix socket.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
-run directory with the candidate SHA and image checksum. The run must exit zero. The final table lists each expected case, its observed
+run directory with the candidate SHA, image checksum, and tools revision. The run must exit zero. The final table lists each expected case, its observed
 result, and the reason and required replacements for every N/A. The run
 fails if any replacement or other required case lacks a recorded PASS. The runner removes guest disks and USB media after cleanup and
 keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
@@ -97,7 +102,7 @@ Use the unmodified candidate archive and offline tree for the baseline cases.
 Make a separate disposable source export for the test factory image:
 
 ```bash
-python3 -B tools/raspi5/minimal_flows.py "$OFFLINE_RELEASE_TREE" "$PROBE_SOURCE"
+python3 -B "$GATE_TREE/tools/raspi5/minimal_flows.py" "$OFFLINE_RELEASE_TREE" "$PROBE_SOURCE"
 ```
 
 The command checks the original init's deploy pin, adds the console marker
@@ -106,9 +111,13 @@ from the candidate revision with the export's instrumented Node-RED init.
 Keep that image and the probe source outside Git trees. Run the full gate
 with `--minimal-probe-image "$PROBE_FACTORY_IMAGE"` and
 `--minimal-probe-sha256 "$PROBE_FACTORY_SHA256"` in addition to the ordinary
-candidate arguments. The runner verifies that image's checksum and booted
-init, and makes the instrumented upgrade bundle in scratch from the same
-offline source. Keep the probe image separate from the release assets.
+candidate arguments. The runner checks both archives' ROM digests for the
+atomic writer and seed `flows.json`. The candidate's ROM init must match
+the offline source, and the probe's ROM init must match the instrumented
+copy of that source. The factory cut marker's starting flows digest must
+match the candidate's ROM seed. The runner records the digests and prepares
+the instrumented upgrade bundle in scratch from the same offline source.
+Keep the probe image separate from the release assets.
 
 ### Customer-line 0.7.0 image fixture (PROVISIONAL)
 

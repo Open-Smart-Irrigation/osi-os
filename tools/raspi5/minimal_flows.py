@@ -84,13 +84,14 @@ def prepare_probe_release(release, output):
     return digest
 
 
-def verify_disk(vm, receipt, *, phase, factory, old_stamp=None, shipped_old=None):
+def verify_disk(vm, receipt, *, phase, factory, shipped_old, old_stamp=None):
     vm.stop(cut=True)
     seen_phase, old, new, stamp = receipt
     if seen_phase != phase.encode() or old == new or (stamp == b'image') != factory or stamp == old_stamp:
         raise RuntimeError('minimal cut marker has the wrong phase, digest or payload stamp')
-    if shipped_old is not None and old != shipped_old:
-        raise RuntimeError('minimal upgrade marker old digest differs from the shipped flows')
+    if old != shipped_old:
+        layout = 'factory' if factory else 'upgrade'
+        raise RuntimeError(f'minimal {layout} marker old digest differs from the shipped flows')
     if (vm.receipts/f'qemu-{vm.boots}.exit').read_text().strip() != str(-signal.SIGKILL):
         raise RuntimeError('QEMU did not exit from the hard power cut')
     layout = 'factory' if factory else 'upgrade'
