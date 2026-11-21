@@ -64,15 +64,15 @@ function freshImageSeed() {
   }
 }
 
-// OpenWrt retains a failing defaults script. This boot-local record tells
-// Node-RED to wait for that retry without recording a redeploy hold.
+// OpenWrt retains a failing defaults script. This boot-local record defers
+// image fallback while ownership is unresolved.
 function markPending() {
   fs.closeSync(fs.openSync(pending, 'a', 0o600));
 }
 
 function shouldSeedFlows() {
-  if (hasEntry(flow) || hasEntry(origin)) return false;
   try {
+    if (hasEntry(flow) || hasEntry(origin)) return false;
     return freshImageSeed();
   } catch (error) {
     markPending();

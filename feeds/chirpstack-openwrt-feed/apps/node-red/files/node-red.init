@@ -430,11 +430,6 @@ start_service() {
         logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH.osi-recovery before starting Node-RED."
         return 1
     fi
-    if [ -f /var/run/osi-factory-seed.pending ] &&
-       [ ! -e "/srv/$PACKAGE_NAME/flows.json" ] && [ ! -L "/srv/$PACKAGE_NAME/flows.json" ]; then
-        logger -t node-red.init "Node-RED start deferred: factory seed pending; retry on next boot."
-        return 1
-    fi
     payload_switch_repair
     payload_schema_check || return 0
     payload_hold_check || return 0
@@ -749,6 +744,11 @@ function assertImageOwnsFlows(seed) {
       [root, path.join(root, 'node_modules')].some(dir => exists(dir) &&
         fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink()))) {
     throw new Error('image flows ownership is contradicted by the deployed payload layout');
+  }
+  // An inconclusive factory probe only defers image fallback. A deployed
+  // payload still gets its normal switch repair, flow recovery, or hold.
+  if (exists('/var/run/osi-factory-seed.pending')) {
+    throw Object.assign(new Error('Node-RED start deferred: factory seed pending; retry on next boot.'), { code: 'EAGAIN' });
   }
   const marker = path.join(root, '.image-flows-origin');
   if (!exists(marker)?.isFile() ||

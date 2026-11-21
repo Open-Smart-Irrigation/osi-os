@@ -558,68 +558,83 @@ test('a broken public flow link records a hold for the selected payload', t => {
   assert.equal(swap.flowRecoveryHeld(fx.userDir), true);
 });
 
-for (const fault of ['parent fsync', 'database read']) {
-  test(`factory defaults and Node-RED recover on the next boot after one ${fault} EIO`, t => {
+function seedDefaults(fx) {
+  const rom = path.join(fx.root, 'rom');
+  const native = path.join(rom, 'sqlite3');
+  const defaults = path.join(fx.root, 'etc', 'uci-defaults');
+  const dbSeed = path.join(defaults, '97_osi_db_seed');
+  const nodeRedSeed = path.join(defaults, '98_osi_node_red_seed');
+  const pending = fx.root + pendingPath;
+  for (const dir of [native, defaults]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(rom, 'settings.js'), 'module.exports = {};\n');
+  fs.writeFileSync(path.join(rom, 'package-lock.json'), JSON.stringify({
+    packages: { 'node_modules/sqlite3': { version: '5.1.7' } },
+  }));
+  fs.writeFileSync(path.join(native, 'package.json'), JSON.stringify({ name: 'sqlite3', version: '5.1.7' }));
+  fs.writeFileSync(path.join(native, 'index.js'),
+    'exports.Database = function (_, callback) { this.close = done => done(); process.nextTick(callback); };\n');
+
+  fs.writeFileSync(dbSeed, fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
+    .replace(/^SEED_SRC=.*$/m, () => 'SEED_SRC=' + JSON.stringify(fx.imageDb))
+    .replace(/^DATA_DIR=.*$/m, () => 'DATA_DIR=' + JSON.stringify(path.dirname(fx.db))));
+  fs.writeFileSync(nodeRedSeed, imageSeedScript
+    .replaceAll('/srv/node-red', fx.userDir)
+    .replaceAll('/usr/share/flows.json', fx.bundled)
+    .replaceAll('/usr/share/db/farming.db', fx.imageDb)
+    .replaceAll('/data/db/farming.db', fx.db)
+    .replaceAll('/usr/share/node-red', rom)
+    .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'))
+    .replaceAll('/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3', native)
+    .replaceAll('/etc/osi-node-red-seed.copied', path.join(fx.root, 'etc', 'osi-node-red-seed.copied'))
+    .replaceAll('/etc/uci-defaults/97_osi_db_seed', dbSeed)
+    .replaceAll(pendingPath, pending));
+  const applyDefaults = fs.readFileSync('openwrt/package/base-files/files/etc/init.d/boot', 'utf8')
+    .match(/^uci_apply_defaults\(\) \{[^]*?^\}/m)[0]
+    .replace('. /lib/functions/system.sh', ':')
+    .replace('/etc/uci-defaults', JSON.stringify(defaults));
+  function run({ method, target } = {}) {
+    const env = { ...process.env };
+    if (method) {
+      const preload = path.join(fx.root, 'fail-factory-seed.cjs');
+      fs.writeFileSync(preload, `
+const fs = require('node:fs');
+const method = ${JSON.stringify(method)};
+const original = fs[method];
+fs[method] = (entry, ...args) => {
+  const filename = typeof entry === 'number' ? fs.readlinkSync('/proc/self/fd/' + entry) : entry;
+  if (filename === ${JSON.stringify(target)}) {
+    throw Object.assign(new Error('injected factory seed ' + method + ' EIO'), { code: 'EIO' });
+  }
+  return original(entry, ...args);
+};`);
+      env.NODE_OPTIONS = '--require=' + preload;
+    }
+    const result = spawnSync('sh', ['-c',
+      'logger() { echo "$@" >&2; }\nuci() { :; }\n' + applyDefaults + '\nuci_apply_defaults'],
+      { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+    return result;
+  }
+  return { run, defaults, dbSeed, nodeRedSeed, pending };
+}
+
+for (const [label, method, chooseTarget] of [
+  ['parent fsync', 'fsyncSync', fx => path.dirname(path.dirname(fx.db))],
+  ['database read', 'readSync', fx => fx.db],
+  ['public flow metadata', 'lstatSync', fx => fx.flows],
+]) {
+  test(`factory defaults and Node-RED recover on the next boot after one ${label} EIO`, t => {
     const fx = fixture(t);
-    const rom = path.join(fx.root, 'rom');
-    const native = path.join(rom, 'sqlite3');
-    const defaults = path.join(fx.root, 'etc', 'uci-defaults');
-    const dbSeed = path.join(defaults, '97_osi_db_seed');
-    const nodeRedSeed = path.join(defaults, '98_osi_node_red_seed');
-    const pending = fx.root + pendingPath;
+    const { run, defaults, dbSeed, nodeRedSeed, pending } = seedDefaults(fx);
     const hold = path.join(fx.userDir, 'DEPLOY-HELD');
     const state = path.join(fx.userDir, 'payload-state.json');
-    for (const dir of [native, defaults]) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(rom, 'settings.js'), 'module.exports = {};\n');
-    fs.writeFileSync(path.join(rom, 'package-lock.json'), JSON.stringify({
-      packages: { 'node_modules/sqlite3': { version: '5.1.7' } },
-    }));
-    fs.writeFileSync(path.join(native, 'package.json'), JSON.stringify({ name: 'sqlite3', version: '5.1.7' }));
-    fs.writeFileSync(path.join(native, 'index.js'),
-      'exports.Database = function (_, callback) { this.close = done => done(); process.nextTick(callback); };\n');
     fs.unlinkSync(fx.origin);
     fs.unlinkSync(fx.db);
     fs.rmdirSync(path.dirname(fx.db));
-
-    fs.writeFileSync(dbSeed, fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
-      .replace(/^SEED_SRC=.*$/m, () => 'SEED_SRC=' + JSON.stringify(fx.imageDb))
-      .replace(/^DATA_DIR=.*$/m, () => 'DATA_DIR=' + JSON.stringify(path.dirname(fx.db))));
-    fs.writeFileSync(nodeRedSeed, imageSeedScript
-      .replaceAll('/srv/node-red', fx.userDir)
-      .replaceAll('/usr/share/flows.json', fx.bundled)
-      .replaceAll('/usr/share/db/farming.db', fx.imageDb)
-      .replaceAll('/data/db/farming.db', fx.db)
-      .replaceAll('/usr/share/node-red', rom)
-      .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'))
-      .replaceAll('/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3', native)
-      .replaceAll('/etc/osi-node-red-seed.copied', path.join(fx.root, 'etc', 'osi-node-red-seed.copied'))
-      .replaceAll('/etc/uci-defaults/97_osi_db_seed', dbSeed)
-      .replaceAll(pendingPath, pending));
-    const applyDefaults = fs.readFileSync('openwrt/package/base-files/files/etc/init.d/boot', 'utf8')
-      .match(/^uci_apply_defaults\(\) \{[^]*?^\}/m)[0]
-      .replace('. /lib/functions/system.sh', ':')
-      .replace('/etc/uci-defaults', JSON.stringify(defaults));
-    const preload = path.join(fx.root, 'fail-factory-seed.cjs');
-    fs.writeFileSync(preload, `
-const fs = require('node:fs');
-const fault = ${JSON.stringify(fault)};
-const method = fault === 'parent fsync' ? 'fsyncSync' : 'readSync';
-const original = fs[method];
-fs[method] = (fd, ...args) => {
-  const target = fault === 'parent fsync' ? ${JSON.stringify(path.dirname(path.dirname(fx.db)))} : ${JSON.stringify(fx.db)};
-  if (fs.readlinkSync('/proc/self/fd/' + fd) === target) {
-    throw Object.assign(new Error('injected factory seed ' + fault + ' failure'), { code: 'EIO' });
-  }
-  return original(fd, ...args);
-};`);
-    const run = env => spawnSync('sh', ['-c',
-      'logger() { echo "$@" >&2; }\nuci() { :; }\n' + applyDefaults + '\nuci_apply_defaults'],
-      { encoding: 'utf8', env: { ...process.env, ...env } });
-    const failed = run({ NODE_OPTIONS: '--require=' + preload });
-    assert.equal(failed.status, 0, failed.stderr);
-    assert.match(failed.stderr, new RegExp('injected factory seed ' + fault + ' failure'));
-    assert.equal(fs.existsSync(fx.db), fault === 'database read');
-    assert.equal(fs.existsSync(dbSeed), fault === 'parent fsync');
+    const failed = run({ method, target: chooseTarget(fx) });
+    assert.match(failed.stderr, new RegExp('injected factory seed ' + method + ' EIO'));
+    assert.equal(fs.existsSync(fx.db), method !== 'fsyncSync');
+    assert.equal(fs.existsSync(dbSeed), method === 'fsyncSync');
     assert.equal(fs.existsSync(nodeRedSeed), true);
     assert.equal(fs.existsSync(pending), true);
     assert.equal(fs.existsSync(fx.origin), false);
@@ -632,7 +647,7 @@ fs[method] = (fd, ...args) => {
     assert.equal(fs.existsSync(state), false);
 
     fs.unlinkSync(pending); // OpenWrt recreates /var/run on a clean boot.
-    const retry = run({});
+    const retry = run();
     assert.equal(retry.status, 0, retry.stderr);
     assert.deepEqual(fs.readdirSync(defaults), [], retry.stdout + retry.stderr);
     assert.deepEqual(fs.readFileSync(fx.db), fs.readFileSync(fx.imageDb));
@@ -640,6 +655,56 @@ fs[method] = (fd, ...args) => {
     assert.match(fx.start(), /procd start/);
     assert.equal(fs.existsSync(hold), false);
     assert.equal(fs.existsSync(state), false);
+  });
+}
+
+for (const sealed of [true, false]) {
+  test(`a factory metadata EIO leaves deployed ${sealed ? 'flow recovery' : 'HOLD'} in effect on both boots`, t => {
+    const deployedOnly = { id: 'deployed-only', type: 'comment' };
+    const fx = fixture(t, { linked: true, pristine: JSON.stringify([...nodes, deployedOnly]) });
+    addLedger(fx.imageDb);
+    addLedger(fx.db);
+    sqlite(fx.db, 'UPDATE schema_migrations SET version=73;');
+    const originalDb = fs.readFileSync(fx.db);
+    fs.unlinkSync(fx.flows);
+    const invalid = '[{}]';
+    fs.writeFileSync(fx.target, invalid);
+    if (!sealed) fs.unlinkSync(path.join(path.dirname(fx.target), 'flows.pristine.json'));
+    const { run, defaults, nodeRedSeed, pending } = seedDefaults(fx);
+    // The deployed settings are already on disk when 98 first defers.
+    fs.writeFileSync(path.join(fx.userDir, 'settings.js'), 'module.exports = {};\n');
+
+    for (const firstBoot of [true, false]) {
+      const result = firstBoot ? run({ method: 'lstatSync', target: path.dirname(fx.active) }) : run();
+      if (firstBoot) {
+        assert.match(result.stderr, /injected factory seed lstatSync EIO/);
+        assert.equal(fs.existsSync(nodeRedSeed), true);
+        assert.equal(fs.existsSync(pending), true);
+      } else {
+        assert.deepEqual(fs.readdirSync(defaults), [], result.stdout + result.stderr);
+      }
+      const start = fx.start({ expectFailure: true });
+      assert.doesNotMatch(start.stderr, /factory seed pending/);
+      assert.equal(fs.existsSync(fx.origin), false);
+      assert.deepEqual(fs.readFileSync(fx.db), originalDb);
+      if (sealed) {
+        assert.equal(start.status, 0, start.stderr);
+        assert.match(start.stdout, /procd start/);
+        if (firstBoot) assert.match(start.stderr, /restored flows.json .*flows.pristine.json/);
+        assert.equal(fs.realpathSync(fx.flows), fx.target);
+        assertPatched(fx);
+        assert.ok(JSON.parse(fs.readFileSync(fx.flows, 'utf8')).some(node => node.id === deployedOnly.id));
+        assert.equal(fs.existsSync(path.join(fx.userDir, 'DEPLOY-HELD')), false);
+      } else {
+        assert.doesNotMatch(start.stdout, /procd start/);
+        assert.match(start.stderr, /HELD.*You must re-run the deploy/);
+        assert.equal(swap.flowRecoveryHeld(fx.userDir), true);
+        assert.match(fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8'), /You must re-run the deploy/);
+        assert.equal(fs.existsSync(fx.flows), false);
+        assert.equal(fs.readFileSync(fx.target, 'utf8'), invalid);
+      }
+      if (firstBoot) fs.unlinkSync(pending); // /var/run is recreated between boots.
+    }
   });
 }
 
