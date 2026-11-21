@@ -92,6 +92,8 @@ COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
+ATOMIC_WRITER_SHA256="c8994eeb72f25ea073b934d86f26c6b1dbe96a32dceeeea6ca67a1b2c23e5ff9"
+PAYLOAD_SWAP_SHA256="95870eb4928a64b7a83b0c3588463c137448efe0152cd41c61db715a4d5f8eef"
 OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
 export SWAP_ROOT
@@ -195,6 +197,13 @@ fetch() {
 
 file_sha256() {
     node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$1"
+}
+
+verify_download_pin() {
+    if [ "$(file_sha256 "$1")" != "$2" ]; then
+        echo "ERROR: ${1##*/} did not match its SHA-256 pin; refusing deploy" >&2
+        return 1
+    fi
 }
 
 # Download into private scratch. Publish from there through a file staged in
@@ -2787,6 +2796,7 @@ run_native_sqlite3_preflight || exit 1
 
 echo "--- Deploy payload swap helper ---"
 fetch "scripts/deploy-payload-swap.js" "$SWAP_JS"
+verify_download_pin "$SWAP_JS" "$PAYLOAD_SWAP_SHA256" || exit 1
 same_fs_or_die /srv/node-red "$PAYLOADS_ROOT"
 # A damaged database is refused here, before anything on the gateway changes.
 check_live_db_readonly || exit 1
@@ -2794,8 +2804,8 @@ gateway_state_preflight || exit 1
 # node-red.init runs this copy at start to finish a switch a power cut
 # interrupted; it is in place before this deploy changes any live link.
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js" "$TMP_DIR/osi-atomic-write.js"
-if ! { node --check "$TMP_DIR/osi-atomic-write.js" && node --check "$SWAP_JS" &&
-       publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js" 644 &&
+verify_download_pin "$TMP_DIR/osi-atomic-write.js" "$ATOMIC_WRITER_SHA256" || exit 1
+if ! { publish_download "$TMP_DIR/osi-atomic-write.js" "/usr/share/node-red/osi-atomic-write.js" 644 &&
        publish_download "$SWAP_JS" "/srv/node-red/.payload-swap.js" 644; }; then
     echo "ERROR: could not install the atomic writer or payload swap helper" >&2
     exit 1

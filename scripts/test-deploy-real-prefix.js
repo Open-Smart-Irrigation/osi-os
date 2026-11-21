@@ -88,7 +88,7 @@ function retryEndsInActivation(g) {
 test('B2: a failed settings.js download, then the retry: the capture keeps its record and the retry activates', () => {
   const g = gateway({ layout: 'image' });
   try {
-    const first = runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
+    const first = runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_LIVE_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
     assert.notEqual(first.status, 0);
     const capture = fs.readdirSync(path.join(g.srv, 'payloads')).find((p) => p.endsWith('-previous'));
     assert.ok(capture, 'the first attempt captured the served flows and GUI');
@@ -126,7 +126,7 @@ test('B2: the same cut, with the capture left without its record (an older deplo
 test('B2: a capture without its record while a migration attempt is recorded: refused before anything is configured', () => {
   const g = gateway({ layout: 'image' });
   try {
-    runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
+    runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_LIVE_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
     const capture = fs.readdirSync(path.join(g.srv, 'payloads')).find((p) => p.endsWith('-previous'));
     fs.rmSync(path.join(g.srv, 'payloads', capture, 'compatibility.json'), { force: true });
     fs.writeFileSync(path.join(g.srv, 'payloads', capture, 'pending-switch.json'), '{"format":2}\n');
@@ -147,7 +147,7 @@ function ledger(g) {
 }
 
 function orphanedCapture(g, fromLedger) {
-  runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
+  runPrefix(g, AFTER_SETTINGS, 'echo PREFIX_DONE', { FAIL_LIVE_SOURCE: 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js' });
   const capture = fs.readdirSync(path.join(g.srv, 'payloads')).find((p) => p.endsWith('-previous'));
   fs.rmSync(path.join(g.srv, 'payloads', capture, 'compatibility.json'), { force: true });
   const pending = path.join(g.srv, 'payloads/20261115T000009Z/pending-switch.json');

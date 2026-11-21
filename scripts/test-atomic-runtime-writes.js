@@ -239,3 +239,117 @@ ${command}
     assert.equal(fs.statSync(target).ino, published);
   });
 }
+
+
+const invalidBodies = [
+  ['package.json', '{"dependencies":', 'invalid JSON'],
+  ['package-lock.json', '{"lockfileVersion":3,"packages":', 'invalid JSON'],
+  ['edge-channels.json', '[{"key":', 'invalid JSON'],
+  ['edge-channels.json', '{}', 'unexpected JSON shape'],
+  ['settings.js', '<!doctype html><h1>Bad response</h1>', 'expected settings entry point'],
+  ['settings.js', 'module.exports = {\n  flowFile: "flows.json",\n', 'invalid JavaScript syntax'],
+  ['chirpstack-bootstrap.js', '/* a complete JS comment, with no executable code */\n', 'expected bootstrap entry point'],
+  ['strega_gen1_decoder.js', 'const unrelated = 1;\n', 'expected codec entry point'],
+  ['agroscope_uplink_transform.js', 'function decodeUplink(input) { return input; }\n', 'expected Agroscope transform entry point'],
+  ['node-red', 'echo "missing shebang"\n', 'expected a shell shebang and script body'],
+  ['osi-bootstrap', '#!/bin/sh /etc/rc.common\nif then\n', 'invalid shell syntax'],
+];
+
+for (const [name, badBody, message] of invalidBodies) {
+  test(`a successful HTTP response with invalid ${name} is refused (${message})`, t => {
+    const dir = fixture(t);
+    const file = path.join(dir, 'live', name);
+    fs.mkdirSync(path.dirname(file));
+    const response = path.join(dir, 'body');
+    fs.writeFileSync(file, 'old complete file', { mode: 0o640 });
+    fs.writeFileSync(response, badBody);
+    fs.copyFileSync(helper, path.join(dir, 'osi-atomic-write.js'));
+    const inode = fs.statSync(file).ino;
+    const functions = ['fetch', 'publish_download', 'fetch_required'].map(shellFunction).join('\n');
+    const mode = ['node-red', 'osi-bootstrap'].includes(name) ? '755' : '644';
+    const result = spawnSync('sh', ['-c', `
+set -eu
+${functions}
+BASE=http://fixture.invalid
+curl() { cp "$RESPONSE" "$2"; }
+fetch_required "fixture" "$1" "$2" "$3"
+printf 'would proceed to restart\n'
+`, 'sh', name, file, mode], {
+      encoding: 'utf8', env: { ...process.env, TMP_DIR: dir, RESPONSE: response },
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.ok(result.stderr.includes(message), result.stderr);
+    assert.doesNotMatch(result.stdout, /would proceed to restart/);
+    assert.equal(fs.statSync(file).ino, inode);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'old complete file');
+    assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+  });
+}
+
+const helperStageStart = deploy.indexOf('echo "--- Deploy payload swap helper ---"');
+const helperStageEnd = deploy.indexOf('# legacy capture preflight begin', helperStageStart);
+assert.ok(helperStageStart !== -1 && helperStageEnd > helperStageStart);
+
+for (const [file, body] of [
+  ['osi-atomic-write.js', ''],
+  ['osi-atomic-write.js', "'use strict';\nconst fs = require('node:fs');\n"],
+  ['deploy-payload-swap.js', "'use strict';\nmodule.exports = {};\n"],
+]) {
+  test(`an invalid ${file} is rejected before helper execution (${body.length} bytes)`, t => {
+    const dir = fixture(t);
+    const liveWriter = path.join(dir, 'writer-live.js');
+    const liveSwap = path.join(dir, 'swap-live.js');
+    fs.writeFileSync(liveWriter, 'old writer');
+    fs.writeFileSync(liveSwap, 'old swap');
+    fs.writeFileSync(path.join(dir, 'bad-helper'), body);
+    const trace = path.join(dir, 'trace');
+    const functions = ['fetch', 'file_sha256', 'publish_download'].map(shellFunction);
+    if (deploy.includes('verify_download_pin() {')) functions.push(shellFunction('verify_download_pin'));
+    const pins = deploy.match(/^(?:ATOMIC_WRITER|PAYLOAD_SWAP)_SHA256="[0-9a-f]{64}"$/gm) ?? [];
+    const stage = deploy.slice(helperStageStart, helperStageEnd)
+      .replace(`"${helperRuntimePath}"`, JSON.stringify(liveWriter))
+      .replace('"/srv/node-red/.payload-swap.js"', JSON.stringify(liveSwap));
+    const result = spawnSync('sh', ['-c', `
+set -eu
+${functions.join('\n')}
+${pins.join('\n')}
+BASE=http://fixture.invalid
+SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
+PAYLOADS_ROOT="$TMP_DIR"
+same_fs_or_die() { :; }
+check_live_db_readonly() { :; }
+gateway_state_preflight() { printf 'preflight\n' >> "$TRACE"; }
+curl() {
+    case "$3" in
+        */"$BAD_NAME") cp "$TMP_DIR/bad-helper" "$2" ;;
+        */osi-atomic-write.js) cp "$WRITER_SRC" "$2" ;;
+        */deploy-payload-swap.js) cp "$SWAP_SRC" "$2" ;;
+        *) return 1 ;;
+    esac
+}
+node() {
+    case "$1" in
+        "$TMP_DIR/osi-atomic-write.js") printf 'invoke writer\n' >> "$TRACE" ;;
+    esac
+    command node "$@"
+}
+${stage}
+printf 'would proceed\n'
+`], {
+      encoding: 'utf8',
+      env: {
+        ...process.env, TMP_DIR: dir, TRACE: trace, BAD_NAME: file, WRITER_SRC: helper,
+        SWAP_SRC: path.join(root, 'scripts/deploy-payload-swap.js'),
+      },
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.ok(result.stderr.includes('SHA-256'), result.stderr);
+    assert.ok(result.stderr.includes(file), result.stderr);
+    assert.doesNotMatch(result.stdout, /would proceed/);
+    const events = fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8') : '';
+    assert.doesNotMatch(events, /invoke writer/);
+    if (file === 'deploy-payload-swap.js') assert.equal(events, '', 'pin is checked before swap-aware preflight');
+    assert.equal(fs.readFileSync(liveWriter, 'utf8'), 'old writer');
+    assert.equal(fs.readFileSync(liveSwap, 'utf8'), 'old swap');
+  });
+}
