@@ -12,6 +12,8 @@ Binding rules come first in this file; reference detail lives in the docs and sk
 
 ## Architecture
 
+Fresh full images pin newly formatted overlays to ext4 for online growth. Existing media is never converted; growth on F2FS is a logged no-op. Policy, shipped-image findings and physical qualification: [image filesystem growth](docs/operations/image-rootfs-growth.md).
+
 ```
 Pi (edge)
   ├── Node-RED  (:1880, LAN-reachable)  — REST API, scheduler, sync orchestration
