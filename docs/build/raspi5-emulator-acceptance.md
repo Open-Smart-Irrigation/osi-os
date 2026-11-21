@@ -43,8 +43,8 @@ exchanges simulated frames over a Unix socket.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
 run directory with the candidate SHA and image checksum. The run must exit zero. The final table lists each expected case, its observed
-result and any capability reason for N/A. A required row passes only with a
-recorded PASS. The runner removes guest disks and USB media after cleanup and
+result, and the reason and required replacements for every N/A. The run
+fails if any replacement or other required case lacks a recorded PASS. The runner removes guest disks and USB media after cleanup and
 keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
 the scratch media when diagnosing a failure. Keep private receipts local.
 A missing or failed run holds the candidate. Physical SD power-cut, upgrade and
@@ -56,9 +56,11 @@ The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
-The init script's `persistFlowHold` function identifies candidates with the
-recovery code from PR #714. The cold boot checks that the guest image and the
-offline tree agree on this capability. These candidates must pass cuts on first
+The runner boots the factory image and reads its immutable
+`/rom/etc/init.d/node-red` before selecting cases. The script's
+`persistFlowHold` function identifies #714. The offline release tree must
+agree with the image. An unreadable or unrecognized marker fails the full
+gate with all cases required. These candidates must pass cuts on first
 boot, a later boot and first Node-RED start during the 0.8.1 upgrade. The cut
 guests use direct I/O. After a serial receipt gives the flows SHA-256 and
 payload stamp, the runner cuts power and boots a clone with a shell as PID 1.
@@ -77,12 +79,14 @@ flows publication described below.
 Use `--flows-power-cut-only` for the three #714 commit cuts or
 `--upgrade-boot-safety-only` for A, B and C. The latter uses the offline
 release and 0.8.1 fixture and can omit the candidate archive and its checksum.
+Focused runs report a separate diagnostic verdict. Flags and environment
+variables cannot grant N/A to any case.
 
 ### Minimal atomic flows candidates
 
 The v0.8.3 release line can use the atomic writer without the #714 recovery
-code. The gate checks the publication capability in the factory init and
-offline tree. A minimal candidate requires the ten baseline cases and three
+code. The factory image must declare the minimal atomic publication in its
+ROM init. A minimal candidate requires the ten baseline cases and three
 additional cuts. The factory cases interrupt the writer before and after
 directory fsync. The upgrade case interrupts the first Node-RED start after
 an offline upgrade from 0.8.1. A shell-only clone must contain the complete

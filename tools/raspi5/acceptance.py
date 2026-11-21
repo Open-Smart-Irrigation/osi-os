@@ -1,5 +1,6 @@
 """OSI factory image acceptance tests. Invoke via acceptance.sh."""
 import argparse
+from dataclasses import dataclass
 import hashlib
 import os
 import re
@@ -25,6 +26,7 @@ ZERO_CASE = 'A. Zeroed upgraded flows preserve migration 0073'
 PRISTINE_CASE = 'B. Missing pristine copy warns or holds'
 TRANSFER_CASES = {key: f'C. Interrupted {key} install' for key in TRANSFER_TARGETS}
 BOOT_SAFETY_CASES = (ZERO_CASE, PRISTINE_CASE, *TRANSFER_CASES.values())
+RECOVERY_CASES = FLOWS_CASES + BOOT_SAFETY_CASES
 MINIMAL_FACTORY_CASES = {
     'committed': 'Minimal factory cut after directory fsync',
     'before-dir-sync': 'Minimal factory cut before directory fsync',
@@ -48,13 +50,17 @@ def flows_capability(init):
     return 'unsupported'
 
 
-def check_image_capability(vm, expected):
-    observed = checked(vm, 'cat /etc/init.d/node-red')
-    if flows_capability(observed) != expected:
-        raise RuntimeError('factory image and offline tree disagree on flows publication capability')
+def read_image_capability(vm):
+    return flows_capability(checked(vm, 'cat /rom/etc/init.d/node-red'))
 
 
-def expected_cases(args, capability, customer_selected, *, historical=False):
+@dataclass(frozen=True)
+class NotApplicable:
+    reason: str
+    replacements: tuple[str, ...]
+
+
+def expected_cases(args, image_capability, customer_selected, *, historical=False):
     if args.flows_power_cut_only:
         return dict.fromkeys(FLOWS_CASES)
     if args.upgrade_boot_safety_only:
@@ -63,14 +69,16 @@ def expected_cases(args, capability, customer_selected, *, historical=False):
         return {CUSTOMER_CASE: None}
     cases = dict.fromkeys(BASE_CASES)
     if not historical:
-        recovery_reason = None if capability == 'recovery' else 'persistFlowHold absent in candidate init'
-        cases.update(dict.fromkeys(FLOWS_CASES + BOOT_SAFETY_CASES, recovery_reason))
-        minimal_reason = 'persistFlowHold present in candidate init' if capability == 'recovery' else None
-        cases.update(dict.fromkeys(MINIMAL_CASES, minimal_reason))
+        cases.update(dict.fromkeys(RECOVERY_CASES + MINIMAL_CASES))
+        if image_capability == 'recovery':
+            cases.update(dict.fromkeys(MINIMAL_CASES, NotApplicable(
+                'persistFlowHold present in factory image init', RECOVERY_CASES)))
+        elif image_capability == 'minimal':
+            cases.update(dict.fromkeys(RECOVERY_CASES, NotApplicable(
+                'persistFlowHold absent and minimal atomic publication present in factory image init', MINIMAL_CASES)))
     if customer_selected:
         cases[CUSTOMER_CASE] = None
     return cases
-
 
 
 def ready(vm):
@@ -233,7 +241,7 @@ def main(argv=None):
     (run/'inputs.txt').write_text(
         f'revision={args.release_revision}\ncandidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
-        f'flows_capability={capability}\nminimal_probe_sha256={args.minimal_probe_sha256}\n'
+        f'offline_flows_capability={capability}\nminimal_probe_sha256={args.minimal_probe_sha256}\n'
         f'flows_power_cut_only={args.flows_power_cut_only}\n'
         f'upgrade_boot_safety_only={args.upgrade_boot_safety_only}\n'
         f'customer_fixture_only={args.customer_fixture_only}\n')
@@ -245,7 +253,7 @@ def main(argv=None):
         return run_cases(args, run, Path(scratch), release, capability, bool(customer_image))
 
 
-def run_cases(args, run, scratch, release, capability, customer_selected):
+def run_cases(args, run, scratch, release, release_capability, customer_selected):
     results = {}
 
     def record(row):
@@ -254,24 +262,30 @@ def run_cases(args, run, scratch, release, capability, customer_selected):
         print(row, flush=True)
 
     focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
-    expected = expected_cases(args, capability, customer_selected)
+    expected = expected_cases(args, None, customer_selected)
 
     def summarize(*, aborted=False):
-        record('Case | Expected | Observed | Verdict | Reason')
+        record('Case | Expected | Observed | Verdict | Reason | Required replacements')
         passed = required = 0
         failed = aborted or bool(results.keys() - expected.keys())
-        for label, reason in expected.items():
+        for label, exemption in expected.items():
             observed = results.get(label, 'NOT RUN')
-            if reason:
-                verdict = 'N/A' if observed == 'NOT RUN' else 'FAIL'
-                need = 'N/A'
-            else:
+            if exemption is None:
                 required += 1
                 passed += observed == 'PASS'
                 verdict = 'PASS' if observed == 'PASS' else 'FAIL'
-                need = 'REQUIRED'
+                need, reason, replacements = 'REQUIRED', '', ''
+            else:
+                verdict = 'N/A' if observed == 'NOT RUN' else 'FAIL'
+                need, reason = 'N/A', exemption.reason
+                replacements = ', '.join(exemption.replacements)
+                failed |= any(
+                    replacement not in expected or expected[replacement] is not None
+                    or results.get(replacement) != 'PASS'
+                    for replacement in exemption.replacements
+                )
             failed |= verdict == 'FAIL'
-            record(f'{label} | {need} | {observed} | {verdict} | {reason or ""}')
+            record(f'{label} | {need} | {observed} | {verdict} | {reason} | {replacements}')
         record(f'Case totals: {passed} passed / {required} required')
         mode = 'Focused acceptance' if focused else 'Candidate acceptance'
         record(f'{mode}: ' + ('FAIL' if failed else 'PASS'))
@@ -353,30 +367,45 @@ def run_cases(args, run, scratch, release, capability, customer_selected):
         finally:
             vm.stop()
 
+    image_capability = None
     try:
-        if not focused and capability == 'unsupported':
-            record('Candidate init declares neither #714 recovery nor minimal atomic flows publication')
-            return summarize(aborted=True)
-        if not focused and capability == 'minimal':
-            try:
-                if not args.minimal_probe_image or not re.fullmatch(r'[0-9a-f]{64}', args.minimal_probe_sha256 or ''):
-                    raise ValueError('minimal qualification requires --minimal-probe-image and --minimal-probe-sha256')
-                if args.minimal_probe_sha256 == args.candidate_sha256:
-                    raise ValueError('the minimal probe must be a separate factory image')
-                probe_image = external_path(args.minimal_probe_image, off_tmp=True)
-                with probe_image.open('rb') as stream:
-                    if hashlib.file_digest(stream, 'sha256').hexdigest() != args.minimal_probe_sha256:
-                        raise ValueError('minimal probe image SHA-256 mismatch')
-                probe_release = scratch/'probe-release'
-                probe_init_digest = prepare_probe_release(release, probe_release)
-                (scratch/'minimal-media').mkdir()
-            except (OSError, ValueError, RuntimeError) as error:
-                record(str(error))
-                return summarize(aborted=True)
         if not focused:
             vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram,
                        receipts=run/'candidate', direct_io=True)
-            stock_cases(vm, args, test, capability)
+            try:
+                try:
+                    vm.start()
+                    image_capability = read_image_capability(vm)
+                except Exception as error:
+                    record(f'Factory image capability probe failed: {error}')
+                    return summarize(aborted=True)
+                record(f'Factory image flows capability: {image_capability}')
+                expected = expected_cases(args, image_capability, customer_selected)
+                if image_capability != release_capability:
+                    record('Factory image and offline tree disagree on flows publication capability')
+                    return summarize(aborted=True)
+                if image_capability == 'unsupported':
+                    record('Factory image declares neither #714 recovery nor minimal atomic flows publication')
+                    return summarize(aborted=True)
+                if image_capability == 'minimal':
+                    try:
+                        if not args.minimal_probe_image or not re.fullmatch(r'[0-9a-f]{64}', args.minimal_probe_sha256 or ''):
+                            raise ValueError('minimal qualification requires --minimal-probe-image and --minimal-probe-sha256')
+                        if args.minimal_probe_sha256 == args.candidate_sha256:
+                            raise ValueError('the minimal probe must be a separate factory image')
+                        probe_image = external_path(args.minimal_probe_image, off_tmp=True)
+                        with probe_image.open('rb') as stream:
+                            if hashlib.file_digest(stream, 'sha256').hexdigest() != args.minimal_probe_sha256:
+                                raise ValueError('minimal probe image SHA-256 mismatch')
+                        probe_release = scratch/'probe-release'
+                        probe_init_digest = prepare_probe_release(release, probe_release)
+                        (scratch/'minimal-media').mkdir()
+                    except (OSError, ValueError, RuntimeError) as error:
+                        record(str(error))
+                        return summarize(aborted=True)
+                stock_cases(vm, args, test)
+            finally:
+                vm.stop()
             for old in UPGRADE_VERSIONS:
                 test(f'Upgrade {old}', lambda: verify_upgrade(old))
         if expected.get(FLOWS_CASES[0], False) is None:
@@ -400,7 +429,7 @@ def run_cases(args, run, scratch, release, capability, customer_selected):
             test(PRISTINE_CASE, lambda: verify_upgrade('0.8.1', recovery='missing'))
             for transfer, label in TRANSFER_CASES.items():
                 test(label, lambda: verify_upgrade('0.8.1', transfer=transfer))
-        if not focused and capability == 'minimal':
+        if image_capability == 'minimal':
             for phase, label in MINIMAL_FACTORY_CASES.items():
                 test(label, lambda: factory_minimal_cut(phase))
             test(MINIMAL_UPGRADE_CASE, lambda: verify_upgrade('0.8.1', cut_at=CUT_RECEIPT))
@@ -417,59 +446,55 @@ def run_cases(args, run, scratch, release, capability, customer_selected):
     return summarize()
 
 
-def stock_cases(vm, args, test, capability):
-    try:
-        def boot():
-            vm.start()
-            ready(vm)
-            check_image_capability(vm, capability)
-            versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
-            if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
-                raise RuntimeError('unexpected versions '+versions)
-            return f'OSI {args.osi_version}, ChirpStack {args.chirpstack_version}, /gui/ served, integrity ok'
-        test('Cold boot',boot)
-        password=None
-        def account():
-            nonlocal password
-            password=checked(vm,"head -c 24 /dev/urandom | hexdump -v -e '1/1 \"%02x\"'")
-            checked(vm,"""for i in $(seq 1 100); do [ \"$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)\" = 401 ] && exit 0; sleep 2; done; exit 1""")
-            if sql(vm,'SELECT count(*) FROM users;')!='0':
-                raise RuntimeError('factory accounts already present')
-            observed=gui(vm,password,'setup')
-            role=sql(vm,"SELECT role FROM users WHERE username='emulator-admin';")
-            if role!='researcher':
-                raise RuntimeError('unexpected stored role')
-            return 'stored '+role+'; '+observed
-        test('First account and login',account)
-        session={}
-        def uplinks():
-            from radio_suite import run_uplinks
-            try:
-                session.update(run_uplinks(vm,password))
-            except Exception:
-                # Report only fixed labels and counts. Application logs can contain credentials.
-                _, diag=vm.command('''for needle in "JoinRequest" "join-request" "invalid MIC" "InvalidMIC" "unknown device" "region mismatch" "device-profile" "uplink frame" "downlink frame" "Too late" "TX_ACK" "CRC_OK"; do
+def stock_cases(vm, args, test):
+    def boot():
+        ready(vm)
+        versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
+        if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
+            raise RuntimeError('unexpected versions '+versions)
+        return f'OSI {args.osi_version}, ChirpStack {args.chirpstack_version}, /gui/ served, integrity ok'
+    test('Cold boot',boot)
+    password=None
+    def account():
+        nonlocal password
+        password=checked(vm,"head -c 24 /dev/urandom | hexdump -v -e '1/1 \"%02x\"'")
+        checked(vm,"""for i in $(seq 1 100); do [ \"$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)\" = 401 ] && exit 0; sleep 2; done; exit 1""")
+        if sql(vm,'SELECT count(*) FROM users;')!='0':
+            raise RuntimeError('factory accounts already present')
+        observed=gui(vm,password,'setup')
+        role=sql(vm,"SELECT role FROM users WHERE username='emulator-admin';")
+        if role!='researcher':
+            raise RuntimeError('unexpected stored role')
+        return 'stored '+role+'; '+observed
+    test('First account and login',account)
+    session={}
+    def uplinks():
+        from radio_suite import run_uplinks
+        try:
+            session.update(run_uplinks(vm,password))
+        except Exception:
+            # Report only fixed labels and counts. Application logs can contain credentials.
+            _, diag=vm.command('''for needle in "JoinRequest" "join-request" "invalid MIC" "InvalidMIC" "unknown device" "region mismatch" "device-profile" "uplink frame" "downlink frame" "Too late" "TX_ACK" "CRC_OK"; do
 printf '%s ' "$needle"; logread | grep -Fi -c "$needle"; done
 for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302; do pidof "$svc" >/dev/null && echo "$svc running"; done''')
-                (vm.receipts/'radio-diagnostics.log').write_text(diag+'\n')
-                raise
-        test('WM1302 uplinks',uplinks)
-        def valve():
-            from radio_suite import run_valve, VALVE
-            run_valve(vm,password,session,lambda: gui(vm,password,'open',VALVE))
-            gui(vm,password,'outcome',VALVE)
-        test('Valve open and outcome',valve)
-        def reboot():
-            sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")
-            before=snapshot(vm)
-            vm.reboot()
-            ready(vm)
-            if before!=snapshot(vm): raise RuntimeError('persistent state changed')
-            return 'account/device/history snapshot and setting preserved'
-        test('Reboot persistence',reboot)
-        for n in range(1,4):
-            test(f'Power cut {n}',lambda: cut(vm,n))
-    finally: vm.stop()
+            (vm.receipts/'radio-diagnostics.log').write_text(diag+'\n')
+            raise
+    test('WM1302 uplinks',uplinks)
+    def valve():
+        from radio_suite import run_valve, VALVE
+        run_valve(vm,password,session,lambda: gui(vm,password,'open',VALVE))
+        gui(vm,password,'outcome',VALVE)
+    test('Valve open and outcome',valve)
+    def reboot():
+        sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")
+        before=snapshot(vm)
+        vm.reboot()
+        ready(vm)
+        if before!=snapshot(vm): raise RuntimeError('persistent state changed')
+        return 'account/device/history snapshot and setting preserved'
+    test('Reboot persistence',reboot)
+    for n in range(1,4):
+        test(f'Power cut {n}',lambda: cut(vm,n))
 
 
 if __name__=='__main__':

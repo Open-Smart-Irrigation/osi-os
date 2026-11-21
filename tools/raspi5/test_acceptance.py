@@ -46,12 +46,14 @@ class FlowTests(unittest.TestCase):
                 (folder/image.name).write_bytes(image.read_bytes())
                 (folder/'SHA256SUMS').write_text(f'{digest}  {image.name}\n')
 
-            def stock(_guest, _args, record, _flows, **_options):
+            def stock(_guest, _args, record, **_options):
                 for label in ('Cold boot', 'First account and login', 'WM1302 uplinks',
                               'Valve open and outcome', 'Reboot persistence', 'Power cut 1', 'Power cut 3'):
                     record(label, lambda: None)
 
-            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest') as guest,
+                  patch.dict(os.environ, {'OSI_FLOWS_CAPABILITY': 'minimal'}),
+                  patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY) as checked,
                   patch.object(acceptance, 'stock_cases', side_effect=stock),
                   patch.object(acceptance, 'ready'), patch.object(acceptance, 'build_media'),
                   patch.object(acceptance, 'upgrade'), patch.object(acceptance, 'verify_zero_recovery'),
@@ -62,7 +64,9 @@ class FlowTests(unittest.TestCase):
                     '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1',
                     '--release', str(root), '--release-revision', revision,
                     '--fixtures', str(root), '--run-root', str(root),
+                    '--minimal-probe-image', str(image), '--minimal-probe-sha256', digest,
                 ])
+            checked.assert_called_once_with(guest.return_value, 'cat /rom/etc/init.d/node-red')
             result = next(root.glob('pi5-acceptance-*/results.log')).read_text()
             self.assertEqual(status, 1, result)
             self.assertIn('Power cut 2 | REQUIRED | NOT RUN | FAIL', result)
@@ -70,7 +74,8 @@ class FlowTests(unittest.TestCase):
             for label in acceptance.FLOWS_CASES + acceptance.BOOT_SAFETY_CASES:
                 self.assertIn(f'{label} | REQUIRED | PASS | PASS', result)
             for label in acceptance.MINIMAL_CASES:
-                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold present', result)
+                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold present in factory image init'
+                              f' | {", ".join(acceptance.RECOVERY_CASES)}', result)
 
     def test_current_source_and_guest_receipt(self):
         source = PINNED_CAPABILITY
@@ -84,11 +89,36 @@ class FlowTests(unittest.TestCase):
         self.assertIsNone(re.search(FLOWS_COMMITTED, COMMIT.replace(DIGEST, b'X')))
         self.assertIsNone(re.search(FLOWS_COMMITTED, COMMIT.replace(b' stamp=', b' payload=')))
 
-    def test_factory_image_and_offline_tree_must_agree(self):
-        with patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY):
-            with self.assertRaisesRegex(RuntimeError, 'disagree on flows publication'):
-                acceptance.check_image_capability(None, 'minimal')
-            acceptance.check_image_capability(None, 'recovery')
+    def test_offline_capability_cannot_waive_factory_recovery_cases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = SimpleNamespace(candidate=None, qemu=None, ram=8,
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest') as guest,
+                  patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY) as checked,
+                  patch.object(acceptance, 'stock_cases') as stock):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'minimal', False), 1)
+            checked.assert_called_once_with(guest.return_value, 'cat /rom/etc/init.d/node-red')
+            stock.assert_not_called()
+            result = (root/'results.log').read_text()
+            self.assertIn('Factory image and offline tree disagree', result)
+            for label in acceptance.RECOVERY_CASES:
+                self.assertIn(f'{label} | REQUIRED | NOT RUN | FAIL', result)
+            self.assertIn('Case totals: 0 passed / 18 required', result)
+
+    def test_failed_factory_probe_has_no_na_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = SimpleNamespace(candidate=None, qemu=None, ram=8,
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
+                  patch.object(acceptance, 'checked', side_effect=RuntimeError('no factory marker'))):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'minimal', False), 1)
+            result = (root/'results.log').read_text()
+            self.assertNotIn(' | N/A | ', result)
+            self.assertIn('Case totals: 0 passed / 21 required', result)
 
     def test_first_boot_rejects_deployed_stamp(self):
         vm = Mock()
@@ -240,9 +270,8 @@ class FlowTests(unittest.TestCase):
                                    minimal_probe_image=probe,
                                    minimal_probe_sha256=hashlib.sha256(b'probe').hexdigest())
 
-            def stock(guest, _args, record, capability, **_options):
-                record('Cold boot', lambda: acceptance.check_image_capability(guest, capability))
-                for label in acceptance.BASE_CASES[1:-2]:
+            def stock(_guest, _args, record, **_options):
+                for label in acceptance.BASE_CASES[:-2]:
                     record(label, lambda: None)
 
             capability = acceptance.flows_capability(minimal_flows.ATOMIC_PUBLISH)
@@ -259,11 +288,26 @@ class FlowTests(unittest.TestCase):
             self.assertEqual(upgrade.call_args.kwargs['cut_at'], minimal_flows.CUT_RECEIPT)
             result = (root/'results.log').read_text()
             for label in acceptance.FLOWS_CASES + acceptance.BOOT_SAFETY_CASES:
-                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold absent', result)
+                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold absent and minimal atomic '
+                              f'publication present in factory image init | {", ".join(acceptance.MINIMAL_CASES)}', result)
             for label in acceptance.MINIMAL_CASES:
                 self.assertIn(f'{label} | REQUIRED | PASS | PASS', result)
             self.assertIn('Case totals: 13 passed / 13 required', result)
             self.assertIn('[PROVISIONAL]: off by default', result)
+            (root/'results.log').unlink()
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
+                  patch.object(acceptance, 'external_path', return_value=probe),
+                  patch.object(acceptance, 'prepare_probe_release'), patch.object(acceptance, 'stock_cases', side_effect=stock),
+                  patch.object(acceptance, 'checked', return_value=minimal_flows.ATOMIC_PUBLISH),
+                  patch.object(acceptance, 'ready'), patch.object(acceptance, 'wait_for_api'),
+                  patch.object(acceptance, 'verify_disk', side_effect=RuntimeError('clone failed')),
+                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'upgrade')):
+                failed_scratch = root/'failed'
+                failed_scratch.mkdir()
+                self.assertEqual(acceptance.run_cases(args, root, failed_scratch, root, capability, False), 1)
+            result = (root/'results.log').read_text()
+            self.assertIn('Case totals: 11 passed / 13 required', result)
+            self.assertIn('Candidate acceptance: FAIL', result)
 
     def test_minimal_probe_copy_matches_source_pin_and_keeps_original_untouched(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -314,6 +358,8 @@ class FlowTests(unittest.TestCase):
             result = (root/'results.log').read_text()
             self.assertRegex(result, r'C\. Interrupted init install\s+FAIL')
             self.assertIn('Focused acceptance: FAIL', result)
+            self.assertNotIn(' | N/A | ', result)
+            self.assertNotIn('Candidate acceptance:', result)
 
     def test_migration_0073_resolves_both_pinned_triggers(self):
         _, triggers = boot_safety.migrated_triggers(Path(__file__).resolve().parents[2])
