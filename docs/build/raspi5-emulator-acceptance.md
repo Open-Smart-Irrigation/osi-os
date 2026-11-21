@@ -2,12 +2,17 @@
 
 Run this local step of Release Runtime Smoke for each candidate image before sending
 the real-device test sheet to Phil. The stock cases take about 45 minutes in
-one `osi-heavy` slot. Candidates with #714 need more time for the boot and
-upgrade cases below.
+one `osi-heavy` slot. Allow extra time for the power-cut cases selected by the
+candidate capability check.
 The hosted smoke jobs use runtime fixtures. The emulator run needs the built
 candidate, previous factory images and the workstation's offline deployment cache.
 
 ## Prepare the inputs
+
+Set `GATE_TREE` to a separate tools checkout from `main` and `GATE_SHA`
+to its pinned full commit SHA. Keep that checkout under the build directory.
+The candidate image and offline deployment tree come from the release build
+receipt and can use a different commit.
 
 Build the `raspi5b` QEMU once via `osi-heavy` using the pinned tools, or reuse the
 matching build. Keep `dtmerge` and `rpi5-bl31.bin` beside its executable. Install
@@ -26,7 +31,7 @@ in each of `v0.8.0/` and `v0.8.1/`. Use factory inputs and synthetic test data.
 ## Run the gate
 
 ```bash
-tools/raspi5/acceptance.sh \
+"$GATE_TREE/tools/raspi5/acceptance.sh" --tools-revision "$GATE_SHA" \
   --candidate "$PI5_FACTORY_IMAGE" --candidate-sha256 "$PI5_FACTORY_SHA256" \
   --osi-version "$OSI_VERSION" --chirpstack-version "$CHIRPSTACK_VERSION" \
   --release "$OFFLINE_RELEASE_TREE" --release-revision "$CANDIDATE_SHA" \
@@ -42,8 +47,9 @@ restricted to the emulated link and a host-loopback GUI forward. The radio
 exchanges simulated frames over a Unix socket.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
-run directory with the candidate SHA and image checksum. The selected cases
-must exit zero. The runner removes guest disks and USB media after cleanup and
+run directory with the candidate SHA, image checksum, and tools revision. The run must exit zero. The final table lists each expected case, its observed
+result, and the reason and required replacements for every N/A. The run
+fails if any replacement or other required case lacks a recorded PASS. The runner removes guest disks and USB media after cleanup and
 keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
 the scratch media when diagnosing a failure. Keep private receipts local.
 A missing or failed run holds the candidate. Physical SD power-cut, upgrade and
@@ -55,9 +61,11 @@ The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
-The init script's `persistFlowHold` function identifies candidates with the
-recovery code from PR #714. The cold boot checks that the guest image and the
-offline tree agree on this capability. These candidates must pass cuts on first
+The runner boots the factory image and reads its immutable
+`/rom/etc/init.d/node-red` before selecting cases. The script's
+`persistFlowHold` function identifies #714. The offline release tree must
+agree with the image. An unreadable or unrecognized marker fails the full
+gate with all cases required. These candidates must pass cuts on first
 boot, a later boot and first Node-RED start during the 0.8.1 upgrade. The cut
 guests use direct I/O. After a serial receipt gives the flows SHA-256 and
 payload stamp, the runner cuts power and boots a clone with a shell as PID 1.
@@ -70,10 +78,39 @@ its trigger definitions. Case B checks that a missing pristine copy warns
 when live flows are valid and holds startup when they are zeroed. Case C cuts
 the settings, init and bootstrap transfers separately and checks their bytes
 and modes on a clone before checking the retained payload and fixture.
-Earlier candidates report each case as `not applicable to this candidate`.
-Use `--flows-power-cut-only` for the three commit cuts or
+If the candidate lacks `persistFlowHold`, these eight cases appear as N/A
+with that reason. A release candidate must then declare the minimal atomic
+flows publication described below.
+Use `--flows-power-cut-only` for the three #714 commit cuts or
 `--upgrade-boot-safety-only` for A, B and C. The latter uses the offline
 release and 0.8.1 fixture and can omit the candidate archive and its checksum.
+Focused runs report a separate diagnostic verdict. Flags and environment
+variables cannot grant N/A to any case.
+
+### Minimal atomic flows candidates
+
+The v0.8.3 release line can use the atomic writer without the #714 recovery
+code. The factory image must declare the minimal atomic publication in its
+ROM init. A minimal candidate requires the ten baseline cases and three
+additional cuts. The factory cases interrupt the writer before and after
+directory fsync. The upgrade case interrupts the first Node-RED start after
+an offline upgrade from 0.8.1. A shell-only clone must contain the complete
+old or new flows at the expected path. Normal startup of the original must
+serve the patched flows and return HTTP 401 from `/api/me`.
+
+Pass the candidate archive and the SHA-256 from its build receipt. Add
+`--openwrt-host-tools "$OPENWRT_HOST_TOOLS"`, pointing to the OpenWrt
+`staging_dir/host` from the build. The runner copies and verifies the
+candidate and fixture archives in private scratch before extraction.
+It derives the probe from the verified candidate copy, retaining the boot
+partition and replacing only the Node-RED init file in the SquashFS tree.
+The original and derived image digests appear in the run receipts.
+
+The candidate's ROM init must match the offline source. The derived image
+must preserve the ROM writer and seed flows and carry the instrumented init.
+The cut marker records the starting flows and the running init and writer
+digests. The runner checks them before accepting clone evidence. It also
+derives the instrumented offline bundle from the deployment tree in scratch.
 
 ### Customer-line 0.7.0 image fixture (PROVISIONAL)
 

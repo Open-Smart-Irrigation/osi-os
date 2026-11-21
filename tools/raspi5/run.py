@@ -26,9 +26,7 @@ def verified_copy(source, digest, destination):
             raise ValueError('firmware override SHA-256 mismatch')
 
 
-def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, quiet=False):
-    # QEMU SD cards require power-of-two capacity. Keep zero padding sparse.
-    disk = work / 'sd.img'
+def expand_image(source, disk):
     with source.open('rb') as raw:
         compressed = raw.read(2) == b'\x1f\x8b'
         raw.seek(0)
@@ -41,6 +39,13 @@ def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, qui
                     out.write(block)
             size = out.tell()
             out.truncate(size)
+    return size
+
+
+def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, quiet=False):
+    # QEMU SD cards require power-of-two capacity. Keep zero padding sparse.
+    disk = work / 'sd.img'
+    size = expand_image(source, disk)
     with disk.open('rb') as f:
         mbr = f.read(512)
     if mbr[510:] != b'\x55\xaa':
