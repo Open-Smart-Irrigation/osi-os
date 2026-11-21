@@ -559,8 +559,8 @@ test('the image DB seed refuses publication when its parent directory cannot syn
   fs.unlinkSync(fx.db);
   fs.rmdirSync(path.dirname(fx.db));
   const source = fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
-    .replace('/usr/share/db/farming.db', fx.imageDb)
-    .replace('/data/db', path.dirname(fx.db));
+    .replace(/^SEED_SRC=.*$/m, () => 'SEED_SRC=' + JSON.stringify(fx.imageDb))
+    .replace(/^DATA_DIR=.*$/m, () => 'DATA_DIR=' + JSON.stringify(path.dirname(fx.db)));
   const preload = path.join(fx.root, 'fail-data-sync.cjs');
   fs.writeFileSync(preload, `
 const fs = require('node:fs');
