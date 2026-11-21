@@ -587,6 +587,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
 
 def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
+    from radio_suite import Radio, VALVE, run_uplinks, run_valve
+
     def boot():
         ready(vm)
         if verify_board is not None:
@@ -609,11 +611,11 @@ def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
             raise RuntimeError('unexpected stored role')
         return 'stored '+role+'; '+observed
     test('First account and login',account)
+    air = Radio(vm.radio)
     session={}
     def uplinks():
-        from radio_suite import run_uplinks
         try:
-            joined, evidence = run_uplinks(vm,password)
+            joined, evidence = run_uplinks(vm,air,password)
             session.update(joined)
             return evidence
         except Exception:
@@ -625,8 +627,7 @@ for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302;
             raise
     test('WM1302 uplinks',uplinks)
     def valve():
-        from radio_suite import run_valve, VALVE
-        evidence = run_valve(vm,session,lambda: gui(vm,password,'open',VALVE))
+        evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE))
         gui(vm,password,'outcome',VALVE)
         return evidence
     test('Valve open and outcome',valve)

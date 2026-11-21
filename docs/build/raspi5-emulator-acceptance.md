@@ -65,9 +65,10 @@ power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
 Both radio cases record the number of frames the WM1302 model accepted into
 its RX FIFO and the number Concentratord logged after its CRC filter. Each
-injection needs a model receipt, and each case needs a positive CRC_OK count
-from its own log window. Rebuild QEMU with these tools if the cached binary
-does not return model receipts.
+injection needs a model receipt with the matching request ID. Each case
+drains pending radio packets and needs a positive CRC_OK count from its own
+log window. Rebuild QEMU with these tools if the cached binary lacks the
+matching receipt protocol.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's
