@@ -20,6 +20,10 @@ SELECT name FROM schema_migrations WHERE version = 76;
 """
 ARCHIVE = 'sdi12_transmissions.sql'
 PROVENANCE = 'fixture-provenance.json'
+QUALIFICATION_SCOPE = (
+    'Exact factory archive and 0.8.1 overlay only. '
+    'The factory ROM GUI differs from the recorded field installation.'
+)
 SHA256 = re.compile(r'[0-9a-f]{64}')
 REVISION = re.compile(r'[0-9a-f]{40}')
 POLL_SECONDS = 15
@@ -328,7 +332,7 @@ node /tmp/verify-candidate/scripts/verify-head-cli.js /tmp/verify-candidate/farm
             raise FixtureFailure('private synthetic database or radio registrations changed')
     finally:
         vm.stop()
-    write_receipt(evidence/'qualification.json', result='PASS', **identity,
+    write_receipt(evidence/'qualification.json', result='PASS', scope=QUALIFICATION_SCOPE, **identity,
                   legacy_ledger=76, archive_migration=80, osi_version=args.osi_version,
                   chirpstack_version=args.chirpstack_version)
     return 'ledger 76→80; synthetic rows, radio registrations and active payload verified after reboot'

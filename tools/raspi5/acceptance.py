@@ -304,11 +304,13 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
         for label in BOOT_SAFETY_CASES:
             record(f'{label}: not applicable to this candidate (requires PR #714)')
     if not focused or args.customer_fixture_only:
+        from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
+        label = 'Customer-line 0.7.0 upgrade [PROVISIONAL]'
+        selection = 'opt-in qualification' if customer_selected else 'off by default'
+        record(f'{label}: {selection}. Count this fixture as release evidence only with a '
+               f'successful owner-only qualification receipt for the exact pair. {QUALIFICATION_SCOPE}')
         if customer_selected:
-            from customer_fixture import run as customer_upgrade
-            test('Customer-line 0.7.0 upgrade', lambda: customer_upgrade(args, scratch, run, release, ready), private=True)
-        else:
-            record('Customer-line 0.7.0 upgrade pending (private inputs not supplied)')
+            test(label, lambda: customer_upgrade(args, scratch, run, release, ready), private=True)
     for label in required:
         if label not in results:
             record(f'{label}: FAIL (missing required result)')

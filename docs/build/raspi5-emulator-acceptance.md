@@ -75,13 +75,19 @@ Use `--flows-power-cut-only` for the three commit cuts or
 `--upgrade-boot-safety-only` for A, B and C. The latter uses the offline
 release and 0.8.1 fixture and can omit the candidate archive and its checksum.
 
-### Customer-line 0.7.0 image fixture
+### Customer-line 0.7.0 image fixture (PROVISIONAL)
+
+This fixture is off by default. Count it as release evidence only after a
+successful owner-only qualification receipt exists for the exact factory
+archive and 0.8.1 overlay. The qualification scope records that the factory
+ROM GUI differs from the recorded field installation.
 
 Set `OSI_RASPI5_CUSTOMER_IMAGE` to the private local factory archive and
 `OSI_RASPI5_CUSTOMER_FIXTURE_DIR` to the matching input directory. Supply both for
-customer-line upgrade qualification. With both unset the runner records the
-case as pending. Use `--customer-fixture-only` for a focused run with the same
-input arguments. Keep the input directory and all artifacts outside Git trees.
+customer-line upgrade qualification. With both unset the summary reports the
+case as provisional and off. Use `--customer-fixture-only` for a focused run
+when the workstation slot is free. Keep the inputs and artifacts outside Git
+trees.
 
 Provide `customer.tar.gz` (the private 0.8.1 offline deploy bundle) and its
 `customer.tar.gz.sha256` sidecar,
@@ -101,9 +107,8 @@ guest, then installs the candidate offline. It compares the SQL and ChirpStack
 receipts, checks the 76-to-80 ledger remap and backup, and verifies the
 active payload after reboot. The runner verifies that the guest boots the
 pinned ROM and the 0.8.1 ledger agrees with the overlay's migration manifest.
-A pass writes `customer-line/qualification.json` for the exact checked media,
-candidate revision and versions. The known factory archive has a different
-ROM GUI asset from the recorded field installation.
+A pass writes the owner-only `customer-line/qualification.json` with that
+scope, the artifact digests, candidate revision and versions.
 Each installer leg writes an exit code and timestamped progress receipts to
 `customer-line/progress.jsonl`. A newer phase, ledger version or reference
 build count extends its 15-minute idle deadline, up to 90 minutes per installer

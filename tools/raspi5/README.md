@@ -87,3 +87,8 @@ A published Pi 5 hardware console trace shows the EEPROM reading FAT and selecti
 The default candidate suite runs on the build workstation through `osi-heavy`.
 The release runbook lists the input artifacts, fixture selection and evidence to retain.
 [Run the acceptance gate](../../docs/build/raspi5-emulator-acceptance.md).
+
+The customer-line 0.7.0 fixture is **PROVISIONAL** and off by default. Release
+evidence requires a successful owner-only qualification receipt for the exact
+factory archive and 0.8.1 overlay. The receipt records that the factory ROM GUI
+differs from the recorded field installation.

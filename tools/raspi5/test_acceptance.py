@@ -196,6 +196,9 @@ class FlowTests(unittest.TestCase):
             result = (root/'results.log').read_text()
             for label in acceptance.FLOWS_CASES:
                 self.assertIn(f'{label}: not applicable to this candidate', result)
+            self.assertIn('[PROVISIONAL]: off by default', result)
+            self.assertIn('qualification receipt for the exact pair', result)
+            self.assertIn(customer_fixture.QUALIFICATION_SCOPE, result)
 
     def test_upgrade_safety_runs_all_abc_cases_and_requires_pass_from_each(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -258,6 +261,7 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(acceptance.run_cases(args, root, root, root, False, True), 1)
             self.assertNotIn('private-filename', stdout.getvalue() + (root/'results.log').read_text())
             self.assertIn('private case failed', stdout.getvalue())
+            self.assertIn('[PROVISIONAL]: opt-in qualification', stdout.getvalue())
 
     def test_both_processes_are_reaped_even_when_exit_receipt_fails(self):
         with tempfile.TemporaryDirectory() as directory:
