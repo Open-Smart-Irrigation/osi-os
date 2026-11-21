@@ -414,6 +414,11 @@ cp openwrt/bin/targets/bcm27xx/bcm2709/*rpi-2*squashfs-factory.img.gz \
 (cd tmp/release-assets/osi-os_<NEW> && sha256sum *.img.gz > SHA256SUMS)
 ```
 
+Run the local Pi 5 emulator step of Release Runtime Smoke for every candidate.
+Run `tools/raspi5/acceptance.sh` through `osi-heavy` and record a green result
+for the exact candidate image before sending the real-device sheet to Phil.
+[Pi 5 acceptance runbook](build/raspi5-emulator-acceptance.md).
+
 Flash each image on a spare card and run that document's "First Boot
 Acceptance". Its `curl http://<pi-ip>:1880/flows` probe now answers 404,
 because the Node-RED editor and admin API are closed by default; skip that
@@ -553,7 +558,7 @@ On each Pi after the deploy:
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
 [ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, manual strict hosted smoke green on that SHA, tag v<NEW>, push only the tag, tag smoke green
-[ ] Step 5  — Build both factory images, rename, SHA256SUMS, first-boot check
+[ ] Step 5  — Build both factory images, rename, SHA256SUMS, Pi 5 emulator green through osi-heavy before the real-device sheet, first-boot check
 [ ] Step 6  — Deploy and verify osi-server (first when a contract change needs the cloud first)
 [ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
 [ ] Step 8  — Prepare deployment payload

@@ -55,6 +55,10 @@
   ],
   "excluded": [
     {
+      "path": "tools/raspi5/test-registers.py",
+      "reason": "Local QEMU board-model diagnostic. It needs the built raspi5b machine and kernel and DTB extracted from a Pi 5 factory image."
+    },
+    {
       "pattern": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/{node-gyp,pump,retry}/**",
       "reason": "third-party npm packages (node-gyp, pump, retry) vendored into the firmware payload; their own test files are not OSI tests. The bcm2709 copies fall under the mirror pattern below"
     },
