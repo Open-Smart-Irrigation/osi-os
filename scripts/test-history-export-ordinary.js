@@ -104,6 +104,25 @@ for(const profile of ['bcm2712','bcm2709']) {
       assert.ok(trace.queries.length>=3);
     }finally{db.close();}
   });
+  test(`${profile}: mixed timestamp offsets crossing adjacent windows are carried once`,async()=>{
+    const db=fixture();
+    try {
+      const rows=[
+        ['2025-01-31T23:45:00-12:00',10],['2025-02-01T13:30:00+14:00',20],['2025-02-01 00:15:00',30],
+        ['2025-02-28T23:45:00-12:00',40],['2025-03-01T13:30:00+14:00',50],['2025-03-01 00:15:00',60],
+      ];
+      const insert=db.prepare('INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES(?,?,?)');
+      for(const [timestamp,value] of rows) insert.run(eui(1),timestamp,value);
+      const trace=traced(db);
+      const result=await helper.buildZoneExportCsv(trace.db,{...range(30,'2025-01-31'),zoneId:2,channels:'swt_1',maxWorkRows:6});
+      assert.deepEqual(result.rows.filter(r=>r.channel_key==='swt_1'&&r.value!==null).map(r=>[r.timestamp.slice(0,10),r.value]),[
+        ['2025-01-31',20],['2025-02-01',20],['2025-02-28',50],['2025-03-01',50],
+      ]);
+      const ids=trace.queries.flatMap(q=>q.rows.map(r=>r.id));
+      assert.equal(ids.length,6);assert.equal(new Set(ids).size,6);
+      assert.equal(trace.queries.length,3);
+    }finally{db.close();}
+  });
   test(`${profile}: request work has its own larger bound and stable refusal`,async()=>{
     const db=fixture();
     try {

@@ -1913,7 +1913,7 @@ test('legacySensorHistory returns raw 24h points and aggregated long-range point
   }
 });
 
-test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () => {
+test('mixed Watermark, Chameleon and SDI12 exports keep supported channels', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -1940,9 +1940,10 @@ test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () =
     const raw = await helper.buildZoneExportCsv(db, { ...options, granularity: 'raw' });
     const hourly = await helper.buildZoneExportCsv(db, { ...options, granularity: 'hourly' });
     const assertSwt3Isolation = (result) => {
+      assert.deepStrictEqual(result.rows.filter(row => row.channel_key === 'swt_1').map(row => row.value).sort((a,b) => a-b), [10,11,12]);
+      // SDI-12's shipped layouts report SWT1/2; only Chameleon reports SWT3.
       const swt3 = result.rows.filter((row) => row.channel_key === 'swt_3');
       assert.deepStrictEqual(swt3.map((row) => [row.source_key, row.value]), [
-        ['soil-src-0c689a161d62', 41],
         ['soil-src-8b90b370f237', 31],
       ]);
     };

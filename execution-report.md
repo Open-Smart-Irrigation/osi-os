@@ -33,6 +33,13 @@ Nightly fixtures rewrite more than 8 MiB and 200,000 records, write raw/hourly
 files above 8 MiB despite lowered request options, and preserve raw/hourly files
 when old daily history has malformed quoting.
 
+The new acceptance file runs in the dedicated History Router workflow under
+192 MiB old space, separately from the long migration job. Test inventory
+recognizes that invocation. The existing golden CSV fixture now excludes twelve
+SWT3/pF rows from a KIWI without Chameleon; its other 72 rows match CI output
+byte for byte. The mixed-device helper fixture preserves all three SWT1 values
+and expects SWT3 only from Chameleon, rather than an unsupported SDI-12 layout.
+
 The existing dense/null-heavy per-read sentinels and cross-source work checks
 remain. The latter now lower `maxWorkRows`, rather than the per-read ceiling.
 The LoRain fixture now omits rate channels its declared family cannot report;
@@ -44,8 +51,13 @@ The targeted inventory regression was red before the parser fix (exit 1, one
 failed test). After the fix it passed: `# tests 1`, `# pass 1`, `# fail 0`.
 
 `node scripts/verify-test-inventory.js` now exits 0:
-`verify-test-inventory: OK (1024 test files: 841 run by workflow steps, 11 run through a listed runner, 172 excluded with a reason; 343 steps in 16 workflows)`.
+`verify-test-inventory: OK (1024 test files: 841 run by workflow steps, 11 run through a listed runner, 172 excluded with a reason; 344 steps in 16 workflows)`.
 Profile parity and the history API contract pass. `git diff --check` passes.
+
+First exact-head CI at `77ad28c54e` passed test inventory and exposed two old
+fixture assumptions: KIWI without Chameleon and SDI-12 both expected unsupported
+SWT3. Those pins are corrected as described above; full CI must qualify the
+follow-up head.
 
 The focused SQLite/CSV red-then-green run is queued through `osi-heavy`, with
 192 MiB old space and serial test files. A live firmware build has held the
