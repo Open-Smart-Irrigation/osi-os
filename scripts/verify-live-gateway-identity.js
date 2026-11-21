@@ -211,16 +211,16 @@ for (const canonicalPath of [
 const deployContracts = [
   ['conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh', 'fetches the identity daemon'],
   ['/usr/libexec/osi-identityd.sh', 'installs the identity daemon'],
-  ['"/usr/libexec/osi-identityd.sh" 755 || exit 1', 'marks the identity daemon executable'],
+  ['"/usr/libexec/osi-identityd.sh" 755 "$IDENTITY_DAEMON_SHA256" || exit 1', 'marks the identity daemon executable'],
   ['conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd', 'fetches the identity service'],
   ['/etc/init.d/osi-identityd', 'installs the identity service'],
-  ['"/etc/init.d/osi-identityd" 755 || exit 1', 'marks the identity service executable'],
+  ['"/etc/init.d/osi-identityd" 755 "$IDENTITY_INIT_SHA256" || exit 1', 'marks the identity service executable'],
   ['conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable', 'fetches the service enable script'],
   ['/etc/uci-defaults/94_osi_identityd_enable', 'installs the service enable script'],
-  ['"/etc/uci-defaults/94_osi_identityd_enable" 755 || exit 1', 'marks the service enable script executable'],
+  ['"/etc/uci-defaults/94_osi_identityd_enable" 755 "$IDENTITY_ENABLE_SHA256" || exit 1', 'marks the service enable script executable'],
   ['conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap', 'fetches the coordinated bootstrap service'],
   ['/etc/init.d/osi-bootstrap', 'installs the coordinated bootstrap service'],
-  ['"/etc/init.d/osi-bootstrap" 755 || exit 1', 'marks the bootstrap service executable'],
+  ['"/etc/init.d/osi-bootstrap" 755 "$BOOTSTRAP_INIT_SHA256" || exit 1', 'marks the bootstrap service executable'],
   ['identityd_service() {\n    /etc/init.d/osi-identityd "$@"\n}', 'uses the installed identityd service through the lifecycle fence'],
   ['identityd_service enable', 'enables identityd during live deploy'],
   ['identityd_service start', 'starts a fresh identityd during live deploy'],
@@ -235,8 +235,8 @@ expectExcludes('deploy.sh', deploySource, 'identityd_service restart', 'does not
 const identityEnabledAt = deploySource.lastIndexOf('identityd_service enable');
 const identityReadyAt = deploySource.lastIndexOf('wait_for_identityd_ready');
 const activationPrerequisites = [
-  ['"/usr/libexec/osi-gateway-identity.sh" 755 || exit 1', 'gateway identity helper installation'],
-  ['"/usr/libexec/osi-identityd.sh" 755 || exit 1', 'identity daemon installation'],
+  ['"/usr/libexec/osi-gateway-identity.sh" 755 "$GATEWAY_IDENTITY_HELPER_SHA256" || exit 1', 'gateway identity helper installation'],
+  ['"/usr/libexec/osi-identityd.sh" 755 "$IDENTITY_DAEMON_SHA256" || exit 1', 'identity daemon installation'],
   ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null', 'paired flows+GUI payload staging'],
   ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null', 'paired flows+GUI payload activation'],
   ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],

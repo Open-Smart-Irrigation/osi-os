@@ -92,10 +92,18 @@ COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc
 COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
-ATOMIC_WRITER_SHA256="c8994eeb72f25ea073b934d86f26c6b1dbe96a32dceeeea6ca67a1b2c23e5ff9"
+ATOMIC_WRITER_SHA256="0c35ebfc83f590ea5e365051dcfe2d4f1ad74fdf0c55e981f83f36ddbcad9842"
 PAYLOAD_SWAP_SHA256="95870eb4928a64b7a83b0c3588463c137448efe0152cd41c61db715a4d5f8eef"
 OSI_SQLITE_SERIALIZE_JS_SHA256="199238f32c7818118800da8d90ed72068f68d0b468a4e233014a2a5d0fdf58c3"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
+# Require complete shell entry points. A truncated script can still parse.
+NODE_RED_INIT_SHA256="2608d45cba55d06cf52b097077629af08f8ece83f087079df1fcfc7c3c979f4a"
+GATEWAY_IDENTITY_HELPER_SHA256="ada77aaa7c4c2fdccf0a674e7297f4f1425fa5fa6e80f479a338c0d20d4dba07"
+IDENTITY_DAEMON_SHA256="4159788616507fe77e73b671524917687dc5077efc962b6a621bc8a6afad1e7d"
+IDENTITY_INIT_SHA256="5ab8396e08c055e4108abcbdc6736e6db8aae275e72e34ed62f733b9143f7cf0"
+IDENTITY_ENABLE_SHA256="00d533b264baaa5ec25a42db39bb67ee04f12205f856fc98de5fc41bdab9a45d"
+BOOTSTRAP_INIT_SHA256="61b657b8e1f19438972042733973139f7734f56ffcdf22f59771e4f9304d82f8"
+IRRIGATION_CLOCK_HOOK_SHA256="8d5c5a47803633ad59aa686a9b243ad6c37afc74e8b13aa94e910e068e3d044c"
 export SWAP_ROOT
 
 # One deploy at a time. The lock is a link in /var/run (gone after a reboot)
@@ -210,17 +218,17 @@ verify_download_pin() {
 # the live target's real directory, so curl can never truncate the live file.
 publish_download() {
     mkdir -p "$(dirname "$2")" || return 1
-    node "$TMP_DIR/osi-atomic-write.js" "$1" "$2" "$3"
+    node "$TMP_DIR/osi-atomic-write.js" "$1" "$2" "$3" "${4:-}"
 }
 
 fetch_required() {
     local label="$1" src="$2" dest="$3" stage rc=0
     echo "--- $label ---"
-    if [ "$#" -eq 4 ]; then
+    if [ "$#" -ge 4 ]; then
         stage="$(mktemp "$TMP_DIR/live-download.XXXXXX")" || return 1
         fetch "$src" "$stage" || rc=$?
         if [ "$rc" -eq 0 ]; then
-            publish_download "$stage" "$dest" "$4" || rc=$?
+            publish_download "$stage" "$dest" "$4" "${5:-}" || rc=$?
         fi
         rm -f "$stage" || rc=1
     else
@@ -301,7 +309,7 @@ install_irrigation_clock_hook() {
 
     fetch_required "conditional irrigation NTP clock hook" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/hotplug.d/ntp/70-osi-irrigation-clock" \
-        "$IRRIGATION_CLOCK_HOOK" 755 || return 1
+        "$IRRIGATION_CLOCK_HOOK" 755 "$IRRIGATION_CLOCK_HOOK_SHA256" || return 1
     if [ "$hook_was_active" = "1" ]; then
         echo "OK: existing executable clock hook refreshed without sysntpd restart"
         return 0
@@ -3793,24 +3801,24 @@ fetch_required "Node-RED settings.js" \
 
 fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
-    "/etc/init.d/node-red" 755 || exit 1
+    "/etc/init.d/node-red" 755 "$NODE_RED_INIT_SHA256" || exit 1
 ensure_journal_media_defaults
 
 fetch_required "Gateway identity helper" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh" \
-    "/usr/libexec/osi-gateway-identity.sh" 755 || exit 1
+    "/usr/libexec/osi-gateway-identity.sh" 755 "$GATEWAY_IDENTITY_HELPER_SHA256" || exit 1
 
 fetch_required "Gateway identity daemon" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh" \
-    "/usr/libexec/osi-identityd.sh" 755 || exit 1
+    "/usr/libexec/osi-identityd.sh" 755 "$IDENTITY_DAEMON_SHA256" || exit 1
 
 fetch_required "Gateway identity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-identityd" \
-    "/etc/init.d/osi-identityd" 755 || exit 1
+    "/etc/init.d/osi-identityd" 755 "$IDENTITY_INIT_SHA256" || exit 1
 
 fetch_required "Gateway identity service enable script" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
-    "/etc/uci-defaults/94_osi_identityd_enable" 755 || exit 1
+    "/etc/uci-defaults/94_osi_identityd_enable" 755 "$IDENTITY_ENABLE_SHA256" || exit 1
 
 fetch_required "chirpstack-bootstrap.js" \
     "scripts/chirpstack-bootstrap.js" \
@@ -3828,7 +3836,7 @@ fi
 
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
-    "/etc/init.d/osi-bootstrap" 755 || exit 1
+    "/etc/init.d/osi-bootstrap" 755 "$BOOTSTRAP_INIT_SHA256" || exit 1
 enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"

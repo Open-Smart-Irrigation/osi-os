@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 
 // Resolve the parent and final symlinks, even if a final target is absent.
 function realTarget(file) {
@@ -98,7 +98,7 @@ function checkSyntax(command, args, bytes, language) {
   if (result.status !== 0) throw new Error('invalid ' + language + ' syntax');
 }
 
-function validateDownload(bytes, target, mode) {
+function validateDownload(bytes, target, mode, pin) {
   const source = bytes.toString('utf8');
   if (!source.trim() || source.includes('\0')) throw new Error('empty or binary response');
   if (mode === '755') {
@@ -107,6 +107,9 @@ function validateDownload(bytes, target, mode) {
       throw new Error('expected a shell shebang and script body');
     }
     checkSyntax('sh', ['-n'], bytes, 'shell');
+    if (createHash('sha256').update(bytes).digest('hex') !== pin) {
+      throw new Error('shell download SHA-256 pin mismatch');
+    }
     return;
   }
 
@@ -151,11 +154,11 @@ function validateDownload(bytes, target, mode) {
 }
 
 if (require.main === module) {
-  const [download, target, mode] = process.argv.slice(2);
+  const [download, target, mode, pin] = process.argv.slice(2);
   try {
     if (mode !== '644' && mode !== '755') throw new Error('unknown deploy file mode');
     const bytes = fs.readFileSync(download);
-    validateDownload(bytes, target, mode);
+    validateDownload(bytes, target, mode, pin);
     // Publish the same bytes checked above. Existing data files retain their
     // permissions. Entry points are executable from the instant of the rename.
     writeAtomic(target, bytes, { mode: mode === '755' ? 0o755 : undefined });

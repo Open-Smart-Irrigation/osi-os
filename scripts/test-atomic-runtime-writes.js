@@ -179,8 +179,15 @@ function shellFunction(name) {
   return deploy.slice(start, deploy.indexOf('\n}\n', start) + 3);
 }
 
-const calls = [...deploy.matchAll(/fetch_required "([^"]+)" \\\n\s+"([^"]+)" \\\n\s+"(\/(?:srv|etc|usr)\/[^"]+|\$IRRIGATION_CLOCK_HOOK)"(?: (\d+))?/g)];
+const calls = [...deploy.matchAll(/fetch_required "([^"]+)" \\\n\s+"([^"]+)" \\\n\s+"(\/(?:srv|etc|usr)\/[^"]+|\$IRRIGATION_CLOCK_HOOK)"(?: (\d+))?(?: "\$([A-Z0-9_]+_SHA256)")?/g)];
 assert.equal(calls.length, 21, 'discovered the direct live deploy download sites');
+
+function downloadPin(name) {
+  if (!name) return '';
+  const match = new RegExp(`^${name}="([0-9a-f]{64})"$`, 'm').exec(deploy);
+  assert.ok(match, `missing deploy pin ${name}`);
+  return match[1];
+}
 const stagedCalls = [
   ['payload swap helper', 'scripts/deploy-payload-swap.js', '$SWAP_JS', '/srv/node-red/.payload-swap.js'],
   ['atomic writer', path.relative(root, helper), '$TMP_DIR/osi-atomic-write.js', helperRuntimePath],
@@ -188,10 +195,10 @@ const stagedCalls = [
 for (const [label, source, stage, dest] of stagedCalls) {
   assert.ok(deploy.includes(`fetch "${source}" "${stage}"`), `${label} download site`);
   assert.ok(deploy.includes(`publish_download "${stage}" "${dest}" 644`), `${label} publication site`);
-  calls.push([null, label, source, dest, '644', stage]);
+  calls.push([null, label, source, dest, '644', undefined, stage]);
 }
 
-for (const [, label, source, dest, mode, stage] of calls) {
+for (const [, label, source, dest, mode, pinName, stage] of calls) {
   test(`a cut during the ${label} download leaves the old file intact`, t => {
     const dir = fixture(t);
     const target = path.join(dir, 'live', path.basename(dest));
@@ -205,7 +212,7 @@ for (const [, label, source, dest, mode, stage] of calls) {
       ? `SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 fetch "$2" "${stage}"
 publish_download "${stage}" "$3" 644`
-      : `fetch_required "$1" "$2" "$3" ${mode}`;
+      : `fetch_required "$1" "$2" "$3" ${mode} "${downloadPin(pinName)}"`;
     const run = cut => spawnSync('sh', ['-c', `
 set -eu
 ${functions}
@@ -252,6 +259,7 @@ const invalidBodies = [
   ['strega_gen1_decoder.js', 'const unrelated = 1;\n', 'expected codec entry point'],
   ['agroscope_uplink_transform.js', 'function decodeUplink(input) { return input; }\n', 'expected Agroscope transform entry point'],
   ['node-red', 'echo "missing shebang"\n', 'expected a shell shebang and script body'],
+  ['node-red', init.split('\n').slice(0, 7).join('\n') + '\n', 'SHA-256 pin mismatch'],
   ['osi-bootstrap', '#!/bin/sh /etc/rc.common\nif then\n', 'invalid shell syntax'],
 ];
 
@@ -261,27 +269,31 @@ for (const [name, badBody, message] of invalidBodies) {
     const file = path.join(dir, 'live', name);
     fs.mkdirSync(path.dirname(file));
     const response = path.join(dir, 'body');
-    fs.writeFileSync(file, 'old complete file', { mode: 0o640 });
+    const restart = path.join(dir, 'restart-marker');
+    const old = name === 'node-red' ? init : 'old complete file';
+    fs.writeFileSync(file, old, { mode: 0o640 });
     fs.writeFileSync(response, badBody);
     fs.copyFileSync(helper, path.join(dir, 'osi-atomic-write.js'));
     const inode = fs.statSync(file).ino;
     const functions = ['fetch', 'publish_download', 'fetch_required'].map(shellFunction).join('\n');
-    const mode = ['node-red', 'osi-bootstrap'].includes(name) ? '755' : '644';
+    const call = calls.find(([, , , target]) => path.basename(target) === name);
+    assert.ok(call, `no download for ${name}`);
+    const [, label, source, , mode, pinName] = call;
     const result = spawnSync('sh', ['-c', `
 set -eu
 ${functions}
 BASE=http://fixture.invalid
 curl() { cp "$RESPONSE" "$2"; }
-fetch_required "fixture" "$1" "$2" "$3"
-printf 'would proceed to restart\n'
-`, 'sh', name, file, mode], {
-      encoding: 'utf8', env: { ...process.env, TMP_DIR: dir, RESPONSE: response },
+fetch_required "$1" "$2" "$3" "$4" "$5" || exit 1
+: > "$RESTART"
+`, 'sh', label, source, file, mode, downloadPin(pinName)], {
+      encoding: 'utf8', env: { ...process.env, TMP_DIR: dir, RESPONSE: response, RESTART: restart },
     });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.ok(result.stderr.includes(message), result.stderr);
-    assert.doesNotMatch(result.stdout, /would proceed to restart/);
+    assert.equal(fs.existsSync(restart), false, 'restart marker must remain untouched');
     assert.equal(fs.statSync(file).ino, inode);
-    assert.equal(fs.readFileSync(file, 'utf8'), 'old complete file');
+    assert.equal(fs.readFileSync(file, 'utf8'), old);
     assert.equal(fs.statSync(file).mode & 0o777, 0o640);
   });
 }
