@@ -10,10 +10,15 @@ import time
 
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
+from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
 
 HERE = Path(__file__).resolve().parent
 FLOWS_CAPABILITY = 'function persistFlowHold('
 FLOWS_CASES = ('Flows cut on first boot', 'Flows cut on later boot', 'Flows cut after upgrade')
+ZERO_CASE = 'A. Zeroed upgraded flows preserve migration 0073'
+PRISTINE_CASE = 'B. Missing pristine copy warns or holds'
+TRANSFER_CASES = {key: f'C. Interrupted {key} install' for key in TRANSFER_TARGETS}
+BOOT_SAFETY_CASES = (ZERO_CASE, PRISTINE_CASE, *TRANSFER_CASES.values())
 
 
 def has_flows_recovery(init_source):
@@ -112,6 +117,7 @@ JS""")
     vm.stop(cut=True)
     if receipt[1] != stamp:
         raise RuntimeError('boot commit named an unexpected payload stamp')
+    vm.verify_cut_disk('factory' if first_boot else 'later boot', receipt)
     vm.start()
     wait_for_api(vm)
     ready(vm)
@@ -127,8 +133,8 @@ JS""")
 
 def main(argv=None):
     ap=argparse.ArgumentParser()
-    ap.add_argument('--candidate', type=Path, required=True)
-    ap.add_argument('--candidate-sha256', required=True)
+    ap.add_argument('--candidate', type=Path)
+    ap.add_argument('--candidate-sha256')
     ap.add_argument('--osi-version', required=True)
     ap.add_argument('--chirpstack-version', required=True)
     ap.add_argument('--release', type=Path, required=True,
@@ -144,21 +150,24 @@ def main(argv=None):
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument('--flows-power-cut-only', action='store_true',
                     help='rerun only the three flows cut cases on a candidate containing PR #714')
+    mode.add_argument('--upgrade-boot-safety-only', action='store_true',
+                      help='rerun cases A, B and C using the offline release and 0.8.1 fixture')
     mode.add_argument('--customer-fixture-only', action='store_true',
                       help='rerun only the opt-in customer-line 0.7.0 fixture')
     args=ap.parse_args(argv)
     if not re.fullmatch(r'[0-9a-f]{40}', args.release_revision):
         ap.error('--release-revision must be a full commit SHA')
-    if not re.fullmatch(r'[0-9a-f]{64}', args.candidate_sha256):
-        ap.error('--candidate-sha256 must be a lowercase SHA-256')
+    if not args.upgrade_boot_safety_only or args.candidate or args.candidate_sha256:
+        if args.candidate is None or not re.fullmatch(r'[0-9a-f]{64}', args.candidate_sha256 or ''):
+            ap.error('--candidate and a lowercase --candidate-sha256 are required together')
     release = args.release.resolve()
     receipt = (release/'SERVED-FROM.txt').read_text()
     if not re.search(rf'\b{args.release_revision}\b', receipt):
         ap.error('offline release receipt does not identify --release-revision')
     init = release/'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'
     flows_cuts = has_flows_recovery(init.read_text())
-    if args.flows_power_cut_only and not flows_cuts:
-        ap.error('--flows-power-cut-only requires a candidate built with the flows fix from PR #714')
+    if (args.flows_power_cut_only or args.upgrade_boot_safety_only) and not flows_cuts:
+        ap.error('focused boot cases require an offline release with the flows fix from PR #714')
     customer_image = os.environ.get('OSI_RASPI5_CUSTOMER_IMAGE')
     customer_source = os.environ.get('OSI_RASPI5_CUSTOMER_FIXTURE_DIR')
     if bool(customer_image) != bool(customer_source):
@@ -172,9 +181,10 @@ def main(argv=None):
             args.customer_source = external_path(Path(customer_source))
     except (OSError, ValueError, RuntimeError):
         ap.error('run root and private inputs must resolve to existing paths outside any Git tree')
-    with args.candidate.open('rb') as stream:
-        if hashlib.file_digest(stream, 'sha256').hexdigest() != args.candidate_sha256:
-            ap.error('candidate SHA-256 mismatch')
+    if args.candidate is not None:
+        with args.candidate.open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != args.candidate_sha256:
+                ap.error('candidate SHA-256 mismatch')
     os.umask(0o077)
     run=Path(tempfile.mkdtemp(prefix='pi5-acceptance-',dir=args.run_root))
     print(run,flush=True)
@@ -182,6 +192,7 @@ def main(argv=None):
         f'revision={args.release_revision}\ncandidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
         f'flows_required={flows_cuts}\nflows_power_cut_only={args.flows_power_cut_only}\n'
+        f'upgrade_boot_safety_only={args.upgrade_boot_safety_only}\n'
         f'customer_fixture_only={args.customer_fixture_only}\n')
     if args.keep_scratch:
         scratch = run/'scratch'
@@ -223,7 +234,7 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
             media = build_media(release, scratch, revision=args.release_revision)
         return media
 
-    def verify_upgrade(old, cut_at=None):
+    def verify_upgrade(old, *, cut_at=None, recovery=None, transfer=None):
         folder = args.fixtures/f'v{old}'
         images = sorted(folder.glob('*rpi5*.img.gz'))
         if len(images) != 1:
@@ -233,27 +244,43 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
         if [digest, image.name] not in [line.split() for line in (folder/'SHA256SUMS').read_text().splitlines()]:
             raise ValueError('fixture SHA-256 mismatch')
-        case = f'{old}-flows-cut' if cut_at else old
-        guest = Guest(scratch/case, image, args.qemu, args.ram, upgrade=candidate_media(), receipts=run/case)
+        scenario = transfer or recovery or ('flows-cut' if cut_at else None)
+        case = f'{old}-{scenario}' if scenario else old
+        guest = Guest(scratch/case, image, args.qemu, args.ram, upgrade=candidate_media(),
+                      receipts=run/case, direct_io=bool(scenario))
         try:
             guest.start()
             ready(guest)
-            upgrade(guest, old, args.osi_version, cut_at=cut_at)
+            previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer, release=release)
+            if recovery == 'zero':
+                verify_zero_recovery(guest, release, previous)
+                return 'pristine recovery preserved trigger definitions, fixture and API'
+            if recovery == 'missing':
+                verify_missing_pristine_hold(guest)
+                return 'healthy flows warned and served; zeroed flows held for redeploy'
+            if transfer:
+                return 'disk retained complete boot files and previous payload'
             return 'recovered candidate digest, stamp, API and fixture verified' if cut_at else None
         finally:
             guest.stop()
 
-    if not args.flows_power_cut_only and not args.customer_fixture_only:
-        vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram, receipts=run/'candidate')
+    focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
+    if not focused:
+        vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram,
+                   receipts=run/'candidate', direct_io=True)
         stock_cases(vm, args, test, flows_cuts)
         for old in ['0.8.0', '0.8.1']:
             test(f'Upgrade {old}', lambda: verify_upgrade(old))
-    required = FLOWS_CASES if flows_cuts and not args.customer_fixture_only else ()
-    if required:
+    run_flows = not (args.customer_fixture_only or args.upgrade_boot_safety_only)
+    run_safety = not (args.customer_fixture_only or args.flows_power_cut_only)
+    required = ()
+    if flows_cuts and run_flows:
+        required += FLOWS_CASES
         for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
             def check_cut():
                 case = label.replace(' ', '-')
-                vm = Guest(scratch/case, args.candidate, args.qemu, args.ram, receipts=run/case)
+                vm = Guest(scratch/case, args.candidate, args.qemu, args.ram,
+                           receipts=run/case, direct_io=True)
                 try:
                     if not first_boot:
                         vm.start()
@@ -263,11 +290,20 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
                     vm.stop()
 
             test(label, check_cut)
-        test(FLOWS_CASES[2], lambda: verify_upgrade('0.8.1', FLOWS_COMMITTED))
-    elif not args.customer_fixture_only:
+        test(FLOWS_CASES[2], lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED))
+    elif run_flows:
         for label in FLOWS_CASES:
             record(f'{label}: not applicable to this candidate (requires PR #714)')
-    if not args.flows_power_cut_only:
+    if flows_cuts and run_safety:
+        required += BOOT_SAFETY_CASES
+        test(ZERO_CASE, lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED, recovery='zero'))
+        test(PRISTINE_CASE, lambda: verify_upgrade('0.8.1', recovery='missing'))
+        for transfer, label in TRANSFER_CASES.items():
+            test(label, lambda: verify_upgrade('0.8.1', transfer=transfer))
+    elif run_safety:
+        for label in BOOT_SAFETY_CASES:
+            record(f'{label}: not applicable to this candidate (requires PR #714)')
+    if not focused or args.customer_fixture_only:
         if customer_selected:
             from customer_fixture import run as customer_upgrade
             test('Customer-line 0.7.0 upgrade', lambda: customer_upgrade(args, scratch, run, release, ready), private=True)
@@ -277,7 +313,7 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
         if label not in results:
             record(f'{label}: FAIL (missing required result)')
     failed = any(status == 'FAIL' for status in results.values()) or any(results.get(label) != 'PASS' for label in required)
-    mode = 'Focused acceptance' if args.flows_power_cut_only or args.customer_fixture_only else 'Candidate acceptance'
+    mode = 'Focused acceptance' if focused else 'Candidate acceptance'
     record(f'{mode}: ' + ('FAIL' if failed else 'PASS'))
     return int(failed)
 

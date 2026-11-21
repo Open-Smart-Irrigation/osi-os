@@ -1,7 +1,9 @@
 # Raspberry Pi 5 candidate acceptance
 
 Run this local step of Release Runtime Smoke for each candidate image before sending
-the real-device test sheet to Phil. Budget about 45 minutes in one `osi-heavy` slot.
+the real-device test sheet to Phil. The stock cases take about 45 minutes in
+one `osi-heavy` slot. Candidates with #714 need more time for the boot and
+upgrade cases below.
 The hosted smoke jobs use runtime fixtures. The emulator run needs the built
 candidate, previous factory images and the workstation's offline deployment cache.
 
@@ -56,11 +58,22 @@ power cuts and offline upgrades from 0.8.0 and 0.8.1.
 The init script's `persistFlowHold` function identifies candidates with the
 recovery code from PR #714. The cold boot checks that the guest image and the
 offline tree agree on this capability. These candidates must pass cuts on first
-boot, a later boot and first Node-RED start during the 0.8.1 upgrade. Each cut requires a serial
-commit receipt with the flows SHA-256 and payload stamp, then compares both with
-the recovered files. Candidates without the fix report each case as
-`not applicable to this candidate`. Use `--flows-power-cut-only` to rerun the
-three cuts during diagnosis.
+boot, a later boot and first Node-RED start during the 0.8.1 upgrade. The cut
+guests use direct I/O. After a serial receipt gives the flows SHA-256 and
+payload stamp, the runner cuts power and boots a clone with a shell as PID 1.
+That shell mounts the persistent overlay and checks both values before the
+original guest starts normally for the API and fixture checks.
+
+The same candidates also require the upgrade boot-safety cases. Case A zeroes
+deployed flows and checks that pristine recovery preserves migration 0073 and
+its trigger definitions. Case B checks that a missing pristine copy warns
+when live flows are valid and holds startup when they are zeroed. Case C cuts
+the settings, init and bootstrap transfers separately and checks their bytes
+and modes on a clone before checking the retained payload and fixture.
+Earlier candidates report each case as `not applicable to this candidate`.
+Use `--flows-power-cut-only` for the three commit cuts or
+`--upgrade-boot-safety-only` for A, B and C. The latter uses the offline
+release and 0.8.1 fixture and can omit the candidate archive and its checksum.
 
 ### Customer-line 0.7.0 image fixture
 
@@ -76,13 +89,21 @@ Provide `customer.tar.gz` (the private 0.8.1 offline deploy bundle) and its
 (the integrity-checked guest npm cache with `content-v2/` at archive root),
 and the synthetic `populate.sql`, `snapshot.sql` and `chirpstack-fixture.cjs`
 from the fixture preparation. The synthetic history must fall within the
-candidate's retention window. Include a `SHA256SUMS` with the factory archive's
-basename and the input filenames, using the hashes from fixture preparation.
+candidate's retention window. In `fixture-provenance.json`, set
+`rom_gui_sha256` to the digest of the factory ROM GUI index from image
+inspection. Copy `factory_image_sha256`, `legacy_bundle_sha256` and
+`legacy_revision` from the preparation receipts for the image and the 0.8.1
+overlay. Include the provenance file, the factory archive's basename and each
+input filename in the private `SHA256SUMS`.
 
 The case boots the factory image, installs the 0.8.1 overlay offline, seeds the
 guest, then installs the candidate offline. It compares the SQL and ChirpStack
 receipts, checks the 76-to-80 ledger remap and backup, and verifies the
-active payload after reboot. The July factory baseline is a provisional match.
+active payload after reboot. The runner verifies that the guest boots the
+pinned ROM and the 0.8.1 ledger agrees with the overlay's migration manifest.
+A pass writes `customer-line/qualification.json` for the exact checked media,
+candidate revision and versions. The known factory archive has a different
+ROM GUI asset from the recorded field installation.
 Each installer leg writes an exit code and timestamped progress receipts to
 `customer-line/progress.jsonl`. A newer phase, ledger version or reference
 build count extends its 15-minute idle deadline, up to 90 minutes per installer

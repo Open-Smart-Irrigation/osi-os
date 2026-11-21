@@ -12,7 +12,7 @@ gate=${OSI_HEAVY:-"$HOME/projects/osi-workstation-config/bin/osi-heavy"}
 gate_args=(wait --contain --need-gib 10 --timeout 86400 --label 'OSI Pi 5 acceptance')
 for arg in "$@"; do
   case "$arg" in
-    --flows-power-cut-only|--customer-fixture-only)
+    --flows-power-cut-only|--upgrade-boot-safety-only|--customer-fixture-only)
       exec "$gate" "${gate_args[@]}" -- python3 "$here/acceptance.py" "$@"
       ;;
   esac

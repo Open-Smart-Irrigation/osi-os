@@ -7,12 +7,14 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tarfile
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 import acceptance
+import boot_safety
 import customer_fixture
 import run
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
@@ -51,6 +53,73 @@ class FlowTests(unittest.TestCase):
             acceptance.cut_after_flows_patch(vm, True)
         vm.stop.assert_called_once_with(cut=True)
 
+    def test_first_boot_never_restarts_original_after_an_uncommitted_disk(self):
+        vm = Mock()
+        vm.start.return_value = (DIGEST, b'image')
+        vm.verify_cut_disk.side_effect = RuntimeError('disk differs before recovery')
+        with self.assertRaisesRegex(RuntimeError, 'differs before recovery'):
+            acceptance.cut_after_flows_patch(vm, True)
+        vm.start.assert_called_once_with(before_console=FLOWS_COMMITTED)
+        vm.verify_cut_disk.assert_called_once_with('factory', (DIGEST, b'image'))
+
+    def test_later_boot_checks_clone_before_normal_recovery(self):
+        vm = Mock()
+        vm.flows_receipt.return_value = (b'b'*64, b'image')
+        vm.command.return_value = (0, '')
+        vm.upgrade_reboot.return_value = (DIGEST, b'image')
+        vm.verify_cut_disk.side_effect = RuntimeError('disk differs before recovery')
+        with self.assertRaisesRegex(RuntimeError, 'differs before recovery'):
+            acceptance.cut_after_flows_patch(vm, False)
+        vm.start.assert_not_called()
+        vm.verify_cut_disk.assert_called_once_with('later boot', (DIGEST, b'image'))
+
+    def test_clone_detects_bytes_that_normal_startup_could_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Guest.__new__(Guest)
+            vm.work = vm.receipts = Path(directory)
+            vm.process = vm.bridge = None
+            vm.direct_io = True
+            (vm.work/'sd.img').write_bytes(b'live disk')
+
+            def boot(*, inspection):
+                self.assertTrue(inspection)
+                clone = vm.work/'inspect.img'
+                self.assertEqual(clone.read_bytes(), b'live disk')
+                clone.write_bytes(b'journal replay on clone')
+
+            with (patch.object(vm, 'start', side_effect=boot),
+                  patch.object(vm, 'flows_receipt', return_value=(b'b'*64, b'image')),
+                  patch.object(vm, 'stop') as stop):
+                with self.assertRaisesRegex(RuntimeError, 'differs before recovery'):
+                    vm.verify_cut_disk('factory', (DIGEST, b'image'))
+                stop.assert_called_once_with(cut=True)
+            self.assertEqual((vm.work/'sd.img').read_bytes(), b'live disk')
+            self.assertFalse((vm.work/'inspect.img').exists())
+            self.assertIn('factory disk ' + 'b'*64, (vm.receipts/'flows-cut.log').read_text())
+
+    def test_inspection_command_attaches_only_the_clone_and_uses_direct_io(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Guest.__new__(Guest)
+            vm.work = Path(directory)
+            vm.qemu = vm.work/'qemu'
+            vm.process = vm.bridge = None
+            vm.boots = 0
+            vm.port = 49152
+            vm.ram = 8
+            vm.private = True
+            vm.upgrade = vm.work/'update-usb.img'
+            vm.direct_io = True
+            (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
+            report = re.search(rb'(READY|FAILED)', b'READY')
+            with (patch('suite_vm.subprocess.Popen') as launch,
+                  patch.object(vm, 'expect', return_value=report),
+                  patch.object(vm, 'send')):
+                vm.start(inspection=True)
+            command = launch.call_args.args[0]
+            self.assertIn('if=sd,format=raw,file=inspect.img,cache=none', command)
+            self.assertIn('init=/bin/sh', command[command.index('-append')+1])
+            self.assertNotIn('usb-storage,drive=update', command)
+
     def test_commit_rejects_different_recovered_bytes_or_stamp(self):
         with tempfile.TemporaryDirectory() as directory:
             vm = Guest.__new__(Guest)
@@ -71,6 +140,20 @@ class FlowTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'without a flows commit marker'):
                 upgrade_suite.run(vm, '0.8.1', '0.8.3', cut_at=FLOWS_COMMITTED)
 
+    def test_upgrade_mismatch_in_clone_prevents_recovery_start(self):
+        vm = Mock()
+        vm.flows_receipt.return_value = (DIGEST, b'image')
+        vm.command.return_value = (None, (DIGEST, b'candidate'))
+        vm.verify_cut_disk.side_effect = RuntimeError('disk differs before recovery')
+        with (patch.object(upgrade_suite, 'checked', side_effect=['0.8.1', 'synthetic']),
+              patch.object(upgrade_suite, 'sql', side_effect=['', 'a\nb\nc\nd']),
+              patch.object(upgrade_suite, 'wait_for_login'),
+              patch('radio_suite._api', return_value={'token': 'synthetic'})):
+            with self.assertRaisesRegex(RuntimeError, 'differs before recovery'):
+                upgrade_suite.run(vm, '0.8.1', '0.8.3', cut_at=FLOWS_COMMITTED)
+        vm.start.assert_not_called()
+        vm.verify_cut_disk.assert_called_once_with('upgrade commit', (DIGEST, b'candidate'))
+
     def test_applicable_suite_cannot_pass_when_serial_marker_is_absent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -82,7 +165,8 @@ class FlowTests(unittest.TestCase):
             (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
             args = SimpleNamespace(fixtures=fixtures, candidate=image, qemu=None, ram=8,
                                    release_revision='a'*40, osi_version='0.8.3',
-                                   flows_power_cut_only=True, customer_fixture_only=False)
+                                   flows_power_cut_only=True, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
             with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
                   patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready'),
                   patch.object(acceptance, 'cut_after_flows_patch', side_effect=TimeoutError('missing receipt')),
@@ -98,6 +182,7 @@ class FlowTests(unittest.TestCase):
             root = Path(directory)
             args = SimpleNamespace(candidate=None, qemu=None, ram=8, fixtures=root,
                                    flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False,
                                    release_revision='a'*40, osi_version='0.8.3')
             for version in ('0.8.0', '0.8.1'):
                 folder = root/f'v{version}'
@@ -111,6 +196,40 @@ class FlowTests(unittest.TestCase):
             result = (root/'results.log').read_text()
             for label in acceptance.FLOWS_CASES:
                 self.assertIn(f'{label}: not applicable to this candidate', result)
+
+    def test_upgrade_safety_runs_all_abc_cases_and_requires_pass_from_each(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root/'v0.8.1'
+            folder.mkdir()
+            (folder/'rpi5.img.gz').write_bytes(b'fixture')
+            (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
+            args = SimpleNamespace(fixtures=root, qemu=None, ram=8,
+                                   release_revision='a'*40, osi_version='0.8.3',
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=True)
+
+            def upgrade(*_, transfer, **__):
+                if transfer == 'init':
+                    raise RuntimeError('wrong on-disk bytes')
+
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest') as guest,
+                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready'),
+                  patch.object(acceptance, 'verify_zero_recovery') as zero,
+                  patch.object(acceptance, 'verify_missing_pristine_hold') as hold,
+                  patch.object(acceptance, 'upgrade', side_effect=upgrade) as deploy):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, True, False), 1)
+            self.assertEqual(deploy.call_count, 5)
+            self.assertTrue(all(call.kwargs['direct_io'] for call in guest.call_args_list))
+            zero.assert_called_once()
+            hold.assert_called_once()
+            result = (root/'results.log').read_text()
+            self.assertRegex(result, r'C\. Interrupted init install\s+FAIL')
+            self.assertIn('Focused acceptance: FAIL', result)
+
+    def test_migration_0073_resolves_both_pinned_triggers(self):
+        _, triggers = boot_safety.migrated_triggers(Path(__file__).resolve().parents[2])
+        self.assertEqual(set(triggers), {'trg_dp_zone_env_outbox_ai', 'trg_dp_zone_env_outbox_au'})
 
 
 class BoundaryTests(unittest.TestCase):
@@ -130,7 +249,8 @@ class BoundaryTests(unittest.TestCase):
     def test_private_tool_error_is_not_printed_or_saved(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            args = SimpleNamespace(flows_power_cut_only=False, customer_fixture_only=True)
+            args = SimpleNamespace(flows_power_cut_only=False, customer_fixture_only=True,
+                                   upgrade_boot_safety_only=False)
             stdout = io.StringIO()
             error = subprocess.CalledProcessError(1, ['tool', 'private-filename.img'])
             with (redirect_stdout(stdout), redirect_stderr(stdout),
@@ -173,6 +293,43 @@ class BoundaryTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('outside the current holder', result.stderr)
+
+    def test_private_pair_rejects_a_different_candidate_archive_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root/'factory.img.gz'
+            image.write_bytes(b'fixture')
+            directory = 'database/migrations/ordered'
+            legacy = f'0076__{customer_fixture.ARCHIVE}'
+            candidate = f'0080__{customer_fixture.ARCHIVE}'
+            sql = b'SELECT 1;'
+            digest = hashlib.sha256(sql).hexdigest()
+            with tarfile.open(root/'customer.tar.gz', 'w:gz') as bundle:
+                for name, data in [(legacy, sql), ('CHECKSUMS.json', json.dumps({legacy: digest}).encode())]:
+                    item = tarfile.TarInfo('./' + directory + '/' + name)
+                    item.size = len(data)
+                    bundle.addfile(item, io.BytesIO(data))
+            bundle_sha = hashlib.sha256((root/'customer.tar.gz').read_bytes()).hexdigest()
+            (root/'customer.tar.gz.sha256').write_text(bundle_sha+'  customer.tar.gz\n')
+            (root/customer_fixture.PROVENANCE).write_text(json.dumps({
+                'rom_gui_sha256': 'a'*64, 'legacy_revision': 'b'*40,
+                'factory_image_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+                'legacy_bundle_sha256': bundle_sha,
+            }))
+            for name in customer_fixture.FILES[2:]:
+                (root/name).write_bytes(b'fixture')
+            (root/'SHA256SUMS').write_text(''.join(
+                f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in root.iterdir()))
+            manifest = root/directory/'CHECKSUMS.json'
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({candidate: digest}))
+            (manifest.parent/candidate).write_bytes(sql)
+            files, identity = customer_fixture.verified_inputs(image, root, root)
+            self.assertNotIn(customer_fixture.PROVENANCE, files)
+            self.assertEqual(identity['legacy_archive_migration_sha256'], digest)
+            manifest.write_text(json.dumps({candidate: 'a'*64}))
+            with self.assertRaisesRegex(ValueError, 'does not match candidate migration 0080'):
+                customer_fixture.verified_inputs(image, root, root)
 
 
 class ProgressTests(unittest.TestCase):

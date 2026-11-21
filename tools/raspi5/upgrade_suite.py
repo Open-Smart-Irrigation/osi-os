@@ -28,8 +28,9 @@ def checked(vm, shell, timeout=90):
     return output
 
 
-def sql(vm, query):
-    return checked(vm, f"sqlite3 -batch -bail -cmd '.timeout 5000' {DB} <<'SQL'\n{query}\nSQL")
+def sql(vm, query, *, readonly=False):
+    mode = '-readonly ' if readonly else ''
+    return checked(vm, f"sqlite3 {mode}-batch -bail -cmd '.timeout 5000' {DB} <<'SQL'\n{query}\nSQL")
 
 
 def cache_locked_packages(release, out):
@@ -115,7 +116,7 @@ done
 exit 1""", 420)
 
 
-def run(vm, old_version, new_version, *, cut_at=None):
+def run(vm, old_version, new_version, *, cut_at=None, transfer=None, release=None):
     if checked(vm,'uci get osi-server.cloud.firmware_version') != old_version:
         raise RuntimeError('old firmware version mismatch')
     from radio_suite import _api
@@ -129,6 +130,10 @@ def run(vm, old_version, new_version, *, cut_at=None):
     before = sql(vm, READ)
     if len(before.splitlines()) != 4:
         raise RuntimeError('incomplete fixture')
+    if transfer:
+        from boot_safety import check_transfer_cut
+        check_transfer_cut(vm, release, transfer, before)
+        return before
     old_stamp = vm.flows_receipt()[1] if cut_at else None
     code, receipt = vm.command('set -e\n'+CANDIDATE_INSTALL, 2400, until=cut_at)
     if cut_at is not None and code is None:
@@ -137,6 +142,7 @@ def run(vm, old_version, new_version, *, cut_at=None):
         vm.stop(cut=True)
         if receipt[1] in (b'image', old_stamp):
             raise RuntimeError('upgrade commit did not name a new deployed payload')
+        vm.verify_cut_disk('upgrade commit', receipt)
         vm.start()
         wait_for_api(vm)
         vm.verify_flows_receipt(receipt)
@@ -165,3 +171,4 @@ done""")
         raise RuntimeError('fixture login failed after upgrade')
     if sql(vm, READ) != before or sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('upgraded database or persisted fixture mismatch')
+    return before

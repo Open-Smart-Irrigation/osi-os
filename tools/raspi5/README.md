@@ -59,7 +59,19 @@ The optional tests stage the probe and service-check script on the disposable bo
 
 For interactive packet injection, pass `--radio-socket /tmp/wm1302.sock` and configure the guest concentrator. Each Unix stream frame starts with three bytes (payload length, multi-SF IF channel, spreading factor), followed by the raw LoRa PHYPayload. For a frequency-addressed uplink, set the channel byte to 255 and insert a four-byte big-endian frequency in Hz and a bandwidth byte before the payload. Bandwidth code 0 selects 125 kHz. The model uses the HAL-programmed SX1250 center frequency, signed IF offset, channel mask and spreading-factor mask to select a receiver. It accepts carriers within one IF tuning step of nominal and drops other bandwidths on the multi-SF channels. Downlinks use the three-byte format with the RF chain in the second byte. A client that stops draining the socket may be disconnected. The launcher disconnects guest Ethernet by default. Use `--nic` to supply a QEMU network backend.
 
-Use published or explicitly recorded SHA-256 values for external firmware. The launcher verifies the copies before it uses them. EEPROM firmware remains subject to Raspberry Pi’s distribution terms. The candidate gate uses the pinned BL31 build and the verified candidate image, with no external firmware override options.
+For the optional EEPROM probe, fetch the May 26, 2026 BCM2712 default image
+from raspberrypi/rpi-eeprom commit `439fc2e934737cb6b718b837ec0870ac85bf7409`.
+
+```sh
+tools/raspi5/fetch-eeprom.sh "$HOME/pi5-eeprom-fixture"
+```
+
+The fetch verifies SHA-256
+`fee8bee6a738a1a61004f0770f15534de7a48a2a199dc4c7af7ed73ab04f18dd` for the image
+and also checks the upstream `LICENSE` copied beside it. The firmware carries
+Raspberry Pi's custom terms for `firmware-2712/*`. Use the digest in
+`SHA256SUMS` with `--eeprom-sha256`. The candidate gate uses the pinned BL31
+build and verified factory image. [Pinned firmware terms](https://github.com/raspberrypi/rpi-eeprom/blob/439fc2e934737cb6b718b837ec0870ac85bf7409/LICENSE).
 
 ## Hardware coverage
 

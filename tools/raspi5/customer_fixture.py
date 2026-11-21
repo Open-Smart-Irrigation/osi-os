@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import shlex
+import tarfile
 import time
 
 from suite_vm import Guest, external_path
@@ -18,6 +19,9 @@ SELECT count(*) FROM schema_migrations WHERE status <> 'applied';
 SELECT name FROM schema_migrations WHERE version = 76;
 """
 ARCHIVE = 'sdi12_transmissions.sql'
+PROVENANCE = 'fixture-provenance.json'
+SHA256 = re.compile(r'[0-9a-f]{64}')
+REVISION = re.compile(r'[0-9a-f]{40}')
 POLL_SECONDS = 15
 IDLE_SECONDS = 15 * 60
 HARD_SECONDS = 90 * 60
@@ -57,7 +61,7 @@ class FixtureFailure(RuntimeError):
     """A fixed diagnostic or validated numeric result safe for shared output."""
 
 
-def verified_inputs(image, source):
+def verified_inputs(image, source, release):
     checksums = {}
     for line in external_path(source/'SHA256SUMS').read_text().splitlines():
         parts = line.split(maxsplit=1)
@@ -68,12 +72,49 @@ def verified_inputs(image, source):
         if name in checksums:
             raise ValueError('duplicate private SHA256SUMS entry')
         checksums[name] = digest
-    files = {name: external_path(source/name) for name in FILES}
-    for name, path in [(image.name, image), *files.items()]:
+    files = {name: external_path(source/name) for name in (*FILES, PROVENANCE)}
+    for name, path in [(image.name, external_path(image)), *files.items()]:
         with path.open('rb') as stream:
             if hashlib.file_digest(stream, 'sha256').hexdigest() != checksums.get(name):
                 raise ValueError('private fixture input SHA-256 mismatch')
-    return files, checksums[image.name]
+    provenance = json.loads(files.pop(PROVENANCE).read_text())
+    pins = {'factory_image_sha256': image.name, 'legacy_bundle_sha256': 'customer.tar.gz'}
+    if not isinstance(provenance, dict) or set(provenance) != {'rom_gui_sha256', 'legacy_revision', *pins}:
+        raise ValueError('invalid private fixture provenance')
+    rom, revision = provenance['rom_gui_sha256'], provenance['legacy_revision']
+    if not (isinstance(rom, str) and SHA256.fullmatch(rom)
+            and isinstance(revision, str) and REVISION.fullmatch(revision)):
+        raise ValueError('invalid private fixture provenance digest or revision')
+    if any(provenance[key] != checksums[name] for key, name in pins.items()):
+        raise ValueError('private factory or overlay differs from the preparation pin')
+
+    directory = 'database/migrations/ordered'
+    old_archive = f'0076__{ARCHIVE}'
+    with tarfile.open(files['customer.tar.gz'], 'r:gz') as bundle:
+        def member(name):
+            path = f'{directory}/{name}'
+            item = next((entry for entry in bundle.getmembers()
+                         if entry.name.removeprefix('./') == path), None)
+            if item is None or not item.isfile():
+                raise ValueError('legacy bundle migration input missing')
+            with bundle.extractfile(item) as stream:
+                return stream.read()
+
+        legacy_checksum = hashlib.sha256(member(old_archive)).hexdigest()
+        if json.loads(member('CHECKSUMS.json')).get(old_archive) != legacy_checksum:
+            raise ValueError('legacy archive migration does not match its manifest')
+    candidate_directory = release/directory
+    candidate_archive = f'0080__{ARCHIVE}'
+    candidate_manifest = json.loads((candidate_directory/'CHECKSUMS.json').read_text())
+    if (candidate_manifest.get(candidate_archive) != legacy_checksum
+            or hashlib.sha256((candidate_directory/candidate_archive).read_bytes()).hexdigest() != legacy_checksum):
+        raise ValueError('legacy archive migration does not match candidate migration 0080')
+    if files['customer.tar.gz.sha256'].read_text().split()[0] != checksums['customer.tar.gz']:
+        raise ValueError('legacy bundle does not match its installer sidecar')
+
+    identity = dict(provenance, legacy_archive_migration_sha256=legacy_checksum,
+                    inputs_sha256={name: checksums[name] for name in (*FILES, PROVENANCE)})
+    return files, identity
 
 
 def ledger_ok(vm):
@@ -215,10 +256,11 @@ def run(args, scratch, receipts, release, ready):
     log = evidence/'progress.jsonl'
     write_receipt(log, event='phase', phase='prepare')
     try:
-        files, image_digest = verified_inputs(args.customer_image, args.customer_source)
-    except (OSError, ValueError, RuntimeError):
-        raise FixtureFailure('private fixture input or SHA256SUMS verification failed') from None
-    (evidence/'image.sha256').write_text(image_digest+'\n')
+        files, identity = verified_inputs(args.customer_image, args.customer_source, release)
+    except (OSError, ValueError, RuntimeError, tarfile.TarError, IndexError, AttributeError):
+        raise FixtureFailure('private fixture provenance, manifest or checksum verification failed') from None
+    identity['candidate_revision'] = args.release_revision
+    (evidence/'inputs.json').write_text(json.dumps(identity, indent=2)+'\n')
     media = build_media(release, work, revision=args.release_revision, extra_files=files, quiet=True)
     write_receipt(log, event='phase', phase='boot-0.7.0')
     vm = Guest(work/'guest', args.customer_image, args.qemu, args.ram, upgrade=media,
@@ -231,6 +273,8 @@ def run(args, scratch, receipts, release, ready):
         if sql(vm, 'SELECT (SELECT count(*) FROM users)+(SELECT count(*) FROM devices)+(SELECT count(*) FROM device_data);') != '0':
             raise FixtureFailure('private factory image contains persisted data')
         rom_asset = checked(vm, 'sha256sum /rom/usr/lib/node-red/gui/index.html | cut -d " " -f 1')
+        if rom_asset != identity['rom_gui_sha256']:
+            raise FixtureFailure('private guest ROM GUI differs from the qualification pin')
         track_install(vm, log, 'legacy', 'customer-install.sh', 'customer.tar.gz', 'customer-cache.tar')
         ready(vm)
         version(vm, '0.8.1', '4.12.1')
@@ -240,6 +284,9 @@ def run(args, scratch, receipts, release, ready):
         if sql(vm, LEDGER).splitlines() != ['76', '0', f'0076__{ARCHIVE}']:
             raise FixtureFailure('old customer-line ledger mismatch')
         old_archive_checksum = sql(vm, 'SELECT checksum FROM schema_migrations WHERE version = 76;')
+        if old_archive_checksum != identity['legacy_archive_migration_sha256']:
+            raise FixtureFailure('legacy guest ledger differs from the pinned overlay bundle')
+        write_receipt(log, event='phase', phase='legacy-ledger-verified', current_ledger=76)
         write_receipt(log, event='phase', phase='load-synthetic-data')
         checked(vm, f'set -e\n{MOUNT_USB}\nsqlite3 -batch -bail {DB} < populate.sql')
         expect_data(vm)
@@ -279,6 +326,9 @@ node /tmp/verify-candidate/scripts/verify-head-cli.js /tmp/verify-candidate/farm
         ledger_ok(vm)
         if snapshot(vm, 'snapshot') != before:
             raise FixtureFailure('private synthetic database or radio registrations changed')
-        return 'ledger 76→80; synthetic rows, radio registrations and active payload verified after reboot'
     finally:
         vm.stop()
+    write_receipt(evidence/'qualification.json', result='PASS', **identity,
+                  legacy_ledger=76, archive_migration=80, osi_version=args.osi_version,
+                  chirpstack_version=args.chirpstack_version)
+    return 'ledger 76→80; synthetic rows, radio registrations and active payload verified after reboot'
