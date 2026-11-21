@@ -2888,6 +2888,21 @@ gateway_state_preflight() {
     if [ ! -e "$DB_PATH" ] && { [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; }; then
         gsp_refuse "$DB_PATH is missing but SQLite sidecar files exist; inspect $DB_DIR" || return 1
     fi
+    # A foreign-key orphan fails the migration runner's postflight check after
+    # the first committed migration: the deploy would stop Node-RED, migrate,
+    # restore the pre-migration copy and refuse, every time. Read-only; only
+    # the child tables and their row counts are reported, no row values.
+    if [ -f "$DB_PATH" ]; then
+        if ! gsp_fk="$(sqlite3 -readonly -cmd '.timeout 5000' "$DB_PATH" 'PRAGMA foreign_key_check;' 2>&1)"; then
+            gsp_refuse "the farm database's foreign keys could not be checked (the read failed, or the database stayed locked for 5 s): $gsp_fk" || return 1
+        fi
+        if [ -n "$gsp_fk" ]; then
+            gsp_fk_tables="$(printf '%s\n' "$gsp_fk" | awk -F'|' '!($1 in n) { o[++k] = $1 } { n[$1]++ } END { for (i = 1; i <= k; i++) printf "%s%s (%d row%s)", (i > 1 ? ", " : ""), o[i], n[o[i]], (n[o[i]] == 1 ? "" : "s") }')"
+            echo "ERROR: the farm database has foreign-key orphans in $gsp_fk_tables; the gateway is unchanged and keeps running its current release; do not retry; contact support with this line" >&2
+            return 1
+        fi
+        echo "OK: no foreign-key orphans in the farm database"
+    fi
     if [ ! -x "$IRRIGATION_CLOCK_HOOK" ]; then
         [ -x "$IRRIGATION_SYSNTPD_INIT" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_SYSNTPD_INIT"; return 1; }
         [ -x "$IRRIGATION_NTPD_HOTPLUG" ] || { gsp_refuse "the conditional irrigation clock hook requires executable $IRRIGATION_NTPD_HOTPLUG"; return 1; }
