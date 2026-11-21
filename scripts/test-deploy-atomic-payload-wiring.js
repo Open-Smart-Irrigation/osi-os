@@ -355,12 +355,14 @@ test('deploy.sh fetches every helper module into the staged payload, never into 
   assert.match(deploy, /^MODULE_STAGE="\$PAYLOADS_ROOT\/\$DEPLOY_STAMP\/modules"$/m);
   const fetches = moduleFetches(deploy);
   // This CLI runs at S90, before the payload is loaded. Its own boot-file
-  // install is durable and it is never loaded as a flow helper.
+  // install and hold-policy dependency are durable boot files, never flow helpers.
   const bootCli = ({ name, file, destination }) =>
-    name === 'osi-db-integrity' && file === 'index.js' && destination === '/usr/share/node-red/osi-db-integrity/index.js';
+    name === 'osi-db-integrity' && ['index.js', 'recovery-hold.js'].includes(file) &&
+    destination === `/usr/share/node-red/osi-db-integrity/${file}`;
   const stagedModule = (entry) => !LIVE_MODULES.includes(entry.name) && !bootCli(entry);
-  assert.equal(fetches.filter(bootCli).length, 1);
+  assert.deepEqual(fetches.filter(bootCli).map(({ file }) => file).sort(), ['index.js', 'recovery-hold.js']);
   assert.match(deploy, /"\/usr\/share\/node-red\/osi-db-integrity\/index\.js" 644 \|\| exit 1/);
+  assert.match(deploy, /"\/usr\/share\/node-red\/osi-db-integrity\/recovery-hold\.js" 644 \|\| exit 1/);
   const staged = fetches.filter(stagedModule);
   assert.ok(staged.length > 100, `expected the full module block, parsed ${staged.length}`);
   const wrong = staged.filter(({ name, file, destination }) => destination !== `$MODULE_STAGE/${name}/${file}`);

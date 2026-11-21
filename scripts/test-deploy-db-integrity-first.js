@@ -106,7 +106,7 @@ test('the preflight check runs before the deploy\'s first change on the gateway'
 test('the hold consumers are installed before the recovery writer becomes callable', () => {
   const writer = DEPLOY.indexOf('fetch_required "Boot database integrity check"');
   assert.ok(writer > 0);
-  for (const name of ['Node-RED init script', 'Outstanding first-boot database seed guard',
+  for (const name of ['Database recovery hold policy', 'Node-RED init script', 'Outstanding first-boot database seed guard',
     'Outstanding first-boot runtime seed guard']) {
     const guard = DEPLOY.indexOf('fetch_required "' + name + '"');
     assert.ok(guard > 0 && guard < writer, name);

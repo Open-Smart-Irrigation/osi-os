@@ -194,11 +194,11 @@ ${deploy.slice(begin, end)}
   });
 }
 
-test('boot publication orders hold policy, checker, then init so every cut keeps dependencies loadable', t => {
+test('boot publication orders hold policy, init, then checker so every cut keeps dependencies loadable', t => {
   const policy = deploy.indexOf('fetch_required "Database recovery hold policy"');
   const checker = deploy.indexOf('fetch_required "Boot database integrity check"');
   const init = deploy.indexOf('fetch_required "Node-RED init script"');
-  assert.ok(policy > 0 && checker > policy && init > checker, 'install recovery-hold.js before index.js before node-red.init');
+  assert.ok(policy > 0 && init > policy && checker > init, 'install recovery-hold.js then the hold consumer before the recovery writer');
   const f = setup(t);
   const installed = path.join(f.scratch, 'installed'); fs.mkdirSync(installed);
   const target = path.join(installed, 'index.js');

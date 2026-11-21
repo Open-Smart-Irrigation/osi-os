@@ -4112,12 +4112,12 @@ fi
 fetch_required "Database recovery hold policy" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/recovery-hold.js" \
     "/usr/share/node-red/osi-db-integrity/recovery-hold.js" 644 || exit 1
-fetch_required "Boot database integrity check" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
-    "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
 fetch_required "Node-RED init script" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init" \
     "/etc/init.d/node-red" 755 || exit 1
+fetch_required "Boot database integrity check" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.js" \
+    "/usr/share/node-red/osi-db-integrity/index.js" 644 || exit 1
 
 fetch_required "Boot database integrity service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-db-integrity" \

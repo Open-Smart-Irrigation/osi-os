@@ -247,8 +247,9 @@ until the new checker and init are installed; it leaves the owed pair untouched.
 The regression uses that actual old checker and a start-recording old init.
 Both migrated and unmigrated owed plans must defer without starting it.
 
-Publication now orders the profile's hold-policy module, its index, then the
-Node-RED init. The unchanged dependency-fetch assertion can therefore prove the
+Publication now orders the profile's hold-policy module, Node-RED init, then
+the index. This preserves #714's consumer-before-writer invariant while the
+held owed check remains deferred. The unchanged dependency-fetch assertion can therefore prove the
 relative require, and a cut after either module publication leaves the index
 loadable. The runbook requires release from the same revision as the retirement
 deploy and names the installed service-script prerequisites.
@@ -266,3 +267,10 @@ the affected full deploy batch and sync verifier, the other stale-test files,
 and the new first-deploy regressions through osi-heavy. Final results and exact
 head CI are recorded in the PR body; the earlier queued status above describes
 the round-2 checkpoint, not a claim of a completed qualification.
+
+
+The first exact-head CI run also exposed two assertions affected by the new
+boot dependency: the module-staging test now recognizes exactly the two durable
+boot CLI files, and the existing consumer-before-writer test remains enforced.
+The latter is strengthened with the hold-policy prerequisite. The follow-up
+changes installation order to satisfy that invariant; it does not waive it.
