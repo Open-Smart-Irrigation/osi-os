@@ -75,13 +75,24 @@ overlay layout. Missing, stopped or mismatched monitors fail closed.
 to return `2` (READY), then asks the retained descriptor's owner to call
 `syncfs(2)`. This flush covers the pending marker, READY directory entry,
 defaults whiteouts and other initialization files/directories on that
-filesystem. Only a checked zero result permits the growth reboot. Neither
-service sets `.fs_state` or calls `mount_root done` itself.
+filesystem. The helper then creates an exclusive private probe under
+`/overlay/upper`, writes and fsyncs it, closes and removes it, and fsyncs
+the upper directory. A final checked `syncfs` samples the retained error
+cursor again. Every operation must succeed before S96 permits the reboot.
+Neither service sets `.fs_state` or calls `mount_root done` itself.
 
 Bare BusyBox `sync` cannot report writeback errors. Opening a new descriptor
 after a failed writeback can also miss an error already observed elsewhere.
 The retained descriptor tracks errors across initialization, including
-S95's bare sync. Any `syncfs` error poisons the monitor for the rest of the
+S95's bare sync. A completed ext4 journal abort can nevertheless escape that
+cursor: an earlier commit-record I/O failure need not increment it, and
+`syncfs` can return zero once that transaction has ended. The new probe
+starts a journal operation and therefore rejects an already-aborted journal,
+even while the cached mount and READY link still appear writable. The pinned
+kernel's [ext4 journal-handle check](https://github.com/gregkh/linux/blob/v6.6.86/fs/ext4/ext4_jbd2.c#L64)
+returns EROFS on this path.
+
+Any flush or probe error poisons the monitor for the rest of the
 boot: flush/check/re-arm requests keep failing, both intents remain, and
 S96 does not reboot. The monitor cannot silently restart or reset its
 cursor on that boot; a stale socket also blocks re-arming. A normal restart
@@ -97,9 +108,11 @@ and follows the same READY-gated reboot. Defaults failures return nonzero
 so OpenWrt retains the script. An interruption before READY may reset the
 uninitialized overlay under fstools' existing protocol; the next mount
 restores defaults from ROM and retries against the already enlarged
-partition. An interruption after READY preserves the pending marker and
-whiteouts. That power cycle already refreshes kernel/loop capacity, so S08
-can finish without another automatic growth reboot.
+partition. After READY and a successful complete durability barrier
+(checked flush, journal probe and final checked flush), an interruption
+preserves the pending marker and whiteouts. That power cycle already
+refreshes kernel/loop capacity, so S08 can finish without another automatic
+growth reboot. READY alone does not establish persistence.
 
 If provisioning proceeds after a partition-step failure without pending
 state, a later run refuses partition changes and requires operator
@@ -146,8 +159,11 @@ prove storage behavior during a power cut. The separate writeback test uses
 an actual FUSE writeback-cache mount: write(2) succeeds, the later kernel
 writeback receives EIO, and bare BusyBox sync returns zero. The packaged
 helper's held descriptor reports the error, latches it, and the shipped S96
-path refuses reboot. This is kernel-error-path coverage, not an SD-card or
-power-loss qualification. TF3 must qualify the final image
+path refuses reboot. A separate FUSE-stub case simulates a completed journal
+abort by returning EROFS on probe creation despite a clean writeback cursor.
+It does not inject a real ext4/JBD2 commit-record failure. This is kernel
+writeback-path and simulated journal-abort coverage; SD-card power loss and
+real journal faults remain TF3 work. TF3 must qualify the final image
 pin on disposable larger cards for both Pi 4 and Pi 5:
 
 1. Record image SHA, board, card size, boot links, mount types, partition
@@ -158,8 +174,10 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    its start and partition 1 remain unchanged, and exactly one growth reboot
    occurs after S95done. Record `/overlay/.fs_state` before the requested
    reboot: its symlink target must be `2`. Capture pending state, the
-   volatile request and defaults whiteouts at that point. Capture the checked
-   flush-complete log separately from the first appearance of the READY link.
+   volatile request and defaults whiteouts at that point. Capture the
+   `checked overlay flush and journal probe complete` log separately from
+   the first appearance of the READY link. It must follow both checked
+   flushes and the successful journal probe.
    Confirm GNU Parted handles the mounted-partition confirmation
    with the image's actual package version.
 3. Use disposable-image serial/preinit tracing to capture `.fs_state`, the
@@ -173,8 +191,9 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    exists and available writable capacity has increased. Exercise writes
    beyond the original filesystem boundary. As an explicit persistence case,
    place known configuration/data canaries and synthetic application rows
-   on disposable ext4 media before S95, capture them after READY, then verify
-   them after the growth reboot and a further normal reboot. Collect early
+   on disposable ext4 media before S95, capture them after the complete
+   durability barrier, then verify them after the growth reboot and a
+   further normal reboot. Collect early
    receipts before application writers change the files.
 4. Reboot again and invoke both scripts again. Expect no partition command,
    no growth reboot and no loss of capacity. Repeat with an already full
@@ -183,17 +202,17 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
 5. Start both UNKNOWN (missing state link) and PENDING (`1`) cases. Cut
    power before, during and after the partition command; after pending state
    is written but before S95; after the READY link appears but before the
-   checked flush completes; after the checked flush completes but before the
+   complete durability barrier finishes; after that barrier but before the
    reboot request; during `resize2fs`;
    after stamp creation; and before pending-state removal. Repeat with an
    already full partition. Capture state links, markers, whiteouts and
    geometry before each cut and after preinit. Before READY, record the
    expected fstools cleanup and defaults restoration. Distinguish visible
-   READY from a successfully completed checked flush: only the latter is a
-   durability receipt. After that flush, require marker/whiteout and canary
+   READY from the complete durability barrier: only the latter is a
+   durability receipt. After that barrier, require marker/whiteout and canary
    persistence. Each recoverable case must finish
    without an automatic reboot loop. A cut after READY may replace the growth
-   reboot after a completed flush, yielding zero automatic requests. The
+   reboot after a completed barrier, yielding zero automatic requests. The
    uninterrupted path still requires exactly one on each board.
    Preserve any unreadable card and stop qualification on a failed recovery.
 6. On disposable provisioned media, verify that first-boot partition growth
@@ -214,6 +233,10 @@ pin on disposable larger cards for both Pi 4 and Pi 5:
    checked flush failure, retained intents and absence of a reboot request.
    A same-boot S96 retry and monitor re-arm must remain refused. A visible
    READY link and a zero exit from bare sync are insufficient receipts.
+   Include a one-shot JBD2 commit-record I/O failure during S95's unchecked
+   sync, then let the device recover before S96. Capture the journal abort
+   and the probe's EROFS/error receipt even if the first checked syncfs returns
+   zero. Both intents must remain and no automatic reboot may occur.
 9. Inject missing tools, failed marker writes and a full/read-only overlay.
    Expect visible errors, retained retry state and no completion claim.
    Check unsupported backing devices and filesystem types without changing

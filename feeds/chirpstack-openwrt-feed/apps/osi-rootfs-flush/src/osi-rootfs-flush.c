@@ -46,6 +46,45 @@ static void timeout(int fd)
     (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t));
 }
 
+static int journal_probe(int overlay)
+{
+    /* A completed JBD2 abort need not advance s_wb_err. Force a new
+     * journal handle after syncfs, then commit and remove our private file.
+     * Never reuse or overwrite a file left by an interrupted probe.
+     */
+    int upper = openat(overlay, "upper", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (upper < 0) return -1;
+    int fd = -1, created = 0, saved;
+    struct stat root_st, upper_st;
+    char name[80];
+    if (fstat(overlay, &root_st) || fstat(upper, &upper_st)) goto error;
+    if (root_st.st_dev != upper_st.st_dev) { errno = EXDEV; goto error; }
+    for (unsigned int n = 0; n < 128; n++) {
+        snprintf(name, sizeof(name), ".osi-rootfs-grow-probe-%ld-%u", (long)getpid(), n);
+        fd = openat(upper, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd >= 0) { created = 1; break; }
+        if (errno != EEXIST) goto error;
+    }
+    if (fd < 0) goto error;
+    const char payload[] = "osi-rootfs-grow durability probe\n";
+    ssize_t n;
+    do { n = write(fd, payload, sizeof(payload) - 1); } while (n < 0 && errno == EINTR);
+    if (n < 0) goto error;
+    if (n != (ssize_t)(sizeof(payload) - 1)) { errno = EIO; goto error; }
+    if (fsync(fd)) goto error;
+    if (close(fd)) { fd = -1; goto error; }
+    fd = -1;
+    if (unlinkat(upper, name, 0)) goto error;
+    created = 0;
+    if (fsync(upper)) goto error;
+    return close(upper);
+error:
+    saved = errno;
+    if (fd >= 0) close(fd);
+    if (created) (void)unlinkat(upper, name, 0);
+    close(upper); errno = saved; return -1;
+}
+
 static int rpc(const struct sockaddr_un *address, struct request *req)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -81,6 +120,8 @@ static void serve(int listener, int overlay, const struct stat *identity)
         else if (transfer(client, &req, sizeof(req), 0)) result = EPROTO;
         else if (req.command != 'Q' && (req.dev != (uint64_t)identity->st_dev || req.ino != (uint64_t)identity->st_ino)) result = ESTALE;
         else if (req.command == 'F') {
+            if (!failed && syncfs(overlay)) failed = errno;
+            if (!failed && journal_probe(overlay)) failed = errno;
             if (!failed && syncfs(overlay)) failed = errno;
             result = failed;
         } else if (req.command == 'C') result = failed;

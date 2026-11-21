@@ -14,7 +14,17 @@ const busybox = find('busybox');
 const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
 function ok(r) { assert.ifError(r.error); assert.equal(r.status, 0, r.stdout + r.stderr); }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks and latches' : 'success permits'} the shipped reboot gate`, async t => {
+const cases = [
+  [0, 'kernel writeback success permits the shipped reboot gate'],
+  [1, 'kernel writeback EIO blocks and latches the shipped reboot gate'],
+  [2, 'simulated aborted journal blocks reboot despite a clean syncfs cursor'],
+  [3, 'probe write failure retains intents and blocks reboot'],
+  [4, 'probe file fsync failure retains intents and blocks reboot'],
+  [5, 'probe unlink failure retains intents and blocks reboot'],
+  [6, 'probe directory fsync failure retains intents and blocks reboot'],
+];
+for (const [mode, name] of cases) test(name, async t => {
+  const fail = mode !== 0;
   assert.ok(busybox, 'BusyBox is required');
   assert.ok(fs.existsSync('/dev/fuse'), 'real /dev/fuse is required; CI must not skip this test');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-wb-'));
@@ -25,10 +35,20 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
   const flags = spawnSync('pkg-config', ['--cflags', '--libs', 'fuse3'], { encoding: 'utf8' }); ok(flags);
   ok(spawnSync('cc', ['-std=gnu99', '-Wall', '-Wextra', '-Werror', path.join(repo, 'scripts/fixtures/image-boot-growth/writeback-fuse.c'), '-o', p('fuse'), ...flags.stdout.trim().split(/\s+/)], { encoding: 'utf8' }));
   const socket = p('var/run/flush.sock');
-  const call = command => spawnSync(p('flush'), [command, p('mnt'), socket], { encoding: 'utf8', timeout: 10000 });
+  const baselineSocket = p('var/run/baseline.sock');
+  const call = (command, endpoint = socket) => spawnSync(p('flush'), [command, p('mnt'), endpoint], { encoding: 'utf8', timeout: 10000 });
+  if (mode === 2) {
+    // Counterfactual red probe: retain both syncfs checks but disable only
+    // the journal probe. Keep its symbol referenced for -Werror builds.
+    const current = fs.readFileSync(source, 'utf8');
+    const withoutProbe = current.replace('!failed && journal_probe(overlay)', '!failed && 0 && journal_probe(overlay)');
+    assert.notEqual(withoutProbe, current, 'mutation must disable exactly the journal check');
+    put('without-probe.c', withoutProbe);
+    ok(spawnSync('cc', ['-std=c99', '-Wall', '-Wextra', '-Werror', p('without-probe.c'), '-o', p('without-probe')], { encoding: 'utf8' }));
+  }
   let daemon, mounted = false;
   t.after(async () => {
-    if (fs.existsSync(socket)) call('stop');
+    for (const endpoint of [socket, baselineSocket]) if (fs.existsSync(endpoint)) call('stop', endpoint);
     if (mounted || fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n').some(line => line.split(' ')[4] === p('mnt'))) ok(spawnSync('fusermount3', ['-u', p('mnt')], { encoding: 'utf8' }));
     if (daemon && daemon.exitCode === null) {
       daemon.kill('SIGTERM');
@@ -38,7 +58,7 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
     fs.rmSync(root, { recursive: true, force: true });
   });
   let errors = '';
-  daemon = spawn(p('fuse'), [p('mnt'), p('writeback-receipt'), fail ? '1' : '0']);
+  daemon = spawn(p('fuse'), [p('mnt'), p('writeback-receipt'), String(mode)]);
   daemon.stderr.on('data', b => { errors += b; });
   for (let n = 0; n < 200; n++) {
     if (fs.existsSync(p('mnt/.fs_state'))) break;
@@ -48,6 +68,7 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
   }
   assert.equal(fs.readlinkSync(p('mnt/.fs_state')), '2', errors); mounted = true;
   ok(call('arm')); ok(call('arm')); ok(call('check'));
+  if (mode === 2) ok(spawnSync(p('without-probe'), ['arm', p('mnt'), baselineSocket], { encoding: 'utf8' }));
   const fd = fs.openSync(p('mnt/fault'), 'r+');
   try {
     assert.equal(fs.writeSync(fd, Buffer.alloc(4096, 42)), 4096, 'write(2) acknowledges the dirty cached page');
@@ -55,7 +76,7 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
     // descriptor must still observe its error after sync() returned success.
     ok(spawnSync(busybox, ['sync'], { encoding: 'utf8', timeout: 15000 }));
     const receipt = fs.readFileSync(p('writeback-receipt'), 'utf8');
-    assert.match(receipt, fail ? /writeback EIO/ : /writeback OK/);
+    assert.match(receipt, mode === 1 ? /writeback EIO/ : /writeback OK/);
     t.diagnostic(`cached write acknowledged 4096 bytes; bare BusyBox sync exited 0; ${receipt.trim()}`);
     put('etc/osi-rootfs-grow-needs-resize', 'pending');
     put('var/run/osi-rootfs-grow-reboot', 'queued');
@@ -75,11 +96,29 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
     for (const [name, body] of [['logger', ':'], ['reboot', `echo reboot >> ${quote(p('reboots'))}`]]) {
       put(`bin/${name}`, `#!${busybox} ash\n${body}\n`); fs.chmodSync(p(`bin/${name}`), 0o755);
     }
-    const run = () => spawnSync(busybox, ['ash', '-c', '. "$1"; start', 'service', p('service')], { encoding: 'utf8', timeout: 15000, env: { ...process.env, PATH: p('bin') } });
+    const run = (file = 'service') => spawnSync(busybox, ['ash', '-c', '. "$1"; start', 'service', p(file)], { encoding: 'utf8', timeout: 15000, env: { ...process.env, PATH: p('bin') } });
+    if (mode === 2) {
+      put('service-without-probe', service.replaceAll(helperPath, p('without-probe')).replaceAll(socket, baselineSocket));
+      ok(run('service-without-probe'));
+      assert.equal(fs.readFileSync(p('reboots'), 'utf8').trim(), 'reboot');
+      assert.doesNotMatch(fs.readFileSync(p('writeback-receipt'), 'utf8'), /probe create/);
+      t.diagnostic('RED counterfactual: disabling only the journal probe permits reboot after the simulated abort; both syncfs calls return zero.');
+      fs.unlinkSync(p('reboots')); put('var/run/osi-rootfs-grow-reboot', 'queued');
+    }
     const result = run();
     if (fail) {
-      assert.notEqual(result.status, 0, 'writeback EIO must block the shipped reboot gate');
-      assert.match(result.stderr, /Input\/output error/);
+      assert.notEqual(result.status, 0, 'storage failure must block the shipped reboot gate');
+      assert.match(result.stderr, mode === 2 || mode === 5 ? /Read-only file system/ : /Input\/output error/);
+      if (mode === 2) {
+        // The FUSE stub has a clean kernel writeback cursor. Its EROFS only
+        // occurs when the real helper attempts a journal-starting create.
+        assert.match(fs.readFileSync(p('writeback-receipt'), 'utf8'), /probe create EROFS \(simulated aborted journal\)/);
+        t.diagnostic('Journal abort simulated at FUSE create; no real ext4/JBD2 fault was injected.');
+      }
+      if (mode >= 3) {
+        const operation = { 3: 'write EIO', 4: 'file fsync EIO', 5: 'unlink EROFS', 6: 'directory fsync EIO' }[mode];
+        assert.ok(fs.readFileSync(p('writeback-receipt'), 'utf8').includes('probe ' + operation));
+      }
       assert.ok(!fs.existsSync(p('reboots')));
       assert.ok(fs.existsSync(p('etc/osi-rootfs-grow-needs-resize')));
       assert.ok(fs.existsSync(p('var/run/osi-rootfs-grow-reboot')));
@@ -89,6 +128,7 @@ for (const fail of [false, true]) test(`kernel writeback ${fail ? 'EIO blocks an
       assert.notEqual(run().status, 0, 'a same-boot retry cannot forget the failed initialization writes');
     } else {
       ok(result); assert.equal(fs.readFileSync(p('reboots'), 'utf8').trim(), 'reboot');
+      assert.match(fs.readFileSync(p('writeback-receipt'), 'utf8'), /probe create OK\nprobe write OK\nprobe file fsync OK\nprobe unlink OK\nprobe directory fsync OK\n/);
       assert.ok(fs.existsSync(p('etc/osi-rootfs-grow-needs-resize')));
       assert.ok(!fs.existsSync(p('var/run/osi-rootfs-grow-reboot')));
     }

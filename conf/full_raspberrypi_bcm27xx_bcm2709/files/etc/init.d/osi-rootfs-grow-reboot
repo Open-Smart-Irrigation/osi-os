@@ -25,12 +25,12 @@ start() {
     return 1
   fi
   # S07 opened this descriptor before initialization writes. syncfs reports
-  # writeback failures since then, including failures hidden by bare sync.
+  # writeback failures since then; a journal probe also rejects old aborts.
   /usr/libexec/osi-rootfs-flush flush /overlay /var/run/osi-rootfs-grow-flush.sock || {
-    logger -t osi-rootfs-grow "checked overlay flush failed; growth reboot deferred, pending state retained"
+    logger -t osi-rootfs-grow "checked overlay flush or journal probe failed; growth reboot deferred, pending state retained"
     return 1
   }
-  logger -t osi-rootfs-grow "checked overlay flush complete; overlay READY; rebooting to grow filesystem"
+  logger -t osi-rootfs-grow "checked overlay flush and journal probe complete; overlay READY; rebooting to grow filesystem"
   reboot || {
     logger -t osi-rootfs-grow "growth reboot request failed; pending state retained"
     return 1

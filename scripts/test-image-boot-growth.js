@@ -66,6 +66,7 @@ for (const [shell, args] of shells) {
     });
     const p = f => path.join(root, f);
     fs.mkdirSync(p('bin'));
+    fs.mkdirSync(p('overlay/upper'), { recursive: true });
     if (lifecycle) for (const dir of ['etc', 'data', 'srv']) {
       fs.mkdirSync(p(`overlay/upper/${dir}`), { recursive: true });
       fs.symlinkSync(p(`overlay/upper/${dir}`), p(dir));

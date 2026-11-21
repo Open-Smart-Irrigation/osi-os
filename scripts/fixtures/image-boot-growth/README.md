@@ -26,3 +26,13 @@ separate writeback regression. Its writeback callback returns EIO after a
 successful cached write. The test runs the actual packaged helper and S96,
 including a successful bare BusyBox sync before the checked flush. FUSE is
 required in CI; the test does not skip or substitute a shell error stub.
+
+The same FUSE fixture supports the journal probe's create/write/fsync/unlink
+and directory-fsync calls. Its third mode simulates an already-aborted
+journal: cached data writes succeed without a kernel writeback error, then
+probe creation returns EROFS. This mode is a filesystem stub, not an injected
+ext4/JBD2 commit-record fault. The packaged helper and S96 still run unchanged.
+The test also disables only the journal probe in a second compiled helper
+and demonstrates that it permits the erroneous reboot with two successful
+syncfs calls. Additional stub modes fail probe write, file fsync, unlink and
+directory fsync; each must retain both intents and latch the failure.
