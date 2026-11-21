@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -19,6 +20,7 @@ from archives import verified_archive
 import boot_safety
 import customer_fixture
 import minimal_flows
+import radio_suite
 import run
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 import upgrade_suite
@@ -28,6 +30,53 @@ import upgrade_suite
 PINNED_CAPABILITY = 'function persistFlowHold(stamp, reason) {'
 DIGEST = b'a' * 64
 COMMIT = b'node-red.init: committed flows.json digest=' + DIGEST + b' stamp=20261120T000000Z\r\n'
+
+
+class RadioTests(unittest.TestCase):
+    def test_wrong_socket_can_accept_bytes_but_cannot_pass(self):
+        host, wrong_peer = socket.socketpair()
+        with host, wrong_peer, patch.object(radio_suite, 'RECEIPT_TIMEOUT', 0.01, create=True):
+            with self.assertRaisesRegex(RuntimeError, 'no WM1302 model delivery receipt'):
+                radio_suite._send(host, b'fixture')
+            self.assertTrue(wrong_peer.recv(32))
+
+    def test_model_receipt_with_zero_delivered_frames_fails(self):
+        host, model = socket.socketpair()
+        with host, model:
+            model.sendall(b'\x01\xfe\x00\x00')
+            with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+                radio_suite._send(host, b'fixture')
+
+    def test_model_receipt_counts_a_delivered_frame(self):
+        host, model = socket.socketpair()
+        with host, model:
+            model.sendall(b'\x01\xfe\x00\x01')
+            self.assertEqual(radio_suite._send(host, b'fixture'), 1)
+            self.assertEqual(model.recv(32), b'\x07\xfe\x07\x35\xc8\x01\x60\x00fixture')
+
+    def test_model_delivery_without_concentratord_crc_ok_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '0')
+        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+            radio_suite._radio_evidence(vm, 'fixture', 1)
+
+    def test_unavailable_concentratord_count_fails(self):
+        vm = Mock()
+        vm.command.return_value = (1, '4')
+        with self.assertRaisesRegex(RuntimeError, 'CRC_OK count unavailable'):
+            radio_suite._radio_evidence(vm, 'fixture', 4)
+
+    def test_positive_model_and_concentratord_counts_pass(self):
+        vm = Mock()
+        vm.command.return_value = (0, '2')
+        self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 2),
+                         'WM1302 model delivered=2, Concentratord CRC_OK=2')
+
+    def test_uplink_case_without_injections_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '4')
+        with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+            radio_suite.inject(vm, {})
 
 
 class FlowTests(unittest.TestCase):
@@ -196,7 +245,7 @@ class FlowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             vm = Guest.__new__(Guest)
             vm.work = vm.receipts = Path(directory)
-            vm.process = vm.bridge = None
+            vm.process = vm.bridge = vm.radio = None
             vm.direct_io = True
             (vm.work/'sd.img').write_bytes(b'live disk')
 
@@ -230,10 +279,20 @@ class FlowTests(unittest.TestCase):
             vm.direct_io = True
             (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
             report = re.search(rb'(READY|FAILED)', b'READY')
-            with (patch('suite_vm.subprocess.Popen') as launch,
+            def verify_launch(args, **options):
+                if '-chardev' in args:
+                    radio_fd = options['pass_fds'][1]
+                    self.assertIn(f'socket,id=wm1302-air,fd={radio_fd},server=off', args)
+                    with socket.socket(fileno=os.dup(radio_fd)) as peer:
+                        peer.sendall(b'from this boot')
+                return Mock()
+
+            with (patch('suite_vm.subprocess.Popen', side_effect=verify_launch) as launch,
                   patch.object(vm, 'expect', return_value=report),
                   patch.object(vm, 'send')):
                 vm.start(inspection=True)
+                with vm.radio as host:
+                    self.assertEqual(host.recv(32), b'from this boot')
             command = launch.call_args.args[0]
             self.assertIn('if=sd,format=raw,file=inspect.img,cache=none', command)
             self.assertIn('init=/bin/sh', command[command.index('-append')+1])
@@ -504,11 +563,13 @@ class BoundaryTests(unittest.TestCase):
             vm = Guest.__new__(Guest)
             guest, bridge = Mock(), Mock()
             vm.process, vm.bridge = guest, bridge
+            vm.radio, peer = socket.socketpair()
+            host = vm.radio
             vm.boots = 1
             vm.receipts = Path(directory)/'missing'
             guest.poll.return_value = bridge.poll.return_value = None
             guest.wait.side_effect = bridge.wait.side_effect = [subprocess.TimeoutExpired('qemu', 5), -9]
-            with self.assertRaises(ExceptionGroup):
+            with peer, self.assertRaises(ExceptionGroup):
                 vm.stop()
             for process in (guest, bridge):
                 process.terminate.assert_called_once()
@@ -516,6 +577,8 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(process.wait.call_count, 2)
             self.assertIsNone(vm.process)
             self.assertIsNone(vm.bridge)
+            self.assertIsNone(vm.radio)
+            self.assertEqual(host.fileno(), -1)
 
     def test_firmware_override_checksum(self):
         with tempfile.TemporaryDirectory() as directory:

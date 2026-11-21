@@ -2,21 +2,20 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
-import socket
 import time
 import urllib.error
 import urllib.request
 
 from lorawan import LoRaWAN10
-from run import rf_frame
+from run import RF_RECEIPT_CHANNEL, rf_frame
 from upgrade_suite import checked, sql
 
 VALVE = 'A840410000000001'
 SENSOR = 'A840410000000002'
 STREGA = bytes.fromhex('333630377423ffffffff23')
 LSN50 = bytes.fromhex('A2030CE404E209290220080008000800080021FFFFFFFF08000800')
+RECEIPT_TIMEOUT = 10
 
 
 class LocalOnly(urllib.request.HTTPRedirectHandler):
@@ -42,39 +41,65 @@ def _api(vm, method, path, body=None, token=None):
         raise RuntimeError(f'OSI API returned HTTP {exc.code}') from None
 
 
-def _radio(vm):
-    # The kernel limits AF_UNIX addresses to 108 bytes. QEMU binds a relative
-    # name in the guest workspace and this short alias reaches the same socket.
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(20)
-    try:
-        directory = os.open(vm.work, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            sock.connect(f'/proc/self/fd/{directory}/radio')
-        finally:
-            os.close(directory)
-    except BaseException:
-        sock.close()
-        raise
-    return sock
-
-
-def _receive(sock, timeout=20):
+def _read_packet(sock, timeout):
     sock.settimeout(timeout)
     def exact(n):
         data = bytearray()
         while len(data) < n:
             part = sock.recv(n-len(data))
             if not part:
-                raise RuntimeError('radio disconnected')
+                raise ConnectionError('radio disconnected')
             data.extend(part)
         return bytes(data)
-    length, _, _ = exact(3)
-    return exact(length)
+    length, channel, spreading_factor = exact(3)
+    return channel, spreading_factor, exact(length)
+
+
+def _receive(sock, timeout=20):
+    channel, _, payload = _read_packet(sock, timeout)
+    if channel not in (0, 1):
+        raise RuntimeError('unexpected WM1302 downlink channel')
+    return payload
 
 
 def _send(sock, frame):
-    sock.sendall(rf_frame(frame, 902300000))
+    try:
+        sock.settimeout(RECEIPT_TIMEOUT)
+        sock.sendall(rf_frame(frame, 902300000, receipt=True))
+        channel, sf, receipt = _read_packet(sock, RECEIPT_TIMEOUT)
+    except OSError as exc:
+        raise RuntimeError('no WM1302 model delivery receipt (radio socket timed out or disconnected)') from exc
+    if (channel, sf) != (RF_RECEIPT_CHANNEL, 0) or receipt not in (b'\x00', b'\x01'):
+        raise RuntimeError('invalid WM1302 model delivery receipt')
+    if receipt == b'\x00':
+        raise RuntimeError('WM1302 model delivered zero frames (uplink rejected by RX FIFO)')
+    return 1
+
+
+def _mark_crc_window(vm):
+    marker = secrets.token_hex(8)
+    checked(vm, f'logger -t osi-radio-suite {marker}')
+    return marker
+
+
+def _radio_evidence(vm, marker, delivered):
+    if delivered <= 0:
+        raise RuntimeError('WM1302 model delivered zero frames')
+    # Concentratord logs this line only after the CRC filter and protobuf
+    # conversion. Verify the filter is enabled before counting those lines.
+    code, count = vm.command(rf"""set -e
+grep -Eq '^ *disable_crc_filter *= *false *$' /var/etc/chirpstack-concentratord/concentratord.toml
+logs=$(logread)
+printf '%s\n' "$logs" | awk -v marker='{marker}' '
+/osi-radio-suite: / && $NF == marker {{ seen=1; next }}
+seen && /chirpstack-concentratord-sx1302\[[0-9]+\]: Frame received, uplink_id:/ {{ count++ }}
+END {{ if (!seen) exit 1; print count+0 }}'
+""")
+    if code or not count.isdecimal():
+        raise RuntimeError(f'Concentratord CRC_OK count unavailable (model delivered {delivered})')
+    if int(count) <= 0:
+        raise RuntimeError(f'Concentratord CRC_OK=0 (model delivered {delivered})')
+    return f'WM1302 model delivered={delivered}, Concentratord CRC_OK={count}'
 
 
 def _wait_history(vm, query, expected):
@@ -101,13 +126,22 @@ uci commit
 /etc/init.d/chirpstack restart
 /etc/init.d/chirpstack-concentratord restart
 /etc/init.d/chirpstack-mqtt-forwarder restart
-for i in $(seq 1 90); do test -S /tmp/concentratord_command && wget -q -O /dev/null http://127.0.0.1:8080/ && break; sleep 2; done
-test -S /tmp/concentratord_command
+for i in $(seq 1 90); do wget -q -T 2 -O /dev/null http://127.0.0.1:8080/ && break; sleep 2; done
+wget -q -T 2 -O /dev/null http://127.0.0.1:8080/
 CS_PROFILE_STREGA_NAME="OSI STREGA US915" CS_PROFILE_LSN50_NAME="OSI LSN50 US915" CS_REGION=US915 node /usr/share/node-red/chirpstack-bootstrap.js >/dev/null
 /etc/init.d/node-red restart
 for i in $(seq 1 150); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)" = 401 ] && exit 0; sleep 2; done
 exit 1
 """, 850)
+    code, _ = vm.command("""for i in $(seq 1 30); do
+    if gateway-id -c ipc:///tmp/concentratord_command | grep -Eq '^[0-9a-f]{16}$'; then
+        exit 0
+    fi
+    sleep 1
+done
+exit 1""", 60)
+    if code:
+        raise RuntimeError('WM1302 Concentratord did not answer the gateway-ID readiness probe')
 
 
 def register(vm,password):
@@ -127,47 +161,53 @@ def register(vm,password):
 
 
 def inject(vm,sessions):
-    with _radio(vm) as sock:
-        for eui,session in sessions.items():
-            _send(sock,session.join_request())
-            deadline=time.monotonic()+40
-            while time.monotonic()<deadline:
-                try:
-                    reply=_receive(sock,max(0.1,deadline-time.monotonic()))
-                except TimeoutError:
-                    break
-                if reply[:1]==b'\x20':
-                    session.accept_join(reply)
-                    break
-            if session.devaddr is None:
-                raise RuntimeError(f'{eui}: join-accept absent')
-            _send(sock, session.uplink(STREGA if eui==VALVE else LSN50,1,fport=4 if eui==VALVE else 11))
-            query = (f"SELECT EXISTS(SELECT 1 FROM device_data WHERE upper(deveui)='{eui}' AND bat_pct=100);" if eui==VALVE else
-                     f"SELECT EXISTS(SELECT 1 FROM watermark_readings WHERE upper(deveui)='{eui}' AND soil_temp_c=12.5);")
-            _wait_history(vm,query,'1')
-    return sessions
+    sock = vm.radio
+    marker = _mark_crc_window(vm)
+    delivered = 0
+    for eui,session in sessions.items():
+        delivered += _send(sock,session.join_request())
+        deadline=time.monotonic()+40
+        while time.monotonic()<deadline:
+            try:
+                reply=_receive(sock,max(0.1,deadline-time.monotonic()))
+            except TimeoutError:
+                break
+            if reply[:1]==b'\x20':
+                session.accept_join(reply)
+                break
+        if session.devaddr is None:
+            evidence = _radio_evidence(vm, marker, delivered)
+            raise RuntimeError(f'{eui}: join-accept absent ({evidence})')
+        delivered += _send(sock, session.uplink(STREGA if eui==VALVE else LSN50,1,fport=4 if eui==VALVE else 11))
+        query = (f"SELECT EXISTS(SELECT 1 FROM device_data WHERE upper(deveui)='{eui}' AND bat_pct=100);" if eui==VALVE else
+                 f"SELECT EXISTS(SELECT 1 FROM watermark_readings WHERE upper(deveui)='{eui}' AND soil_temp_c=12.5);")
+        _wait_history(vm,query,'1')
+    return _radio_evidence(vm, marker, delivered)
 
 
 def run_uplinks(vm,password):
     configure_gateway(vm)
-    return inject(vm, register(vm,password))
+    sessions = register(vm, password)
+    return sessions, inject(vm, sessions)
 
 
-def run_valve(vm,password,session,gui_open):
+def run_valve(vm, session, gui_open):
     if VALVE not in session:
         raise RuntimeError('no authenticated valve radio session')
     valve=session[VALVE]
-    with _radio(vm) as sock:
-        gui_open()
-        try: _receive(sock,2)
-        except TimeoutError: pass
-        else: raise RuntimeError('valve downlink before receive window')
-        _send(sock,valve.uplink(STREGA,2,fport=4))
-        command=valve.downlink(_receive(sock,40))
-        if command['fport'] != 2 or command['payload'] != bytes.fromhex('4101'):
-            raise RuntimeError('timed-open downlink payload mismatch')
-        opened=bytearray(STREGA)
-        opened[4]=0x75
-        _send(sock,valve.uplink(bytes(opened),3,fport=4))
-        _wait_history(vm,f"SELECT current_state FROM devices WHERE upper(deveui)='{VALVE}';",'OPEN')
-        _wait_history(vm,f"SELECT EXISTS(SELECT 1 FROM valve_actuation_expectations WHERE upper(device_eui)='{VALVE}' AND commanded_duration_seconds=60 AND (observed_open_at IS NOT NULL OR json_type(transport_json,'$.untrusted_report.open')='object'));",'1')
+    sock = vm.radio
+    marker = _mark_crc_window(vm)
+    gui_open()
+    try: _receive(sock,2)
+    except TimeoutError: pass
+    else: raise RuntimeError('valve downlink before receive window')
+    delivered = _send(sock,valve.uplink(STREGA,2,fport=4))
+    command=valve.downlink(_receive(sock,40))
+    if command['fport'] != 2 or command['payload'] != bytes.fromhex('4101'):
+        raise RuntimeError('timed-open downlink payload mismatch')
+    opened=bytearray(STREGA)
+    opened[4]=0x75
+    delivered += _send(sock,valve.uplink(bytes(opened),3,fport=4))
+    _wait_history(vm,f"SELECT current_state FROM devices WHERE upper(deveui)='{VALVE}';",'OPEN')
+    _wait_history(vm,f"SELECT EXISTS(SELECT 1 FROM valve_actuation_expectations WHERE upper(device_eui)='{VALVE}' AND commanded_duration_seconds=60 AND (observed_open_at IS NOT NULL OR json_type(transport_json,'$.untrusted_report.open')='object'));",'1')
+    return _radio_evidence(vm, marker, delivered)

@@ -10,6 +10,7 @@
 #include "system/memory.h"
 
 #define SSI_FIFO_DEPTH 64
+#define WM_AIR_RECEIPT 254
 
 /* The SX1250 command address is 16 bits. The modeled control registers
  * used by the SX1302 HAL are in the first 4 KiB. */
@@ -145,11 +146,11 @@ static unsigned wm_find_channel(WmSpiState *s, uint32_t hz, uint8_t bandwidth)
     return 8;
 }
 
-static void wm_queue_rx(WmSpiState *s)
+static bool wm_queue_rx(WmSpiState *s)
 {
     uint8_t size = s->frame[0], channel = s->frame[1], sf = s->frame[2];
     const uint8_t *payload = s->frame + 3;
-    if (channel == 255) {
+    if (channel >= WM_AIR_RECEIPT) {
         channel = wm_find_channel(s, ldl_be_p(payload), payload[4]);
         payload += 5;
     }
@@ -158,10 +159,10 @@ static void wm_queue_rx(WmSpiState *s)
     unsigned len = size + 23;
     /* HAL: CORR_EN (0x5821) has one bit per multi-SF IF; CORR_SF_EN (0x5822)
      * uses bit 0 for SF5 through bit 7 for SF12. */
-    if (!s->active || !(s->regs[0x405] & 2) || channel > 7 || sf < 5 || sf > 12 ||
+    if (!size || !s->active || !(s->regs[0x405] & 2) || channel > 7 || sf < 5 || sf > 12 ||
         !(s->regs[0x621] & (1u << channel)) || !(s->regs[0x622] & (1u << (sf - 5))) ||
         len + s->fifo_count > sizeof(s->fifo)) {
-        return;
+        return false;
     }
     memcpy(record + 9, payload, size);
     for (unsigned i = 0; i < size; i++) {
@@ -181,6 +182,17 @@ static void wm_queue_rx(WmSpiState *s)
     for (unsigned i = 0; i < len; i++) {
         s->fifo[(s->fifo_head + s->fifo_count++) % sizeof(s->fifo)] = record[i];
     }
+    return true;
+}
+
+static void wm_air_write(WmSpiState *s, const uint8_t *frame, int len)
+{
+    if (qemu_chr_fe_backend_open(&s->air) &&
+        qemu_chr_fe_write(&s->air, frame, len) != len) {
+        /* A stalled observer must not stop the virtual CPU or leave a
+         * partial packet in a stream that will receive later frames. */
+        qemu_chr_fe_disconnect(&s->air);
+    }
 }
 
 static void wm_air_read(void *opaque, const uint8_t *bytes, int count)
@@ -191,10 +203,17 @@ static void wm_air_read(void *opaque, const uint8_t *bytes, int count)
         if (s->frame_len < 3) {
             continue;
         }
-        unsigned header = s->frame[1] == 255 ? 8 : 3;
+        unsigned header = s->frame[1] >= WM_AIR_RECEIPT ? 8 : 3;
         if (s->frame_len == s->frame[0] + header) {
-            wm_queue_rx(s);
+            bool receipt_requested = s->frame[1] == WM_AIR_RECEIPT;
+            bool delivered = wm_queue_rx(s);
             s->frame_len = 0;
+            if (receipt_requested) {
+                /* Report the number of packets added to the HAL FIFO by
+                 * this request. Legacy channel 255 never produces a receipt. */
+                uint8_t receipt[] = {1, WM_AIR_RECEIPT, 0, delivered};
+                wm_air_write(s, receipt, sizeof(receipt));
+            }
         }
     }
 }
@@ -244,12 +263,7 @@ static void wm_tx_event(void *opaque)
         uint8_t len = reg[99];
         uint8_t frame[258] = {len, tx->chain, reg[96] & 15};
         memcpy(frame + 3, reg + 256, len);
-        if (qemu_chr_fe_backend_open(&s->air) &&
-            qemu_chr_fe_write(&s->air, frame, len + 3) != len + 3) {
-            /* A stalled observer must not stop the virtual CPU or leave a
-             * partial packet in a stream that will receive later frames. */
-            qemu_chr_fe_disconnect(&s->air);
-        }
+        wm_air_write(s, frame, len + 3);
         tx->status = 0x30;
         timer_mod(tx->timer, qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) + wm_airtime(reg));
     } else {

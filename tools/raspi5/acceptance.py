@@ -613,10 +613,12 @@ def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
     def uplinks():
         from radio_suite import run_uplinks
         try:
-            session.update(run_uplinks(vm,password))
+            joined, evidence = run_uplinks(vm,password)
+            session.update(joined)
+            return evidence
         except Exception:
             # Report only fixed labels and counts. Application logs can contain credentials.
-            _, diag=vm.command('''for needle in "JoinRequest" "join-request" "invalid MIC" "InvalidMIC" "unknown device" "region mismatch" "device-profile" "uplink frame" "downlink frame" "Too late" "TX_ACK" "CRC_OK"; do
+            _, diag=vm.command('''for needle in "JoinRequest" "join-request" "invalid MIC" "InvalidMIC" "unknown device" "region mismatch" "device-profile" "Frame received, uplink_id:" "downlink frame" "Too late" "TX_ACK"; do
 printf '%s ' "$needle"; logread | grep -Fi -c "$needle"; done
 for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302; do pidof "$svc" >/dev/null && echo "$svc running"; done''')
             (vm.receipts/'radio-diagnostics.log').write_text(diag+'\n')
@@ -624,8 +626,9 @@ for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302;
     test('WM1302 uplinks',uplinks)
     def valve():
         from radio_suite import run_valve, VALVE
-        run_valve(vm,password,session,lambda: gui(vm,password,'open',VALVE))
+        evidence = run_valve(vm,session,lambda: gui(vm,password,'open',VALVE))
         gui(vm,password,'outcome',VALVE)
+        return evidence
     test('Valve open and outcome',valve)
     def reboot():
         sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")

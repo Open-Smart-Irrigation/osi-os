@@ -45,8 +45,8 @@ Set `OSI_HEAVY` if the workstation wrapper is installed outside its default
 location. Invoke the command outside any current `osi-heavy` holder so it can
 queue its own slot. The evidence root must exist outside every Git worktree
 and have room for sparse writable SD copies and USB media. The guest network is
-restricted to the emulated link and a host-loopback GUI forward. The radio
-exchanges simulated frames over a Unix socket.
+restricted to the emulated link and a host-loopback GUI forward. Each boot
+passes a fresh Unix socket pair to QEMU for the radio.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
 run directory with the candidate SHA, image checksum, and tools revision. The run must exit zero. The final table lists each expected case, its observed
@@ -62,6 +62,12 @@ valve checks still belong on the real-device sheet.
 The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
+
+Both radio cases record the number of frames the WM1302 model accepted into
+its RX FIFO and the number Concentratord logged after its CRC filter. Each
+injection needs a model receipt, and each case needs a positive CRC_OK count
+from its own log window. Rebuild QEMU with these tools if the cached binary
+does not return model receipts.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's
