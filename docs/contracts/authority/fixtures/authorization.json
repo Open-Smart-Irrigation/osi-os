@@ -7361,7 +7361,7 @@
       }
     },
     {
-      "id": "before-token-issued",
+      "id": "issued-at-is-not-revocation-authority",
       "input": {
         "action": "read_history",
         "session": {
@@ -7369,8 +7369,8 @@
         }
       },
       "expected": {
-        "decision": "deny",
-        "reason": "clock_before_issue",
+        "decision": "allow",
+        "reason": "authorized",
         "effects": 0
       }
     },
@@ -7714,7 +7714,7 @@
       }
     },
     {
-      "id": "clock-behind-high-water-expires-still-young-token",
+      "id": "clock-behind-high-water-keeps-unexpired-token",
       "input": {
         "action": "read_history",
         "now_ms": 1000,
@@ -7724,10 +7724,9 @@
         }
       },
       "expected": {
-        "decision": "deny",
-        "reason": "session_expired",
-        "effects": 0,
-        "http_status": 401
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 0
       }
     },
     {
@@ -10589,6 +10588,358 @@
         "reason": "insufficient_role",
         "effects": 0
       }
+    },
+    {
+      "id": "cloud-prediction-owner-viewer",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "gateway_role": "viewer",
+          "zone_relation": "owned"
+        },
+        "resource": {}
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "insufficient_role",
+        "effects": 0
+      }
+    },
+    {
+      "id": "cloud-prediction-unmapped",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "local_actor_mapped": false,
+          "zone_relation": "owned"
+        },
+        "resource": {}
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "gateway_authority_required",
+        "effects": 0
+      }
+    },
+    {
+      "id": "cloud-prediction-missing-membership",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "gateway_membership_confirmed": false,
+          "zone_relation": "owned"
+        },
+        "resource": {}
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "gateway_authority_required",
+        "effects": 0
+      }
+    },
+    {
+      "id": "cloud-prediction-granted-researcher",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "gateway_role": "researcher",
+          "zone_relation": "granted"
+        },
+        "resource": {}
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized",
+        "effects": 1
+      }
+    },
+    {
+      "id": "cloud-prediction-outsider",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "zone_relation": "none"
+        },
+        "resource": {}
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "cloud-prediction-stale-capability",
+      "input": {
+        "origin": "cloud",
+        "action": "prediction_setting",
+        "actor": {
+          "zone_relation": "owned"
+        },
+        "resource": {
+          "capability_state": "stale"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "capability_unavailable",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-issue-lost-grant",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "issue",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized_stop_continuation",
+        "effects": 1,
+        "opens": 0,
+        "reenables": 0,
+        "extends": 0,
+        "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
+        "revocation_noted": true
+      }
+    },
+    {
+      "id": "close-override-after-revocation-issue-disabled",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "issue",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": false
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized_stop_continuation",
+        "effects": 1,
+        "opens": 0,
+        "reenables": 0,
+        "extends": 0,
+        "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
+        "revocation_noted": true
+      }
+    },
+    {
+      "id": "close-override-after-revocation-issue-new-request",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "issue",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": false,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-issue-foreign-binding",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "issue",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": false
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-issue-not-reduce-only",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "issue",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": false,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-apply-lost-grant",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "apply",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized_stop_continuation",
+        "effects": 1,
+        "opens": 0,
+        "reenables": 0,
+        "extends": 0,
+        "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
+        "revocation_noted": true
+      }
+    },
+    {
+      "id": "close-override-after-revocation-apply-disabled",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "apply",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": false
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "allow",
+        "reason": "authorized_stop_continuation",
+        "effects": 1,
+        "opens": 0,
+        "reenables": 0,
+        "extends": 0,
+        "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
+        "revocation_noted": true
+      }
+    },
+    {
+      "id": "close-override-after-revocation-apply-new-request",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "apply",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": false,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-apply-foreign-binding",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "apply",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": true,
+          "binding_matches": false
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
+    },
+    {
+      "id": "close-override-after-revocation-apply-not-reduce-only",
+      "input": {
+        "origin": "cloud",
+        "action": "close_override",
+        "stage": "apply",
+        "actor": {
+          "zone_relation": "none",
+          "enabled": true
+        },
+        "continuation": {
+          "accepted": true,
+          "trusted": true,
+          "reduce_only": false,
+          "binding_matches": true
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "resource_not_found",
+        "effects": 0
+      }
     }
   ],
   "radio_tools": [
@@ -10642,5 +10993,10 @@
         "cloud"
       ]
     }
-  ]
+  ],
+  "cloud_prediction_baseline_delta": {
+    "inventory_id": "prediction_owner_shortcut",
+    "function": "PredictionController.writableZone",
+    "required_change": "Remove owner short-circuit; every retained prediction write uses normal mapped enabled writer and owned/granted zone authority. No exception."
+  }
 }

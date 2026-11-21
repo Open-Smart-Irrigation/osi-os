@@ -621,6 +621,13 @@
             },
             "upgrade_outcome": {
               "type": "string"
+            },
+            "cloud_revocation_status": {
+              "enum": [
+                "none",
+                "pending",
+                "applied"
+              ]
             }
           },
           "required": [
@@ -648,7 +655,8 @@
             "transport_revision",
             "transport_subject_kind",
             "transport_token",
-            "used_incarnations"
+            "used_incarnations",
+            "cloud_revocation_status"
           ],
           "additionalProperties": false
         },
@@ -1705,6 +1713,36 @@
                   "op"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "reissue_pause"
+                  },
+                  "actor": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "authorized": {
+                    "type": "boolean"
+                  },
+                  "new_request": {
+                    "type": "boolean"
+                  },
+                  "expected": {
+                    "type": "object",
+                    "minProperties": 1
+                  }
+                },
+                "required": [
+                  "op",
+                  "actor",
+                  "authorized",
+                  "new_request",
+                  "expected"
+                ],
+                "additionalProperties": false
               }
             ]
           }
@@ -1730,12 +1768,6 @@
             "scoped_access": {
               "type": "boolean"
             },
-            "original_bootstrap_uuid": {
-              "type": "string"
-            },
-            "original_bootstrap_verified": {
-              "type": "boolean"
-            },
             "accounts": {
               "type": "array",
               "items": {
@@ -1752,13 +1784,23 @@
                   },
                   "generation": {
                     "type": "integer"
+                  },
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
                   "user_uuid",
                   "role",
                   "enabled",
-                  "generation"
+                  "generation",
+                  "id",
+                  "created_at"
                 ],
                 "additionalProperties": false
               }
@@ -1820,17 +1862,23 @@
             },
             "release_note_line": {
               "type": "string"
+            },
+            "users_sequence": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
             }
           },
           "required": [
             "accounts",
             "audit",
-            "original_bootstrap_uuid",
-            "original_bootstrap_verified",
             "receipt",
             "release_note_line",
             "release_notes",
-            "scoped_access"
+            "scoped_access",
+            "users_sequence"
           ],
           "additionalProperties": false
         },

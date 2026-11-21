@@ -72,7 +72,8 @@
       "product_default": false,
       "phil_may_override": false,
       "override_owner": null,
-      "rule": "Generation mismatch always denies. Keep a persisted time high-water mark; if clock is behind it, treat sessions as expired. Rollback never revives a token."
+      "rule": "Revocation uses generation only, never issued-at versus revocation times. A generation mismatch always denies. Expiry uses max(current clock, persisted high-water mark), so rollback cannot extend or revive expiry. Fresh valid local password login for an enabled account succeeds behind the mark, issuing a session with current generation and expiry based on that effective clock.",
+      "corrected_at": "2026-11-21"
     },
     {
       "id": "R6",

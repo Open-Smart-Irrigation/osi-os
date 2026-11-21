@@ -38,7 +38,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -202,7 +203,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -366,7 +368,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -530,7 +533,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -694,7 +698,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -858,7 +863,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1021,7 +1027,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1091,7 +1098,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1162,7 +1170,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1225,7 +1234,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1281,7 +1291,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1337,7 +1348,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1393,7 +1405,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1464,7 +1477,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1527,7 +1541,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1544,6 +1559,25 @@
         },
         {
           "op": "disconnect"
+        },
+        {
+          "op": "cloud_revoke",
+          "change": "password_reset"
+        },
+        {
+          "op": "assert_cloud_session",
+          "expected": {
+            "decision": "deny",
+            "reason": "cloud_session_revoked"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
         },
         {
           "op": "assert_session",
@@ -1567,7 +1601,70 @@
           },
           "commit": true,
           "expected": {
+            "decision": "pending_offline",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "offline",
+          "credential": "credential-a",
+          "subject": "gateway-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "offline",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "reconnect"
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v1"
+          },
+          "commit": true,
+          "expected": {
             "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "applied",
             "generation": 8
           }
         },
@@ -1591,9 +1688,6 @@
             "decision": "deny",
             "reason": "invalid_credential_context"
           }
-        },
-        {
-          "op": "reconnect"
         },
         {
           "op": "login",
@@ -1652,7 +1746,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1705,7 +1800,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1757,7 +1853,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1774,6 +1871,25 @@
         },
         {
           "op": "disconnect"
+        },
+        {
+          "op": "cloud_revoke",
+          "change": "password_reset"
+        },
+        {
+          "op": "assert_cloud_session",
+          "expected": {
+            "decision": "deny",
+            "reason": "cloud_session_revoked"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
         },
         {
           "op": "assert_session",
@@ -1797,7 +1913,70 @@
           },
           "commit": true,
           "expected": {
+            "decision": "pending_offline",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "offline",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "offline",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "reconnect"
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "generation": 7,
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
             "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "applied",
             "generation": 8
           }
         },
@@ -1821,9 +2000,6 @@
             "decision": "deny",
             "reason": "invalid_credential_context"
           }
-        },
-        {
-          "op": "reconnect"
         },
         {
           "op": "login",
@@ -1882,7 +2058,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1935,7 +2112,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -1987,7 +2165,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2111,7 +2290,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2207,7 +2387,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2321,7 +2502,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2388,7 +2570,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2454,7 +2637,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2524,7 +2708,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2618,7 +2803,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2696,7 +2882,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2774,7 +2961,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2867,7 +3055,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -2949,7 +3138,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3020,7 +3210,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3078,7 +3269,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3148,7 +3340,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3205,7 +3398,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3262,7 +3456,8 @@
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
         "transport_subject_kind": "gateway",
-        "upgrade_outcome": "recovery_required"
+        "upgrade_outcome": "recovery_required",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3378,7 +3573,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3444,7 +3640,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3529,7 +3726,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3613,7 +3811,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3681,7 +3880,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3750,7 +3950,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3767,6 +3968,12 @@
           "expected": {
             "decision": "deny",
             "reason": "cloud_session_revoked"
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending"
           }
         },
         {
@@ -3836,6 +4043,12 @@
           }
         },
         {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "applied"
+          }
+        },
+        {
           "op": "assert_session",
           "token": "offline-new",
           "expected": {
@@ -3892,7 +4105,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3951,7 +4165,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -3976,7 +4191,7 @@
       ]
     },
     {
-      "id": "clock-behind-mark-expires-young-token",
+      "id": "clock-behind-mark-preserves-unexpired-token",
       "initial": {
         "account_uuid": "11111111-1111-4111-8111-111111111111",
         "installation": "installation-a",
@@ -4010,7 +4225,8 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
@@ -4030,14 +4246,14 @@
           "op": "assert_session",
           "token": "young",
           "expected": {
-            "decision": "deny",
-            "reason": "session_expired"
+            "decision": "allow",
+            "effects": 0
           }
         }
       ]
     },
     {
-      "id": "clock-rollback-cannot-mint-usable-replacement-session",
+      "id": "offline-boot-at-build-time-fresh-login-succeeds",
       "initial": {
         "account_uuid": "11111111-1111-4111-8111-111111111111",
         "installation": "installation-a",
@@ -4052,7 +4268,131 @@
         "enabled": true,
         "role": "admin",
         "now_ms": 1000,
-        "high_water_ms": 1500,
+        "high_water_ms": 10000000,
+        "connected": false,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "restart"
+        },
+        {
+          "op": "login",
+          "token": "replacement",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "generation": 7
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "replacement",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "prepare_login",
+          "ticket": "delayed",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a"
+        },
+        {
+          "op": "finish_login",
+          "ticket": "delayed",
+          "token": "delayed-session",
+          "expected": {
+            "decision": "allow",
+            "generation": 7
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "delayed-session",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "password_reset",
+          "credential": "credential-b",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "replacement",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new-generation",
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "new-generation",
+          "expected": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "revoked-token-denied-at-any-clock",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
         "connected": true,
         "transport_authorized": true,
         "transport_token": "transport-a",
@@ -4071,20 +4411,57 @@
         "transport_revision": 1,
         "cloud_sessions_valid": true,
         "human_account_enabled": true,
-        "transport_subject_kind": "gateway"
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
       },
       "steps": [
         {
-          "op": "login",
-          "token": "replacement",
-          "credential": "credential-a",
-          "subject": "installation-a",
-          "installation": "installation-a",
-          "link_incarnation": "link-a",
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "commit_account",
+          "change": "role_change",
+          "role": "viewer",
+          "commit": true
+        },
+        {
+          "op": "clock",
+          "now_ms": 0
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
           "expected": {
             "decision": "deny",
-            "reason": "session_expired",
-            "http_status": 401
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "clock",
+          "now_ms": 1000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "clock",
+          "now_ms": 10000000
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
           }
         }
       ]

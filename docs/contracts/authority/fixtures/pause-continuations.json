@@ -197,7 +197,17 @@
             "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
             "extends": 0,
             "reenables": 0,
-            "revocation_noted": true
+            "revocation_noted": true,
+            "ui": "pause_pending_mirror",
+            "physical_closed": false
+          }
+        },
+        {
+          "op": "mirror",
+          "expected": {
+            "ui": "paused",
+            "confirmed_policy_enabled": false,
+            "opens": 0
           }
         }
       ]
@@ -273,7 +283,17 @@
             "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
             "extends": 0,
             "reenables": 0,
-            "revocation_noted": true
+            "revocation_noted": true,
+            "ui": "pause_pending_mirror",
+            "physical_closed": false
+          }
+        },
+        {
+          "op": "mirror",
+          "expected": {
+            "ui": "paused",
+            "confirmed_policy_enabled": false,
+            "opens": 0
           }
         }
       ]
@@ -518,6 +538,134 @@
             "decision": "deny",
             "reason": "binding_mismatch",
             "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "authorized-reissue-after-terminal-binding-refusal",
+      "initial": {
+        "actor": "11111111-1111-4111-8111-111111111111",
+        "original_actor": "11111111-1111-4111-8111-111111111111",
+        "command_actor": "11111111-1111-4111-8111-111111111111",
+        "has_grant": true,
+        "disabled": false,
+        "stop_policy": "reduce_only_continuation",
+        "accepted_pause": false,
+        "binding_matches": true,
+        "gateway_matches": true,
+        "policy_matches": true,
+        "create_pending": false,
+        "create_delivered": null,
+        "policy_enabled": false,
+        "issued": false,
+        "ack": null,
+        "ui": "idle",
+        "accepted_gateway": "gateway-a",
+        "accepted_zone_uuid": "zone-a",
+        "accepted_policy_uuid": "policy-a",
+        "command_gateway": "gateway-a",
+        "command_zone_uuid": "zone-a",
+        "command_policy_uuid": "policy-a",
+        "current_policy_version": 4,
+        "record_owner": "11111111-1111-4111-8111-111111111111",
+        "confirmed_policy_enabled": false,
+        "revocation_noted": false
+      },
+      "steps": [
+        {
+          "op": "accept_create",
+          "delivered": true
+        },
+        {
+          "op": "accept_pause"
+        },
+        {
+          "op": "answer_create",
+          "applied": true,
+          "create_mirror_confirmed": false
+        },
+        {
+          "op": "revoke_grant"
+        },
+        {
+          "op": "change_binding",
+          "patch": {
+            "policy_matches": false,
+            "command_policy_uuid": "foreign-policy"
+          }
+        },
+        {
+          "op": "issue_pause",
+          "expected": {
+            "decision": "deny",
+            "effects": 0,
+            "ui": "pause_refused_policy_may_remain_enabled"
+          }
+        },
+        {
+          "op": "reissue_pause",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "authorized": false,
+          "new_request": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "current_authority_required"
+          }
+        },
+        {
+          "op": "change_binding",
+          "patch": {
+            "binding_matches": true,
+            "gateway_matches": true,
+            "policy_matches": true,
+            "command_gateway": "gateway-a",
+            "command_zone_uuid": "zone-a",
+            "command_policy_uuid": "policy-a"
+          }
+        },
+        {
+          "op": "reissue_pause",
+          "actor": "22222222-2222-4222-8222-222222222222",
+          "authorized": true,
+          "new_request": true,
+          "expected": {
+            "decision": "accepted_new_request",
+            "actor": "22222222-2222-4222-8222-222222222222",
+            "previous_ack": "REJECTED_PERMANENT",
+            "effects": 0,
+            "previous_record": {
+              "actor": "11111111-1111-4111-8111-111111111111",
+              "recorded_under_actor": "11111111-1111-4111-8111-111111111111",
+              "ack": "REJECTED_PERMANENT"
+            }
+          }
+        },
+        {
+          "op": "issue_pause",
+          "expected": {
+            "decision": "allow",
+            "actor": "22222222-2222-4222-8222-222222222222",
+            "recorded_under_actor": "22222222-2222-4222-8222-222222222222",
+            "revocation_noted": false
+          }
+        },
+        {
+          "op": "apply_pause",
+          "expected": {
+            "decision": "allow",
+            "ack": "APPLIED",
+            "ui": "pause_pending_mirror",
+            "opens": 0,
+            "recorded_under_actor": "22222222-2222-4222-8222-222222222222"
+          }
+        },
+        {
+          "op": "mirror",
+          "expected": {
+            "ui": "paused",
+            "confirmed_policy_enabled": false,
+            "opens": 0
           }
         }
       ]

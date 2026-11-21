@@ -19,9 +19,7 @@ function sessionDecision(input) {
   // CTO R5: generation mismatch denies before any clock treatment.
   if (s.generation !== c.generation) return reject('session_revoked');
   if (!actor.enabled) return reject('account_disabled');
-  if (now < high) return reject('session_expired');
   const clock = Math.max(now, high);
-  if (clock < s.issued_at_ms) return reject('clock_before_issue');
   if (!Number.isFinite(s.exp_ms) || s.exp_ms <= 0 || clock >= s.exp_ms) return reject('session_expired');
   return allow(0);
 }
@@ -54,10 +52,10 @@ function authorize(input) {
   if (a.kind !== 'user') return deny('system_actor_not_allowed');
   const stop = input.continuation;
   if (stop.accepted && stop.trusted && (stop.original_actor_uuid !== stop.command_actor_uuid || a.user_uuid !== stop.command_actor_uuid)) return deny('actor_binding_mismatch');
-  if (origin === 'cloud' && ['policy_pause', 'valve_cancel'].includes(action) && ['issue', 'apply'].includes(input.stage)
+  if (origin === 'cloud' && ['policy_pause', 'valve_cancel', 'close_override'].includes(action) && ['issue', 'apply'].includes(input.stage)
       && p.stop_authority === 'reduce_only_continuation' && stop.accepted && stop.trusted
       && stop.reduce_only && stop.binding_matches && stop.gateway_matches && stop.policy_matches
-      && stop.original_actor_uuid === stop.command_actor_uuid) return allow(1, 'authorized_stop_continuation');
+      && stop.original_actor_uuid === stop.command_actor_uuid) return { ...allow(1, 'authorized_stop_continuation'), recorded_under_actor: stop.original_actor_uuid, revocation_noted: !a.enabled || a.zone_relation === 'none', opens: 0, reenables: 0, extends: 0 };
   if (origin === 'edge') {
     const session = sessionDecision(input);
     if (session.decision === 'deny') return session;
@@ -105,7 +103,11 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
     current: { account_uuid: s.account_uuid, installation: s.installation, generation: s.generation, link_incarnation: s.link_incarnation, linked: s.linked },
     session: sessions.get(token) || { signature_valid: false },
   });
-  const issue = (token, expiry) => sessions.set(token, { kind: 'local', signature_valid: true, account_uuid: s.account_uuid, installation: s.installation, generation: s.generation, issued_at_ms: s.now_ms, exp_ms: expiry === undefined ? s.now_ms + 1000 : expiry, link_incarnation: s.link_incarnation });
+  const issue = (token, expiry) => {
+    const effectiveNow = Math.max(s.now_ms, s.high_water_ms);
+    s.high_water_ms = effectiveNow;
+    sessions.set(token, { kind: 'local', signature_valid: true, account_uuid: s.account_uuid, installation: s.installation, generation: s.generation, issued_at_ms: effectiveNow, exp_ms: expiry === undefined ? effectiveNow + 1000 : expiry, link_incarnation: s.link_incarnation });
+  };
   const loginValid = step => s.enabled && step.credential === s.credential
     && step.subject === (s.scheme === 'v1' ? s.gateway : s.installation)
     && step.installation === s.installation && step.link_incarnation === s.link_incarnation;
@@ -141,11 +143,11 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
       case 'prepare_login': logins.set(step.ticket, { valid: loginValid(step), generation: s.generation, link: s.link_incarnation }); result = allow(0); break;
       case 'finish_login': {
         const ticket = logins.get(step.ticket);
-        result = ticket && ticket.valid && ticket.generation === s.generation && ticket.link === s.link_incarnation ? (s.now_ms < s.high_water_ms ? deny('session_expired') : allow(0)) : deny('login_superseded');
+        result = ticket && ticket.valid && ticket.generation === s.generation && ticket.link === s.link_incarnation ? { ...allow(0), generation: s.generation } : deny('login_superseded');
         if (result.decision === 'allow') issue(step.token);
         break;
       }
-      case 'login': result = s.now_ms < s.high_water_ms ? { ...deny('session_expired'), http_status: 401 } : loginValid(step) ? allow(0) : deny('invalid_credential_context'); if (result.decision === 'allow') issue(step.token); break;
+      case 'login': result = loginValid(step) ? { ...allow(0), generation: s.generation } : deny('invalid_credential_context'); if (result.decision === 'allow') issue(step.token); break;
       case 'link_transition':
         if (!step.commit) { result = deny('mutation_rollback'); break; }
         if (usedLinks.has(step.incarnation)) { result = deny('incarnation_reuse'); break; }
@@ -157,6 +159,7 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         s.generation++; result = { decision: 'committed', effects: 0, generation: s.generation }; break;
       case 'credential_delivery': {
         const e = step.envelope;
+        if (!s.connected) { result = { decision: 'pending_offline', effects: 0 }; break; }
         if (!s.transport_authorized) { result = { decision: 'pending_stranded', effects: 0 }; break; }
         if (!s.linked || e.incarnation !== s.link_incarnation || e.account_uuid !== s.account_uuid || e.cloud_account !== s.cloud_account || e.installation !== s.installation || e.gateway !== s.gateway) { result = deny('stale_link_context'); break; }
         if (e.revision < s.credential_revision) { result = deny('stale_credential_revision'); break; }
@@ -173,9 +176,10 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         if (e.role !== undefined) s.role = e.role;
         acceptedCredentialPayload = credentialPayload(e);
         s.credential_snapshot = JSON.parse(acceptedCredentialPayload);
+        if (s.cloud_revocation_status === 'pending') s.cloud_revocation_status = 'applied';
         s.generation++; result = { decision: 'committed', effects: 0, generation: s.generation }; break;
       }
-      case 'cloud_revoke': s.cloud_sessions_valid = false; if (step.change === 'disable') s.human_account_enabled = false; result = { decision: 'cloud_fenced', effects: 0 }; break;
+      case 'cloud_revoke': s.cloud_sessions_valid = false; s.cloud_revocation_status = 'pending'; if (step.change === 'disable') s.human_account_enabled = false; result = { decision: 'cloud_fenced', effects: 0 }; break;
       case 'assert_cloud_session': result = s.cloud_sessions_valid ? allow(0) : deny('cloud_session_revoked'); break;
       case 'transport_principal': s.transport_authorized = step.authorized; result = allow(0); break;
       case 'transport_refresh':
@@ -224,6 +228,10 @@ function runPause(initial, steps, defaults, assertProjection) {
         result = decision('issue');
         s.issued = result.decision === 'allow';
         s.ui = s.issued ? 'pause_pending' : 'pause_refused_policy_may_remain_enabled';
+        if (!s.issued) {
+          s.ack = 'REJECTED_PERMANENT';
+          s.refused_record = { actor: s.command_actor, recorded_under_actor: s.record_owner, ack: s.ack };
+        }
         result = { ...result, actor: s.command_actor, recorded_under_actor: s.record_owner, revocation_noted: s.revocation_noted, extends: 0, reenables: 0, ui: s.ui, expected_policy_version: null };
         break;
       case 'apply_pause':
@@ -232,7 +240,15 @@ function runPause(initial, steps, defaults, assertProjection) {
         else { s.ack = 'REJECTED_PERMANENT'; s.ui = 'pause_refused_policy_may_remain_enabled'; }
         result = { ...result, ack: s.ack, recorded_under_actor: s.record_owner, revocation_noted: s.revocation_noted, extends: 0, reenables: 0, ui: s.ui, policy_enabled: s.policy_enabled, confirmed_policy_enabled: s.confirmed_policy_enabled, physical_closed: false, opens: 0, applied_policy_version: result.decision === 'allow' ? s.current_policy_version : null }; break;
       case 'mirror': if (s.ack === 'APPLIED') s.confirmed_policy_enabled = s.policy_enabled; s.ui = s.ack === 'APPLIED' && !s.policy_enabled ? 'paused' : s.ui; result = { ui: s.ui, confirmed_policy_enabled: s.confirmed_policy_enabled, opens: 0 }; break;
-      case 'reissue_pause': s.actor = step.actor; s.original_actor = step.actor; s.command_actor = step.actor; s.record_owner = step.actor; s.has_grant = true; s.disabled = false; s.accepted_pause = true; result = { actor: step.actor, effects: 0 }; break;
+      case 'reissue_pause': {
+        if (!step.authorized) { result = deny('current_authority_required'); break; }
+        if (!step.new_request || s.ack !== 'REJECTED_PERMANENT') { result = deny('new_request_after_terminal_refusal_required'); break; }
+        const previousAck = s.ack;
+        s.actor = step.actor; s.original_actor = step.actor; s.command_actor = step.actor;
+        s.record_owner = step.actor; s.has_grant = true; s.disabled = false; s.accepted_pause = true;
+        s.revocation_noted = false; s.issued = false; s.ack = null; s.ui = 'pause_intent_pending';
+        result = { decision: 'accepted_new_request', actor: step.actor, previous_ack: previousAck, previous_record: clone(s.refused_record), effects: 0 }; break;
+      }
       default: throw new Error(`unknown pause operation ${step.op}`);
     }
     if (step.expected) assertProjection(result, step.expected, step.op);
@@ -248,8 +264,11 @@ function runAdminUpgrade(initial, steps, assertProjection) {
       else if (!step.commit) result = { decision: 'rollback', promotions: 0 };
       else {
         const existingAdmin = state.accounts.some(a => a.enabled && a.role === 'admin');
-        const original = state.original_bootstrap_verified
-          ? state.accounts.find(a => a.user_uuid === state.original_bootstrap_uuid) : null;
+        // AUTOINCREMENT id 1 proves first-ever insertion, not lowest surviving id.
+        // sqlite_sequence(users).seq is the durable insertion marker; no bootstrap flag exists.
+        const insertionEvidence = Number.isInteger(state.users_sequence) && state.users_sequence >= 1
+          && state.accounts.every(a => a.id <= state.users_sequence);
+        const original = insertionEvidence ? state.accounts.find(a => a.id === 1) : null;
         const promote = !existingAdmin && original && original.enabled;
         if (promote) {
           original.role = 'admin';
@@ -261,7 +280,7 @@ function runAdminUpgrade(initial, steps, assertProjection) {
         result = { decision: state.receipt.outcome, promotions: promote ? 1 : 0 };
       }
     } else if (step.op === 'disable_original') {
-      const account = state.accounts.find(a => a.user_uuid === state.original_bootstrap_uuid);
+      const account = state.accounts.find(a => a.id === 1);
       if (account) account.enabled = false;
       result = { decision: 'disabled', promotions: 0 };
     } else if (step.op === 'restart') result = { decision: 'restarted', promotions: 0 };

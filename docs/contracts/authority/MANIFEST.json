@@ -60,5 +60,6 @@
   },
   "ruling_date": "2026-11-20",
   "actor_capability": "authority_actor_v1",
-  "phil_overridable_defaults": []
+  "phil_overridable_defaults": [],
+  "r5_corrected_at": "2026-11-21"
 }

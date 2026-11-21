@@ -27,6 +27,7 @@ function verify() {
   assert.deepEqual(manifest.open_questions, []);
   assert.equal(manifest.ruling_date, '2026-11-20');
   assert.equal(manifest.actor_capability, 'authority_actor_v1');
+  assert.equal(manifest.r5_corrected_at, '2026-11-21');
   const schema = read('vectors.schema.json');
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   ajv.addSchema(schema);
@@ -175,6 +176,7 @@ function verify() {
   unique(upgrades.cases.map(c => c.id), 'upgrade case');
   for (const c of upgrades.cases) {
     validate('adminUpgradeCase', c);
+    unique(c.initial.accounts.map(a => a.id), 'upgrade account id');
     model.runAdminUpgrade(c.initial, c.steps, (actual, expected, op) => projection(actual, expected, `${c.id}/${op}`));
   }
   assert.deepEqual(authority.valid_defaults.policies, manifest.policy_defaults);
@@ -233,7 +235,7 @@ function verify() {
     (actual, expected, op) => projection(actual, expected, op)), /decision/);
   // Deliberately corrupt required expectations to the reviewed old behavior.
   // A shape-only checker would accept these records.
-  for (const id of ['sdi12_recipe_apply-1-missing_bearer', 'sdi12_recipe_rollback-1-revoked', 'cloud-owner-viewer-zone_config', 'rename-no-name-capability', 'clock-behind-high-water-expires-still-young-token', 'actorless-queued-valve_open-refused-at-upgrade']) {
+  for (const id of ['sdi12_recipe_apply-1-missing_bearer', 'sdi12_recipe_rollback-1-revoked', 'cloud-owner-viewer-zone_config', 'rename-no-name-capability', 'actorless-queued-valve_open-refused-at-upgrade']) {
     const bad = structuredClone(authority.cases.find(c => c.id === id));
     assert.ok(bad, id);
     bad.expected = { decision: 'allow', effects: 1 };
@@ -242,11 +244,64 @@ function verify() {
     validate('authorityCase', bad);
     assert.throws(() => verifyCase(bad), /decision/, `${id} old behavior must fail`);
   }
+  // Restore the actual owner short-circuit in a model copy: the cloud fixture must reject it.
+  const ownerViewer = authority.cases.find(c => c.id === 'cloud-prediction-owner-viewer');
+  assert.equal(ownerViewer.input.origin, 'cloud');
+  assert.equal(authority.cloud_prediction_baseline_delta.inventory_id, 'prediction_owner_shortcut');
+  const modelSource = fs.readFileSync(path.join(__dirname, 'lib/authority-contract-model.js'), 'utf8');
+  const mutantModel = (before, after) => {
+    assert.ok(modelSource.includes(before), `mutation seam ${before}`);
+    const sandbox = { module: { exports: {} }, structuredClone };
+    require('node:vm').runInNewContext(modelSource.replace(before, after), sandbox);
+    return sandbox.module.exports;
+  };
+  const restoredOwner = mutantModel("  if (action === 'public_features') return allow(0);",
+    "  if (origin === 'cloud' && action === 'prediction_setting' && a.zone_relation === 'owned') return allow();\n  if (action === 'public_features') return allow(0);");
+  assert.throws(() => projection(restoredOwner.authorize(model.merge(authority.valid_defaults, ownerViewer.input)), ownerViewer.expected, 'restored-owner-shortcut'), /decision/);
+  for (const name of ['owner-viewer', 'unmapped', 'missing-membership', 'granted-researcher', 'outsider', 'stale-capability']) {
+    const c = authority.cases.find(c => c.id === 'cloud-prediction-' + name);
+    assert.equal(c.input.origin, 'cloud');
+    assert.equal(c.input.action, 'prediction_setting');
+  }
+  const close = authority.cases.find(c => c.id === 'close-override-after-revocation-apply-lost-grant');
+  const refusedClose = mutantModel("['policy_pause', 'valve_cancel', 'close_override'].includes(action)", "['policy_pause', 'valve_cancel'].includes(action)");
+  assert.throws(() => projection(refusedClose.authorize(model.merge(authority.valid_defaults, close.input)), close.expected, 'refused-close'), /decision/);
+  const offline = revocation.cases.find(c => c.id === 'v1-login-revocation-offline-reconnect');
+  const deliveredOffline = mutantModel("if (!s.connected) { result = { decision: 'pending_offline', effects: 0 }; break; }", '');
+  assert.throws(() => deliveredOffline.runLifecycle(offline.initial, offline.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|generation/);
+  const missingBootstrap = upgrades.cases.find(c => c.id === 'missing-bootstrap-operator-fallback');
+  const selectedSurvivor = mutantModel('state.accounts.find(a => a.id === 1)', 'state.accounts.reduce((first, a) => !first || a.id < first.id ? a : first, null)');
+  assert.throws(() => selectedSurvivor.runAdminUpgrade(missingBootstrap.initial, missingBootstrap.steps,
+    (actual, expected, op) => projection(actual, expected, op)), /decision/);
+  const freshLogin = revocation.cases.find(c => c.id === 'offline-boot-at-build-time-fresh-login-succeeds');
+  const refusedFreshLogin = mutantModel("case 'login': result = loginValid(step)", "case 'login': if (s.now_ms < s.high_water_ms) { result = deny('session_expired'); break; } result = loginValid(step)");
+  assert.throws(() => refusedFreshLogin.runLifecycle(freshLogin.initial, freshLogin.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision/);
+  const rejectedLogin = structuredClone(freshLogin);
+  rejectedLogin.steps.find(s => s.op === 'login').expected.decision = 'deny';
+  assert.throws(() => model.runLifecycle(rejectedLogin.initial, rejectedLogin.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision/);
+  assert.ok(revocation.cases.some(c => c.id === 'revoked-token-denied-at-any-clock'));
+  assert.ok(revocation.cases.some(c => c.id === 'persisted-clock-rollback-session-expired'));
+  const pinnedSchema = execFileSync('git', ['show', manifest.sources.edge_commit + ':database/seed-blank.sql'], { cwd: ROOT, encoding: 'utf8' });
+  assert.match(pinnedSchema, /CREATE TABLE users \(\s*id\s+INTEGER PRIMARY KEY AUTOINCREMENT/);
+  assert.ok(nodes.get('auth-db-insert').func.includes('WHERE NOT EXISTS (SELECT 1 FROM users)'));
+  assert.ok(nodes.get('auth-db-insert').func.includes('INSERT INTO users (username, password_hash, created_at)'));
+  assert.ok(!nodes.get('auth-insert-complete').func.includes('bootstrap'), 'no dedicated baseline bootstrap marker');
+  assert.ok(upgrades.cases.some(c => c.id === 'bootstrap-row-and-sequence-proof-present-flag-0'));
+  assert.ok(upgrades.cases.some(c => c.id === 'bootstrap-sequence-evidence-absent-operator-fallback'));
   const doc = fs.readFileSync(path.join(DIR, 'v1.md'), 'utf8');
   for (const id of manifest.decision_ids) assert.ok(doc.includes(id));
   assert.ok(doc.includes('20 Nov 2026'));
   assert.ok(doc.includes(upgrades.release_note_line), 'exact release-note line');
   assert.ok(!doc.includes('## Open questions'));
+  assert.ok(doc.includes('21 Nov 2026'));
+  const k3 = execFileSync('git', ['show', '7e6e87c7e7766f2d8988a03ce140bed2d8a75936:docs/contracts/valve-command/v1.md'], { cwd: ROOT, encoding: 'utf8' }).split('\n');
+  for (const [line, text] of [[437, 'operation permission alone is insufficient'], [438, 'disabled/revoked actor'], [445, 'queue time is not permission at edge apply time'], [469, 'while edge authority rules still hold'], [519, 'Open until K1 lands']]) {
+    assert.ok(k3[line - 1].includes(text), `merged K3 source line ${line}`);
+    assert.ok(doc.includes('#L' + (line === 445 ? 444 : line)), `K3 reconciliation citation ${line}`);
+  }
   console.log(`authority contract: OK (${inventory.routes.length} routes, ${inventory.verification_callers.length} verifier callers (73 inline, 10 shared, 6 admin), ${inventory.module_consumers.length} module consumers, ${authority.cases.length} authority cases, ${revocation.cases.length} lifecycle cases, ${pauses.cases.length} pause cases, ${upgrades.cases.length} admin-upgrade cases; old-behavior mutation probes rejected)`);
 }
 if (require.main === module) {

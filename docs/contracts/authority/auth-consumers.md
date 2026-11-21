@@ -359,3 +359,16 @@ acceptance deployed first. FORCE_EDGE_SYNC and SYNC_LINKED_AUTH use a system act
 bound to the gateway's own non-human transport credential. Queued pauses retain
 the original recorded local actor; actorless queued records are refused at upgrade,
 never attributed to an owner. The protected ACK/mirror fence remains unchanged.
+
+The round-two R2 proof is `users.id=1` plus SQLite's retained
+`sqlite_sequence(name='users').seq` insertion marker. The baseline writes no
+dedicated bootstrap flag. The original enabled row with that evidence must be
+promoted by the one-time upgrade; missing/disabled original or absent
+insertion proof uses operator recovery only as the fallback. Do not infer a
+bootstrap identity from the lowest surviving row or a wall-clock timestamp.
+
+R5's CTO correction of 21 Nov 2026 uses generation for revocation and
+`max(clock, persisted_high_water)` for expiry. Fresh valid enabled-account local
+login remains available behind the mark. R7 delivery is deferred while offline;
+both v1/v2 verifiers retain local login and cloud pending status until reconnect
+and the edge credential/revocation commit.
