@@ -1,0 +1,813 @@
+{
+  "contract_version": "authority-v1",
+  "ruling": "R2, 20 Nov 2026",
+  "representation": "Run one recorded upgrade transaction only when no enabled admin exists. Resolve original bootstrap from surviving users.id=1 and sqlite_sequence(users).seq evidence; never MIN(remaining users.id). The pinned registration flow writes no dedicated bootstrap marker. The AUTOINCREMENT row-id and sqlite_sequence entry are its durable insertion evidence. Operator recovery is only the fallback when original account is missing/disabled or this evidence is genuinely absent.",
+  "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+  "cases": [
+    {
+      "id": "bootstrap-row-and-sequence-proof-present-flag-0",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2025-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "promoted_original_bootstrap",
+            "promotions": 1
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": true,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_original_bootstrap",
+              "target_uuid": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "noop",
+            "reason": "already_recorded",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": true,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_original_bootstrap",
+              "target_uuid": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "bootstrap-row-and-sequence-proof-present-flag-1",
+      "initial": {
+        "scoped_access": true,
+        "accounts": [
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2025-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "promoted_original_bootstrap",
+            "promotions": 1
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": true,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_original_bootstrap",
+              "target_uuid": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "noop",
+            "reason": "already_recorded",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": true,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_original_bootstrap",
+              "target_uuid": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing-bootstrap-operator-fallback",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 2,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 3
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "operator_recovery_required",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 2,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "release_notes": [],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "operator_recovery_required",
+              "target_uuid": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "disabled-bootstrap-operator-fallback",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": false,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "operator_recovery_required",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": false,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "release_notes": [],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "operator_recovery_required",
+              "target_uuid": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "bootstrap-sequence-evidence-absent-operator-fallback",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": null
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "operator_recovery_required",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "release_notes": [],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "operator_recovery_required",
+              "target_uuid": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "existing-enabled-admin-no-promotion",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "admin",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "admin_exists",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "admin",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "release_notes": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "upgrade-account-audit-receipt-rollback-together",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": false,
+          "expected": {
+            "decision": "rollback",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "receipt": null,
+            "release_notes": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "recorded-upgrade-never-promotes-again-after-disable",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "admin",
+            "enabled": false,
+            "generation": 8,
+            "id": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 2,
+            "id": 3,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 3,
+            "id": 4,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": {
+          "step": "bootstrap_admin_upgrade_v1",
+          "outcome": "promoted_original_bootstrap",
+          "target_uuid": "11111111-1111-4111-8111-111111111111"
+        },
+        "audit": [
+          {
+            "event": "bootstrap_admin_upgrade",
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "ruling_date": "2026-11-20"
+          }
+        ],
+        "release_notes": [
+          "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+        ],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "restart"
+        },
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "noop",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": false,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2026-01-01T00:00:00Z"
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "viewer",
+                "enabled": true,
+                "generation": 2,
+                "id": 3,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 3,
+                "id": 4,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
