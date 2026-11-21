@@ -106,7 +106,7 @@ jobs:
         run: node --test scripts/verify-merge-allowance-preservation.test.js
       - run: node scripts/test-history-helper.js
       - name: All-zones history export and saved-view delete, both profiles
-        run: node --max-old-space-size=192 --test --test-concurrency=1 scripts/test-history-all-zones-export.js scripts/test-history-export-bounds.js scripts/test-history-export-review.js
+        run: node --max-old-space-size=192 --test --test-concurrency=1 scripts/test-history-all-zones-export.js scripts/test-history-export-bounds.js scripts/test-history-export-review.js scripts/test-history-export-ordinary.js
       - name: Install pinned history HTTP response fixture runtime
         run: npm ci --ignore-scripts --no-audit --no-fund --prefix scripts/fixtures/history-response-runtime
       - name: Check feed archive and loaded response source
