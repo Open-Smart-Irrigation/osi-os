@@ -106,6 +106,7 @@ for (const [mode, name] of cases) test(name, async t => {
       fs.unlinkSync(p('reboots')); put('var/run/osi-rootfs-grow-reboot', 'queued');
     }
     const result = run();
+    t.diagnostic(fs.readFileSync(p('writeback-receipt'), 'utf8').trim());
     if (fail) {
       assert.notEqual(result.status, 0, 'storage failure must block the shipped reboot gate');
       assert.match(result.stderr, mode === 2 || mode === 5 ? /Read-only file system/ : /Input\/output error/);

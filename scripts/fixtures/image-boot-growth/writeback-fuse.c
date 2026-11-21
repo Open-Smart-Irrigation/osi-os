@@ -58,6 +58,18 @@ static int open_dir(const char *path, struct fuse_file_info *fi)
 {
     (void)fi; return strcmp(path, "/") && strcmp(path, "/upper") ? -ENOTDIR : 0;
 }
+static int set_times(const char *path, const struct timespec times[2], struct fuse_file_info *fi)
+{
+    /* FUSE writeback-cache fsync first flushes cached inode timestamps. */
+    (void)path; (void)times; (void)fi; return 0;
+}
+static int truncate_file(const char *path, off_t size, struct fuse_file_info *fi)
+{
+    (void)fi;
+    if (!probe[0] || strcmp(path, probe)) return -ENOENT;
+    if (size < 0 || size > (off_t)sizeof(probe_content)) return -EFBIG;
+    probe_size = (size_t)size; return 0;
+}
 static int create_file(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
     (void)mode; (void)fi;
@@ -122,7 +134,8 @@ static int fsync_dir(const char *path, int datasync, struct fuse_file_info *fi)
 static const struct fuse_operations ops = {
     .init = init, .getattr = attributes, .readlink = state_link,
     .open = open_file, .read = read_file, .write = write_file, .fsync = fsync_file,
-    .create = create_file, .unlink = unlink_file, .opendir = open_dir, .fsyncdir = fsync_dir
+    .create = create_file, .unlink = unlink_file, .opendir = open_dir, .fsyncdir = fsync_dir,
+    .utimens = set_times, .truncate = truncate_file
 };
 int main(int argc, char **argv)
 {
