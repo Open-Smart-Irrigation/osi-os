@@ -1,4 +1,4 @@
-"""Disposable serial-controlled Pi 5 with an isolated browser forward."""
+"""Disposable Raspberry Pi guests with a serial shell and loopback browser access."""
 import os
 from pathlib import Path
 import re
@@ -20,8 +20,8 @@ FLOWS_COMMITTED = rb'node-red\.init: committed flows\.json digest=(?P<digest>[0-
 def external_path(path, *, off_tmp=False):
     resolved = path.resolve(strict=True)
     for spelling in (path.absolute(), resolved):
-        if off_tmp and spelling.is_relative_to("/tmp"):
-            raise ValueError("path is under /tmp")
+        if off_tmp and spelling.is_relative_to('/tmp'):
+            raise ValueError('path is under /tmp')
         for directory in (spelling, *spelling.parents):
             marker = directory/'.git'
             if marker.exists() or marker.is_symlink() or all(
@@ -71,6 +71,11 @@ INSPECTION_INIT = (
 
 
 class Guest:
+    usb_storage = 'usb-storage,drive=update'
+    load_boot = staticmethod(boot_config.load)
+    boot_files = ('kernel_2712.img', 'bcm2712-rpi-5-b.dtb', 'cmdline.txt')
+    console_args = 'console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
+
     def __init__(self, work, image, qemu, ram, upgrade=None, *, receipts=None, private=False,
                  direct_io=False):
         self.work = Path(work).resolve()
@@ -84,11 +89,20 @@ class Guest:
         self.direct_io = direct_io
         self.process = self.bridge = None
         self.boots = 0
-        prepare(image, self.work, self.qemu.with_name('dtmerge'), quiet=private)
+        prepare(image, self.work, self.qemu.with_name('dtmerge'), quiet=private,
+                load_boot=self.load_boot)
         with socket.socket() as port:
             port.bind(('127.0.0.1', 0))
             self.port = port.getsockname()[1]
         self.url = f'http://127.0.0.1:{self.port}'
+
+    def qemu_args(self, wire_fd, disk, cmdline, inspection):
+        return [self.qemu, '-M', 'raspi5b', '-m', f'{self.ram}G', '-no-reboot',
+                '-display', 'none', '-nic', f'socket,fd={wire_fd}', '-monitor', 'none',
+                '-serial', 'stdio', '-kernel', 'kernel_2712.img', '-dtb',
+                'bcm2712-rpi-5-b.dtb', '-drive', disk, '-bios',
+                self.qemu.with_name('rpi5-bl31.bin'), '-append', cmdline,
+                '-chardev', 'socket,id=wm1302-air,path=radio,server=on,wait=off']
 
     def start(self, *, before_console=None, inspection=False, flow_cut=None):
         if self.process is not None or self.bridge is not None:
@@ -97,9 +111,10 @@ class Guest:
         d = self.work
         self.buf = b''
         self.started = time.monotonic()
-        disk = 'inspect.img' if inspection else 'sd.img'
+        image = 'inspect.img' if inspection else 'sd.img'
         cache = ',cache=none' if self.direct_io else ''
-        cmdline = (d/'cmdline.txt').read_text().strip() + ' console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
+        disk = f'if=sd,format=raw,file={image}{cache}'
+        cmdline = (d/'cmdline.txt').read_text().strip() + ' ' + self.console_args
         if flow_cut is not None:
             if inspection or flow_cut not in ('committed', 'before-dir-sync'):
                 raise ValueError('invalid minimal flows cut boot')
@@ -108,16 +123,13 @@ class Guest:
             cmdline += f' init=/bin/sh loglevel=7 -- -c "{INSPECTION_INIT}"'
         a, b = socket.socketpair()
         with a,b,self.stderr('bridge.stderr', 'ab') as err:
+            args = self.qemu_args(b.fileno(), disk, cmdline, inspection)
             self.bridge = subprocess.Popen(['qemu-system-x86_64','-machine','none','-nodefaults','-display','none','-monitor','none','-serial','none',
                 '-netdev',f'socket,id=wire,fd={a.fileno()}','-netdev',f'user,id=local,restrict=on,net=192.0.2.0/24,hostfwd=tcp:127.0.0.1:{self.port}-192.0.2.15:1880',
                 '-netdev','hubport,id=a,hubid=0,netdev=wire','-netdev','hubport,id=b,hubid=0,netdev=local'],pass_fds=(a.fileno(),),stdout=subprocess.DEVNULL,stderr=err)
-            args=[self.qemu,'-M','raspi5b','-m',f'{self.ram}G','-no-reboot','-display','none','-nic',f'socket,fd={b.fileno()}','-monitor','none','-serial','stdio',
-                  '-kernel','kernel_2712.img','-dtb','bcm2712-rpi-5-b.dtb','-drive',f'if=sd,format=raw,file={disk}{cache}','-bios',self.qemu.with_name('rpi5-bl31.bin'),
-                  '-append',cmdline,
-                  '-chardev','socket,id=wm1302-air,path=radio,server=on,wait=off']
             if self.upgrade and not inspection:
                 media = str(self.upgrade).replace(',', ',,')
-                args.extend(['-drive',f'if=none,id=update,format=raw,readonly=on,file={media}','-device','usb-storage,drive=update'])
+                args.extend(['-drive',f'if=none,id=update,format=raw,readonly=on,file={media}','-device',self.usb_storage])
             with self.stderr(f'qemu-{self.boots}.stderr', 'wb') as stderr:
                 self.process=subprocess.Popen(args,cwd=d,pass_fds=(b.fileno(),),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr)
         if inspection:
@@ -201,15 +213,19 @@ class Guest:
         if errors:
             raise ExceptionGroup('guest cleanup or exit receipt failed', errors)
 
+    def wait_for_reboot(self):
+        self.process.wait(timeout=600)
+
     def upgrade_reboot(self, shell, *, before_console=None):
         self.send((shell+'\n').encode())
-        self.process.wait(timeout=600)
+        self.wait_for_reboot()
         self.stop()
         with (self.work/'sd.img').open('rb') as disk:
             offset=struct.unpack_from('<I',disk.read(512),454)[0]*512
         with tempfile.TemporaryDirectory(dir=self.work) as tmp:
-            boot_config.load(f'{self.work}/sd.img@@{offset}',Path(tmp),self.qemu.with_name('dtmerge'), quiet=self.private)
-            for name in ('kernel_2712.img','bcm2712-rpi-5-b.dtb','cmdline.txt'):
+            self.load_boot(f'{self.work}/sd.img@@{offset}', Path(tmp),
+                           self.qemu.with_name('dtmerge'), quiet=self.private)
+            for name in self.boot_files:
                 (Path(tmp)/name).replace(self.work/name)
         return self.start(before_console=before_console)
 
@@ -243,29 +259,38 @@ printf '%s %s\n' "${digest%% *}" "$stamp"
         if observed != expected:
             raise RuntimeError('recovered flows digest or active payload stamp differs from commit')
 
-    def verify_cut_disk(self, label, expected, *, inspect=None, alternatives=()):
+    def inspect_cut(self, inspect):
         if self.process is not None or self.bridge is not None or not self.direct_io:
             raise RuntimeError('disk inspection requires a reaped direct-I/O guest')
         clone = self.work/'inspect.img'
+        try:
+            subprocess.run(['cp', '--reflink=auto', '--sparse=always', self.work/'sd.img', clone],
+                           check=True)
+            self.start(inspection=True)
+            inspect(self)
+        finally:
+            try:
+                self.stop(cut=True)
+            finally:
+                clone.unlink(missing_ok=True)
+
+    def verify_cut_disk(self, label, expected, *, inspect=None, alternatives=()):
         audit = self.receipts/'flows-cut.log'
         with audit.open('a') as log:
             print(label, 'expected', *(part.decode() for part in expected), file=log)
             for alternative in alternatives:
                 print(label, 'alternative', *(part.decode() for part in alternative), file=log)
-        try:
-            subprocess.run(['cp', '--reflink=auto', '--sparse=always', self.work/'sd.img', clone],
-                           check=True)
-            self.start(inspection=True)
-            observed = self.flows_receipt()
+
+        def verify(guest):
+            observed = guest.flows_receipt()
             with audit.open('a') as log:
                 print(label, 'disk', *(part.decode() for part in observed), file=log)
             if observed not in (expected, *alternatives):
                 raise RuntimeError('on-disk flows digest or payload stamp differs before recovery')
             if inspect is not None:
-                inspect(self)
-        finally:
-            self.stop(cut=True)
-            clone.unlink(missing_ok=True)
+                inspect(guest)
+
+        self.inspect_cut(verify)
 
     def reboot(self):
         self.upgrade_reboot('sync && reboot')

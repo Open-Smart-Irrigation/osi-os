@@ -4,6 +4,8 @@ Run this local step of Release Runtime Smoke for each candidate image before sen
 the real-device test sheet to Phil. The stock cases take about 45 minutes in
 one `osi-heavy` slot. Allow extra time for the power-cut cases selected by the
 candidate capability check.
+The same candidate requires a green Pi 4 run for its 32-bit bcm2709 image.
+[Pi 4 runbook](raspi4-emulator-acceptance.md).
 The hosted smoke jobs use runtime fixtures. The emulator run needs the built
 candidate, previous factory images and the workstation's offline deployment cache.
 

@@ -99,6 +99,29 @@ class FlowTests(unittest.TestCase):
                 self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold present in factory image init'
                               f' | {", ".join(acceptance.RECOVERY_CASES)}', result)
 
+    def test_sqlite_cut_checks_the_clone_before_starting_normally(self):
+        vm = Mock()
+        vm.inspect_cut.side_effect = lambda inspect: inspect(vm)
+        with (patch.object(acceptance, 'snapshot', return_value='synthetic'),
+              patch.object(acceptance, 'checked'),
+              patch.object(acceptance, 'sql', side_effect=['', 'ok', '1\n1'])):
+            with self.assertRaisesRegex(RuntimeError, 'disk before startup:.*transaction mismatch'):
+                acceptance.cut(vm, 1, inspect_disk=True)
+        vm.stop.assert_called_once_with(cut=True)
+        vm.start.assert_not_called()
+
+    def test_pi5_sqlite_cut_reboots_the_original_disk_directly(self):
+        vm = Mock()
+        with (patch.object(acceptance, 'snapshot', return_value='synthetic'),
+              patch.object(acceptance, 'checked'),
+              patch.object(acceptance, 'ready') as ready,
+              patch.object(acceptance, 'sql', side_effect=['', '1\n0'])):
+            acceptance.cut(vm, 1)
+        vm.stop.assert_called_once_with(cut=True)
+        vm.start.assert_called_once_with()
+        vm.inspect_cut.assert_not_called()
+        ready.assert_called_once_with(vm)
+
     def test_current_source_and_guest_receipt(self):
         source = PINNED_CAPABILITY
         if fixture := os.environ.get('OSI_RASPI5_TEST_FLOWS_INIT'):

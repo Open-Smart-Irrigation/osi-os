@@ -12,10 +12,15 @@ def fat_name(name):
     return '::' + str(path)
 
 
-def load(volume, work, dtmerge, *, quiet=False):
+def load(volume, work, dtmerge, *, board='pi5', quiet=False):
     stderr = subprocess.DEVNULL if quiet else None
     stdout = subprocess.DEVNULL if quiet else None
-    selected = {'kernel': '', 'armstub': '', 'device_tree': 'bcm2712-rpi-5-b.dtb',
+    dtb_name, kernel_names = {
+        'pi4': ('bcm2711-rpi-4-b.dtb', ('kernel7l.img', 'kernel.img')),
+        'pi5': ('bcm2712-rpi-5-b.dtb', ('kernel_2712.img', 'kernel8.img')),
+    }[board]
+    kernel_dest = 'kernel.img' if board == 'pi4' else kernel_names[0]
+    selected = {'kernel': '', 'armstub': '', 'device_tree': dtb_name,
                 'cmdline': 'cmdline.txt'}
     changes = []
     prefix = ''
@@ -31,7 +36,7 @@ def load(volume, work, dtmerge, *, quiet=False):
             line = line.partition('#')[0].strip()
             if line.startswith('[') and line.endswith(']'):
                 group = line[1:-1].lower()
-                if group in ('all', 'pi5'):
+                if group in ('all', board):
                     active = True
                 elif group == 'none' or re.fullmatch(r'(?:pi|cm)[0-9a-z]+', group):
                     active = False
@@ -62,7 +67,8 @@ def load(volume, work, dtmerge, *, quiet=False):
     def kernel_name(base):
         if selected['kernel']:
             return selected['kernel']
-        return 'kernel_2712.img' if exists(base + 'kernel_2712.img') else 'kernel8.img'
+        preferred, fallback = kernel_names
+        return preferred if exists(base + preferred) else fallback
 
     if prefix and not (exists(prefix + kernel_name(prefix)) and exists(prefix + selected['device_tree'])):
         prefix = ''
@@ -71,11 +77,11 @@ def load(volume, work, dtmerge, *, quiet=False):
         subprocess.run(['mcopy', '-i', volume, fat_name(selected['armstub']), work / 'armstub.bin'],
                        check=True, stdout=stdout, stderr=stderr)
     overlay_base = prefix if prefix and exists(prefix + overlay_prefix + 'README') else ''
-    for key, destination in [('kernel', 'kernel_2712.img'), ('device_tree', 'bcm2712-rpi-5-b.dtb'),
+    for key, destination in [('kernel', kernel_dest), ('device_tree', dtb_name),
                              ('cmdline', 'cmdline.txt')]:
         subprocess.run(['mcopy', '-i', volume, fat_name(prefix + selected[key]), work / destination],
                        check=True, stdout=stdout, stderr=stderr)
-    dtb = work / 'bcm2712-rpi-5-b.dtb'
+    dtb = work / dtb_name
     merged = work / 'merged.dtb'
     for overlay, params in changes:
         source = '-'

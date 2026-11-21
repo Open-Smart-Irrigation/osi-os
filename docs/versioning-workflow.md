@@ -402,22 +402,83 @@ Do not capture an image from a booted Pi instead. First-boot provisioning
 (`uci-defaults`, `osi-bootstrap`) has already run on it, so its image carries
 that Pi's gateway identity and ChirpStack IDs.
 
-Stage and rename the assets as in that document's "Release Asset Naming",
-with the new version in the directory and file names:
+Stage and rename the assets as in that document's "Release Asset Naming".
+Set `RELEASE_VERSION` to the candidate version without the `v` prefix.
 
 ```bash
-mkdir -p tmp/release-assets/osi-os_<NEW>
+RELEASE_ASSETS="tmp/release-assets/osi-os_${RELEASE_VERSION}"
+mkdir -p "$RELEASE_ASSETS"
 cp openwrt/bin/targets/bcm27xx/bcm2712/*rpi-5*squashfs-factory.img.gz \
-  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi5-factory.img.gz
+  "$RELEASE_ASSETS/osi-os_${RELEASE_VERSION}-rpi5-factory.img.gz"
 cp openwrt/bin/targets/bcm27xx/bcm2709/*rpi-2*squashfs-factory.img.gz \
-  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi4-factory.img.gz
-(cd tmp/release-assets/osi-os_<NEW> && sha256sum *.img.gz > SHA256SUMS)
+  "$RELEASE_ASSETS/osi-os_${RELEASE_VERSION}-rpi4-factory.img.gz"
+(cd "$RELEASE_ASSETS" && sha256sum *.img.gz > SHA256SUMS)
 ```
 
-Run the local Pi 5 emulator step of Release Runtime Smoke for every candidate.
-Run `tools/raspi5/acceptance.sh` through `osi-heavy` and record a green result
-for the exact candidate image before sending the real-device sheet to Phil.
-[Pi 5 acceptance runbook](build/raspi5-emulator-acceptance.md).
+Stage copies of the factory archives and their checksum file in the external
+emulator input directory. Export the same commit for the offline installer.
+Set `EMULATOR_INPUTS` to a new directory outside all Git worktrees and
+`/tmp`, under `$HOME/builds` on the build workstation. Set
+`REACT_GUI_TARBALL` to the archive built for the candidate in Step 3.
+Set `PI4_BUILD_RECEIPT` and `PI5_BUILD_RECEIPT` to the corresponding factory
+image verification receipt paths. Each receipt must include `commit:` and
+`image_sha256:` fields.
+
+```bash
+receipt_field() {
+  awk -v field="$2:" '$1 == field { print $2 }' "$1"
+}
+CANDIDATE_SHA=$(receipt_field "$PI4_BUILD_RECEIPT" commit) || exit 1
+PI5_CANDIDATE_SHA=$(receipt_field "$PI5_BUILD_RECEIPT" commit) || exit 1
+PI4_FACTORY_SHA256=$(receipt_field "$PI4_BUILD_RECEIPT" image_sha256) || exit 1
+PI5_FACTORY_SHA256=$(receipt_field "$PI5_BUILD_RECEIPT" image_sha256) || exit 1
+if [[ ! $CANDIDATE_SHA =~ ^[0-9a-f]{40}$ || $CANDIDATE_SHA != "$PI5_CANDIDATE_SHA" ||
+      ! $PI4_FACTORY_SHA256 =~ ^[0-9a-f]{64}$ || ! $PI5_FACTORY_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
+  printf '%s\n' 'Build receipts must provide the same full commit and one SHA-256 per image.' >&2
+  exit 1
+fi
+
+CANDIDATE_REPO=$(git rev-parse --show-toplevel) || exit 1
+OFFLINE_RELEASE_TREE="$EMULATOR_INPUTS/offline"
+PI4_FACTORY_IMAGE="$EMULATOR_INPUTS/osi-os_${RELEASE_VERSION}-rpi4-factory.img.gz"
+PI5_FACTORY_IMAGE="$EMULATOR_INPUTS/osi-os_${RELEASE_VERSION}-rpi5-factory.img.gz"
+(
+  set -euo pipefail
+  mkdir -m 700 "$EMULATOR_INPUTS"
+  mkdir "$OFFLINE_RELEASE_TREE"
+  cp "$RELEASE_ASSETS/"*.img.gz "$RELEASE_ASSETS/SHA256SUMS" "$EMULATOR_INPUTS/"
+  (cd "$EMULATOR_INPUTS" && sha256sum -c SHA256SUMS)
+  printf '%s  %s\n' "$PI4_FACTORY_SHA256" "$PI4_FACTORY_IMAGE" \
+    "$PI5_FACTORY_SHA256" "$PI5_FACTORY_IMAGE" | sha256sum -c -
+  git -C "$CANDIDATE_REPO" archive "$CANDIDATE_SHA" | tar -xf - -C "$OFFLINE_RELEASE_TREE"
+  cp "$REACT_GUI_TARBALL" "$OFFLINE_RELEASE_TREE/react_gui.tar.gz"
+  printf '%s\n' "$CANDIDATE_SHA" > "$OFFLINE_RELEASE_TREE/SERVED-FROM.txt"
+)
+```
+
+Take the gate tools from a separate checkout of `main`. This also works for
+release lines that lack the emulator scripts. Set `GATE_TREE` to a new
+directory under `$HOME/builds`.
+
+```bash
+(
+  set -euo pipefail
+  git -C "$CANDIDATE_REPO" fetch origin main
+  git -C "$CANDIDATE_REPO" worktree add --detach "$GATE_TREE" FETCH_HEAD
+  test -x "$GATE_TREE/tools/raspi4/acceptance.sh"
+  test -x "$GATE_TREE/tools/raspi5/acceptance.sh"
+)
+GATE_SHA=$(git -C "$GATE_TREE" rev-parse HEAD)
+```
+
+Use the runbook commands for `"$GATE_TREE/tools/raspi4/acceptance.sh"` and
+`"$GATE_TREE/tools/raspi5/acceptance.sh"`. Both pass `--tools-revision "$GATE_SHA"`
+and use the staged candidate inputs. Record each green `osi-heavy` run with
+the tools SHA, candidate SHA and staged image checksum before sending the
+real-device sheet to Phil. Each board needs 18 passes for a #714 candidate
+or 13 for a minimal atomic-write candidate. The result table gives the
+factory capability reason and required replacements for each N/A row.
+[Pi 4 runbook](build/raspi4-emulator-acceptance.md) · [Pi 5 runbook](build/raspi5-emulator-acceptance.md).
 
 Flash each image on a spare card and run that document's "First Boot
 Acceptance". Its `curl http://<pi-ip>:1880/flows` probe now answers 404,
@@ -558,7 +619,7 @@ On each Pi after the deploy:
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
 [ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, manual strict hosted smoke green on that SHA, tag v<NEW>, push only the tag, tag smoke green
-[ ] Step 5  — Build both factory images, rename, SHA256SUMS, Pi 5 emulator green through osi-heavy before the real-device sheet, first-boot check
+[ ] Step 5  — Build both factory images, rename, SHA256SUMS, Pi 4 and Pi 5 emulators green through osi-heavy before the real-device sheet, first-boot check
 [ ] Step 6  — Deploy and verify osi-server (first when a contract change needs the cloud first)
 [ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
 [ ] Step 8  — Prepare deployment payload

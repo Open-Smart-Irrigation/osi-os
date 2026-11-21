@@ -43,6 +43,8 @@ jobs:
         run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js scripts/test-farming-sqlite-startup.js scripts/test-farming-sqlite-driver.js
       - name: Pi 5 emulator gate host checks
         run: python3 tools/raspi5/test_acceptance.py
+      - name: Pi 4 emulator gate host checks
+        run: python3 tools/raspi4/test_acceptance.py
       - name: Reject broken late and caught handlers (serial negative controls)
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
@@ -54,7 +56,8 @@ jobs:
       - name: Record the local candidate smoke requirement
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         run: |
-          printf 'A candidate also requires a green Pi 5 emulator run through osi-heavy before the real-device test sheet. [Local release smoke step](%s/%s/blob/%s/docs/build/raspi5-emulator-acceptance.md).\n' \
+          printf 'A candidate requires green Pi 4 and Pi 5 emulator runs through osi-heavy before the real-device test sheet. [Pi 4 runbook](%s/%s/blob/%s/docs/build/raspi4-emulator-acceptance.md) and [Pi 5 runbook](%s/%s/blob/%s/docs/build/raspi5-emulator-acceptance.md).\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" \
             "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve runtime evidence
         if: always()

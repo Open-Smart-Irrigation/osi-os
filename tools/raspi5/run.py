@@ -42,7 +42,8 @@ def expand_image(source, disk):
     return size
 
 
-def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, quiet=False):
+def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *,
+            quiet=False, load_boot=boot_config.load):
     # QEMU SD cards require power-of-two capacity. Keep zero padding sparse.
     disk = work / 'sd.img'
     size = expand_image(source, disk)
@@ -61,7 +62,7 @@ def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *, qui
             end = max(end, (start + count) * 512)
     with disk.open('r+b') as f:
         f.truncate(1 << (end - 1).bit_length())
-    boot_config.load(f'{disk}@@{offset * 512}', work, dtmerge, quiet=quiet)
+    load_boot(f'{disk}@@{offset * 512}', work, dtmerge, quiet=quiet)
 
     if concentratord:
         check = Path(__file__).with_name('check-concentratord.sh').resolve()
