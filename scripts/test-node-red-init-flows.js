@@ -39,6 +39,7 @@ function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'node-red-init-flows-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'data', 'db'), { recursive: true });
+  fs.mkdirSync(path.dirname(root + pendingPath), { recursive: true });
   const db = path.join(root, 'data', 'db', 'farming.db');
   const imageDb = path.join(root, 'image-seed.db');
   if (!linked) {
@@ -568,13 +569,14 @@ for (const fault of ['parent fsync', 'database read']) {
     const pending = fx.root + pendingPath;
     const hold = path.join(fx.userDir, 'DEPLOY-HELD');
     const state = path.join(fx.userDir, 'payload-state.json');
-    for (const dir of [native, defaults, path.dirname(pending)]) fs.mkdirSync(dir, { recursive: true });
+    for (const dir of [native, defaults]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(rom, 'settings.js'), 'module.exports = {};\n');
     fs.writeFileSync(path.join(rom, 'package-lock.json'), JSON.stringify({
       packages: { 'node_modules/sqlite3': { version: '5.1.7' } },
     }));
     fs.writeFileSync(path.join(native, 'package.json'), JSON.stringify({ name: 'sqlite3', version: '5.1.7' }));
-    fs.writeFileSync(path.join(native, 'index.js'), 'module.exports = {};\n');
+    fs.writeFileSync(path.join(native, 'index.js'),
+      'exports.Database = function (_, callback) { this.close = done => done(); process.nextTick(callback); };\n');
     fs.unlinkSync(fx.origin);
     fs.unlinkSync(fx.db);
     fs.rmdirSync(path.dirname(fx.db));
@@ -632,7 +634,7 @@ fs[method] = (fd, ...args) => {
     fs.unlinkSync(pending); // OpenWrt recreates /var/run on a clean boot.
     const retry = run({});
     assert.equal(retry.status, 0, retry.stderr);
-    assert.deepEqual(fs.readdirSync(defaults), []);
+    assert.deepEqual(fs.readdirSync(defaults), [], retry.stdout + retry.stderr);
     assert.deepEqual(fs.readFileSync(fx.db), fs.readFileSync(fx.imageDb));
     assert.equal(fs.readFileSync(fx.origin, 'utf8'), createHash('sha256').update(seed).digest('hex') + '\n');
     assert.match(fx.start(), /procd start/);
