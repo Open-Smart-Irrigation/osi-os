@@ -347,7 +347,7 @@ test('two concurrent pushes with one source label isolate GUI hashes, launchers 
   fs.writeFileSync(path.join(second.root, 'gui/index.html'), 'different GUI build');
   await exec('tar', ['czf', path.join(second.stage, 'react_gui.tar.gz'), '-C', path.join(second.root, 'gui'), '.']);
   const script = path.join(first.stage, 'deploy.sh');
-  const download = `umask 077\ncurl -q --proxy '' --noproxy '*' -fsS "http://127.0.0.1:$1/react_gui.tar.gz" | sha256sum > "$DEPLOY_OUTCOME_FILE.gui-sha"\n`;
+  const download = `umask 077\ncurl -q --proxy '' --noproxy '*' -fsS "http://127.0.0.1:$1/react_gui.tar.gz" -o "$DEPLOY_OUTCOME_FILE.gui"\nsha256sum "$DEPLOY_OUTCOME_FILE.gui" > "$DEPLOY_OUTCOME_FILE.gui-sha"\n`;
   const bytes = fs.readFileSync(script, 'utf8').replace('touch ', download + 'touch ');
   for (const f of [first, second]) {
     fs.writeFileSync(path.join(f.stage, 'deploy.sh'), bytes);
