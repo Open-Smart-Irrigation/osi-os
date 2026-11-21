@@ -53,17 +53,24 @@ try {
   const { renderHandoff } = require(path.join(clone, 'scripts/x3-zone-env-adapters'));
   const rendered = renderHandoff(path.join(scratch, 'idempotence'));
   for (const [relative, text] of applied) assert.equal(fs.readFileSync(path.join(rendered, relative), 'utf8'), text, 'integrated renderer must be idempotent: ' + relative);
-  // Independently reject a half-profile swap, a single legacy node and each
-  // stale baseline. Restore each mutation before moving to the next control.
-  if (state === 'legacy') {
-    for (const relative of [FLOW_PATHS[0], ...BASELINES]) {
-      fs.writeFileSync(path.join(clone, relative), original.get(relative)); rejected('partial swap ' + relative);
-      fs.writeFileSync(path.join(clone, relative), applied.get(relative));
-    }
-    const relative = FLOW_PATHS[0], nodes = JSON.parse(applied.get(relative));
-    const legacy = require('./fixtures/x3-zone-env/legacy-nodes.json')[0];
-    nodes[nodes.findIndex(n => n.id === legacy.id)] = legacy;
-    fs.writeFileSync(path.join(clone, relative), JSON.stringify(nodes, null, 2) + '\n'); rejected('single-node partial swap');
+  // Partial-state controls must also run when this test starts on main with
+  // the handoff already installed, without depending on legacy checkout bytes.
+  const frozen = require('./fixtures/x3-zone-env/legacy-nodes.json');
+  const relative = FLOW_PATHS[0];
+  const nodes = JSON.parse(applied.get(relative));
+  fs.writeFileSync(path.join(clone, relative), JSON.stringify(nodes.map(n => frozen.find(old => old.id === n.id) || n), null, 2) + '\n');
+  rejected('half-profile partial swap');
+  fs.writeFileSync(path.join(clone, relative), applied.get(relative));
+  nodes[nodes.findIndex(n => n.id === frozen[0].id)] = frozen[0];
+  fs.writeFileSync(path.join(clone, relative), JSON.stringify(nodes, null, 2) + '\n');
+  rejected('single-node partial swap');
+  fs.writeFileSync(path.join(clone, relative), applied.get(relative));
+  for (const relative of BASELINES) {
+    const stale = JSON.parse(applied.get(relative));
+    if (relative === BASELINES[0]) Object.values(stale.profiles)[0].silentCatchCount++;
+    else { stale.files[FLOW_PATHS[0]].total++; stale.total++; }
+    fs.writeFileSync(path.join(clone, relative), JSON.stringify(stale, null, 2) + '\n');
+    rejected('stale baseline partial swap ' + relative);
     fs.writeFileSync(path.join(clone, relative), applied.get(relative));
   }
   // The installed CI dependencies are reusable; no fixture/runtime source comes
@@ -74,7 +81,7 @@ try {
   }
   command('git', ['add', '-A']);
   command('git', ['-c', 'user.name=X3 Integration Proof', '-c', 'user.email=x3-proof@example.test', 'commit', '--allow-empty', '-m', 'Local applied X3 handoff candidate']);
-  console.log('X3 applied candidate: committed adapters and recounts; stale/partial controls rejected');
+  console.log('X3 applied candidate: committed adapters and recounts; partial controls rejected; legacy patch freshness checked when applicable');
   if (process.argv.includes('--runtime-only')) {
     node(['scripts/verify-x3-zone-env-handoff.js', '--runtime-only']);
   } else {
