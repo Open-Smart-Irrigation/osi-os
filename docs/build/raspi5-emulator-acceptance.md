@@ -2,8 +2,8 @@
 
 Run this local step of Release Runtime Smoke for each candidate image before sending
 the real-device test sheet to Phil. The stock cases take about 45 minutes in
-one `osi-heavy` slot. Candidates with #714 need more time for the boot and
-upgrade cases below.
+one `osi-heavy` slot. Allow extra time for the power-cut cases selected by the
+candidate capability check.
 The hosted smoke jobs use runtime fixtures. The emulator run needs the built
 candidate, previous factory images and the workstation's offline deployment cache.
 
@@ -42,8 +42,9 @@ restricted to the emulated link and a host-loopback GUI forward. The radio
 exchanges simulated frames over a Unix socket.
 
 Record the command's exit code, `inputs.txt` and `results.log` from the printed
-run directory with the candidate SHA and image checksum. The selected cases
-must exit zero. The runner removes guest disks and USB media after cleanup and
+run directory with the candidate SHA and image checksum. The run must exit zero. The final table lists each expected case, its observed
+result and any capability reason for N/A. A required row passes only with a
+recorded PASS. The runner removes guest disks and USB media after cleanup and
 keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
 the scratch media when diagnosing a failure. Keep private receipts local.
 A missing or failed run holds the candidate. Physical SD power-cut, upgrade and
@@ -70,10 +71,40 @@ its trigger definitions. Case B checks that a missing pristine copy warns
 when live flows are valid and holds startup when they are zeroed. Case C cuts
 the settings, init and bootstrap transfers separately and checks their bytes
 and modes on a clone before checking the retained payload and fixture.
-Earlier candidates report each case as `not applicable to this candidate`.
-Use `--flows-power-cut-only` for the three commit cuts or
+If the candidate lacks `persistFlowHold`, these eight cases appear as N/A
+with that reason. A release candidate must then declare the minimal atomic
+flows publication described below.
+Use `--flows-power-cut-only` for the three #714 commit cuts or
 `--upgrade-boot-safety-only` for A, B and C. The latter uses the offline
 release and 0.8.1 fixture and can omit the candidate archive and its checksum.
+
+### Minimal atomic flows candidates
+
+The v0.8.3 release line can use the atomic writer without the #714 recovery
+code. The gate checks the publication capability in the factory init and
+offline tree. A minimal candidate requires the ten baseline cases and three
+additional cuts. The factory cases interrupt the writer before and after
+directory fsync. The upgrade case interrupts the first Node-RED start after
+an offline upgrade from 0.8.1. A shell-only clone must contain the complete
+old or new flows at the expected path. Normal startup of the original must
+serve the patched flows and return HTTP 401 from `/api/me`.
+
+Use the unmodified candidate archive and offline tree for the baseline cases.
+Make a separate disposable source export for the test factory image:
+
+```bash
+python3 -B tools/raspi5/minimal_flows.py "$OFFLINE_RELEASE_TREE" "$PROBE_SOURCE"
+```
+
+The command checks the original init's deploy pin, adds the console marker
+and updates the pin in the export. Build the same board's test factory image
+from the candidate revision with the export's instrumented Node-RED init.
+Keep that image and the probe source outside Git trees. Run the full gate
+with `--minimal-probe-image "$PROBE_FACTORY_IMAGE"` and
+`--minimal-probe-sha256 "$PROBE_FACTORY_SHA256"` in addition to the ordinary
+candidate arguments. The runner verifies that image's checksum and booted
+init, and makes the instrumented upgrade bundle in scratch from the same
+offline source. Keep the probe image separate from the release assets.
 
 ### Customer-line 0.7.0 image fixture (PROVISIONAL)
 

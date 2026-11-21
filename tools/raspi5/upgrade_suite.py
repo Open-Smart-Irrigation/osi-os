@@ -7,6 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from minimal_flows import CUT_RECEIPT, verify_disk
+
 DB = '/data/db/farming.db'
 SEED = """
 INSERT INTO devices(deveui,name,type_id,created_at,updated_at) VALUES('A840410000000001','upgrade fixture','DRAGINO_LSN50',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
@@ -135,14 +137,21 @@ def run(vm, old_version, new_version, *, cut_at=None, transfer=None, release=Non
         check_transfer_cut(vm, release, transfer, before)
         return before
     old_stamp = vm.flows_receipt()[1] if cut_at else None
+    if cut_at == CUT_RECEIPT:
+        candidate_flows = release/'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
+        shipped_old = hashlib.sha256(candidate_flows.read_bytes()).hexdigest().encode()
     code, receipt = vm.command('set -e\n'+CANDIDATE_INSTALL, 2400, until=cut_at)
     if cut_at is not None and code is None:
         # This is the candidate init's first publication on the upgraded
         # payload. The installer is still running, so cut without a guest call.
-        vm.stop(cut=True)
-        if receipt[1] in (b'image', old_stamp):
-            raise RuntimeError('upgrade commit did not name a new deployed payload')
-        vm.verify_cut_disk('upgrade commit', receipt)
+        if cut_at == CUT_RECEIPT:
+            receipt = verify_disk(vm, receipt, phase='committed', factory=False,
+                                  old_stamp=old_stamp, shipped_old=shipped_old)
+        else:
+            vm.stop(cut=True)
+            if receipt[1] in (b'image', old_stamp):
+                raise RuntimeError('upgrade commit did not name a new deployed payload')
+            vm.verify_cut_disk('upgrade commit', receipt)
         vm.start()
         wait_for_api(vm)
         vm.verify_flows_receipt(receipt)

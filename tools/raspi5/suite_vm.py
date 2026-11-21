@@ -17,9 +17,11 @@ from run import prepare
 FLOWS_COMMITTED = rb'node-red\.init: committed flows\.json digest=(?P<digest>[0-9a-f]{64}) stamp=(?P<stamp>[A-Za-z0-9_-]+)\r?\n'
 
 
-def external_path(path):
+def external_path(path, *, off_tmp=False):
     resolved = path.resolve(strict=True)
     for spelling in (path.absolute(), resolved):
+        if off_tmp and spelling.is_relative_to("/tmp"):
+            raise ValueError("path is under /tmp")
         for directory in (spelling, *spelling.parents):
             marker = directory/'.git'
             if marker.exists() or marker.is_symlink() or all(
@@ -88,7 +90,7 @@ class Guest:
             self.port = port.getsockname()[1]
         self.url = f'http://127.0.0.1:{self.port}'
 
-    def start(self, *, before_console=None, inspection=False):
+    def start(self, *, before_console=None, inspection=False, flow_cut=None):
         if self.process is not None or self.bridge is not None:
             raise RuntimeError('previous guest or bridge has not been reaped')
         self.boots += 1
@@ -98,6 +100,10 @@ class Guest:
         disk = 'inspect.img' if inspection else 'sd.img'
         cache = ',cache=none' if self.direct_io else ''
         cmdline = (d/'cmdline.txt').read_text().strip() + ' console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
+        if flow_cut is not None:
+            if inspection or flow_cut not in ('committed', 'before-dir-sync'):
+                raise ValueError('invalid minimal flows cut boot')
+            cmdline += f' osi_flows_cut={flow_cut}'
         if inspection:
             cmdline += f' init=/bin/sh loglevel=7 -- -c "{INSPECTION_INIT}"'
         a, b = socket.socketpair()
@@ -121,7 +127,7 @@ class Guest:
             self.send(b'stty -echo\n')
             return
         if before_console is not None:
-            return self.expect(before_console, 300).group('digest', 'stamp')
+            return self.expect(before_console, 300).groups()
         self.expect(b'Please press Enter to activate this console',180)
         self.send(b'\n')
         self.expect(b':~#',40)
@@ -237,13 +243,15 @@ printf '%s %s\n' "${digest%% *}" "$stamp"
         if observed != expected:
             raise RuntimeError('recovered flows digest or active payload stamp differs from commit')
 
-    def verify_cut_disk(self, label, expected, *, inspect=None):
+    def verify_cut_disk(self, label, expected, *, inspect=None, alternatives=()):
         if self.process is not None or self.bridge is not None or not self.direct_io:
             raise RuntimeError('disk inspection requires a reaped direct-I/O guest')
         clone = self.work/'inspect.img'
         audit = self.receipts/'flows-cut.log'
         with audit.open('a') as log:
             print(label, 'expected', *(part.decode() for part in expected), file=log)
+            for alternative in alternatives:
+                print(label, 'alternative', *(part.decode() for part in alternative), file=log)
         try:
             subprocess.run(['cp', '--reflink=auto', '--sparse=always', self.work/'sd.img', clone],
                            check=True)
@@ -251,7 +259,7 @@ printf '%s %s\n' "${digest%% *}" "$stamp"
             observed = self.flows_receipt()
             with audit.open('a') as log:
                 print(label, 'disk', *(part.decode() for part in observed), file=log)
-            if observed != expected:
+            if observed not in (expected, *alternatives):
                 raise RuntimeError('on-disk flows digest or payload stamp differs before recovery')
             if inspect is not None:
                 inspect(self)

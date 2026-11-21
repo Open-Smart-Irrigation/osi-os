@@ -8,17 +8,30 @@ import subprocess
 import tempfile
 import time
 
+from minimal_flows import CUT_RECEIPT, INIT, has_atomic_publish, prepare_probe_release, verify_disk
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
 
 HERE = Path(__file__).resolve().parent
+UPGRADE_VERSIONS = ('0.8.0', '0.8.1')
+BASE_CASES = ('Cold boot', 'First account and login', 'WM1302 uplinks',
+              'Valve open and outcome', 'Reboot persistence',
+              'Power cut 1', 'Power cut 2', 'Power cut 3',
+              *(f'Upgrade {version}' for version in UPGRADE_VERSIONS))
 FLOWS_CAPABILITY = 'function persistFlowHold('
 FLOWS_CASES = ('Flows cut on first boot', 'Flows cut on later boot', 'Flows cut after upgrade')
 ZERO_CASE = 'A. Zeroed upgraded flows preserve migration 0073'
 PRISTINE_CASE = 'B. Missing pristine copy warns or holds'
 TRANSFER_CASES = {key: f'C. Interrupted {key} install' for key in TRANSFER_TARGETS}
 BOOT_SAFETY_CASES = (ZERO_CASE, PRISTINE_CASE, *TRANSFER_CASES.values())
+MINIMAL_FACTORY_CASES = {
+    'committed': 'Minimal factory cut after directory fsync',
+    'before-dir-sync': 'Minimal factory cut before directory fsync',
+}
+MINIMAL_UPGRADE_CASE = 'Minimal flows cut on first post-upgrade start'
+MINIMAL_CASES = (*MINIMAL_FACTORY_CASES.values(), MINIMAL_UPGRADE_CASE)
+CUSTOMER_CASE = 'Customer-line 0.7.0 upgrade [PROVISIONAL]'
 
 
 def has_flows_recovery(init_source):
@@ -27,10 +40,37 @@ def has_flows_recovery(init_source):
     return any(line.startswith(FLOWS_CAPABILITY) for line in init_source.splitlines())
 
 
+def flows_capability(init):
+    if has_flows_recovery(init):
+        return 'recovery'
+    if has_atomic_publish(init):
+        return 'minimal'
+    return 'unsupported'
+
+
 def check_image_capability(vm, expected):
-    observed = checked(vm, f"sed -n '/^{FLOWS_CAPABILITY}/p' /etc/init.d/node-red")
-    if has_flows_recovery(observed) != expected:
-        raise RuntimeError('factory image and offline tree disagree on flows recovery capability')
+    observed = checked(vm, 'cat /etc/init.d/node-red')
+    if flows_capability(observed) != expected:
+        raise RuntimeError('factory image and offline tree disagree on flows publication capability')
+
+
+def expected_cases(args, capability, customer_selected, *, historical=False):
+    if args.flows_power_cut_only:
+        return dict.fromkeys(FLOWS_CASES)
+    if args.upgrade_boot_safety_only:
+        return dict.fromkeys(BOOT_SAFETY_CASES)
+    if args.customer_fixture_only:
+        return {CUSTOMER_CASE: None}
+    cases = dict.fromkeys(BASE_CASES)
+    if not historical:
+        recovery_reason = None if capability == 'recovery' else 'persistFlowHold absent in candidate init'
+        cases.update(dict.fromkeys(FLOWS_CASES + BOOT_SAFETY_CASES, recovery_reason))
+        minimal_reason = 'persistFlowHold present in candidate init' if capability == 'recovery' else None
+        cases.update(dict.fromkeys(MINIMAL_CASES, minimal_reason))
+    if customer_selected:
+        cases[CUSTOMER_CASE] = None
+    return cases
+
 
 
 def ready(vm):
@@ -135,6 +175,9 @@ def main(argv=None):
     ap=argparse.ArgumentParser()
     ap.add_argument('--candidate', type=Path)
     ap.add_argument('--candidate-sha256')
+    ap.add_argument('--minimal-probe-image', type=Path,
+                    help='separate factory archive built with the test-only minimal flows probe')
+    ap.add_argument('--minimal-probe-sha256')
     ap.add_argument('--osi-version', required=True)
     ap.add_argument('--chirpstack-version', required=True)
     ap.add_argument('--release', type=Path, required=True,
@@ -164,9 +207,8 @@ def main(argv=None):
     receipt = (release/'SERVED-FROM.txt').read_text()
     if not re.search(rf'\b{args.release_revision}\b', receipt):
         ap.error('offline release receipt does not identify --release-revision')
-    init = release/'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'
-    flows_cuts = has_flows_recovery(init.read_text())
-    if (args.flows_power_cut_only or args.upgrade_boot_safety_only) and not flows_cuts:
+    capability = flows_capability((release/INIT).read_text())
+    if (args.flows_power_cut_only or args.upgrade_boot_safety_only) and capability != 'recovery':
         ap.error('focused boot cases require an offline release with the flows fix from PR #714')
     customer_image = os.environ.get('OSI_RASPI5_CUSTOMER_IMAGE')
     customer_source = os.environ.get('OSI_RASPI5_CUSTOMER_FIXTURE_DIR')
@@ -191,24 +233,49 @@ def main(argv=None):
     (run/'inputs.txt').write_text(
         f'revision={args.release_revision}\ncandidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
-        f'flows_required={flows_cuts}\nflows_power_cut_only={args.flows_power_cut_only}\n'
+        f'flows_capability={capability}\nminimal_probe_sha256={args.minimal_probe_sha256}\n'
+        f'flows_power_cut_only={args.flows_power_cut_only}\n'
         f'upgrade_boot_safety_only={args.upgrade_boot_safety_only}\n'
         f'customer_fixture_only={args.customer_fixture_only}\n')
     if args.keep_scratch:
         scratch = run/'scratch'
         scratch.mkdir(mode=0o700)
-        return run_cases(args, run, scratch, release, flows_cuts, bool(customer_image))
+        return run_cases(args, run, scratch, release, capability, bool(customer_image))
     with tempfile.TemporaryDirectory(prefix='scratch-', dir=run) as scratch:
-        return run_cases(args, run, Path(scratch), release, flows_cuts, bool(customer_image))
+        return run_cases(args, run, Path(scratch), release, capability, bool(customer_image))
 
 
-def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
+def run_cases(args, run, scratch, release, capability, customer_selected):
     results = {}
 
     def record(row):
         with (run/'results.log').open('a') as log:
             print(row, file=log)
         print(row, flush=True)
+
+    focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
+    expected = expected_cases(args, capability, customer_selected)
+
+    def summarize(*, aborted=False):
+        record('Case | Expected | Observed | Verdict | Reason')
+        passed = required = 0
+        failed = aborted or bool(results.keys() - expected.keys())
+        for label, reason in expected.items():
+            observed = results.get(label, 'NOT RUN')
+            if reason:
+                verdict = 'N/A' if observed == 'NOT RUN' else 'FAIL'
+                need = 'N/A'
+            else:
+                required += 1
+                passed += observed == 'PASS'
+                verdict = 'PASS' if observed == 'PASS' else 'FAIL'
+                need = 'REQUIRED'
+            failed |= verdict == 'FAIL'
+            record(f'{label} | {need} | {observed} | {verdict} | {reason or ""}')
+        record(f'Case totals: {passed} passed / {required} required')
+        mode = 'Focused acceptance' if focused else 'Candidate acceptance'
+        record(f'{mode}: ' + ('FAIL' if failed else 'PASS'))
+        return int(failed)
 
     def test(label, fn, *, private=False):
         start=time.monotonic()
@@ -244,12 +311,18 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
         if [digest, image.name] not in [line.split() for line in (folder/'SHA256SUMS').read_text().splitlines()]:
             raise ValueError('fixture SHA-256 mismatch')
-        scenario = transfer or recovery or ('flows-cut' if cut_at else None)
+        minimal = cut_at == CUT_RECEIPT
+        scenario = transfer or recovery or ('minimal-cut' if minimal else 'flows-cut' if cut_at else None)
+        upgrade_media = build_media(probe_release, scratch/'minimal-media',
+                                    revision=args.release_revision) if minimal else candidate_media()
         case = f'{old}-{scenario}' if scenario else old
-        guest = Guest(scratch/case, image, args.qemu, args.ram, upgrade=candidate_media(),
+        guest = Guest(scratch/case, image, args.qemu, args.ram, upgrade=upgrade_media,
                       receipts=run/case, direct_io=bool(scenario))
         try:
-            guest.start()
+            if minimal:
+                guest.start(flow_cut='committed')
+            else:
+                guest.start()
             ready(guest)
             previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer, release=release)
             if recovery == 'zero':
@@ -264,68 +337,92 @@ def run_cases(args, run, scratch, release, flows_cuts, customer_selected):
         finally:
             guest.stop()
 
-    focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
-    if not focused:
-        vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram,
-                   receipts=run/'candidate', direct_io=True)
-        stock_cases(vm, args, test, flows_cuts)
-        for old in ['0.8.0', '0.8.1']:
-            test(f'Upgrade {old}', lambda: verify_upgrade(old))
-    run_flows = not (args.customer_fixture_only or args.upgrade_boot_safety_only)
-    run_safety = not (args.customer_fixture_only or args.flows_power_cut_only)
-    required = ()
-    if flows_cuts and run_flows:
-        required += FLOWS_CASES
-        for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
-            def check_cut():
-                case = label.replace(' ', '-')
-                vm = Guest(scratch/case, args.candidate, args.qemu, args.ram,
-                           receipts=run/case, direct_io=True)
-                try:
-                    if not first_boot:
-                        vm.start()
-                        ready(vm)
-                    return cut_after_flows_patch(vm, first_boot)
-                finally:
-                    vm.stop()
+    def factory_minimal_cut(phase):
+        case = scratch/f'minimal-factory-{phase}'
+        vm = Guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
+        try:
+            receipt = vm.start(before_console=CUT_RECEIPT, flow_cut=phase)
+            committed = verify_disk(vm, receipt, phase=phase, factory=True)
+            vm.start()
+            wait_for_api(vm)
+            vm.verify_flows_receipt(committed)
+            digest = checked(vm, 'sha256sum /etc/init.d/node-red').split()[0]
+            if digest != probe_init_digest:
+                raise RuntimeError('probe image init differs from the instrumented candidate source')
+            return 'clone held complete old or new flows and /api/me returned 401'
+        finally:
+            vm.stop()
 
-            test(label, check_cut)
-        test(FLOWS_CASES[2], lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED))
-    elif run_flows:
-        for label in FLOWS_CASES:
-            record(f'{label}: not applicable to this candidate (requires PR #714)')
-    if flows_cuts and run_safety:
-        required += BOOT_SAFETY_CASES
-        test(ZERO_CASE, lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED, recovery='zero'))
-        test(PRISTINE_CASE, lambda: verify_upgrade('0.8.1', recovery='missing'))
-        for transfer, label in TRANSFER_CASES.items():
-            test(label, lambda: verify_upgrade('0.8.1', transfer=transfer))
-    elif run_safety:
-        for label in BOOT_SAFETY_CASES:
-            record(f'{label}: not applicable to this candidate (requires PR #714)')
-    if not focused or args.customer_fixture_only:
-        from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
-        label = 'Customer-line 0.7.0 upgrade [PROVISIONAL]'
-        selection = 'opt-in qualification' if customer_selected else 'off by default'
-        record(f'{label}: {selection}. Count this fixture as release evidence only with a '
-               f'successful owner-only qualification receipt for the exact pair. {QUALIFICATION_SCOPE}')
-        if customer_selected:
-            test(label, lambda: customer_upgrade(args, scratch, run, release, ready), private=True)
-    for label in required:
-        if label not in results:
-            record(f'{label}: FAIL (missing required result)')
-    failed = any(status == 'FAIL' for status in results.values()) or any(results.get(label) != 'PASS' for label in required)
-    mode = 'Focused acceptance' if focused else 'Candidate acceptance'
-    record(f'{mode}: ' + ('FAIL' if failed else 'PASS'))
-    return int(failed)
+    try:
+        if not focused and capability == 'unsupported':
+            record('Candidate init declares neither #714 recovery nor minimal atomic flows publication')
+            return summarize(aborted=True)
+        if not focused and capability == 'minimal':
+            try:
+                if not args.minimal_probe_image or not re.fullmatch(r'[0-9a-f]{64}', args.minimal_probe_sha256 or ''):
+                    raise ValueError('minimal qualification requires --minimal-probe-image and --minimal-probe-sha256')
+                if args.minimal_probe_sha256 == args.candidate_sha256:
+                    raise ValueError('the minimal probe must be a separate factory image')
+                probe_image = external_path(args.minimal_probe_image, off_tmp=True)
+                with probe_image.open('rb') as stream:
+                    if hashlib.file_digest(stream, 'sha256').hexdigest() != args.minimal_probe_sha256:
+                        raise ValueError('minimal probe image SHA-256 mismatch')
+                probe_release = scratch/'probe-release'
+                probe_init_digest = prepare_probe_release(release, probe_release)
+                (scratch/'minimal-media').mkdir()
+            except (OSError, ValueError, RuntimeError) as error:
+                record(str(error))
+                return summarize(aborted=True)
+        if not focused:
+            vm = Guest(scratch/'candidate', args.candidate, args.qemu, args.ram,
+                       receipts=run/'candidate', direct_io=True)
+            stock_cases(vm, args, test, capability)
+            for old in UPGRADE_VERSIONS:
+                test(f'Upgrade {old}', lambda: verify_upgrade(old))
+        if expected.get(FLOWS_CASES[0], False) is None:
+            for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
+                def check_cut():
+                    case = label.replace(' ', '-')
+                    vm = Guest(scratch/case, args.candidate, args.qemu, args.ram,
+                               receipts=run/case, direct_io=True)
+                    try:
+                        if not first_boot:
+                            vm.start()
+                            ready(vm)
+                        return cut_after_flows_patch(vm, first_boot)
+                    finally:
+                        vm.stop()
+
+                test(label, check_cut)
+            test(FLOWS_CASES[2], lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED))
+        if expected.get(ZERO_CASE, False) is None:
+            test(ZERO_CASE, lambda: verify_upgrade('0.8.1', cut_at=FLOWS_COMMITTED, recovery='zero'))
+            test(PRISTINE_CASE, lambda: verify_upgrade('0.8.1', recovery='missing'))
+            for transfer, label in TRANSFER_CASES.items():
+                test(label, lambda: verify_upgrade('0.8.1', transfer=transfer))
+        if not focused and capability == 'minimal':
+            for phase, label in MINIMAL_FACTORY_CASES.items():
+                test(label, lambda: factory_minimal_cut(phase))
+            test(MINIMAL_UPGRADE_CASE, lambda: verify_upgrade('0.8.1', cut_at=CUT_RECEIPT))
+        if not focused or args.customer_fixture_only:
+            from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
+            selection = 'opt-in qualification' if customer_selected else 'off by default'
+            record(f'{CUSTOMER_CASE}: {selection}. Count this fixture as release evidence only with a '
+                   f'successful owner-only qualification receipt for the exact pair. {QUALIFICATION_SCOPE}')
+            if customer_selected:
+                test(CUSTOMER_CASE, lambda: customer_upgrade(args, scratch, run, release, ready), private=True)
+    except BaseException:
+        summarize(aborted=True)
+        raise
+    return summarize()
 
 
-def stock_cases(vm, args, test, flows_cuts):
+def stock_cases(vm, args, test, capability):
     try:
         def boot():
             vm.start()
             ready(vm)
-            check_image_capability(vm, flows_cuts)
+            check_image_capability(vm, capability)
             versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
             if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
                 raise RuntimeError('unexpected versions '+versions)

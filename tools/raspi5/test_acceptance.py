@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 import acceptance
 import boot_safety
 import customer_fixture
+import minimal_flows
 import run
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 import upgrade_suite
@@ -28,6 +29,49 @@ COMMIT = b'node-red.init: committed flows.json digest=' + DIGEST + b' stamp=2026
 
 
 class FlowTests(unittest.TestCase):
+    def test_candidate_gate_fails_when_pi5_workload_omits_a_required_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            revision = 'a' * 40
+            (root/'SERVED-FROM.txt').write_text(revision)
+            init = root/'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'
+            init.parent.mkdir(parents=True)
+            init.write_text(PINNED_CAPABILITY + '\n')
+            image = root/'rpi5.img.gz'
+            image.write_bytes(b'factory')
+            digest = hashlib.sha256(image.read_bytes()).hexdigest()
+            for version in ('0.8.0', '0.8.1'):
+                folder = root/f'v{version}'
+                folder.mkdir()
+                (folder/image.name).write_bytes(image.read_bytes())
+                (folder/'SHA256SUMS').write_text(f'{digest}  {image.name}\n')
+
+            def stock(_guest, _args, record, _flows, **_options):
+                for label in ('Cold boot', 'First account and login', 'WM1302 uplinks',
+                              'Valve open and outcome', 'Reboot persistence', 'Power cut 1', 'Power cut 3'):
+                    record(label, lambda: None)
+
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
+                  patch.object(acceptance, 'stock_cases', side_effect=stock),
+                  patch.object(acceptance, 'ready'), patch.object(acceptance, 'build_media'),
+                  patch.object(acceptance, 'upgrade'), patch.object(acceptance, 'verify_zero_recovery'),
+                  patch.object(acceptance, 'verify_missing_pristine_hold'),
+                  patch.object(acceptance, 'cut_after_flows_patch')):
+                status = acceptance.main([
+                    '--candidate', str(image), '--candidate-sha256', digest,
+                    '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1',
+                    '--release', str(root), '--release-revision', revision,
+                    '--fixtures', str(root), '--run-root', str(root),
+                ])
+            result = next(root.glob('pi5-acceptance-*/results.log')).read_text()
+            self.assertEqual(status, 1, result)
+            self.assertIn('Power cut 2 | REQUIRED | NOT RUN | FAIL', result)
+            self.assertIn('Case totals: 17 passed / 18 required', result)
+            for label in acceptance.FLOWS_CASES + acceptance.BOOT_SAFETY_CASES:
+                self.assertIn(f'{label} | REQUIRED | PASS | PASS', result)
+            for label in acceptance.MINIMAL_CASES:
+                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold present', result)
+
     def test_current_source_and_guest_receipt(self):
         source = PINNED_CAPABILITY
         if fixture := os.environ.get('OSI_RASPI5_TEST_FLOWS_INIT'):
@@ -42,9 +86,9 @@ class FlowTests(unittest.TestCase):
 
     def test_factory_image_and_offline_tree_must_agree(self):
         with patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY):
-            with self.assertRaisesRegex(RuntimeError, 'disagree on flows recovery'):
-                acceptance.check_image_capability(None, False)
-            acceptance.check_image_capability(None, True)
+            with self.assertRaisesRegex(RuntimeError, 'disagree on flows publication'):
+                acceptance.check_image_capability(None, 'minimal')
+            acceptance.check_image_capability(None, 'recovery')
 
     def test_first_boot_rejects_deployed_stamp(self):
         vm = Mock()
@@ -171,34 +215,75 @@ class FlowTests(unittest.TestCase):
                   patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready'),
                   patch.object(acceptance, 'cut_after_flows_patch', side_effect=TimeoutError('missing receipt')),
                   patch.object(acceptance, 'upgrade', side_effect=RuntimeError('missing receipt'))):
-                self.assertEqual(acceptance.run_cases(args, root, root, root, True, False), 1)
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'recovery', False), 1)
             result = (root/'results.log').read_text()
             for label in acceptance.FLOWS_CASES:
                 self.assertRegex(result, re.escape(label) + r'\s+FAIL')
             self.assertIn('Focused acceptance: FAIL', result)
 
-    def test_old_candidate_reports_each_cut_as_not_applicable(self):
+    def test_minimal_candidate_requires_its_three_cuts_and_reports_recovery_na(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            (root/'v0.8.0').mkdir()
+            (root/'v0.8.1').mkdir()
+            probe = root/'probe.img.gz'
+            probe.write_bytes(b'probe')
+            for version in acceptance.UPGRADE_VERSIONS:
+                folder = root/f'v{version}'
+                (folder/'rpi5.img.gz').write_bytes(b'fixture')
+                (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
             args = SimpleNamespace(candidate=None, qemu=None, ram=8, fixtures=root,
                                    flows_power_cut_only=False, customer_fixture_only=False,
                                    upgrade_boot_safety_only=False,
-                                   release_revision='a'*40, osi_version='0.8.3')
-            for version in ('0.8.0', '0.8.1'):
-                folder = root/f'v{version}'
-                folder.mkdir()
-                (folder/'rpi5.img.gz').write_bytes(b'fixture')
-                (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
+                                   release_revision='a'*40, osi_version='0.8.3',
+                                   candidate_sha256=hashlib.sha256(b'factory').hexdigest(),
+                                   minimal_probe_image=probe,
+                                   minimal_probe_sha256=hashlib.sha256(b'probe').hexdigest())
+
+            def stock(guest, _args, record, capability, **_options):
+                record('Cold boot', lambda: acceptance.check_image_capability(guest, capability))
+                for label in acceptance.BASE_CASES[1:-2]:
+                    record(label, lambda: None)
+
+            capability = acceptance.flows_capability(minimal_flows.ATOMIC_PUBLISH)
+            self.assertEqual(capability, 'minimal')
             with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest'),
-                  patch.object(acceptance, 'stock_cases'), patch.object(acceptance, 'ready'),
-                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'upgrade')):
-                self.assertEqual(acceptance.run_cases(args, root, root, root, False, False), 0)
+                  patch.object(acceptance, 'external_path', return_value=probe),
+                  patch.object(acceptance, 'prepare_probe_release', return_value='abc'),
+                  patch.object(acceptance, 'checked', side_effect=[minimal_flows.ATOMIC_PUBLISH, 'abc  init', 'abc  init']),
+                  patch.object(acceptance, 'wait_for_api'), patch.object(acceptance, 'stock_cases', side_effect=stock),
+                  patch.object(acceptance, 'ready'), patch.object(acceptance, 'verify_disk') as disk,
+                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'upgrade') as upgrade):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, capability, False), 0)
+            self.assertEqual([call.kwargs['phase'] for call in disk.call_args_list], ['committed', 'before-dir-sync'])
+            self.assertEqual(upgrade.call_args.kwargs['cut_at'], minimal_flows.CUT_RECEIPT)
             result = (root/'results.log').read_text()
-            for label in acceptance.FLOWS_CASES:
-                self.assertIn(f'{label}: not applicable to this candidate', result)
+            for label in acceptance.FLOWS_CASES + acceptance.BOOT_SAFETY_CASES:
+                self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold absent', result)
+            for label in acceptance.MINIMAL_CASES:
+                self.assertIn(f'{label} | REQUIRED | PASS | PASS', result)
+            self.assertIn('Case totals: 13 passed / 13 required', result)
             self.assertIn('[PROVISIONAL]: off by default', result)
-            self.assertIn('qualification receipt for the exact pair', result)
-            self.assertIn(customer_fixture.QUALIFICATION_SCOPE, result)
+
+    def test_minimal_probe_copy_matches_source_pin_and_keeps_original_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root/'release'
+            init = source/minimal_flows.INIT
+            init.parent.mkdir(parents=True)
+            init.write_text(minimal_flows.ATOMIC_PUBLISH + '\n')
+            original = init.read_bytes()
+            deploy = source/'deploy.sh'
+            deploy.write_text('NODE_RED_INIT_SHA256="' + hashlib.sha256(original).hexdigest() + '"\n')
+            probe = root/'probe'
+            new_digest = minimal_flows.prepare_probe_release(source, probe)
+            self.assertEqual(init.read_bytes(), original)
+            self.assertIn('minimal-flows-cut', (probe/minimal_flows.INIT).read_text())
+            self.assertEqual(new_digest, hashlib.sha256((probe/minimal_flows.INIT).read_bytes()).hexdigest())
+            self.assertEqual(minimal_flows.INIT_PIN.findall((probe/'deploy.sh').read_text()), [new_digest])
+            with self.assertRaisesRegex(ValueError, 'pin the original'):
+                deploy.write_text('NODE_RED_INIT_SHA256="' + 'a' * 64 + '"\n')
+                minimal_flows.prepare_probe_release(source, root/'invalid')
 
     def test_upgrade_safety_runs_all_abc_cases_and_requires_pass_from_each(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -221,7 +306,7 @@ class FlowTests(unittest.TestCase):
                   patch.object(acceptance, 'verify_zero_recovery') as zero,
                   patch.object(acceptance, 'verify_missing_pristine_hold') as hold,
                   patch.object(acceptance, 'upgrade', side_effect=upgrade) as deploy):
-                self.assertEqual(acceptance.run_cases(args, root, root, root, True, False), 1)
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'recovery', False), 1)
             self.assertEqual(deploy.call_count, 5)
             self.assertTrue(all(call.kwargs['direct_io'] for call in guest.call_args_list))
             zero.assert_called_once()
@@ -258,7 +343,7 @@ class BoundaryTests(unittest.TestCase):
             error = subprocess.CalledProcessError(1, ['tool', 'private-filename.img'])
             with (redirect_stdout(stdout), redirect_stderr(stdout),
                   patch.object(customer_fixture, 'run', side_effect=error)):
-                self.assertEqual(acceptance.run_cases(args, root, root, root, False, True), 1)
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'unsupported', True), 1)
             self.assertNotIn('private-filename', stdout.getvalue() + (root/'results.log').read_text())
             self.assertIn('private case failed', stdout.getvalue())
             self.assertIn('[PROVISIONAL]: opt-in qualification', stdout.getvalue())
