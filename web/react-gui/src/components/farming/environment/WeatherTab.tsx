@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import type { OnlineEnvironment, ForecastEnvironment, DailyForecast, HourlyForecast, EnvironmentLocation, RainFocus } from '../../../types/farming';
-import { formatForecastTemperature, formatWeatherValue } from '../../../utils/forecastFormat';
+import { formatForecastTemperature, formatWeatherValue, isIsolatedForecastProbability } from '../../../utils/forecastFormat';
 import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
@@ -245,7 +245,12 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[]; source?: string | null }
             dataKey="prob"
             stroke="var(--text-secondary)"
             strokeWidth={1.5}
-            dot={false}
+            connectNulls={false}
+            dot={({ cx, cy, index }: { cx?: number; cy?: number; index?: number }) => (
+              index != null && cx != null && cy != null && isIsolatedForecastProbability(points, index)
+                ? <circle key={`probability-${index}`} cx={cx} cy={cy} r={3} fill="var(--text-secondary)" />
+                : <g key={`probability-${index}`} />
+            )}
             strokeDasharray="4 2"
           />
         </ComposedChart>

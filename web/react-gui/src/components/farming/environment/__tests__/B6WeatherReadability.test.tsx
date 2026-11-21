@@ -17,12 +17,18 @@ import { AgronomicTab } from '../AgronomicTab';
 import { LocalTab } from '../LocalTab';
 import type { ForecastEnvironment, OnlineEnvironment, LocalEnvironment } from '../../../../types/farming';
 
-const chart = vi.hoisted(() => ({ axes: [] as Record<string, any>[], points: [] as Record<string, unknown>[] }));
+const chart = vi.hoisted(() => ({ axes: [] as Record<string, any>[], points: [] as Record<string, unknown>[], line: null as Record<string, any> | null }));
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: any) => <div>{children}</div>,
   ComposedChart: ({ children, data }: any) => { chart.points = data; return <div>{children}</div>; },
   YAxis: (props: any) => { chart.axes.push(props); return null; },
-  XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Bar: () => null, Line: () => null,
+  XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Bar: () => null,
+  Line: (props: any) => {
+    chart.line = props;
+    return <svg data-testid="probability-markers">{typeof props.dot === 'function' && chart.points.map((point, index) =>
+      props.dot({ index, cx: index * 10, cy: point.prob == null ? undefined : 100 - Number(point.prob) }),
+    )}</svg>;
+  },
 }));
 const online: OnlineEnvironment = { available: false, source: 'unavailable', cacheStatus: 'miss', observedAt: null, expiresAt: null, current: null };
 const location = { source: 'zone' as const, latitude: 0, longitude: 0, timezone: 'UTC' };
@@ -39,9 +45,31 @@ function instance() {
   void i.use(initReactI18next).init({ lng: 'en', fallbackLng: 'en', resources: { en: { devices: en }, fr: { devices: fr }, 'de-CH': { devices: de }, it: { devices: itDevices }, es: { devices: es }, pt: { devices: pt }, lg: { devices: lg } }, interpolation: { escapeValue: false } });
   return i;
 }
-afterEach(() => { cleanup(); chart.axes = []; });
+afterEach(() => { cleanup(); chart.axes = []; chart.line = null; });
 
 describe.each([WeatherTab, ForecastTab])('B6 forecast display', (Tab) => {
+  it.each([
+    [[null, 80, null], 1],
+    [[null, 0, null], 1],
+    [[80], 1],
+    [[80, null, 60], 2],
+    [[null, 80, 60, null], 0],
+    [[null, null, null], 0],
+    [[null, 80, 60, null, 40, null], 1],
+  ] as Array<[Array<number | null>, number]>)('marks only isolated probability points in %j', (probabilities, markers) => {
+    const f = forecast();
+    f.rainFocus!.hourly = probabilities.map((probability, index) => ({
+      time: new Date(Date.now() + (index + 1) * 3600000).toISOString(),
+      rainMm: null, rainProbabilityPct: probability, tempC: null, windSpeedMps: null,
+    }));
+    render(<I18nextProvider i18n={instance()}><Tab forecast={f} online={online} location={location} /></I18nextProvider>);
+    const circles = screen.getByTestId('probability-markers').querySelectorAll('circle');
+    expect(circles).toHaveLength(markers);
+    expect(chart.line?.connectNulls).toBe(false);
+    expect(chart.points.map(point => point.prob)).toEqual(probabilities);
+    if (probabilities[1] === 0) expect(circles[0]).toHaveAttribute('cy', '100');
+  });
+
   it('keeps fractional rain ticks distinct and labels their units', () => {
     render(<I18nextProvider i18n={instance()}><Tab forecast={forecast()} online={online} location={location} /></I18nextProvider>);
     const axis = chart.axes.find(a => a.yAxisId === 'rain')!;

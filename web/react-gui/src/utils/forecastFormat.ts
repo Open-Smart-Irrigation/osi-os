@@ -21,3 +21,14 @@ export function formatWeatherValue(
 export function formatForecastTemperature(value: number | null | undefined, locale: string): string {
   return formatWeatherValue(value, locale, 0, '°C');
 }
+
+/** Mark singleton probability readings without bridging unavailable hours. */
+export function isIsolatedForecastProbability(
+  points: ReadonlyArray<{ prob: number | null | undefined }>, index: number,
+): boolean {
+  const hasValue = (at: number): boolean => {
+    const value = points[at]?.prob;
+    return value != null && Number.isFinite(value);
+  };
+  return hasValue(index) && !hasValue(index - 1) && !hasValue(index + 1);
+}
