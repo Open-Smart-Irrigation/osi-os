@@ -1,4 +1,5 @@
 """Host-only tests for the Pi 5 acceptance runner."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 import hashlib
@@ -7,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+from shlex import quote
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -19,6 +22,7 @@ from archives import verified_archive
 import boot_safety
 import customer_fixture
 import minimal_flows
+import radio_suite
 import run
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 import upgrade_suite
@@ -28,6 +32,173 @@ import upgrade_suite
 PINNED_CAPABILITY = 'function persistFlowHold(stamp, reason) {'
 DIGEST = b'a' * 64
 COMMIT = b'node-red.init: committed flows.json digest=' + DIGEST + b' stamp=20261120T000000Z\r\n'
+
+
+class RadioTests(unittest.TestCase):
+    def request(self, wire):
+        header = wire.read(8)
+        self.assertEqual(header[1:], b'\xfe\x07\x35\xc8\x01\x60\x00')
+        request_id = wire.read(run.RF_REQUEST_ID_SIZE)
+        payload = wire.read(header[0])
+        self.assertEqual(len(request_id), run.RF_REQUEST_ID_SIZE)
+        self.assertEqual(len(payload), header[0])
+        return request_id, payload
+
+    def receipt(self, request_id, count):
+        return bytes((len(request_id) + 1, 254, 0)) + request_id + bytes((count,))
+
+    def downlink(self, address, port=2):
+        payload = b'\x60' + address.to_bytes(4, 'little') + b'\x00\x01\x00'
+        payload += bytes((port,)) + b'\x41\x01\x00\x00\x00\x00'
+        return payload, bytes((len(payload), 0, 7)) + payload
+
+    def test_wrong_socket_can_accept_bytes_but_cannot_pass(self):
+        host, wrong_peer = socket.socketpair()
+        with host, wrong_peer, patch.object(radio_suite, 'RECEIPT_TIMEOUT', 0.01):
+            with self.assertRaisesRegex(RuntimeError, 'no matching WM1302 model delivery receipt'):
+                radio_suite.Radio(host).send(b'fixture')
+            self.assertTrue(wrong_peer.recv(32))
+
+    def test_model_receipt_counts_the_requested_frame(self):
+        for count in (0, 1):
+            with self.subTest(count=count):
+                host, model = socket.socketpair()
+                with host, model, ThreadPoolExecutor(1) as worker:
+                    model.settimeout(2)
+
+                    def reply():
+                        with model.makefile('rb') as wire:
+                            request_id, payload = self.request(wire)
+                            self.assertEqual(payload, b'fixture')
+                            model.sendall(self.receipt(request_id, count))
+
+                    waiting = worker.submit(reply)
+                    air = radio_suite.Radio(host)
+                    if count:
+                        self.assertEqual(air.send(b'fixture'), count)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+                            air.send(b'fixture')
+                    waiting.result()
+
+    def test_stale_receipt_cannot_count_for_a_later_injection(self):
+        host, model = socket.socketpair()
+        with host, model, ThreadPoolExecutor(1) as worker:
+            model.settimeout(2)
+
+            def reply_once():
+                with model.makefile('rb') as wire:
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'first')
+                    receipt = self.receipt(request_id, 1)
+                    model.sendall(receipt + receipt)
+                    next_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'second')
+                    self.assertNotEqual(next_id, request_id)
+
+            waiting = worker.submit(reply_once)
+            air = radio_suite.Radio(host)
+            self.assertEqual(air.send(b'first'), 1)
+            with (patch.object(radio_suite, 'RECEIPT_TIMEOUT', 0.05),
+                  self.assertRaisesRegex(RuntimeError, 'no matching WM1302 model delivery receipt')):
+                air.send(b'second')
+            waiting.result()
+
+    def test_valve_ignores_pending_and_unrelated_packets_and_accepts_interleaving(self):
+        host, model = socket.socketpair()
+        valve = Mock(devaddr=1)
+        valve.uplink.side_effect = [b'trigger receive window', b'report opened']
+        valve.downlink.return_value = {'fport': 2, 'payload': b'\x41\x01'}
+        command, command_wire = self.downlink(valve.devaddr)
+        _, other_wire = self.downlink(2)
+        _, mac_wire = self.downlink(valve.devaddr, port=0)
+        vm = Mock()
+        vm.command.return_value = (0, '2')
+        with (host, model, ThreadPoolExecutor(1) as worker,
+              patch.object(radio_suite, '_wait_history'),
+              patch.object(radio_suite, 'EARLY_WINDOW_TIMEOUT', 0.01)):
+            model.settimeout(2)
+            model.sendall(self.receipt(b'old-id!!', 1) + command_wire)
+
+            def reply():
+                with model.makefile('rb') as wire:
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'trigger receive window')
+                    model.sendall(mac_wire + command_wire + self.receipt(request_id, 1))
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'report opened')
+                    model.sendall(self.receipt(request_id, 1))
+
+            waiting = worker.submit(reply)
+            air = radio_suite.Radio(host)
+            result = radio_suite.run_valve(vm, air, {radio_suite.VALVE: valve},
+                                          lambda: model.sendall(other_wire + mac_wire))
+            self.assertEqual(result, 'WM1302 model delivered=2, Concentratord CRC_OK=2')
+            self.assertFalse(air.buffer)
+            valve.downlink.assert_called_once_with(command)
+            waiting.result()
+
+    def test_valve_command_after_gui_open_and_before_window_still_fails(self):
+        host, model = socket.socketpair()
+        valve = Mock(devaddr=1)
+        _, command_wire = self.downlink(valve.devaddr)
+        vm = Mock()
+        vm.command.return_value = (0, '')
+        with host, model:
+            with self.assertRaisesRegex(RuntimeError, 'valve downlink before receive window'):
+                radio_suite.run_valve(vm, radio_suite.Radio(host), {radio_suite.VALVE: valve},
+                                      lambda: model.sendall(command_wire))
+
+    def test_model_delivery_without_concentratord_crc_ok_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '0')
+        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+            radio_suite._radio_evidence(vm, 'fixture', 1)
+
+    def test_unavailable_concentratord_count_fails(self):
+        vm = Mock()
+        vm.command.return_value = (1, '4')
+        with self.assertRaisesRegex(RuntimeError, 'CRC_OK count unavailable'):
+            radio_suite._radio_evidence(vm, 'fixture', 4)
+
+    def test_positive_model_and_concentratord_counts_pass(self):
+        vm = Mock()
+        vm.command.return_value = (0, '2')
+        self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 2),
+                         'WM1302 model delivered=2, Concentratord CRC_OK=2')
+
+    def test_uplink_case_without_injections_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '4')
+        with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+            radio_suite.inject(vm, Mock(), {})
+
+    def test_crc_count_matches_the_syslog_tag_and_case_window(self):
+        prefix = 'Sat Nov 21 20:00:00 2026 '
+        marker = prefix + 'user.notice osi-radio-suite: fixture'
+        daemon = 'chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: 81'
+        valid = prefix + 'user.info ' + daemon
+        foreign = prefix + 'user.info unrelated[42]: printed ' + daemon
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'concentratord.toml'
+            config.write_text('disable_crc_filter=false\n')
+            for current in ([foreign], [foreign, valid]):
+                log = '\n'.join([valid, marker, *current])
+
+                def command(script):
+                    script = script.replace('/var/etc/chirpstack-concentratord/concentratord.toml',
+                                            quote(str(config)))
+                    fixture = f"logread() {{ printf '%s\\n' {quote(log)}; }}\n"
+                    result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+                    return result.returncode, result.stdout.strip()
+
+                vm = SimpleNamespace(command=command)
+                if current[-1] == valid:
+                    self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
+                                     'WM1302 model delivered=1, Concentratord CRC_OK=1')
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+                        radio_suite._radio_evidence(vm, 'fixture', 1)
 
 
 class FlowTests(unittest.TestCase):
@@ -196,7 +367,7 @@ class FlowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             vm = Guest.__new__(Guest)
             vm.work = vm.receipts = Path(directory)
-            vm.process = vm.bridge = None
+            vm.process = vm.bridge = vm.radio = None
             vm.direct_io = True
             (vm.work/'sd.img').write_bytes(b'live disk')
 
@@ -230,10 +401,20 @@ class FlowTests(unittest.TestCase):
             vm.direct_io = True
             (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
             report = re.search(rb'(READY|FAILED)', b'READY')
-            with (patch('suite_vm.subprocess.Popen') as launch,
+            def verify_launch(args, **options):
+                if '-chardev' in args:
+                    radio_fd = options['pass_fds'][1]
+                    self.assertIn(f'socket,id=wm1302-air,fd={radio_fd},server=off', args)
+                    with socket.socket(fileno=os.dup(radio_fd)) as peer:
+                        peer.sendall(b'from this boot')
+                return Mock()
+
+            with (patch('suite_vm.subprocess.Popen', side_effect=verify_launch) as launch,
                   patch.object(vm, 'expect', return_value=report),
                   patch.object(vm, 'send')):
                 vm.start(inspection=True)
+                with vm.radio as host:
+                    self.assertEqual(host.recv(32), b'from this boot')
             command = launch.call_args.args[0]
             self.assertIn('if=sd,format=raw,file=inspect.img,cache=none', command)
             self.assertIn('init=/bin/sh', command[command.index('-append')+1])
@@ -504,11 +685,13 @@ class BoundaryTests(unittest.TestCase):
             vm = Guest.__new__(Guest)
             guest, bridge = Mock(), Mock()
             vm.process, vm.bridge = guest, bridge
+            vm.radio, peer = socket.socketpair()
+            host = vm.radio
             vm.boots = 1
             vm.receipts = Path(directory)/'missing'
             guest.poll.return_value = bridge.poll.return_value = None
             guest.wait.side_effect = bridge.wait.side_effect = [subprocess.TimeoutExpired('qemu', 5), -9]
-            with self.assertRaises(ExceptionGroup):
+            with peer, self.assertRaises(ExceptionGroup):
                 vm.stop()
             for process in (guest, bridge):
                 process.terminate.assert_called_once()
@@ -516,6 +699,8 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(process.wait.call_count, 2)
             self.assertIsNone(vm.process)
             self.assertIsNone(vm.bridge)
+            self.assertIsNone(vm.radio)
+            self.assertEqual(host.fileno(), -1)
 
     def test_firmware_override_checksum(self):
         with tempfile.TemporaryDirectory() as directory:
