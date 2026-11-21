@@ -15,7 +15,13 @@
 set -eu
 
 PORT="${1:-9876}"
-BASE="http://localhost:$PORT"
+# deploy endpoint begin
+if [ "${DEPLOY_OFFLINE_MODE:-0}" = 1 ]; then
+    BASE="http://127.0.0.1:$PORT"
+else
+    BASE="http://localhost:$PORT"
+fi
+# deploy endpoint end
 DB_DIR="/data/db"
 DB_PATH="$DB_DIR/farming.db"
 # Pick the seed DB from the profile matching the running hardware.
@@ -94,6 +100,7 @@ COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87
 NODE_FILES_DIR="${NODE_FILES_DIR:-/srv/node-red/nodes}"
 OSI_SQLITE_SERIALIZE_JS_SHA256="89128084cef60fd0f9a1498103a7c36b21fc13a6a391b9316d6987331a5ef570"
 OSI_SQLITE_SERIALIZE_HTML_SHA256="2db50d96f7d48d0c2d17ba7c75b3871e1f655e6c4e7dfcb6db5676eda4c4c74b"
+DEPLOY_GUI_ARCHIVE_SHA256="9fbcb0c7baeeb9f7a900b97456e4a6b4ccd978e018c8c85de31968926cb36c20"
 export SWAP_ROOT
 
 # One deploy at a time. The lock is a link in /var/run (gone after a reboot)
@@ -129,15 +136,20 @@ write_deploy_outcome() {
     outcome_code="$outcome_rc"
     outcome_verdict=refused
     outcome_reason="deploy refused before activation; inspect the deploy log"
-    if [ "${DEPLOY_HOLD_SERVICES:-0}" = 1 ] || [ "${identityd_deploy_state:-}" = fatal_hold ] || [ "${DEPLOY_OUTCOME_HOLD:-0}" = 1 ]; then
-        outcome_verdict=hold
-        outcome_reason="services held stopped; inspect DEPLOY-HELD and the deploy log"
+    if [ "${DEPLOY_RECOVERY_INCOMPLETE:-0}" = 1 ]; then
+        outcome_verdict=incomplete-recovery
+        outcome_reason="recovery is incomplete; inspect the deploy log and service state before restarting"
+    elif [ "${DEPLOY_HOLD_SERVICES:-0}" = 1 ] || [ "${identityd_deploy_state:-}" = fatal_hold ] || [ "${DEPLOY_OUTCOME_HOLD:-0}" = 1 ]; then
+        if [ "${DEPLOY_SERVICE_STATE:-unknown}" = stopped ] && [ "${DEPLOY_IDENTITYD_STATE:-unknown}" = stopped ]; then
+            outcome_verdict=hold
+            outcome_reason="services held stopped; inspect DEPLOY-HELD and the deploy log"
+        else
+            outcome_verdict=incomplete-recovery
+            outcome_reason="a required service stop was not proven; inspect the deploy log"
+        fi
     elif [ "${ROLLBACK_RESTORED:-0}" = 1 ]; then
         outcome_verdict=auto-rollback
         outcome_reason="deploy failed; the compatible previous payload was restored and its readiness confirmed"
-    elif [ "${DEPLOY_RECOVERY_INCOMPLETE:-0}" = 1 ]; then
-        outcome_verdict=incomplete-recovery
-        outcome_reason="recovery is incomplete; inspect the deploy log and service state before restarting"
     elif [ "$outcome_rc" -eq 0 ] && [ "${DEPLOY_COMPLETED:-0}" = 1 ]; then
         if [ "${PROBE_OK:-}" = 0 ]; then
             outcome_verdict=success
@@ -147,9 +159,9 @@ write_deploy_outcome() {
             outcome_code=3
             outcome_reason="the new payload runs but its start could not be verified"
         fi
-    elif [ "${PAYLOAD_FLIPPED:-0}" = 1 ] || [ "${DB_MIGRATION_COMMITTED:-0}" = 1 ] || [ "${DEPLOY_ACTIVATION_ATTEMPTED:-0}" = 1 ]; then
+    elif [ "${PAYLOAD_FLIPPED:-0}" = 1 ] || [ "${DB_MIGRATION_COMMITTED:-0}" = 1 ] || [ "${DEPLOY_ACTIVATION_ATTEMPTED:-0}" = 1 ] || [ "${DEPLOY_LIVE_FILES_PUBLISHED:-0}" = 1 ]; then
         outcome_verdict=failed
-        outcome_reason="deploy failed after activation or migration; inspect the deploy log"
+        outcome_reason="deploy failed after live-file publication, activation or migration; inspect the deploy log"
     fi
     [ "$outcome_verdict" = success ] || [ "$outcome_code" -ne 0 ] || outcome_code=1
     case "$outcome_verdict" in
@@ -170,7 +182,7 @@ write_deploy_outcome() {
         {
             printf 'schema=osi-deploy-result/1\nstate=complete\nexit_code=%s\ndeploy_exit_code=%s\nverdict=%s\n' "$outcome_code" "$outcome_rc" "$outcome_verdict"
             printf 'payload_stamp=%s\nactive_payload_stamp=%s\nbundle_sha256=%s\n' "${DEPLOY_STAMP:-unknown}" "${outcome_active:-unknown}" "${DEPLOY_BUNDLE_SHA256:-unknown}"
-            printf 'service_state=%s\nreason_code=%s\nreason=%s\n' "${DEPLOY_SERVICE_STATE:-unknown}" "$outcome_reason_code" "$outcome_reason"
+            printf 'service_state=%s\nidentityd_state=%s\nreason_code=%s\nreason=%s\n' "${DEPLOY_SERVICE_STATE:-unknown}" "${DEPLOY_IDENTITYD_STATE:-unknown}" "$outcome_reason_code" "$outcome_reason"
         } > "$DEPLOY_OUTCOME_FILE.tmp-$$" && mv "$DEPLOY_OUTCOME_FILE.tmp-$$" "$DEPLOY_OUTCOME_FILE"
     )
 }
@@ -280,7 +292,13 @@ deploy_time() {
 fetch() {
     local src="$1" dest="$2"
     mkdir -p "$(dirname "$dest")"
-    curl -fsSLo "$dest" "$BASE/$src"
+    if [ "${DEPLOY_OFFLINE_MODE:-0}" = 1 ]; then
+        # -q must be first: ignore ~/.curlrc. Never proxy the verified loopback
+        # endpoint, even when the invoking SSH environment supplies proxies.
+        curl -q --proxy '' --noproxy '*' -fsSLo "$dest" "$BASE/$src"
+    else
+        curl -fsSLo "$dest" "$BASE/$src"
+    fi
 }
 
 file_sha256() {
@@ -290,7 +308,7 @@ file_sha256() {
 # Boot entry points are exchanged as complete files on their destination
 # filesystem. In particular a partial download cannot truncate the old init.
 publish_boot_file() {
-    node - "$1" "$2" "$3" <<'NODE'
+    if node - "$1" "$2" "$3" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const [stage, target, mode] = process.argv.slice(2);
@@ -338,6 +356,11 @@ try {
   fs.closeSync(dir);
 }
 NODE
+    then
+        DEPLOY_LIVE_FILES_PUBLISHED=1
+    else
+        return $?
+    fi
 }
 
 publish_bootstrap_receipt() {
@@ -1745,12 +1768,15 @@ quiesce_identityd_for_deploy() {
 }
 
 hold_identityd_stopped() {
+    DEPLOY_IDENTITYD_STATE=unknown
     echo "ERROR: migrated database has no proven compatible active payload; keeping identityd stopped" >&2
     if ! quiesce_identityd_instance; then
         echo "ERROR: could not prove identityd stopped after the committed migration" >&2
+        DEPLOY_RECOVERY_INCOMPLETE=1
         return 1
     fi
     identityd_deploy_state="fatal_hold"
+    DEPLOY_IDENTITYD_STATE=stopped
     return 0
 }
 
@@ -1767,6 +1793,7 @@ restore_identityd_prior_state() {
             ;;
     esac
 
+    DEPLOY_IDENTITYD_STATE=unknown
     echo "--- Restore gateway identity supervisor after interrupted deploy ---"
     if ! quiesce_identityd_instance; then
         echo "ERROR: could not quiesce a partial identityd activation" >&2
@@ -1774,6 +1801,7 @@ restore_identityd_prior_state() {
     fi
     if [ "$identityd_deploy_state" = "restore_stopped" ]; then
         identityd_deploy_state="disarmed"
+        DEPLOY_IDENTITYD_STATE=stopped
         echo "OK: identityd restored to stopped state"
         return 0
     fi
@@ -1785,6 +1813,7 @@ restore_identityd_prior_state() {
         return 1
     fi
     identityd_deploy_state="disarmed"
+    DEPLOY_IDENTITYD_STATE=running
     echo "OK"
 }
 
@@ -1978,17 +2007,20 @@ restore_as_found() {
         return 1
     fi
     node_red_restart_needed=0
+    DEPLOY_SERVICE_STATE=running
     echo "OK: the deploy was refused; payloads/$raf_active runs again as this deploy found it" >&2
     return 0
 }
 
 deploy_exit_handler() {
     exit_status="$1"
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     set +e
     if [ "${ROLLBACK_RESTORED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
         echo "OK: preserving the verified rollback pair while returning deploy failure" >&2
         if ! restore_identityd_prior_state; then
+            DEPLOY_RECOVERY_INCOMPLETE=1
+            DEPLOY_IDENTITYD_STATE=unknown
             echo "ERROR: identityd could not be restored after the verified rollback" >&2
         fi
     elif [ "${DB_MIGRATION_COMMITTED:-0}" = "1" ] && [ "$exit_status" -ne 0 ]; then
@@ -1996,7 +2028,7 @@ deploy_exit_handler() {
             { [ "${PAYLOAD_FLIPPED:-0}" = "1" ] || [ "${node_red_restart_needed:-0}" = "1" ]; }; then
             cleanup_failed_first_payload
             DEPLOY_HOLD_SERVICES=1
-            hold_identityd_stopped || true
+            if ! hold_identityd_stopped; then DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_IDENTITYD_STATE=unknown; fi
         elif restart_previous_payload; then
             :
         else
@@ -2005,11 +2037,11 @@ deploy_exit_handler() {
             # so a cut during the steps below still leaves a hold.
             swap_call writePayloadState "${DEPLOY_STAMP:-}" held "it failed after migrating the database and no payload that passed its health check fits it; see ${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD" deploy.sh >/dev/null 2>&1 || true
             DEPLOY_HOLD_SERVICES=1
-            hold_node_red_stopped || true
+            if ! hold_node_red_stopped; then DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_SERVICE_STATE=unknown; fi
             if [ -n "${DEPLOY_STAMP:-}" ] && [ "${PAYLOAD_FLIPPED:-0}" != "1" ]; then
                 swap_call discardPayload "$DEPLOY_STAMP" >/dev/null 2>&1 || true
             fi
-            hold_identityd_stopped || true
+            if ! hold_identityd_stopped; then DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_IDENTITYD_STATE=unknown; fi
             record_deploy_hold
             if [ "${PAYLOAD_FLIPPED:-0}" = "1" ]; then
                 swap_call markFailed "${DEPLOY_STAMP:-}" "its deploy failed after migrating the database" >/dev/null 2>&1 || true
@@ -2036,15 +2068,19 @@ deploy_exit_handler() {
             # Never stopped with nothing written: the state goes first.
             swap_call writePayloadState "$(swap_call currentStamp 2>/dev/null || true)" held "this deploy was refused after it stopped Node-RED, and no payload is proven to fit the database as the deploy left it; run the deploy again" deploy.sh >/dev/null 2>&1 || true
             DEPLOY_HOLD_SERVICES=1
-            hold_node_red_stopped || true
-            hold_identityd_stopped || true
+            if ! hold_node_red_stopped; then DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_SERVICE_STATE=unknown; fi
+            if ! hold_identityd_stopped; then DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_IDENTITYD_STATE=unknown; fi
         elif [ "${node_red_restart_needed:-0}" = "1" ] && [ -n "${PREV_STAMP:-}" ]; then
             :
         elif ! restart_node_red; then
+            DEPLOY_RECOVERY_INCOMPLETE=1
+            DEPLOY_SERVICE_STATE=unknown
             [ "$exit_status" -ne 0 ] || exit_status=1
         fi
     fi
     if [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ] && ! restore_identityd_prior_state; then
+        DEPLOY_RECOVERY_INCOMPLETE=1
+        DEPLOY_IDENTITYD_STATE=unknown
         [ "$exit_status" -ne 0 ] || exit_status=1
     fi
     # The copy of the previous command-ledger files is kept until a deploy
@@ -2180,12 +2216,15 @@ wait_for_node_red_health() {
 
 # deploy payload lifecycle begin
 hold_node_red_stopped() {
+    DEPLOY_SERVICE_STATE=unknown
     "$NODE_RED_INIT" stop || true
     if wait_for_node_red_stop "${NODE_RED_STOP_TIMEOUT:-30}"; then
+        DEPLOY_SERVICE_STATE=stopped
         node_red_restart_needed=0
         return 0
     fi
     node_red_restart_needed=0
+    DEPLOY_RECOVERY_INCOMPLETE=1
     return 1
 }
 
@@ -2385,6 +2424,7 @@ restart_previous_payload() {
     fi
     node_red_restart_needed=0
     ROLLBACK_RESTORED=1
+    DEPLOY_SERVICE_STATE=running
     PAYLOAD_FLIPPED=0
     echo "OK: rollback Node-RED readiness confirmed after ${probe_elapsed:-0}s"
     return 0
@@ -3168,7 +3208,11 @@ fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGE
 STAGED_GUI_ARCHIVE="$TMP_DIR/react_gui.tar.gz"
 STAGED_GUI="$TMP_DIR/gui"
 fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"
-fetch "scripts/deploy-archive.js" "$TMP_DIR/deploy-archive.js"
+fetch_required "GUI archive verifier" "scripts/deploy-archive.js" "$TMP_DIR/deploy-archive.js"
+if [ "$(file_sha256 "$TMP_DIR/deploy-archive.js")" != "$DEPLOY_GUI_ARCHIVE_SHA256" ]; then
+    echo "ERROR: GUI archive verifier digest mismatch; refusing before execution" >&2
+    exit 1
+fi
 node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"
 # Recorded "staged" before anything is copied in: a staged payload is no
 # rollback target until its health check passes, also when a cut leaves it
@@ -4470,6 +4514,8 @@ if ! wait_for_identityd_ready; then
     exit 1
 fi
 identityd_deploy_state="disarmed"
+DEPLOY_IDENTITYD_STATE=running
+[ "$PROBE_OK" != 0 ] || DEPLOY_SERVICE_STATE=running
 echo "OK"
 
 echo ""

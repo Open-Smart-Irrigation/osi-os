@@ -50,7 +50,15 @@ function createVerifiedServer(input, options = {}) {
     if (options.hashes && crypto.createHash('sha256').update(copy).digest('hex') !== options.hashes[name]) throw new Error('server snapshot hash mismatch');
     files.set(name, copy);
   }
-  const log = options.log || (() => {});
+  const diagnostic = options.log || (() => {});
+  let logFailed = false;
+  const log = line => {
+    try { diagnostic(line); }
+    catch (error) {
+      if (!logFailed) console.error('WARN: deploy access log unavailable:', error);
+      logFailed = true;
+    }
+  };
   return http.createServer((req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return;

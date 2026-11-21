@@ -79,7 +79,7 @@ push() {
 echo "=== fresh upload streams the whole bundle and invokes deploy-offline.sh ==="
 : > "$run_log"
 push --port 19999 --wait
-remote_bundle="$remote_tmp/$(basename "$bundle")"
+remote_bundle="$remote_tmp/osi-deploy-bundles/$(cat "$work/sha.txt")/bundle.tar.gz"
 [ -f "$remote_bundle" ] || { echo "remote bundle missing" >&2; exit 1; }
 cmp -s "$bundle" "$remote_bundle" || { echo "remote bundle content differs" >&2; exit 1; }
 grep -q "invoked with: .*$remote_bundle.*--port 19999 --wait" "$run_log" || {

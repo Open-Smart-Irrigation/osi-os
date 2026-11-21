@@ -101,7 +101,7 @@ command exits (exit 0 means launch accepted):
 scripts/deploy-push-bundle.sh root@<pi-ip> dist/deploy-bundle-<sha>.tar.gz
 # ...
 #   Log:  /data/deploy-20260911T120000Z-1234.log
-#   Read result: cat '/data/deploy-20260911T120000Z-1234.result'
+#   Read result: sh '/tmp/osi-deploy-run.<id>/deploy-offline.sh' --result '/data/deploy-20260911T120000Z-1234.result'
 #   Launch accepted; the result is pending until state=complete.
 ```
 
@@ -112,7 +112,10 @@ time after hand-off), the deploy itself is unaffected:
   the remote file's size and, once the upload finishes, its sha256; a
   partial remote file is resumed from the last byte (`tail -c +N`), not
   restarted from zero. A remote file whose sha256 doesn't match on
-  completion is deleted and re-uploaded.
+  completion is deleted and re-uploaded. Archive staging is keyed by SHA-256,
+  so different GUI builds with one source label cannot replace each other.
+  Each invocation uploads its trusted launcher set into a new mode-0700
+  directory and passes the workstation digest directly to that launcher.
 - **Session drops after hand-off**: the supervisor runs in its own session,
   without a controlling terminal. Launcher HUP or TERM leaves it running.
   HUP or TERM sent directly to the supervisor is forwarded to the deploy
@@ -121,16 +124,18 @@ time after hand-off), the deploy itself is unaffected:
 
 ### Manually, without `deploy-push-bundle.sh`
 
-If you'd rather copy the tarball over yourself:
+For manual delivery, create a fresh private directory and bind the invocation
+to the workstation digest. This example does not resume transfers:
 
 ```bash
-ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz' < dist/deploy-bundle-<sha>.tar.gz
-ssh root@<pi-ip> 'cat > /tmp/deploy-bundle.tar.gz.sha256' < dist/deploy-bundle-<sha>.tar.gz.sha256
-ssh root@<pi-ip> 'cat > /tmp/deploy-offline.sh' < scripts/deploy-offline.sh
-for file in deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
-  ssh root@<pi-ip> "cat > /tmp/$file" < "scripts/$file"
+bundle=dist/deploy-bundle-<sha>.tar.gz
+expected=$(sha256sum "$bundle" | cut -d ' ' -f1)
+run_dir=$(ssh root@<pi-ip> 'umask 077; mktemp -d /tmp/osi-deploy-run.XXXXXX')
+ssh root@<pi-ip> "umask 077; cat > '$run_dir/bundle.tar.gz'" < "$bundle"
+for file in deploy-offline.sh deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
+  ssh root@<pi-ip> "umask 077; cat > '$run_dir/$file'" < "scripts/$file"
 done
-ssh root@<pi-ip> 'sh /tmp/deploy-offline.sh /tmp/deploy-bundle.tar.gz --wait'
+ssh root@<pi-ip> "sh '$run_dir/deploy-offline.sh' '$run_dir/bundle.tar.gz' --expected-sha256 '$expected' --wait"
 ```
 
 (The Pis have no `sftp-server`, which plain `scp` needs, so it will fail.
@@ -146,6 +151,9 @@ for exactly this reason.)
    An existing run is refused rather than overwritten.
 3. Binds its own server to loopback and probes it with a unique instance token.
    An occupied port refuses the deploy; another listener cannot satisfy readiness.
+   Offline curl fetches use that exact IPv4 literal, with proxies and user curl
+   configuration disabled. Native tunnel delivery retains its localhost endpoint.
+   Access-log write failures warn without stopping the server or supervisor.
 4. Runs the verified `deploy.sh` bytes from memory, serving verified buffers for
    every fetch. The child receives its own process group for signal forwarding.
 5. Waits for the child's real exit, reconciles its private lifecycle report,
@@ -159,24 +167,28 @@ for exactly this reason.)
 Both push and direct offline delivery print the command for that run:
 
 ```sh
-sh /tmp/deploy-offline.sh --result /data/deploy-<run>.result
-# Or inspect the plain text directly:
-cat /data/deploy-<run>.result
+sh /tmp/osi-deploy-run.<id>/deploy-offline.sh --result /data/deploy-<run>.result
 ```
 
-The result is plain text, never a shell script: read it with `cat`, do not source
-it. `state=pending` or `state=running` with `verdict=pending` means no final
-verdict exists. If a process is killed without running its exit handler, or the
-gateway loses power, that pending record remains inconclusive. Check its log and
-the payload state before retrying.
+Use the trusted reader command printed for the run. It checks the publication
+guard and syncs the result directory before acknowledging a committed receipt.
+The waiter uses the same reader. `state=pending` or `state=running` returns 125.
+An uncommitted complete candidate returns the reserved recovery receipt and 74;
+it cannot acknowledge success, even if both publication and fallback fail.
+
+The raw `.result` file is diagnostic data: `cat` can expose a candidate between
+rename and directory fsync. A raw `state=complete` alone is not an acknowledgement.
+Never source a receipt or manually remove `.publishing`. If a reboot clears the
+launcher directory, copy the matching trusted launcher set into a new private
+directory before reading the persistent receipt.
 
 | Final verdict | Meaning | `--wait` status |
 |---|---|---|
 | `success` | Activation, local health check and identity supervisor readiness completed. | 0 |
 | `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
 | `incomplete-recovery` | Recovery could not be confirmed; `service_state` says stopped or unknown. | Nonzero deploy status, or 74 for receipt persistence failure |
-| `interrupted` | Supervisor received a catchable signal before activation began. | 128 + signal number |
-| `hold` | The deploy left services deliberately stopped for operator recovery. | Nonzero deploy status |
+| `interrupted` | A catchable signal interrupted the run; the reason distinguishes pre-start cancellation from an interrupted deploy. | 128 + signal number |
+| `hold` | Required Node-RED and identityd stops were positively established. | Nonzero deploy status |
 | `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
 | `failed` | The deploy process failed without a confirmed rollback, including interruption after its lifecycle report. | Nonzero deploy status |
 | `unverified` | The new payload runs, but its startup could not be confirmed, or no final lifecycle report was received. | 3 |
@@ -184,7 +196,10 @@ the payload state before retrying.
 `payload_stamp` identifies the attempted payload; `active_payload_stamp` identifies
 the final active link, which can differ after rollback. A refusal before
 `deploy.sh` starts uses `unknown`. The result also records `reason_code`, a fixed
-`reason`, `bundle_sha256` and `deploy_exit_code` (the raw script status). The bundle runner returns 3 for an
+`reason`, `bundle_sha256` and `deploy_exit_code` (the raw script status). `service_state` refers to Node-RED;
+`identityd_state` reports the identity supervisor. Each is running, stopped or
+unknown. A failed required stop or restoration yields `incomplete-recovery`,
+including identityd failure after Node-RED rollback readiness. The bundle runner returns 3 for an
 unverified start even though the native deploy script retains its existing exit-0
 behavior and leaves the running payload alone. A failed migration, activation or
 health check cannot become a successful bundle verdict.
@@ -244,8 +259,9 @@ mechanism of its own.
 Receipts and private lifecycle reports are mode 0600, outside the served tree.
 Reasons use allowlisted codes and fixed messages; raw errors, identifiers and
 URLs stay in `/data/deploy-<run>.log`. Pending, running and final receipts use a
-temporary file, file fsync, rename and directory fsync. Before starting deploy,
-the supervisor also fsyncs a preallocated `.result.recovery` receipt. If final
-publication fails, it promotes that receipt and returns 74. Persistent storage
-failure can prevent promotion too; inspect `.result.recovery` and the log in
-that case. The supervisor never acknowledges success after a persistence error.
+temporary file, file fsync, rename and directory fsync. Before deployment, the
+supervisor persists a publication guard and preallocated `.result.recovery`
+receipt. The guard is removed only after final publication syncs succeed.
+Readers keep the recovery receipt authoritative while the guard remains, then
+sync the acknowledgement directory themselves. A failed access log cannot take
+down supervision; failed receipt acknowledgement returns 74.

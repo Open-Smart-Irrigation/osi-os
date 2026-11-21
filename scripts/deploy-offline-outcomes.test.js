@@ -34,7 +34,7 @@ async function fixture(t, verdict = 'success', rawCode = 0) {
     success: 'DEPLOY_COMPLETED=1; PROBE_OK=0',
     unverified: 'DEPLOY_COMPLETED=1; PROBE_OK=unverified',
     'auto-rollback': 'ROLLBACK_RESTORED=1',
-    hold: 'DEPLOY_HOLD_SERVICES=1',
+    hold: 'DEPLOY_HOLD_SERVICES=1; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped',
     refused: '',
     failed: 'PAYLOAD_FLIPPED=1',
   }[verdict];
@@ -73,7 +73,7 @@ for (const [verdict, rawCode, expected] of [['success', 0, 0], ['auto-rollback',
     assert.match(record, /^payload_stamp=fixture-payload$/m);
     assert.match(record, /^reason_code=[a-z_]+$/m);
     assert.doesNotMatch(record, /fixture migration or health refusal/);
-    assert.match(result.output, /Read result: cat /);
+    assert.match(result.output, /Read result: sh /);
   });
 }
 for (const defect of ['changed', 'extra', 'magic-key', 'missing', 'link', 'no-manifest']) {
@@ -239,7 +239,7 @@ for (const signal of ['SIGTERM', 'SIGHUP']) {
     const f = await fixture(t, 'hold', 1);
     const script = path.join(f.stage, 'deploy.sh');
     const code = signal === 'SIGTERM' ? 143 : 129;
-    fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `trap 'DEPLOY_HOLD_SERVICES=1; exit ${code}' ${signal.slice(3)}\ntrap 'write_deploy_outcome $?' EXIT\ntouch `).replace(/\nexit 1\n$/, '\nsleep 30\nexit 1\n'));
+    fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `trap 'DEPLOY_HOLD_SERVICES=1; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped; exit ${code}' ${signal.slice(3)}\ntrap 'write_deploy_outcome $?' EXIT\ntouch `).replace(/\nexit 1\n$/, '\nsleep 30\nexit 1\n'));
     await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
     const launcher = spawn('sh', [offline, f.bundle, '--port', String(await freePort()), '--wait'], { env: f.env, stdio: 'ignore' });
     const exited = new Promise(resolve => launcher.once('exit', resolve));
@@ -303,4 +303,85 @@ test('the deploy shell retains the sh applet name and identifies its verified so
   const result = await run(f);
   assert.equal(result.code, 0, result.output);
   assert.equal(path.basename(fs.readFileSync(marker, 'utf8').trim()), 'sh');
+});
+
+test('actual offline shell fetch uses the verified IPv4 listener despite IPv6 localhost, proxies and curlrc', { timeout: 20000 }, async t => {
+  const http = require('node:http');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-endpoint-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const good = http.createServer((req, res) => res.end('verified IPv4 bytes'));
+  const wrong = http.createServer((req, res) => res.end('unverified IPv6 bytes'));
+  const proxy = http.createServer((req, res) => res.end('proxy bytes'));
+  for (const server of [good, wrong, proxy]) t.after(() => new Promise(resolve => server.close(resolve)));
+  await new Promise(resolve => good.listen(0, '127.0.0.1', resolve));
+  const port = good.address().port;
+  await new Promise((resolve, reject) => { wrong.once('error', reject); wrong.listen({ port, host: '::1', ipv6Only: true }, resolve); });
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  const maliciousProxy = `http://127.0.0.1:${proxy.address().port}`;
+  fs.writeFileSync(path.join(root, '.curlrc'), `proxy = "${maliciousProxy}"\nurl = "${maliciousProxy}/config"\n`);
+  const prefix = deploy.slice(0, deploy.indexOf('DB_DIR='));
+  const fetch = deploy.slice(deploy.indexOf('fetch() {'), deploy.indexOf('\nfile_sha256()'));
+  const dest = path.join(root, 'received');
+  await exec('sh', ['-c', `${prefix}\n${fetch}\nfetch payload ${quote(dest)}`, 'sh', String(port)], { env: { ...process.env, DEPLOY_OFFLINE_MODE: '1', HOME: root, CURL_HOME: root, http_proxy: maliciousProxy, ALL_PROXY: maliciousProxy, NO_PROXY: '', no_proxy: '' } });
+  assert.equal(fs.readFileSync(dest, 'utf8'), 'verified IPv4 bytes');
+  const native = await exec('sh', ['-c', `${prefix}\nprintf '%s' "$BASE"`, 'sh', String(port)], { env: { ...process.env, DEPLOY_OFFLINE_MODE: '0' } });
+  assert.equal(native.stdout, `http://localhost:${port}`, 'native tunnel endpoint is retained');
+});
+
+test('ENOSPC on the first child GET cannot kill the real supervisor or prevent a final receipt', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', 'curl -q --proxy "" --noproxy "*" -fsS "http://127.0.0.1:$1/deploy.sh" > /dev/null\ntouch '));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  const { stdout } = await exec(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});let failed=false;r.supervise(r.config(${JSON.stringify(args)}),{accessLog(line){if(!failed && line.includes(' GET ')){failed=true;throw Object.assign(new Error('full access log'),{code:'ENOSPC'})}}}).then(code=>{if(!failed)throw Error('GET fault not exercised');process.exitCode=code})`], { env: f.env, timeout: 15000 });
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=success$/m, stdout);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), true);
+});
+
+test('two concurrent pushes with one source label isolate GUI hashes, launchers and expected digests', { timeout: 30000 }, async t => {
+  const first = await fixture(t); const second = await fixture(t);
+  fs.cpSync(first.stage, second.stage, { recursive: true });
+  fs.writeFileSync(path.join(second.root, 'gui/index.html'), 'different GUI build');
+  await exec('tar', ['czf', path.join(second.stage, 'react_gui.tar.gz'), '-C', path.join(second.root, 'gui'), '.']);
+  const script = path.join(first.stage, 'deploy.sh');
+  const download = `umask 077\ncurl -q --proxy '' --noproxy '*' -fsS "http://127.0.0.1:$1/react_gui.tar.gz" | sha256sum > "$DEPLOY_OUTCOME_FILE.gui-sha"\n`;
+  const bytes = fs.readFileSync(script, 'utf8').replace('touch ', download + 'touch ');
+  for (const f of [first, second]) {
+    fs.writeFileSync(path.join(f.stage, 'deploy.sh'), bytes);
+    await exec(process.execPath, [manifestTool, 'create', f.stage, 'same-source-label']); await f.pack();
+  }
+  const remote = path.join(first.root, 'remote'); const data = path.join(first.root, 'data');
+  const ready = path.join(first.root, 'first-ready'); const release = path.join(first.root, 'release');
+  const ssh = path.join(first.root, 'ssh');
+  fs.writeFileSync(ssh, `#!/bin/sh\nshift\ncase "$1" in sh\\ *) if [ -n "\${PAUSE_FIRST:-}" ]; then touch '${ready}'; while [ ! -f '${release}' ]; do sleep 0.05; done; fi ;; esac\nexec sh -c "$1"\n`, { mode: 0o755 });
+  const push = path.join(__dirname, 'deploy-push-bundle.sh');
+  const invoke = async (f, ts, pauseFirst = false) => exec('bash', [push, 'fixture-host', f.bundle, '--wait', '--port', String(await freePort())], { timeout: 25000, env: { ...f.env, DEPLOY_OFFLINE_TS: ts, DEPLOY_OFFLINE_LOG_DIR: data, SSH_CMD: ssh, REMOTE_TMP: remote, REPO_ROOT: repo, ...(pauseFirst ? { PAUSE_FIRST: '1' } : {}) } });
+  const pendingFirst = invoke(first, 'push-first', true);
+  pendingFirst.catch(() => {});
+  try {
+    for (let n = 0; n < 150 && !fs.existsSync(ready); n++) await pause(30);
+    assert.equal(fs.existsSync(ready), true, 'first push is paused after upload verification');
+    await invoke(second, 'push-second');
+  } finally { fs.writeFileSync(release, 'go'); }
+  await pendingFirst;
+  const { hash } = require('./deploy-archive');
+  const hashes = [];
+  for (const [f, ts] of [[first, 'push-first'], [second, 'push-second']]) {
+    const expected = hash(fs.readFileSync(f.bundle)); hashes.push(expected);
+    const receipt = fs.readFileSync(path.join(data, `deploy-${ts}.result`), 'utf8');
+    assert.match(receipt, new RegExp(`^bundle_sha256=${expected}$`, 'm'));
+    assert.match(receipt, /^verdict=success$/m);
+    const received = fs.readFileSync(path.join(data, `.deploy-${ts}/outcome.gui-sha`), 'utf8').split(/\s+/)[0];
+    assert.equal(received, hash(fs.readFileSync(path.join(f.stage, 'react_gui.tar.gz'))));
+  }
+  assert.notEqual(hashes[0], hashes[1]);
+  const runs = fs.readdirSync(remote).filter(n => n.startsWith('osi-deploy-run.'));
+  assert.equal(runs.length, 2);
+  for (const run of runs) {
+    assert.equal(fs.statSync(path.join(remote, run)).mode & 0o777, 0o700);
+    for (const file of ['deploy-offline.sh', 'deploy-offline-runtime.js', 'deploy-archive.js', 'deploy-local-server.js']) assert.equal(fs.statSync(path.join(remote, run, file)).mode & 0o077, 0);
+  }
 });

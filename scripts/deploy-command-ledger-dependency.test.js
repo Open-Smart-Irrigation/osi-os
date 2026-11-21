@@ -294,6 +294,7 @@ test('the deploy script uses a pinned staged dependency installer and seed insta
     ['COMMAND_LEDGER_PACKAGE_SHA256', path.join(LEDGER, 'package.json')],
     ['COMMAND_LEDGER_INDEX_SHA256', path.join(LEDGER, 'index.js')],
     ['COMMAND_LEDGER_BINDING_SHA256', path.join(BINDING, 'canonicalization.js')],
+    ['DEPLOY_GUI_ARCHIVE_SHA256', path.join(ROOT, 'scripts/deploy-archive.js')],
   ]) {
     const match = new RegExp(`${name}="([0-9a-f]{64})"`).exec(DEPLOY);
     assert.ok(match, `missing independent ${name} pin`);

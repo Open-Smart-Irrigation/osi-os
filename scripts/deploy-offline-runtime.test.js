@@ -112,3 +112,52 @@ test('server snapshot uses the original manifest expectations even if an archive
   tree.files.get('deploy.sh').fill(88);
   assert.throws(() => createVerifiedServer(tree.files, { hashes: tree.hashes }), /snapshot hash mismatch/);
 });
+
+test('readers cannot acknowledge a candidate during rename/fsync or after a second fallback fault', t => {
+  const { readReceipt } = require('./deploy-offline-runtime');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'receipt-ack-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const io = Object.create(fs);
+  const receipt = new Receipts(path.join(root, 'result'), io);
+  receipt.prepare();
+  let during;
+  let finalRenamed = false;
+  io.renameSync = (src, dst) => {
+    if (src.includes('.fallback-') || src === receipt.reserve) throw Object.assign(new Error('second storage error'), { code: 'EIO' });
+    fs.renameSync(src, dst);
+    if (dst === receipt.file) finalRenamed = true;
+  };
+  io.fsyncSync = fd => {
+    if (finalRenamed && fs.fstatSync(fd).isDirectory()) {
+      const cli = require('node:child_process').spawnSync('sh', [path.join(__dirname, 'deploy-offline.sh'), '--result', receipt.file], { encoding: 'utf8' });
+      during = { code: cli.status, text: cli.stdout };
+      throw Object.assign(new Error('directory fsync failed'), { code: 'EIO' });
+    }
+    fs.fsyncSync(fd);
+  };
+  assert.equal(receipt.finish({ verdict: 'success', exit_code: 0, reason_code: 'verified' }), 74);
+  assert.match(fs.readFileSync(receipt.file, 'utf8'), /^verdict=success$/m, 'the raw candidate reproduces the visibility window');
+  assert.equal(during.code, 74, 'a reconnect during publication cannot acknowledge success');
+  for (const result of [during, readReceipt(receipt.file), readReceipt(receipt.file, 74)]) {
+    assert.equal(result.code, 74);
+    assert.doesNotMatch(result.text, /^verdict=success$/m);
+  }
+  const { spawnSync } = require('node:child_process');
+  const cli = spawnSync('sh', [path.join(__dirname, 'deploy-offline.sh'), '--result', receipt.file], { encoding: 'utf8' });
+  assert.equal(cli.status, 74);
+  assert.doesNotMatch(cli.stdout, /^verdict=success$/m);
+});
+
+test('a committed result reader syncs the acknowledgement directory before returning success', t => {
+  const { readReceipt } = require('./deploy-offline-runtime');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'receipt-commit-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const receipt = new Receipts(path.join(root, 'result'));
+  receipt.prepare();
+  assert.equal(receipt.finish({ verdict: 'success', exit_code: 0, reason_code: 'verified' }), 0);
+  const io = Object.create(fs); let synced = false;
+  io.fsyncSync = fd => { synced ||= fs.fstatSync(fd).isDirectory(); fs.fsyncSync(fd); };
+  assert.equal(readReceipt(receipt.file, 0, io).code, 0);
+  assert.equal(synced, true);
+  assert.equal(readReceipt(receipt.file, 74).code, 74, 'the waiter cannot print success after observing publication failure');
+});

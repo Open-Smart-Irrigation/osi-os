@@ -18,13 +18,13 @@ test('deploy reports the final lifecycle verdict, including rollback and an unve
       ['success', 0, 'DEPLOY_COMPLETED=1; PROBE_OK=0', 0],
       ['unverified', 0, 'DEPLOY_COMPLETED=1; PROBE_OK=unverified', 3],
       ['auto-rollback', 1, 'ROLLBACK_RESTORED=1', 1],
-      ['hold', 1, 'DEPLOY_HOLD_SERVICES=1', 1],
-      ['hold', 1, 'identityd_deploy_state=fatal_hold', 1],
+      ['hold', 1, 'DEPLOY_HOLD_SERVICES=1; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped', 1],
+      ['hold', 1, 'identityd_deploy_state=fatal_hold; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped', 1],
       ['refused', 0, '', 1],
       ['refused', 7, '', 7],
       ['failed', 1, 'PAYLOAD_FLIPPED=1', 1],
       ['failed', 1, 'DEPLOY_ACTIVATION_ATTEMPTED=1; PAYLOAD_FLIPPED=0', 1],
-      ['hold', 1, 'DEPLOY_OUTCOME_HOLD=1', 1],
+      ['hold', 1, 'DEPLOY_OUTCOME_HOLD=1; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped', 1],
       ['incomplete-recovery', 1, 'DEPLOY_RECOVERY_INCOMPLETE=1; DEPLOY_SERVICE_STATE=stopped', 1],
     ];
     for (const [verdict, status, setup, expectedCode] of cases) {
@@ -64,8 +64,8 @@ ${lifecycle}
 ${early}
 cleanup() { :; }
 restore_identityd_prior_state() { :; }
-hold_identityd_stopped() { :; }
-hold_node_red_stopped() { :; }
+hold_identityd_stopped() { DEPLOY_IDENTITYD_STATE=stopped; }
+hold_node_red_stopped() { DEPLOY_SERVICE_STATE=stopped; }
 record_deploy_hold() { :; }
 swap_call() { :; }
 PREV_STAMP=old
@@ -88,7 +88,7 @@ test('native receipt excludes synthetic sensitive reasons and log diagnostics', 
     const sensitive = '0016C001F1000001 https://user:password@example.invalid/private';
     fs.writeFileSync(log, `ERROR: ${sensitive}\n`);
     const block = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
-    const run = spawnSync('sh', ['-c', `${block}\nDEPLOY_HOLD_SERVICES=1\nNODE_RED_START_REASON='${sensitive}'\nwrite_deploy_outcome 1`], { encoding: 'utf8', env: { ...process.env, SWAP_ROOT: dir, DEPLOY_LOGFILE: log, DEPLOY_OUTCOME_FILE: result } });
+    const run = spawnSync('sh', ['-c', `${block}\nDEPLOY_HOLD_SERVICES=1; DEPLOY_SERVICE_STATE=stopped; DEPLOY_IDENTITYD_STATE=stopped\nNODE_RED_START_REASON='${sensitive}'\nwrite_deploy_outcome 1`], { encoding: 'utf8', env: { ...process.env, SWAP_ROOT: dir, DEPLOY_LOGFILE: log, DEPLOY_OUTCOME_FILE: result } });
     assert.equal(run.status, 0, run.stderr);
     const receipt = fs.readFileSync(result, 'utf8');
     assert.doesNotMatch(receipt, /0016C001F1000001|password|https:/);
@@ -96,3 +96,54 @@ test('native receipt excludes synthetic sensitive reasons and log diagnostics', 
     assert.equal(fs.statSync(result).mode & 0o777, 0o600);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+for (const signal of ['TERM', 'HUP']) for (const failure of ['identityd', 'stop', 'published-boot']) {
+  test(`${signal} through the real EXIT handler reports ${failure} from completed recovery attempts`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-recovery-proof-'));
+    try {
+      const result = path.join(dir, 'result');
+      const outcome = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+      const lifecycle = deploy.slice(deploy.indexOf('# identityd deploy lifecycle begin'), deploy.indexOf('# identityd deploy lifecycle end'));
+      const payload = deploy.slice(deploy.indexOf('# deploy payload lifecycle begin'), deploy.indexOf('# deploy payload lifecycle end'));
+      const publisher = deploy.slice(deploy.indexOf('publish_boot_file() {'), deploy.indexOf('\npublish_bootstrap_receipt()'));
+      const init = path.join(dir, 'init'); fs.writeFileSync(init, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const stage = path.join(dir, 'staged.js'); fs.writeFileSync(stage, 'module.exports = true;\n');
+      const setup = failure === 'identityd' ? `DB_MIGRATION_COMMITTED=1
+restart_previous_payload() { ROLLBACK_RESTORED=1; DEPLOY_SERVICE_STATE=running; }
+identityd_deploy_state=restore_running
+wait_for_identityd_ready() { return 1; }` : failure === 'stop' ? `DB_MIGRATION_COMMITTED=1
+restart_previous_payload() { return 1; }
+wait_for_node_red_stop() { return 1; }` : `DB_MIGRATION_COMMITTED=0
+PAYLOAD_FLIPPED=0
+publish_boot_file '${stage}' '${path.join(dir, 'live.js')}' 644`;
+      const script = `set -eu
+SWAP_ROOT='${dir}'
+${outcome}
+${lifecycle}
+${payload}
+${publisher}
+cleanup() { :; }
+swap_call() { :; }
+record_deploy_hold() { DEPLOY_OUTCOME_HOLD=1; }
+restart_node_red() { return 0; }
+quiesce_identityd_instance() { return 0; }
+identityd_service() { return 1; }
+NODE_RED_INIT='${init}'
+PREV_STAMP=old
+DEPLOY_STAMP=candidate
+PAYLOAD_FLIPPED=1
+node_red_restart_needed=0
+${setup}
+install_deploy_exit_trap
+kill -${signal} "$$"
+exit 99
+`;
+      const run = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, DEPLOY_OUTCOME_FILE: result } });
+      assert.equal(run.status, signal === 'TERM' ? 143 : 129, run.stderr);
+      const record = fs.readFileSync(result, 'utf8');
+      assert.match(record, new RegExp(`^verdict=${failure === 'published-boot' ? 'failed' : 'incomplete-recovery'}$`, 'm'));
+      if (failure === 'identityd') { assert.match(record, /^service_state=running$/m); assert.match(record, /^identityd_state=unknown$/m); }
+      if (failure === 'stop') { assert.match(record, /^service_state=unknown$/m); assert.match(record, /^identityd_state=stopped$/m); }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
