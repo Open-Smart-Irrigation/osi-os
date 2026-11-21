@@ -1,0 +1,276 @@
+"""Host checks for Pi 4 wiring and required candidate results."""
+from contextlib import redirect_stdout
+import hashlib
+import io
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from pi4 import DTB, Pi4, acceptance, boot_config
+from minimal_flows import ATOMIC_PUBLISH, CUT_RECEIPT
+from suite_vm import INSPECTION_INIT
+
+
+def write_upgrade_fixtures(root, data):
+    digest = hashlib.sha256(data).hexdigest()
+    for version in acceptance.UPGRADE_VERSIONS:
+        folder = root/f'v{version}'
+        folder.mkdir()
+        (folder/'rpi4.img.gz').write_bytes(data)
+        (folder/'SHA256SUMS').write_text(f'{digest}  rpi4.img.gz\n')
+
+
+class Pi4Tests(unittest.TestCase):
+    def test_release_gate_fails_when_both_capability_probes_miss_a_renamed_helper(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            revision = 'a' * 40
+            (root/'SERVED-FROM.txt').write_text(revision)
+            init = root/'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'
+            init.parent.mkdir(parents=True)
+            init.write_text('function persistRenamedHold(stamp, reason) {\n')
+            image = root/'rpi4.img.gz'
+            image.write_bytes(b'pi4 image')
+            image_digest = hashlib.sha256(image.read_bytes()).hexdigest()
+            write_upgrade_fixtures(root, image.read_bytes())
+
+            def stock(_guest, _args, record, **_options):
+                for label in acceptance.BASE_CASES[:-2]:
+                    record(label, lambda: None)
+
+            with (redirect_stdout(io.StringIO()),
+                  patch.object(acceptance, 'external_path', side_effect=lambda path, **_: path),
+                  patch.object(acceptance, 'stock_cases', side_effect=stock),
+                  patch.object(acceptance, 'checked', return_value=''),
+                  patch.object(acceptance, 'ready'), patch.object(acceptance, 'build_media'),
+                  patch.object(acceptance, 'upgrade')):
+                status = acceptance.main([
+                    '--candidate', str(image), '--candidate-sha256', image_digest,
+                    '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1',
+                    '--release', str(root), '--release-revision', revision,
+                    '--fixtures', str(root), '--run-root', str(root),
+                ], board='pi4', guest_class=Mock(), memory=(2,))
+            result = next(root.glob('pi4-acceptance-*/results.log')).read_text()
+            self.assertEqual(status, 1, result)
+            self.assertIn('Candidate acceptance: FAIL', result)
+            self.assertIn('Case totals: 0 passed / 21 required', result)
+            self.assertNotIn(' | N/A | ', result)
+            for label in acceptance.RECOVERY_CASES + acceptance.MINIMAL_CASES:
+                self.assertIn(f'{label} | REQUIRED | NOT RUN | FAIL', result)
+
+    def test_release_counts_all_18_and_rejects_a_skipped_case(self):
+        for skip in (False, True):
+            with self.subTest(skip=skip), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_upgrade_fixtures(root, b'pi4 fixture')
+                args = SimpleNamespace(fixtures=root, candidate=None, qemu=None, ram=2,
+                                       osi_version='0.8.3', release_revision='a'*40,
+                                       flows_power_cut_only=False, upgrade_boot_safety_only=False,
+                                       customer_fixture_only=False, historical=False)
+
+                def stock(_guest, _args, record, **_options):
+                    for label in acceptance.BASE_CASES[:-2]:
+                        record(label, lambda: None)
+
+                def flow_cut(_guest, first_boot):
+                    if skip and first_boot:
+                        raise unittest.SkipTest('case skipped by workload')
+
+                with (redirect_stdout(io.StringIO()),
+                      patch.object(acceptance, 'external_path', side_effect=lambda path, **_: path),
+                      patch.object(acceptance, 'stock_cases', side_effect=stock),
+                      patch.object(acceptance, 'checked', return_value='function persistFlowHold('),
+                      patch.object(acceptance, 'ready'), patch.object(acceptance, 'build_media'),
+                      patch.object(acceptance, 'upgrade'), patch.object(acceptance, 'verify_zero_recovery'),
+                      patch.object(acceptance, 'verify_missing_pristine_hold'),
+                      patch.object(acceptance, 'cut_after_flows_patch', side_effect=flow_cut)):
+                    status = acceptance.run_cases(args, root, root, root, 'recovery', False,
+                                                  board='pi4', guest_class=Mock())
+                result = (root/'results.log').read_text()
+                self.assertEqual(status, int(skip), result)
+                self.assertIn(f'Case totals: {18 - int(skip)} passed / 18 required', result)
+                for label in acceptance.MINIMAL_CASES:
+                    self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold present in factory image init'
+                                  f' | {", ".join(acceptance.RECOVERY_CASES)}', result)
+                if skip:
+                    self.assertRegex(result, r'Flows cut on first boot\s+FAIL.*case skipped')
+
+    def test_minimal_candidate_uses_pi4_probe_and_requires_all_three_cuts(self):
+        for omit in (False, True):
+            with self.subTest(omit=omit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_upgrade_fixtures(root, b'pi4 fixture')
+                init = root/acceptance.INIT
+                init.parent.mkdir(parents=True)
+                init.write_text(ATOMIC_PUBLISH + '\n')
+                candidate_payload = acceptance.FactoryPayload(hashlib.sha256(init.read_bytes()).hexdigest(),
+                                                              'b'*64, 'c'*64)
+                probe_payload = acceptance.FactoryPayload('d'*64, candidate_payload.writer, candidate_payload.flows)
+                image = root/'factory.img.gz'
+                image.write_bytes(b'factory')
+                args = SimpleNamespace(fixtures=root, candidate=image, qemu=None, ram=2,
+                                       osi_version='0.8.3', release_revision='a'*40,
+                                       flows_power_cut_only=False, upgrade_boot_safety_only=False,
+                                       customer_fixture_only=False, historical=False,
+                                       candidate_sha256=hashlib.sha256(b'factory').hexdigest(),
+                                       openwrt_host_tools=root)
+
+                def stock(_guest, _args, record, **_options):
+                    for label in acceptance.BASE_CASES[:-2]:
+                        record(label, lambda: None)
+
+                factory_cases = dict(acceptance.MINIMAL_FACTORY_CASES)
+                if omit:
+                    del factory_cases['before-dir-sync']
+                guest = Mock()
+                capability = acceptance.flows_capability(ATOMIC_PUBLISH)
+                self.assertEqual(capability, 'minimal')
+                def derive(archive, _release, _probe, output, _tools):
+                    self.assertNotEqual(archive, image)
+                    self.assertEqual(archive.read_bytes(), b'factory')
+                    output.write_bytes(b'derived from ' + archive.read_bytes())
+                    return hashlib.sha256(output.read_bytes()).hexdigest()
+
+                with (redirect_stdout(io.StringIO()),
+                      patch.object(acceptance, 'derive_probe_image', side_effect=derive) as derivation,
+                      patch.object(acceptance, 'MINIMAL_FACTORY_CASES', factory_cases),
+                      patch.object(acceptance, 'external_path', side_effect=lambda path, **_: path),
+                      patch.object(acceptance, 'stock_cases', side_effect=stock),
+                      patch.object(acceptance, 'prepare_probe_release', return_value='d'*64),
+                      patch.object(acceptance, 'checked', return_value=ATOMIC_PUBLISH),
+                      patch.object(acceptance, 'read_factory_payload',
+                                   side_effect=[candidate_payload, probe_payload, probe_payload]),
+                      patch.object(acceptance, 'ready'), patch.object(acceptance, 'wait_for_api'),
+                      patch.object(acceptance, 'verify_disk'), patch.object(acceptance, 'build_media'),
+                      patch.object(acceptance, 'upgrade') as upgrade):
+                    status = acceptance.run_cases(args, root, root, root, capability, False,
+                                                  board='pi4', guest_class=guest)
+                self.assertEqual(status, int(omit))
+                self.assertEqual(guest.call_args_list[0].args[1], derivation.call_args.args[0])
+                self.assertEqual(sum(call.args[1] == derivation.call_args.args[3] for call in guest.call_args_list), 2 - int(omit))
+                self.assertEqual(upgrade.call_args.kwargs['cut_at'], CUT_RECEIPT)
+                result = (root/'results.log').read_text()
+                self.assertIn(f'Case totals: {13 - int(omit)} passed / 13 required', result)
+                for label in acceptance.FLOWS_CASES + acceptance.BOOT_SAFETY_CASES:
+                    self.assertIn(f'{label} | N/A | NOT RUN | N/A | persistFlowHold absent and minimal atomic '
+                                  f'publication present in factory image init | {", ".join(acceptance.MINIMAL_CASES)}', result)
+                for label in acceptance.MINIMAL_CASES:
+                    outcome = 'NOT RUN | FAIL' if omit and label.endswith('before directory fsync') else 'PASS | PASS'
+                    self.assertIn(f'{label} | REQUIRED | {outcome}', result)
+
+    def test_historical_flag_and_env_cannot_override_factory_capability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            revision = 'a' * 40
+            init = root/'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init'
+            init.parent.mkdir(parents=True)
+            init.write_text(ATOMIC_PUBLISH + '\n')
+            (root/'SERVED-FROM.txt').write_text(revision)
+            image = root/'rpi4.img.gz'
+            image.write_bytes(b'pi4 image')
+            digest = hashlib.sha256(image.read_bytes()).hexdigest()
+            guest = Mock()
+            with (redirect_stdout(io.StringIO()),
+                  patch.dict(os.environ, {'OSI_FLOWS_CAPABILITY': 'unsupported'}),
+                  patch.object(acceptance, 'external_path', side_effect=lambda path, **_: path),
+                  patch.object(acceptance, 'checked', return_value=ATOMIC_PUBLISH) as checked,
+                  patch.object(acceptance, 'stock_cases') as stock):
+                status = acceptance.main([
+                    '--historical', '--candidate', str(image), '--candidate-sha256', digest,
+                    '--osi-version', '0.8.3', '--chirpstack-version', '4.12.1',
+                    '--release', str(root), '--release-revision', revision,
+                    '--fixtures', str(root), '--run-root', str(root),
+                ], board='pi4', guest_class=guest, memory=(2,))
+            self.assertEqual(status, 1)
+            checked.assert_called_once_with(guest.return_value, 'cat /rom/etc/init.d/node-red')
+            stock.assert_not_called()
+            result = next(root.glob('pi4-acceptance-*/results.log')).read_text()
+            self.assertIn('Factory image flows capability: minimal', result)
+            self.assertIn('Historical diagnostics: FAIL', result)
+            self.assertNotIn(' | N/A | ', result)
+            self.assertNotIn('Candidate acceptance:', result)
+
+    def test_selects_32_bit_kernel_and_ignores_pi5_config(self):
+        config = b'[pi5]\nkernel=kernel_2712.img\n[pi4]\ninclude distroconfig.txt\n'
+        distro = b'[pi4]\nos_prefix=armv7/\n'
+
+        def read(args, **_options):
+            return {'::config.txt': config, '::distroconfig.txt': distro}[args[-1]]
+
+        with (patch.object(boot_config.subprocess, 'check_output', side_effect=read),
+              patch.object(boot_config.subprocess, 'run') as run):
+            run.return_value.returncode = 0
+            work = Path('work')
+            boot_config.load('boot.fat', work, 'dtmerge', board='pi4')
+        copied = [call.args[0][-2:] for call in run.call_args_list if call.args[0][0] == 'mcopy']
+        self.assertEqual(copied, [['::armv7/kernel7l.img', work/'kernel.img'],
+                                  [f'::armv7/{DTB}', work/DTB],
+                                  ['::armv7/cmdline.txt', work/'cmdline.txt']])
+
+    def test_shell_boot_uses_a_separate_dtb_and_clone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Pi4.__new__(Pi4)
+            vm.work = Path(directory)
+            vm.qemu = vm.work/'qemu-system-aarch64'
+            vm.ram = 2
+            (vm.work/DTB).write_bytes(b'dtb')
+            cmdline = f'root=/dev/mmcblk0p2 {vm.console_args} init=/bin/sh -- -c "{INSPECTION_INIT}"'
+            disk = 'if=sd,format=raw,file=inspect.img,cache=none'
+            with patch('pi4.subprocess.run') as run:
+                args = vm.qemu_args(5, disk, cmdline, True)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0][-4:],
+                                 [vm.work/'inspect.dtb', '/chosen', 'bootargs', cmdline])
+                with self.assertRaisesRegex(ValueError, 'command-line limit'):
+                    vm.qemu_args(5, disk, 'x' * 1024, True)
+            self.assertIn(disk, args)
+            self.assertTrue(any(str(arg).startswith('loader,file=inspect.dtb,') for arg in args))
+            self.assertEqual((vm.work/DTB).read_bytes(), b'dtb')
+
+    def test_pi4_candidate_fails_for_missing_required_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_upgrade_fixtures(root, b'pi4 fixture')
+
+            args = SimpleNamespace(fixtures=root, candidate=None, qemu=None, ram=2,
+                                   osi_version='0.8.3', release_revision='a'*40,
+                                   flows_power_cut_only=False, upgrade_boot_safety_only=False,
+                                   customer_fixture_only=False, historical=True)
+
+            def stock(_guest, _args, record, **_options):
+                for label in acceptance.BASE_CASES[:-2]:
+                    if label != 'Power cut 2':
+                        record(label, lambda: None)
+
+            with (redirect_stdout(io.StringIO()),
+                  patch.object(acceptance, 'external_path', side_effect=lambda path, **_: path),
+                  patch.object(acceptance, 'Guest') as guest,
+                  patch.object(acceptance, 'checked', return_value=''),
+                  patch.object(acceptance, 'stock_cases', side_effect=stock),
+                  patch.object(acceptance, 'ready'), patch.object(acceptance, 'build_media'),
+                  patch.object(acceptance, 'upgrade') as upgrade):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'unsupported', False, board='pi4'), 1)
+            self.assertEqual(upgrade.call_count, 2)
+            self.assertEqual([call.args[1].name for call in guest.call_args_list[1:]],
+                             ['fixture-0.8.0.img.gz', 'fixture-0.8.1.img.gz'])
+            result = (root/'results.log').read_text()
+            self.assertIn('Power cut 2 | REQUIRED | NOT RUN | FAIL', result)
+            self.assertRegex(result, re.escape('Upgrade 0.8.1') + r'\s+PASS')
+            self.assertIn('Case totals: 9 passed / 10 required', result)
+            self.assertIn('Historical diagnostics: FAIL', result)
+
+    def test_wrapper_refuses_nested_slot(self):
+        wrapper = Path(__file__).with_name('acceptance.sh')
+        result = subprocess.run(['bash', wrapper], capture_output=True, text=True,
+                                env={**os.environ, 'OSI_HEAVY_HOLDER': 'test:1', 'OSI_HEAVY': '/missing'})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('outside the current holder', result.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,6 +1,8 @@
 """OSI factory image acceptance tests. Invoke via acceptance.sh."""
 import argparse
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import hashlib
 import os
 import re
@@ -161,7 +163,7 @@ SELECT key,value FROM app_settings WHERE key='emulator_persistence';"""
     return hashlib.sha256(sql(vm,query).encode()).hexdigest()
 
 
-def cut(vm,n):
+def cut(vm, n, *, inspect_disk=False):
     before = snapshot(vm)
     sql(vm, f"CREATE TABLE IF NOT EXISTS emulator_recovery(n INTEGER PRIMARY KEY); INSERT INTO emulator_recovery VALUES({n});")
     # The second transaction dirties more pages than the 8-page SQLite cache.
@@ -181,13 +183,28 @@ SQL
 ) </dev/null >/dev/null 2>&1 &
 for i in $(seq 1 30); do test -f /tmp/transaction-open && exit 0; sleep 1; done; exit 1""")
     vm.stop(cut=True)
+
+    def verify(guest, phase=''):
+        prefix = f'{phase}: ' if phase else ''
+        rows = sql(guest, "SELECT n FROM emulator_recovery ORDER BY n; SELECT count(*) FROM sqlite_master WHERE name='emulator_uncommitted';")
+        if before != snapshot(guest):
+            raise RuntimeError(prefix + 'gateway data changed across power loss')
+        if rows.splitlines() != [str(i) for i in range(1,n+1)]+['0']:
+            raise RuntimeError(prefix + 'committed or interrupted transaction mismatch')
+        if phase:
+            with (guest.receipts/'sqlite-cut.log').open('a') as log:
+                print(f'cut {n} {phase} PASS', file=log)
+
+    def inspect(guest):
+        if sql(guest, 'PRAGMA integrity_check;') != 'ok':
+            raise RuntimeError('disk before startup: SQLite integrity check failed')
+        verify(guest, 'disk before startup')
+
+    if inspect_disk:
+        vm.inspect_cut(inspect)
     vm.start()
     ready(vm)
-    rows = sql(vm, "SELECT n FROM emulator_recovery ORDER BY n; SELECT count(*) FROM sqlite_master WHERE name='emulator_uncommitted';")
-    if before != snapshot(vm):
-        raise RuntimeError('gateway data changed across power loss')
-    if rows.splitlines() != [str(i) for i in range(1,n+1)]+['0']:
-        raise RuntimeError('committed or interrupted transaction mismatch')
+    verify(vm, 'after normal restart' if inspect_disk else '')
 
 
 def cut_after_flows_patch(vm, first_boot):
@@ -228,7 +245,7 @@ JS""")
     return 'hard cut at flows commit; recovered digest, stamp and API verified'
 
 
-def main(argv=None):
+def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_board=None):
     ap=argparse.ArgumentParser()
     ap.add_argument('--candidate', type=Path)
     ap.add_argument('--candidate-sha256')
@@ -242,9 +259,9 @@ def main(argv=None):
     ap.add_argument('--release-revision', required=True,
                     help='full Git SHA in the offline release tree receipt')
     ap.add_argument('--fixtures', type=Path, required=True)
-    ap.add_argument('--qemu',type=Path,default=Path.home()/'.cache/osi-os/raspi5/qemu-system-aarch64')
+    ap.add_argument('--qemu',type=Path,default=Path.home()/f'.cache/osi-os/ras{board}/qemu-system-aarch64')
     ap.add_argument('--run-root',type=Path,required=True)
-    ap.add_argument('--ram',type=int,choices=(4,8),default=8)
+    ap.add_argument('--ram',type=int,choices=memory,default=memory[-1])
     ap.add_argument('--keep-scratch', action='store_true',
                     help='retain writable guest disks and USB copies in the owner-only run directory')
     mode = ap.add_mutually_exclusive_group()
@@ -252,14 +269,28 @@ def main(argv=None):
                     help='rerun only the three flows cut cases on a candidate containing PR #714')
     mode.add_argument('--upgrade-boot-safety-only', action='store_true',
                       help='rerun cases A, B and C using the offline release and 0.8.1 fixture')
-    mode.add_argument('--customer-fixture-only', action='store_true',
-                      help='rerun only the opt-in customer-line 0.7.0 fixture')
+    ap.set_defaults(customer_fixture_only=False, historical=False)
+    if board == 'pi5':
+        mode.add_argument('--customer-fixture-only', action='store_true',
+                          help='rerun only the opt-in customer-line 0.7.0 fixture')
+    else:
+        mode.add_argument('--historical', action='store_true',
+                          help='run ten baseline diagnostics on an image preceding both flows fixes')
     args=ap.parse_args(argv)
     if not re.fullmatch(r'[0-9a-f]{40}', args.release_revision):
         ap.error('--release-revision must be a full commit SHA')
     if not args.upgrade_boot_safety_only or args.candidate or args.candidate_sha256:
         if args.candidate is None or not re.fullmatch(r'[0-9a-f]{64}', args.candidate_sha256 or ''):
             ap.error('--candidate and a lowercase --candidate-sha256 are required together')
+    if board == 'pi4':
+        try:
+            args.run_root = external_path(args.run_root, off_tmp=True)
+            args.release = external_path(args.release, off_tmp=True)
+            args.fixtures = external_path(args.fixtures, off_tmp=True)
+            if args.candidate is not None:
+                args.candidate = external_path(args.candidate, off_tmp=True)
+        except (OSError, ValueError, RuntimeError):
+            ap.error('run root and Pi 4 inputs must exist outside Git trees and /tmp')
     release = args.release.resolve()
     receipt = (release/'SERVED-FROM.txt').read_text()
     if not re.search(rf'\b{args.release_revision}\b', receipt):
@@ -267,8 +298,8 @@ def main(argv=None):
     capability = flows_capability((release/INIT).read_text())
     if (args.flows_power_cut_only or args.upgrade_boot_safety_only) and capability != 'recovery':
         ap.error('focused boot cases require an offline release with the flows fix from PR #714')
-    customer_image = os.environ.get('OSI_RASPI5_CUSTOMER_IMAGE')
-    customer_source = os.environ.get('OSI_RASPI5_CUSTOMER_FIXTURE_DIR')
+    customer_image = os.environ.get('OSI_RASPI5_CUSTOMER_IMAGE') if board == 'pi5' else None
+    customer_source = os.environ.get('OSI_RASPI5_CUSTOMER_FIXTURE_DIR') if board == 'pi5' else None
     if bool(customer_image) != bool(customer_source):
         ap.error('set both OSI_RASPI5_CUSTOMER_IMAGE and OSI_RASPI5_CUSTOMER_FIXTURE_DIR')
     if args.customer_fixture_only and not customer_image:
@@ -285,11 +316,13 @@ def main(argv=None):
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         ap.error(f'cannot verify tools checkout revision: {error}')
     os.umask(0o077)
-    run=Path(tempfile.mkdtemp(prefix='pi5-acceptance-',dir=args.run_root))
+    run=Path(tempfile.mkdtemp(prefix=f'{board}-acceptance-',dir=args.run_root))
     print(run,flush=True)
     (run/'results.log').write_text(
         f'Candidate revision: {args.release_revision}\nTools revision: {tools_revision}\n')
     (run/'inputs.txt').write_text(
+        f'started_utc={datetime.now(timezone.utc).isoformat()}\nboard={board}\n'
+        f'historical={args.historical}\n'
         f'revision={args.release_revision}\ntools_revision={tools_revision}\n'
         f'candidate_sha256={args.candidate_sha256}\n'
         f'osi_version={args.osi_version}\nchirpstack_version={args.chirpstack_version}\n'
@@ -300,12 +333,28 @@ def main(argv=None):
     if args.keep_scratch:
         scratch = run/'scratch'
         scratch.mkdir(mode=0o700)
-        return run_cases(args, run, scratch, release, capability, bool(customer_image))
-    with tempfile.TemporaryDirectory(prefix='scratch-', dir=run) as scratch:
-        return run_cases(args, run, Path(scratch), release, capability, bool(customer_image))
+        scratch_dir = nullcontext(scratch)
+    else:
+        scratch_dir = tempfile.TemporaryDirectory(prefix='scratch-', dir=run)
+    with scratch_dir as directory:
+        scratch = Path(directory)
+        env = {key: os.environ.get(key) for key in ('TMPDIR', 'TMP', 'TEMP')} if board == 'pi4' else {}
+        try:
+            os.environ.update(dict.fromkeys(env, str(scratch)))
+            return run_cases(args, run, scratch, release, capability, bool(customer_image),
+                             board=board, guest_class=guest_class, verify_board=verify_board)
+        finally:
+            for key, value in env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            (run/'stopped.utc').write_text(datetime.now(timezone.utc).isoformat() + '\n')
 
 
-def run_cases(args, run, scratch, release, release_capability, customer_selected):
+def run_cases(args, run, scratch, release, release_capability, customer_selected, *,
+              board='pi5', guest_class=None, verify_board=None):
+    make_guest = guest_class if guest_class is not None else Guest
     results = {}
 
     def record(row):
@@ -314,7 +363,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         print(row, flush=True)
 
     focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
-    expected = expected_cases(args, None, customer_selected)
+    historical = board == 'pi4' and args.historical
+    expected = expected_cases(args, None, customer_selected, historical=historical)
 
     def summarize(*, aborted=False):
         record('Case | Expected | Observed | Verdict | Reason | Required replacements')
@@ -339,7 +389,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             failed |= verdict == 'FAIL'
             record(f'{label} | {need} | {observed} | {verdict} | {reason} | {replacements}')
         record(f'Case totals: {passed} passed / {required} required')
-        mode = 'Focused acceptance' if focused else 'Candidate acceptance'
+        mode = ('Historical diagnostics' if historical else
+                'Focused acceptance' if focused else 'Candidate acceptance')
         record(f'{mode}: ' + ('FAIL' if failed else 'PASS'))
         return int(failed)
 
@@ -371,16 +422,25 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
     def fixture_archive(old):
         if old not in fixture_archives:
             folder = args.fixtures/f'v{old}'
-            images = sorted(folder.glob('*rpi5*.img.gz'))
+            if board == 'pi4':
+                folder = external_path(folder, off_tmp=True)
+            images = sorted(folder.glob(f'*r{board}*.img.gz'))
             if len(images) != 1:
-                raise ValueError(f'expected one Pi 5 fixture archive for {old}')
+                raise ValueError(f'expected one {board} fixture archive for {old}')
             image = images[0]
-            entries = [line.split(maxsplit=1) for line in (folder/'SHA256SUMS').read_text().splitlines()]
+            sums = folder/'SHA256SUMS'
+            if board == 'pi4':
+                external_path(image, off_tmp=True)
+                sums = external_path(sums, off_tmp=True)
+            entries = [line.split(maxsplit=1) for line in sums.read_text().splitlines()]
             matches = [entry[0] for entry in entries if len(entry) == 2 and entry[1].lstrip('*') == image.name]
             if len(matches) != 1 or not re.fullmatch(r'[0-9a-f]{64}', matches[0]):
                 raise ValueError('fixture checksum manifest must identify exactly one archive digest')
             fixture_archives[old] = verified_archive(
                 image, matches[0], scratch/f'fixture-{old}.img.gz', label='fixture archive')
+            if board == 'pi4':
+                with (run/'fixtures.log').open('a') as log:
+                    print(old, matches[0], file=log)
         return fixture_archives[old]
 
     def verify_upgrade(old, *, cut_at=None, recovery=None, transfer=None):
@@ -390,7 +450,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         upgrade_media = build_media(probe_release, scratch/'minimal-media',
                                     revision=args.release_revision) if minimal else candidate_media()
         case = f'{old}-{scenario}' if scenario else old
-        guest = Guest(scratch/case, image, args.qemu, args.ram, upgrade=upgrade_media,
+        guest = make_guest(scratch/case, image, args.qemu, args.ram, upgrade=upgrade_media,
                       receipts=run/case, direct_io=bool(scenario))
         try:
             if minimal:
@@ -414,7 +474,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
     def factory_minimal_cut(phase):
         case = scratch/f'minimal-factory-{phase}'
-        vm = Guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
+        vm = make_guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
         try:
             receipt = vm.start(before_console=CUT_RECEIPT, flow_cut=phase)
             committed = verify_disk(vm, receipt, phase=phase, factory=True,
@@ -444,7 +504,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 record(str(error))
                 return summarize(aborted=True)
         if not focused:
-            vm = Guest(scratch/'candidate', candidate, args.qemu, args.ram,
+            vm = make_guest(scratch/'candidate', candidate, args.qemu, args.ram,
                        receipts=run/'candidate', direct_io=True)
             try:
                 try:
@@ -454,11 +514,14 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                     record(f'Factory image capability probe failed: {error}')
                     return summarize(aborted=True)
                 record(f'Factory image flows capability: {image_capability}')
-                expected = expected_cases(args, image_capability, customer_selected)
+                expected = expected_cases(args, image_capability, customer_selected, historical=historical)
                 if image_capability != release_capability:
                     record('Factory image and offline tree disagree on flows publication capability')
                     return summarize(aborted=True)
-                if image_capability == 'unsupported':
+                if historical and image_capability != 'unsupported':
+                    record('Historical diagnostics require an image preceding both flows fixes')
+                    return summarize(aborted=True)
+                if not historical and image_capability == 'unsupported':
                     record('Factory image declares neither #714 recovery nor minimal atomic flows publication')
                     return summarize(aborted=True)
                 if image_capability == 'minimal':
@@ -480,7 +543,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
                         record(str(error))
                         return summarize(aborted=True)
-                stock_cases(vm, args, test)
+                stock_cases(vm, args, test, verify_board=verify_board, inspect_disk=board == 'pi4')
             finally:
                 vm.stop()
             for old in UPGRADE_VERSIONS:
@@ -489,7 +552,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
                 def check_cut():
                     case = label.replace(' ', '-')
-                    vm = Guest(scratch/case, candidate, args.qemu, args.ram,
+                    vm = make_guest(scratch/case, candidate, args.qemu, args.ram,
                                receipts=run/case, direct_io=True)
                     try:
                         if not first_boot:
@@ -510,7 +573,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             for phase, label in MINIMAL_FACTORY_CASES.items():
                 test(label, lambda: factory_minimal_cut(phase))
             test(MINIMAL_UPGRADE_CASE, lambda: verify_upgrade('0.8.1', cut_at=CUT_RECEIPT))
-        if not focused or args.customer_fixture_only:
+        if board == 'pi5' and (not focused or args.customer_fixture_only):
             from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
             selection = 'opt-in qualification' if customer_selected else 'off by default'
             record(f'{CUSTOMER_CASE}: {selection}. Count this fixture as release evidence only with a '
@@ -523,9 +586,11 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
     return summarize()
 
 
-def stock_cases(vm, args, test):
+def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
     def boot():
         ready(vm)
+        if verify_board is not None:
+            verify_board(vm)
         versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
         if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
             raise RuntimeError('unexpected versions '+versions)
@@ -571,7 +636,7 @@ for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302;
         return 'account/device/history snapshot and setting preserved'
     test('Reboot persistence',reboot)
     for n in range(1,4):
-        test(f'Power cut {n}',lambda: cut(vm,n))
+        test(f'Power cut {n}', lambda: cut(vm, n, inspect_disk=inspect_disk))
 
 
 if __name__=='__main__':
