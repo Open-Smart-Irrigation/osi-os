@@ -74,7 +74,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       try {
         samples(raw, first, 4, null); samples(raw, second, 4, null);
         const { db, queries } = recording(raw);
-        await assert.rejects(helper.buildAllZonesExportCsv(db, { ...opts, zoneIds: [1,2], granularity, maxInputRows: 6 }), { statusCode: 413, code: 'EXPORT_INPUT_TOO_LARGE' });
+        await assert.rejects(helper.buildAllZonesExportCsv(db, { ...opts, zoneIds: [1,2], granularity, maxWorkRows: 6 }), { statusCode: 413, code: 'EXPORT_INPUT_TOO_LARGE' });
         boundedQueries(queries, 6);
         assert.equal(queries.length, 2);
         assert.equal(queries[1].count, 3);

@@ -14,29 +14,45 @@ these ceilings:
 
 | Resource | Ceiling | Charged work |
 |---|---:|---|
-| Input rows | 30,000 | SQL candidate rows before filtering, including nulls and date-margin rows |
-| Input cells | 200,000 | Candidate rows multiplied by selected SQL fields, including legacy alias fields |
+| Per-read input rows | 30,000 | One source-window's SQL candidates plus carried date-margin rows, including nulls |
+| Per-read input cells | 200,000 | Those candidates multiplied by the device's selected SQL fields, including legacy aliases |
+| Request input work | 5,000,000 rows / 40,000,000 cells | Newly fetched candidates across every source, card and zone; margin rows count once per source-window sequence |
 | Output rows / aggregate cells | 200,000 | Actual output expansion, plus preflight of empty source/channel/bucket cells and potential pF |
 | CSV bytes | 8 MiB | Actual encoded UTF-8, including BOM, header, CSV escaping and newlines |
 
 Options can lower these limits for tests or smaller callers; they cannot raise
-them. One budget spans every source, card, window and zone in a response. A
-3,660-day request with three SWT channels reserves 21,960 aggregate cells per
-sensor. Nine such sensors fit the cell ceiling; the independent input and byte
-ceilings can refuse the request sooner.
+them. Output and request work share a budget across the response. Input memory
+is bounded per read, so a year of daily aggregates does not exhaust a single
+month's memory allowance. Each projection and empty-cell preflight uses the
+channels declared for that device type, with SWT3 eligibility preserved. Known
+types without a family for a card contribute no channels to that card.
 
-Raw and aggregate exports read one physical source at a time through the
-`(deveui, recorded_at)` index, ordered by `recorded_at, id`. SQL applies
-`LIMIT remaining + 1`; the extra row is an overflow sentinel and produces 413.
-The remaining allowance is the smaller of the row allowance and the cell
-allowance divided by the selected field count. Null-heavy input consumes the
-same work budget as valued input. Nothing is silently truncated.
+The work ceiling comes from the supported date range and observed reporting
+cadence: four five-minute sources over all 3,660 daily dates require 4,216,320
+samples. Five million allows those rows and outer date margins; forty million
+cells accommodates their five tension/legacy-alias fields with headroom. These
+are work ceilings, not a target-Pi latency guarantee. An LSN50 with three SWT
+channels reserves 21,960 potential daily/pF cells over 3,660 days; output bytes
+and other request limits can still refuse it. Sensor count alone does not
+predict export capacity.
+
+Raw exports read one physical source at a time; aggregate exports read one
+local calendar month per source. SQLite chooses the access plan. On a normal
+DB the `(deveui, recorded_at)` index satisfies the source/range predicate and
+`ORDER BY recorded_at, id` without a temporary sort. A missing index permits a
+slower correct read. SQL applies `LIMIT remaining + 1`; the extra row is an
+overflow sentinel and produces 413. The allowance is the smaller of remaining
+per-read memory and request work, divided by selected field width for the cell
+limits. Null-heavy input consumes the same budget as valued input. Nothing is
+silently truncated.
 
 Indexed lexical date bounds include margins for older timestamp encodings.
-Those candidates consume input work before exact instant filtering in JS.
-Aggregation reads one local calendar month per source at a time, using these
-bounded reads directly rather than the interactive history reader's optional
-rollup/raw-limit behavior.
+Those candidates consume request work before exact instant filtering in JS.
+Adjacent windows carry their boundary candidates forward and advance the SQL
+lower bound past the previous read. The same margin rows are neither fetched
+nor charged again. Only the adjacent margin remains live between windows.
+Aggregation uses these bounded reads directly rather than the interactive
+history reader's optional rollup/raw-limit behavior.
 
 All authorized aggregate scopes are resolved and preflighted before the first
 measurement query. Preflight and aggregation reuse the same month windows.
@@ -52,9 +68,10 @@ this is a host qualification, not a measurement on target hardware.
 
 ## Local days and stored CSV records
 
-Daily buckets follow each zone's local calendar. Missing channels remain blank,
-measured zero remains zero, and another depth never fills a missing requested
-depth. pF is derived after aggregating canonical kPa and stays undefined at zero.
+Daily buckets follow each zone's local calendar. An empty day emits blank
+values only for channels that device type supports. A day with observations
+emits its measured channels, as on main; it gains no fabricated blank channels.
+Measured zero remains zero, and another depth never fills a missing depth. pF is derived after aggregating canonical kPa and stays undefined at zero.
 
 An absent civil date maps to the next existing local boundary. For example,
 `Pacific/Apia`'s skipped 2011-12-30 is an empty interval on every export path.
@@ -64,8 +81,12 @@ days without borrowing the preceding day's data.
 Daily rewrites split complete CSV records, preserving quoted embedded CR/LF,
 escaped quotes and existing numeric tokens. Replacement uses the timestamp's
 zone-local date, including UTC timestamps on the preceding calendar date.
-The writer checks the old file's byte size before reading it and validates all
-new contents before replacing any file. Legacy BOM-less files gain one BOM.
+The nightly writers have no HTTP row, input or byte budgets. Raw and hourly
+files are written independently before daily processing. Daily history is
+rewritten through a UTF-8 record stream and atomically renamed, without loading
+the whole file or refusing it at 8 MiB. A malformed old daily file leaves that
+file intact and does not undo the raw/hourly updates. Legacy BOM-less files gain
+one BOM.
 
 ## Stable refusal codes and shared slot
 

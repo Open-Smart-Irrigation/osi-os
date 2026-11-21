@@ -153,7 +153,7 @@ for (const profile of PROFILES) {
         assert.equal(value('rain_tips_delta'), 15, `${granularity} interval tips are summed from device_data`);
         assert.equal(value('rain_mm_today'), 6, `${granularity} running total uses latest observation`);
         assert.equal(value('ambient_temperature'), 22.067, `${granularity} temperature uses mean`);
-        assert.equal(value('rain_mm_per_hour'), 10, `${granularity} rate uses mean`);
+        assert.ok(!rows.some(row => /^rain_mm_per_(?:hour|10min)$/.test(row.channel_key)), `${granularity} omits rates LoRain cannot report`);
       }
     } finally {
       raw.close();

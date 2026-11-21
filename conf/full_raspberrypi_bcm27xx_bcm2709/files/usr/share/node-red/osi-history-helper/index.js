@@ -6,6 +6,10 @@ const exportLimits = (() => {
   const MAX_ROWS = 200000;
   const MAX_INPUT_ROWS = 30000;
   const MAX_INPUT_CELLS = 200000;
+  // Four five-minute sources across all 3,660 allowed daily dates consume
+  // 4,216,320 rows. Request work is distinct from any one read's live memory.
+  const MAX_WORK_ROWS = 5000000;
+  const MAX_WORK_CELLS = 40000000;
   const MAX_CSV_BYTES = 8 * 1024 * 1024;
   const REASON_CODES = Object.freeze({
     RANGE: 'RANGE_TOO_LARGE',
@@ -39,6 +43,8 @@ const exportLimits = (() => {
       bytes: Buffer.byteLength(csvHeader, 'utf8'),
       inputRows: ceiling(options.maxInputRows, MAX_INPUT_ROWS),
       inputCells: ceiling(options.maxInputCells, MAX_INPUT_CELLS),
+      workRows: ceiling(options.maxWorkRows, MAX_WORK_ROWS),
+      workCells: ceiling(options.maxWorkCells, MAX_WORK_CELLS),
     };
     if (budget.bytes > budget.maxBytes) throw refusal(REASON_CODES.BYTES, 'export exceeds the CSV byte budget');
     return budget;
@@ -60,34 +66,36 @@ const exportLimits = (() => {
     return lines;
   }
 
-  function reserveRecord(record, budget) {
-    const bytes = Buffer.byteLength(record, 'utf8') + 1;
-    if (budget.rows + 1 > budget.maxRows) throw refusal(REASON_CODES.ROWS, `export exceeds ${budget.maxRows} rows`);
-    if (budget.bytes + bytes > budget.maxBytes) throw refusal(REASON_CODES.BYTES, 'export exceeds the CSV byte budget');
-    budget.rows++;
-    budget.bytes += bytes;
-  }
-
-  // Preserve the original escaped cells and numeric tokens when rewriting files.
-  // Physical CR/LF inside a quoted field is part of its record, not a delimiter.
-  function records(csv) {
-    const text = String(csv).replace(/^\uFEFF/, '');
-    const result = [];
-    let start = 0;
+  // Decode stream chunks as UTF-8, but keep record bytes/escaping unchanged.
+  // Quoting state and a split CRLF delimiter survive chunk boundaries.
+  async function* records(file) {
+    const fs = require('fs');
+    let pending = '';
     let quoted = false;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '"') {
-        if (quoted && text[i + 1] === '"') i++;
-        else quoted = !quoted;
-      } else if (!quoted && (text[i] === '\n' || text[i] === '\r')) {
-        if (i > start) result.push(text.slice(start, i));
-        if (text[i] === '\r' && text[i + 1] === '\n') i++;
-        start = i + 1;
+    let skipLF = false;
+    let first = true;
+    for await (let chunk of fs.createReadStream(file, { encoding: 'utf8', highWaterMark: 64 * 1024 })) {
+      if (first) { chunk = chunk.replace(/^\uFEFF/, ''); first = false; }
+      let start = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const ch = chunk[i];
+        if (skipLF) {
+          skipLF = false;
+          if (ch === '\n') { start = i + 1; continue; }
+        }
+        if (ch === '"') quoted = !quoted;
+        else if (!quoted && (ch === '\r' || ch === '\n')) {
+          const record = pending + chunk.slice(start, i);
+          if (record) yield record;
+          pending = '';
+          start = i + 1;
+          skipLF = ch === '\r';
+        }
       }
+      pending += chunk.slice(start);
     }
     if (quoted) throw new Error('daily CSV contains an unterminated quoted field');
-    if (start < text.length) result.push(text.slice(start));
-    return result;
+    if (pending) yield pending;
   }
 
   function firstCell(record) {
@@ -96,7 +104,7 @@ const exportLimits = (() => {
     return match[1].startsWith('"') ? match[1].slice(1, -1).replace(/""/g, '"') : match[1];
   }
 
-  return { MAX_ROWS, MAX_INPUT_ROWS, MAX_INPUT_CELLS, MAX_CSV_BYTES, REASON_CODES, ceiling, refusal, header, createBudget, reserveOutput, reserveRecord, records, firstCell };
+  return { MAX_ROWS, MAX_INPUT_ROWS, MAX_INPUT_CELLS, MAX_WORK_ROWS, MAX_WORK_CELLS, MAX_CSV_BYTES, REASON_CODES, ceiling, refusal, header, createBudget, reserveOutput, records, firstCell };
 })();
 const { createAnalysis } = require('./analysis');
 const { deviceSourceId, describeDeviceSource, isWatermarkSoilTemperatureSource } = require('./device-sources');
@@ -3581,39 +3589,56 @@ function exportChannelsForCard(card, scope) {
 function exportChannelsForDevice(card, device, scope) {
   const channels = channelsForCard(card, [device]);
   const type = deviceTypeId(device);
-  const deviceChannels = type === 'AQUASCOPE_LORAIN'
-    ? channels
-    : channels.filter((channel) => channel.id !== 'rain_tips_delta');
+  const supported = type ? deviceFamilyChannelKeys(device, normalizeCardType(card.cardType)) : null;
+  const deviceChannels = channels.filter(channel =>
+    (!type || (supported && supported.has(channel.id)))
+    && (channel.id !== 'swt_3' || isLsn50Swt3Eligible(device)));
   return scope && scope.requestedChannelKeys
-    ? deviceChannels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    ? deviceChannels.filter(channel => scope.requestedChannelKeys.has(channel.id))
     : deviceChannels;
 }
 
-function ensureExportBudget(scope) {
-  if (!scope.budget) scope.budget = exportLimits.createBudget({}, exportLimits.header(RAW_CSV_COLUMNS));
-  return scope.budget;
-}
-
 function retainExportRows(rows, expanded, scope) {
-  exportLimits.reserveOutput(expanded, RAW_CSV_COLUMNS, ensureExportBudget(scope), renderCsvRow);
+  // Only request-time callers install a response budget. Nightly files are
+  // persistent artifacts and retain main's unlimited output behavior.
+  if (scope.budget) exportLimits.reserveOutput(expanded, RAW_CSV_COLUMNS, scope.budget, renderCsvRow);
   rows.push(...expanded);
 }
 
-// One indexed source scan at a time. Charge candidate rows, including nulls and
-// timestamp-margin rows, before filtering or aggregation. No SQL-side sort or
-// unbounded instant-normalization scan can precede the LIMIT sentinel.
+// The memory sentinel applies to one source-window. A separate request-work
+// budget counts newly fetched rows/cells. Carry only the adjacent date margin
+// forward, so repeated month boundaries are neither fetched nor charged twice.
 async function readExportRows(db, scope, deveui, channels, start, end) {
-  const budget = ensureExportBudget(scope);
+  const budget = scope.budget;
   const fields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const width = Math.max(1, fields.length);
-  const remaining = Math.min(budget.inputRows, Math.floor(budget.inputCells / width));
   const range = recordedAtRangeSql('recorded_at', start, end);
-  const sql = `SELECT id, deveui, recorded_at, ${fields.join(', ')} FROM device_data INDEXED BY idx_device_data_deveui_recorded_at WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC, id ASC LIMIT ${remaining + 1}`;
-  const fetched = await dbAll(db, sql, [deveui].concat(range.params.slice(0, 2)));
-  if (fetched.length > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
-  budget.inputRows -= fetched.length;
-  budget.inputCells -= fetched.length * width;
-  return fetched.filter(recordedAtRangeFilter(start, end));
+  const key = deveui + '|' + fields.join(',');
+  const cursor = scope.inputCursor;
+  const contiguous = cursor && cursor.key === key && cursor.nextStart === start;
+  const carried = contiguous ? cursor.rows : [];
+  const lower = contiguous ? cursor.upper : range.params[0];
+  const remaining = budget ? Math.min(
+    budget.inputRows - carried.length,
+    Math.floor(budget.inputCells / width) - carried.length,
+    budget.workRows,
+    Math.floor(budget.workCells / width)
+  ) : null;
+  if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the per-read memory budget');
+  const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
+  const sql = `SELECT id, deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC, id ASC${limit}`;
+  const fetched = await dbAll(db, sql, [deveui, lower, range.params[1]]);
+  if (remaining !== null && fetched.length > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work or per-read memory budget');
+  if (budget) {
+    budget.workRows -= fetched.length;
+    budget.workCells -= fetched.length * width;
+  }
+  const combined = carried.concat(fetched);
+  scope.inputCursor = end < scope.end ? {
+    key, nextStart: end, upper: range.params[1],
+    rows: combined.filter(row => row.recorded_at >= isoDate(Date.parse(end) - DAY_MS)),
+  } : null;
+  return combined.filter(recordedAtRangeFilter(start, end));
 }
 
 async function rawZoneExportRows(db, scope) {
@@ -3851,32 +3876,54 @@ async function writeZoneCsv(options = {}) {
   const zoneName = String(zone.name || zoneUuid);
   const stamp = (row) => tidyCsvRow({ ...(row || {}), zone: row && row.zone ? row.zone : zoneName });
 
-  const rawCsv = toCsv(RAW_CSV_COLUMNS, (options.rawRows || []).map(stamp), options);
-  const hourlyCsv = toCsv(AGG_CSV_COLUMNS, (options.hourlyRows || []).map(stamp), options);
-  const dailyPath = path.join(base, 'daily.csv');
-  const csvHeader = exportLimits.header(AGG_CSV_COLUMNS);
-  const budget = exportLimits.createBudget(options, csvHeader);
-  const daily = [csvHeader];
-  if (fs.existsSync(dailyPath)) {
-    if (fs.statSync(dailyPath).size > budget.maxBytes) throw exportLimits.refusal(exportLimits.REASON_CODES.BYTES, 'daily CSV exceeds the byte budget');
-    const records = exportLimits.records(fs.readFileSync(dailyPath, 'utf8'));
-    for (const record of records.slice(1)) {
-      const timestamp = exportLimits.firstCell(record);
-      const recordDay = localDateKey(parseRecordedAtMs(timestamp), normalizeTimezone(zone.timezone));
-      if (recordDay === day) continue;
-      exportLimits.reserveRecord(record, budget);
-      daily.push(record + '\n');
-    }
-  }
-  for (const row of (options.dailyRows || []).map(stamp)) {
-    daily.push(...exportLimits.reserveOutput([row], AGG_CSV_COLUMNS, budget, renderCsvRow));
-  }
-  // Finish all validation before replacing any file.
   fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
-  fs.writeFileSync(path.join(base, 'raw', `${day}.csv`), rawCsv);
-  fs.writeFileSync(path.join(base, 'hourly', `${day}.csv`), hourlyCsv);
-  fs.writeFileSync(dailyPath, daily.join(''));
+  const temporary = file => file + '.tmp-' + process.pid + '-' + crypto.randomBytes(8).toString('hex');
+  const writeRows = (file, columns, rows) => {
+    const temp = temporary(file);
+    let fd = null;
+    try {
+      fd = fs.openSync(temp, 'wx');
+      fs.writeSync(fd, exportLimits.header(columns));
+      for (const row of rows) fs.writeSync(fd, renderCsvRow(columns, stamp(row)));
+      fs.closeSync(fd); fd = null;
+      fs.renameSync(temp, file);
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
+    }
+  };
+  // Raw/hourly updates succeed independently of a malformed old daily file.
+  writeRows(path.join(base, 'raw', `${day}.csv`), RAW_CSV_COLUMNS, options.rawRows || []);
+  writeRows(path.join(base, 'hourly', `${day}.csv`), AGG_CSV_COLUMNS, options.hourlyRows || []);
+  const dailyPath = path.join(base, 'daily.csv');
+  const temp = temporary(dailyPath);
+  let fd = null;
+  try {
+    fd = fs.openSync(temp, 'wx');
+    fs.writeSync(fd, exportLimits.header(AGG_CSV_COLUMNS));
+    if (fs.existsSync(dailyPath)) {
+      let header = true;
+      let previousTimestamp;
+      let previousDay;
+      const timezone = normalizeTimezone(zone.timezone);
+      for await (const record of exportLimits.records(dailyPath)) {
+        if (header) { header = false; continue; }
+        const timestamp = exportLimits.firstCell(record);
+        if (timestamp !== previousTimestamp) {
+          previousTimestamp = timestamp;
+          previousDay = localDateKey(parseRecordedAtMs(timestamp), timezone);
+        }
+        if (previousDay !== day) fs.writeSync(fd, record + '\n');
+      }
+    }
+    for (const row of options.dailyRows || []) fs.writeSync(fd, renderCsvRow(AGG_CSV_COLUMNS, stamp(row)));
+    fs.closeSync(fd); fd = null;
+    fs.renameSync(temp, dailyPath);
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+    fs.rmSync(temp, { force: true });
+  }
 }
 
 async function rotateZoneCsv(options = {}) {
@@ -4096,7 +4143,7 @@ function* csvRowsFromAggregate(aggregate, card, device, sourceName, channels, ar
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       const missing = !stats || Number(stats.sampleCount || 0) === 0;
-      if (missing && !context.includeMissing) continue;
+      if (missing && (!context.includeMissing || Number(bucket.sampleCount || 0) > 0)) continue;
       const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,
@@ -4645,6 +4692,8 @@ module.exports = {
   ALL_ZONES_EXPORT_MAX_ROWS,
   EXPORT_MAX_INPUT_ROWS: exportLimits.MAX_INPUT_ROWS,
   EXPORT_MAX_INPUT_CELLS: exportLimits.MAX_INPUT_CELLS,
+  EXPORT_MAX_WORK_ROWS: exportLimits.MAX_WORK_ROWS,
+  EXPORT_MAX_WORK_CELLS: exportLimits.MAX_WORK_CELLS,
   EXPORT_MAX_CSV_BYTES: exportLimits.MAX_CSV_BYTES,
   EXPORT_REASON_CODES: exportLimits.REASON_CODES,
   RAW_CSV_COLUMNS,
