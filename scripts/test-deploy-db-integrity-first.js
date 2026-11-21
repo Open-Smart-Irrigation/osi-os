@@ -113,6 +113,82 @@ test('the hold consumers are installed before the recovery writer becomes callab
   }
 });
 
+for (const outcome of ['valid seed', 'failed CLI install', 'invalid seed']) {
+  test(`stock first deploy with no SQLite CLI handles a ${outcome}`, t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-stock-db-seed-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const bin = path.join(dir, 'bin');
+    const source = path.join(dir, 'seed.db');
+    const db = path.join(dir, 'live', 'farming.db');
+    const trace = path.join(dir, 'trace');
+    fs.mkdirSync(bin);
+    for (const name of ['cp', 'mkdir', 'mktemp', 'rm']) {
+      const command = spawnSync('sh', ['-c', 'command -v "$1"', 'command', name], { encoding: 'utf8' });
+      assert.equal(command.status, 0, name);
+      fs.symlinkSync(command.stdout.trim(), path.join(bin, name));
+    }
+    fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+    const sqlite = spawnSync('sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' });
+    assert.equal(sqlite.status, 0);
+    if (outcome === 'invalid seed') fs.writeFileSync(source, 'broken seed');
+    else assert.equal(spawnSync(sqlite.stdout.trim(), [source, 'CREATE TABLE seed (n);']).status, 0);
+    const installer = path.join(dir, 'sqlite3');
+    fs.writeFileSync(installer, `#!/bin/sh
+set -eu
+[ "$1 $2 $3" = '-batch -bail -readonly' ]
+[ "$5" = 'PRAGMA integrity_check;' ]
+[ -f "$4" ] && [ ! -e "$DB_PATH" ] || exit 1
+printf 'integrity check\\n' >> "$STOCK_TRACE"
+exec "$HOST_SQLITE" "$@"
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'opkg'), `#!/bin/sh
+set -eu
+printf 'opkg %s\\n' "$*" >> "$STOCK_TRACE"
+case "$*" in
+  update) exit 0 ;;
+  'install sqlite3-cli')
+    [ "$OUTCOME" != 'failed CLI install' ] || exit 1
+    cp "$SQLITE_INSTALLER" "$PATH/sqlite3"
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+    const run = spawnSync('/bin/sh', ['-c', `set -eu
+SEED_DB_REL=release/seed.db
+${fn('ensure_sqlite3_cli')}
+${fn('check_live_db_readonly')}
+${fn('seed_db_if_missing')}
+fetch() {
+  printf 'fetch\\n' >> "$STOCK_TRACE"
+  cp "$SEED_SOURCE" "$2"
+}
+if command -v sqlite3 >/dev/null 2>&1 || [ -e "$DB_PATH" ]; then exit 2; fi
+check_live_db_readonly || exit 2
+test ! -e "$STOCK_TRACE" || exit 2
+seed_db_if_missing || exit 1
+`], {
+      encoding: 'utf8',
+      env: { PATH: bin, DB_DIR: path.dirname(db), DB_PATH: db, OUTCOME: outcome, STOCK_TRACE: trace,
+        SEED_SOURCE: source, SQLITE_INSTALLER: installer, HOST_SQLITE: sqlite.stdout.trim() },
+    });
+    const success = outcome === 'valid seed';
+    assert.equal(run.status, success ? 0 : 1, run.stdout + run.stderr);
+    const steps = ['opkg update', 'opkg install sqlite3-cli'];
+    if (outcome !== 'failed CLI install') steps.push('fetch', 'integrity check');
+    assert.equal(fs.readFileSync(trace, 'utf8'), steps.join('\n') + '\n');
+    assert.equal(fs.existsSync(db), success);
+    if (success) {
+      assert.equal(digest(db), digest(source));
+    } else if (outcome === 'failed CLI install') {
+      assert.match(run.stderr, /cannot validate a fresh database seed without the sqlite3 CLI/);
+      assert.equal(fs.existsSync(path.dirname(db)), false);
+    } else {
+      assert.match(run.stderr, /downloaded database seed failed integrity_check/);
+      assert.deepEqual(fs.readdirSync(path.dirname(db)), []);
+    }
+  });
+}
+
 for (const fail of ['download', 'integrity', 'file fsync', 'directory fsync', 'concurrent create', 'ok']) {
   test(`database seed publication handles ${fail} under a conditional call`, t => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-seed-publish-'));
@@ -141,6 +217,7 @@ fs.fsyncSync = fd => {
 DB_PATH="$1"
 DB_DIR="$(dirname "$DB_PATH")"
 SEED_DB_REL=release/seed.db
+${fn('ensure_sqlite3_cli')}
 ${fn('seed_db_if_missing')}
 fetch() {
   case "$SEED_FAULT" in
