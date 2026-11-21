@@ -97,7 +97,7 @@ const realSqlProbe = spawnSync(process.execPath, ['-'], { cwd: ROOT, encoding: '
   }
   const flowState = {};
   const flow = { get: (key) => flowState[key] || {}, set: (key, value) => { flowState[key] = value; } };
-  global.get = (key) => key === 'fs' ? { existsSync: () => false } : undefined;
+  global.get = (key) => key === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined;
   const env = { get: (key) => ({ DEVICE_EUI: gateway, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active', FIRMWARE_VERSION: 'test-build', OSI_SCOPED_ACCESS: '0' }[key] || '') };
   const node = { warn: () => {}, error: () => {}, status: () => {} };
   const calls = [];

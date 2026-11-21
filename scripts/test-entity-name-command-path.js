@@ -554,10 +554,10 @@ test('the applier is wired between installation revisions and Route Command, on 
     const flows = loadFlows(profile);
     const upstream = flows.find((n) => n.id === 'installation-revision-command-apply-fn');
     const applier = flows.find((n) => n.id === 'entity-name-command-apply-fn');
-    assert.deepEqual(upstream.wires, [['entity-name-command-apply-fn'], ['9d5e3035c3d069c4']], profile);
+    assert.deepEqual(upstream.wires, [['entity-name-command-apply-fn'], ['account-cloud-guard-9d5e3035c3d069c4']], profile);
     const protectedApplier = flows.find((n) => n.id === 'watermark-config-command-apply-fn');
-    assert.deepEqual(applier.wires, [['watermark-config-command-apply-fn'], ['9d5e3035c3d069c4']], profile);
-    assert.deepEqual(protectedApplier.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']], profile);
+    assert.deepEqual(applier.wires, [['watermark-config-command-apply-fn'], ['account-cloud-guard-9d5e3035c3d069c4']], profile);
+    assert.deepEqual(protectedApplier.wires, [['934bf2bc19a8ce22'], ['account-cloud-guard-9d5e3035c3d069c4']], profile);
     assert.deepEqual(applier.libs, [{ var: 'osiLib', module: 'osi-lib' }], profile);
     assert.equal(applier.name, 'Apply Entity Name Command', profile);
   }

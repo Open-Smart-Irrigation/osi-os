@@ -157,7 +157,7 @@ async function testBuildBatchCorrelation() {
   const node = nodeById('command-ack-build-batch');
   const { resultPromise } = execute(node, {}, db, {
     env: { DEVICE_EUI: 'AABBCCDDEEFF0011', DEVICE_EUI_CONFIDENCE: 'confirmed' },
-    global: { fs: { existsSync: () => false } },
+    global: { fs: { existsSync: () => false, readdirSync: () => [] } },
     flowState: { sync_state: {} },
   });
   const out = await resultPromise;
@@ -583,7 +583,7 @@ function buildBatch(db, flowState) {
   db.prepare("INSERT INTO users (server_url, server_sync_token, server_linked_at) VALUES ('https://cloud.example', 'tok', '2026-01-01')").run();
   return execute(nodeById('command-ack-build-batch'), {}, db, {
     env: { DEVICE_EUI: '0016C001F1000001', DEVICE_EUI_CONFIDENCE: 'confirmed' },
-    global: { fs: { existsSync: () => false } },
+    global: { fs: { existsSync: () => false, readdirSync: () => [] } },
     flowState: flowState || { sync_state: {} },
   });
 }
