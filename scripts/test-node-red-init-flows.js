@@ -700,7 +700,8 @@ for (const sealed of [true, false]) {
         assert.match(start.stderr, /HELD.*You must re-run the deploy/);
         assert.equal(swap.flowRecoveryHeld(fx.userDir), true);
         assert.match(fs.readFileSync(path.join(fx.userDir, 'DEPLOY-HELD'), 'utf8'), /You must re-run the deploy/);
-        assert.equal(fs.existsSync(fx.flows), false);
+        // Switch repair can recreate the link while leaving the payload held.
+        assert.equal(fs.realpathSync(fx.flows), fx.target);
         assert.equal(fs.readFileSync(fx.target, 'utf8'), invalid);
       }
       if (firstBoot) fs.unlinkSync(pending); // /var/run is recreated between boots.
