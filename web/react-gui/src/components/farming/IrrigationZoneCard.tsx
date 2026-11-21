@@ -31,7 +31,7 @@ import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
 import { formatDisplayFallbackReason } from '../../utils/displayFallback';
-import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
+import { useDesktopData } from '../../history/useDesktopData';
 
 interface IrrigationZoneCardProps {
   zone: IrrigationZone;
@@ -325,7 +325,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   // Entry points to gateway-level modules follow the gateway's module flags, exactly as the
   // header does. `null` while the settings load: hidden rather than flashed and withdrawn.
   const gatewayModules = useGatewayModules();
-  const showZoneDataLink = !isDesktopBrowser() && gatewayModules?.data === true;
+  const desktopData = useDesktopData();
+  const showZoneDataLink = !desktopData && gatewayModules?.data === true;
   const showJournalLink = gatewayModules?.journal === true;
   const waterSubtitle = formatWaterSubtitle(
     t,

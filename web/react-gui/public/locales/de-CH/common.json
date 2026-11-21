@@ -83,7 +83,7 @@
       "label": "Layout",
       "stacked": "Gestapelt",
       "overlaid": "Überlagert",
-      "smallMultiples": "Kleine Vielfache"
+      "smallMultiples": "Einzeldiagramme"
     },
     "autoStack": {
       "note": "Gestapelt angezeigt: Bei dieser Breite lassen die Einheitenachsen zu wenig Platz für das Diagramm.",

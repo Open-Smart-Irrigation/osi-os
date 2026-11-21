@@ -9,6 +9,7 @@ const MODES: AnalysisWorkspaceMode[] = ['timeline', 'correlation'];
 const LAYOUTS: TimelineLayout[] = ['stacked', 'overlaid', 'small-multiples'];
 
 interface AnalysisControlsProps {
+  expandedViewsEnabled?: boolean;
   rangeLabel: string;
   range?: AnalysisRange;
   mode: AnalysisWorkspaceMode;
@@ -45,6 +46,7 @@ function isoToDatetimeLocal(value: string | null | undefined): string {
 }
 
 export function AnalysisControls({
+  expandedViewsEnabled = true,
   rangeLabel,
   range,
   mode,
@@ -131,24 +133,26 @@ export function AnalysisControls({
             </button>
           ))}
         </div>
-        <div
-          className="analysis-control-group analysis-modes inline-flex max-w-full flex-wrap gap-1"
-          role="group"
-          aria-label={t('analysis.mode.label')}
-        >
-          {MODES.map((m) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={m === mode}
-              onClick={() => onModeChange(m)}
-              className={segBtn(m === mode)}
-            >
-              {t(`analysis.mode.${m}`)}
-            </button>
-          ))}
-        </div>
-        {mode === 'timeline' ? (
+        {expandedViewsEnabled && (
+          <div
+            className="analysis-control-group analysis-modes inline-flex max-w-full flex-wrap gap-1"
+            role="group"
+            aria-label={t('analysis.mode.label')}
+          >
+            {MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={m === mode}
+                onClick={() => onModeChange(m)}
+                className={segBtn(m === mode)}
+              >
+                {t(`analysis.mode.${m}`)}
+              </button>
+            ))}
+          </div>
+        )}
+        {expandedViewsEnabled && mode === 'timeline' ? (
           <>
             <div
               className="analysis-control-group analysis-layouts inline-flex max-w-full flex-wrap gap-1"

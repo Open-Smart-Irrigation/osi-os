@@ -11,6 +11,7 @@
 //
 //   node scripts/rehearse-ledger-cutover.js --db <pulled copy of farming.db> --work <scratch directory>
 //       [--gateway-eui <16 hex>] [--allow-dirty] [--require-freeze] [--json]
+//       [--profile bcm2712|bcm2709] [--expect-row-change <name>]...
 //
 // --require-freeze fails the preflight unless the cutover freeze holds (no
 // pending outbox event, no in_flight history key, a cloud link with a gateway
@@ -39,8 +40,11 @@
 // and duration. Exit status: 0 PASS, 1 FAIL (a step refused or a check failed),
 // 2 usage or path guard refusal (nothing was written).
 //
-// Row changes the migrations make by design are listed in EXPECTED_CHANGES.
-// Any other row change, removed table or removed column fails the rehearsal.
+// EXPECTED_CHANGES lists the existing migration rules. Opt in to reviewed
+// additional deltas with --expect-row-change lorain-legacy-rates (0078 and
+// its history trigger) and/or --expect-row-change boot-device-identity
+// (blank device identity filled from the EUI used for boot). Each selected
+// declaration must apply and change at least one row in pass 1.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -52,7 +56,13 @@ const MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const FIXTURES_DIR = path.join(REPO, 'scripts/fixtures/lineages');
 const SEED_SQL = path.join(REPO, 'database/seed-blank.sql');
 const DEVICES_REBUILD_CLI = path.join(REPO, 'scripts/rehearse-devices-rebuild.js');
-const BOOT_FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
+const { bootFuncText, runBootNode } = require('../lib/osi-migrate/__tests__/helpers/boot-rehearsal');
+
+const PROFILES = ['bcm2712', 'bcm2709'];
+
+function bootFlows(profile) {
+  return path.join(REPO, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
+}
 
 const LIVE_DB_DIR = '/data/db';
 const WORK_MARKER = '.ledger-cutover-rehearsal';
@@ -197,6 +207,94 @@ const EXPECTED_CHANGES = {
   },
 };
 
+// Additional rules are selected by name on the CLI. Predicates and deltas
+// are defined here so the invocation cannot supply arbitrary SQL or waivers.
+const REVIEWED_UPDATES = {
+  'lorain-legacy-rates': {
+    version: 78,
+    table: 'device_data',
+    predicate: "rain_mm_per_10min IS NOT NULL AND deveui IN (SELECT deveui FROM devices WHERE type_id = 'AQUASCOPE_LORAIN')",
+    delta: { rain_mm_per_hour: null, rain_mm_per_10min: null, counter_interval_seconds: null },
+    sideEffects: [{
+      table: 'sync_history_dirty_keys',
+      predicate: 'one key per selected reading when linked and the trigger resolves a nonempty EUI',
+      delta: 'insert or reset to a pending correction with the reading ID and an in-window timestamp',
+    }],
+  },
+  'boot-device-identity': {
+    table: 'devices',
+    predicate: "gateway_device_eui IS NULL OR gateway_device_eui = ''",
+    delta: { gateway_device_eui: 'boot EUI' },
+  },
+};
+
+function rainDirtyKeys(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    // Same identity fallback as trg_sync_device_data_dirty_au. An empty
+    // device EUI suppresses the trigger, while NULL falls back to the link.
+    const query = db.prepare(`
+      SELECT id, COALESCE(
+        (SELECT gateway_device_eui FROM devices WHERE deveui = device_data.deveui AND deleted_at IS NULL),
+        link.gateway_device_eui, ''
+      ) AS eui
+      FROM device_data JOIN sync_link_state AS link ON link.peer_node = 'cloud' AND link.linked = 1
+      WHERE ${REVIEWED_UPDATES['lorain-legacy-rates'].predicate}
+    `);
+    query.setReadBigInts(true);
+    const keys = new Map();
+    for (const { id, eui } of query.iterate()) {
+      if (eui !== '') keys.set(`DEVICE_DATA|${eui}|${id}`, id);
+    }
+    return keys;
+  } finally {
+    db.close();
+  }
+}
+
+const RAIN_DIRTY_DELTA = {
+  peer_node: 'cloud', table_name: 'device_data', change_kind: 'correction',
+  status: 'pending', attempts: 0n, next_attempt_at: null, last_error: null,
+};
+
+function rainDirtyRule(keys, migrationWindow) {
+  return {
+    table: 'sync_history_dirty_keys',
+    columns: [...Object.keys(RAIN_DIRTY_DELTA), 'source_row_id', 'changed_at'],
+    append: { peer_node: ['cloud'], table_name: ['device_data'] },
+    appendAffectsSequence: false, // The correction key is composite, with no AUTOINCREMENT.
+    migration: '0078 history trigger',
+    validate({ addedRows, changedRows, columns, context }) {
+      const problems = [];
+      const expected = (row) => col(row, columns, 'peer_node') === 'cloud'
+        && col(row, columns, 'table_name') === 'device_data'
+        && keys.has(col(row, columns, 'row_key'));
+      for (const row of [...addedRows, ...changedRows.map((r) => r.after)]) {
+        if (!expected(row)) problems.push('dirty history key outside the LoRain correction');
+      }
+      if (keys.size === 0) return problems;
+      const actual = context.after.tables.sync_history_dirty_keys.rows;
+      if (!actual) return [...problems, 'dirty history rows unavailable for validation'];
+      let matched = 0;
+      for (const { v: row } of actual.values()) {
+        if (!row || !expected(row)) continue;
+        const rowKey = col(row, columns, 'row_key');
+        const delta = { ...RAIN_DIRTY_DELTA, source_row_id: keys.get(rowKey) };
+        const stamp = col(row, columns, 'changed_at');
+        const time = Date.parse(stamp);
+        if (Object.entries(delta).some(([name, value]) => col(row, columns, name) !== value)
+          || !Number.isFinite(time) || new Date(time).toISOString() !== stamp
+          || time < migrationWindow.start || time > migrationWindow.end) {
+          problems.push('dirty history key has an unexpected correction payload or timestamp');
+        }
+        matched += 1;
+      }
+      if (matched !== keys.size) problems.push(`found ${matched} LoRain dirty history key(s), expected ${keys.size}`);
+      return problems;
+    },
+  };
+}
+
 // --- argument and path guards -----------------------------------------------
 
 class UsageError extends Error {}
@@ -208,12 +306,19 @@ function parseArgs(argv) {
     if (arg === '--db') options.db = argv[++i];
     else if (arg === '--work') options.work = argv[++i];
     else if (arg === '--gateway-eui') options.gatewayEui = argv[++i];
-    else if (arg === '--json') options.json = true;
+    else if (arg === '--profile') {
+      options.profile = argv[++i];
+      if (!PROFILES.includes(options.profile)) throw new UsageError('--profile must be bcm2712 or bcm2709');
+    } else if (arg === '--expect-row-change') {
+      const name = argv[++i];
+      if (!Object.hasOwn(REVIEWED_UPDATES, name)) throw new UsageError('unknown expected row change ' + name);
+      (options.expectedRowChanges ??= []).push(name);
+    } else if (arg === '--json') options.json = true;
     else if (arg === '--allow-dirty') options.allowDirty = true;
     else if (arg === '--require-freeze') options.requireFreeze = true;
     else throw new UsageError('unknown argument ' + arg);
   }
-  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--allow-dirty] [--require-freeze] [--json]');
+  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--allow-dirty] [--require-freeze] [--json] [--profile bcm2712|bcm2709] [--expect-row-change <name>]...');
   if (options.gatewayEui !== null && !/^[0-9A-Fa-f]{16}$/.test(options.gatewayEui)) throw new UsageError('--gateway-eui must be 16 hex digits');
   return options;
 }
@@ -310,9 +415,9 @@ function gitState(dir) {
 
 // What the rehearsal actually runs from this working tree, hashed, so a report
 // proves the exact migration set, boot node, seed and tool versions.
-function checkoutProvenance() {
+function checkoutProvenance(profile = PROFILES[0]) {
   const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-  const bootNode = JSON.parse(fs.readFileSync(BOOT_FLOWS, 'utf8')).find((n) => n.id === 'sync-init-fn');
+  const bootNode = bootFuncText(bootFlows(profile));
   const lineageFixtures = {};
   if (fs.existsSync(FIXTURES_DIR)) {
     for (const dir of fs.readdirSync(FIXTURES_DIR).sort()) {
@@ -331,7 +436,8 @@ function checkoutProvenance() {
   return {
     checksumsJsonSha256: sha(path.join(MIGRATIONS_DIR, 'CHECKSUMS.json')),
     seedSha256: sha(SEED_SQL),
-    bootNodeSha256: bootNode ? crypto.createHash('sha256').update(bootNode.func).digest('hex') : null,
+    profile,
+    bootNodeSha256: crypto.createHash('sha256').update(bootNode).digest('hex'),
     toolSha256: sha(__filename),
     lineageFixtures,
     node: process.version,
@@ -390,7 +496,7 @@ function encodeValue(v) {
 // not depend on rowids or on physical column order. `columnsFrom` (an earlier
 // snapshot) makes the hash cover the earlier column list, so a table rebuilt
 // with extra columns still compares equal when no earlier value changed.
-function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() } = {}) {
+function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set(), expectedUpdate } = {}) {
   const db = new DatabaseSync(dbPath);
   try {
     const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_stat%' ORDER BY name").all().map((r) => r.name);
@@ -408,7 +514,9 @@ function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() 
       const pk = pkEarlier.length ? pkEarlier : [];
       const count = Number(db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(name)}`).get().n);
       const orderBy = (pk.length ? pk : columns).map(quoteIdent).join(', ');
-      const stmt = db.prepare(`SELECT ${columns.map(quoteIdent).join(', ')} FROM ${quoteIdent(name)}${orderBy ? ' ORDER BY ' + orderBy : ''}`);
+      const update = expectedUpdate?.table === name ? expectedUpdate : null;
+      const predicate = update ? `, CASE WHEN ${update.predicate} THEN 1 ELSE 0 END` : '';
+      const stmt = db.prepare(`SELECT ${columns.map(quoteIdent).join(', ')}${predicate} FROM ${quoteIdent(name)}${orderBy ? ' ORDER BY ' + orderBy : ''}`);
       stmt.setReadBigInts(true);
       stmt.setReturnArrays(true);
       const pkIdx = pk.map((c) => columns.indexOf(c));
@@ -418,9 +526,27 @@ function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() 
       const rows = keepKeys ? new Map() : null;
       const hash = crypto.createHash('sha256');
       const seen = new Map();
+      const expectedHash = update ? crypto.createHash('sha256') : null;
+      const delta = update ? Object.entries(update.delta).map(([column, value]) => {
+        const index = columns.indexOf(column);
+        if (index < 0 || pk.includes(column) || !pk.length) throw new Error(`invalid expected update column ${name}.${column}`);
+        return [index, value];
+      }) : [];
+      let expectedRows = 0;
       for (const row of stmt.iterate()) {
+        const matches = update && row.pop() === 1n;
         const encoded = row.map(encodeValue).join('\u001f');
         hash.update(encoded + '\u001e');
+        if (expectedHash) {
+          let projected = encoded;
+          if (matches) {
+            const values = row.slice();
+            expectedRows += 1;
+            for (const [index, value] of delta) values[index] = value;
+            projected = values.map(encodeValue).join('\u001f');
+          }
+          expectedHash.update(projected + '\u001e');
+        }
         if (!keepKeys) continue;
         let key = pkIdx.length ? pkIdx.map((i) => encodeValue(row[i])).join('\u001f') : encoded;
         if (!pkIdx.length) {
@@ -447,10 +573,17 @@ function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() 
         return { column: c, default: dflt, nonDefaultRows: n };
       });
       tables[name] = { columns, pk, count, sha256: hash.digest('hex'), rows, missingColumns, addedColumns, addedColumnDefaults };
+      if (expectedHash) tables[name].expectedUpdate = { sha256: expectedHash.digest('hex'), expectedRows, columns: Object.keys(update.delta) };
     }
     return { tables };
   } finally {
     db.close();
+  }
+}
+
+function requireExpectedRows(snapshot, declaration, rule) {
+  if (!snapshot.tables[rule.table]?.expectedUpdate?.expectedRows) {
+    throw new Error(`${declaration}: predicate selected no rows in ${rule.table}`);
   }
 }
 
@@ -484,7 +617,7 @@ function matchesAppendFilter(filter, row, columns) {
 // Compares two snapshots. `rules` (from rulesFor) lists the row changes made
 // by design; `allowBookkeeping` lets the ledger and fingerprint tables change.
 // Everything else must be byte-for-byte equal in the compared columns.
-function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping = false } = {}) {
+function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping = false, verifyExpectedUpdate = false } = {}) {
   const result = { unchanged: [], changedByDesign: [], bookkeeping: [], newTables: [], addedColumns: [], unexpected: [] };
   const context = { changedKeysByTable: new Map(), before, after };
   const deferred = [];
@@ -500,6 +633,16 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
       }
     }
     if (a.missingColumns.length) result.unexpected.push({ table: name, reason: 'columns removed: ' + a.missingColumns.join(', ') });
+    if (verifyExpectedUpdate && b.expectedUpdate) {
+      const expected = b.expectedUpdate;
+      const diff = { table: name, countBefore: b.count, countAfter: a.count };
+      if (a.count !== b.count || a.sha256 !== expected.sha256) {
+        result.unexpected.push({ ...diff, reason: 'rows differ from the declared update', expectedRows: expected.expectedRows, columns: expected.columns });
+      } else if (expected.expectedRows) {
+        result.changedByDesign.push({ ...diff, rowsChanged: expected.expectedRows, changedColumns: expected.columns });
+      } else result.unchanged.push(name);
+      continue;
+    }
     if (a.count === b.count && a.sha256 === b.sha256 && !a.missingColumns.length) {
       result.unchanged.push(name);
       // A validator can require a change (one outbox event per changed zone),
@@ -545,7 +688,9 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
   }
   // sqlite_sequence follows the tables it counts: a row may change or appear
   // for a table that gained rows by design or is new.
-  const appendTables = new Set([...rules.entries()].filter(([, list]) => list.some((r) => r.append)).map(([t]) => t));
+  const appendTables = new Set([...rules.entries()]
+    .filter(([, list]) => list.some((r) => r.append && r.appendAffectsSequence !== false))
+    .map(([t]) => t));
   for (const t of result.newTables) appendTables.add(t.table);
   for (const d of deferred) {
     const problems = [];
@@ -725,7 +870,6 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   const { runReconcile } = require('./reconcile-ledger-numbering');
   const { runMigrateCli } = require('./migrate-cli');
   const { runVerifyHead } = require('./verify-head-cli');
-  const { runBootNode } = require('../lib/osi-migrate/__tests__/helpers/boot-rehearsal');
   const { snapshotSchema, compareSchemas } = require('./semantic-schema-compare');
   const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 
@@ -735,8 +879,19 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   const headVersion = migrations[migrations.length - 1].version;
   let snapBefore;
   let snapMigrated;
+  let snapBeforeBoot;
   let pendingAfterReconcile = null;
   let applied = [];
+  let migrationRules;
+  const migrationWindow = {};
+  // Only the first pass can satisfy declarations. Pass 2 must be a no-op.
+  const declared = new Set(passNumber === 1 ? options.expectedRowChanges : []);
+  const rainChange = 'lorain-legacy-rates';
+  const bootChange = 'boot-device-identity';
+  const rainUpdate = declared.has(rainChange) ? REVIEWED_UPDATES[rainChange] : null;
+  const bootUpdate = declared.has(bootChange)
+    ? { ...REVIEWED_UPDATES[bootChange], delta: { gateway_device_eui: gatewayEui.value } }
+    : null;
 
   await runStep(pass, 'preflight', log, async () => {
     const integrity = sqliteJson(workDb, 'PRAGMA integrity_check').map((r) => r.integrity_check);
@@ -789,7 +944,18 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   // says which tables carry a rule, and those keep every row's values.
   await runStep(pass, 'snapshot-before', log, async () => {
     const keepValuesFor = ruleTables(pendingAfterReconcile);
-    snapBefore = snapshotTables(workDb, { keepValuesFor });
+    if (rainUpdate && !pendingAfterReconcile.includes(rainUpdate.version)) {
+      const version = String(rainUpdate.version).padStart(4, '0');
+      throw new Error(`${rainChange}: migration ${version} is not pending`);
+    }
+    migrationRules = rulesFor(pendingAfterReconcile);
+    if (rainUpdate) {
+      const dirty = rainDirtyRule(rainDirtyKeys(workDb), migrationWindow);
+      migrationRules.set(dirty.table, [dirty]);
+      keepValuesFor.add(dirty.table);
+    }
+    snapBefore = snapshotTables(workDb, { keepValuesFor, expectedUpdate: rainUpdate });
+    if (rainUpdate) requireExpectedRows(snapBefore, rainChange, rainUpdate);
     return { tables: Object.keys(snapBefore.tables).length, valuesKeptFor: [...keepValuesFor], rows: summarizeSnapshot(snapBefore) };
   });
 
@@ -803,7 +969,9 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
 
   await runStep(pass, 'migrate-cli', log, async () => {
     const migrateLog = [];
+    migrationWindow.start = Date.now();
     const res = await runMigrateCli({ dbPath: workDb, backupDir, migrationsDir: MIGRATIONS_DIR, log: (l) => migrateLog.push(l) });
+    migrationWindow.end = Date.now();
     applied = res.applied;
     const asExpected = JSON.stringify(applied) === JSON.stringify(pendingAfterReconcile);
     return {
@@ -821,7 +989,17 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   });
 
   await runStep(pass, 'snapshot-migrated', log, async () => {
-    snapMigrated = snapshotTables(workDb, { columnsFrom: snapBefore });
+    snapMigrated = snapshotTables(workDb, {
+      columnsFrom: snapBefore,
+      keepValuesFor: migrationRules.has('sync_history_dirty_keys') ? new Set(['sync_history_dirty_keys']) : undefined,
+    });
+    // The migration comparison projects the original columns. Start a fresh
+    // boot baseline if migrations added columns, so boot checks those too.
+    const addedColumns = Object.values(snapMigrated.tables).some((table) => table.addedColumns.length);
+    snapBeforeBoot = bootUpdate || addedColumns
+      ? snapshotTables(workDb, { expectedUpdate: bootUpdate })
+      : snapMigrated;
+    if (bootUpdate) requireExpectedRows(snapBeforeBoot, bootChange, bootUpdate);
     return { tables: Object.keys(snapMigrated.tables).length };
   });
 
@@ -846,7 +1024,7 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   let snapBooted;
   await runStep(pass, 'boot-node', log, async () => {
     const ddlBefore = devicesDdl(workDb);
-    const boot = await runBootNode(workDb, gatewayEui.value);
+    const boot = await runBootNode(workDb, gatewayEui.value, bootFlows(options.profile || PROFILES[0]));
     const ddlAfter = devicesDdl(workDb);
     const rebuilt = ddlBefore !== ddlAfter;
     return { ok: boot.errors.length === 0 && !rebuilt, gatewayEui: gatewayEui.source, devicesRebuilt: rebuilt, errors: boot.errors, warnings: boot.warnings };
@@ -872,19 +1050,18 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
   });
 
   await runStep(pass, 'snapshot-after-boot', log, async () => {
-    snapBooted = snapshotTables(workDb, { columnsFrom: snapMigrated });
+    snapBooted = snapshotTables(workDb, { columnsFrom: snapBeforeBoot });
     return { tables: Object.keys(snapBooted.tables).length };
   });
 
   await runStep(pass, 'data-compare', log, async () => {
     // Migrations: only the listed changes by design, ledger bookkeeping allowed.
-    const migrationPhase = compareSnapshots(snapBefore, snapMigrated, { rules: rulesFor(applied), allowBookkeeping: applied.length > 0 || passNumber === 1 });
-    // Boot node: no row may change.
-    const bootPhase = compareSnapshots(snapMigrated, snapBooted, { allowBookkeeping: true });
+    const migrationPhase = compareSnapshots(snapBefore, snapMigrated, { rules: migrationRules, allowBookkeeping: applied.length > 0 || passNumber === 1, verifyExpectedUpdate: true });
+    const bootPhase = compareSnapshots(snapBeforeBoot, snapBooted, { allowBookkeeping: true, verifyExpectedUpdate: true });
     const operational = operationalSummary(workDb);
     const problems = [];
     if (!migrationPhase.ok) problems.push('migration phase changed rows outside the design');
-    if (!bootPhase.ok) problems.push('the boot node changed rows');
+    if (!bootPhase.ok || bootPhase.newTables.length || bootPhase.addedColumns.length) problems.push('boot changed data outside the design');
     if (passNumber > 1) {
       // The second run must be a no-op, ledger and fingerprints included.
       const strict = compareSnapshots(snapBefore, snapBooted, {});
@@ -895,8 +1072,8 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
       ok: problems.length === 0,
       problems,
       migrationPhase: { ...migrationPhase, unchanged: migrationPhase.unchanged.length, unchangedTables: migrationPhase.unchanged },
-      bootPhase: { ok: bootPhase.ok, unexpected: bootPhase.unexpected, bookkeeping: bootPhase.bookkeeping, newTables: bootPhase.newTables },
-      expectedChangeRules: [...rulesFor(applied).entries()].map(([table, list]) => ({ table, migrations: list.map((r) => r.migration) })),
+      bootPhase: { ok: bootPhase.ok, unexpected: bootPhase.unexpected, bookkeeping: bootPhase.bookkeeping, newTables: bootPhase.newTables, addedColumns: bootPhase.addedColumns, changedByDesign: bootPhase.changedByDesign },
+      expectedChangeRules: [...migrationRules.entries()].map(([table, list]) => ({ table, migrations: list.map((r) => r.migration) })),
       tables: Object.fromEntries(Object.keys(snapBooted.tables).map((name) => [name, {
         before: snapBefore.tables[name] ? { count: snapBefore.tables[name].count, sha256: snapBefore.tables[name].sha256 } : null,
         after: { count: snapBooted.tables[name].count, sha256: snapBooted.tables[name].sha256 },
@@ -943,9 +1120,10 @@ async function rehearse(options, { log }) {
     })(),
     work,
     expectedChanges: Object.fromEntries(Object.entries(EXPECTED_CHANGES).map(([v, e]) => [v, { name: e.name, rules: e.rules.map((r) => ({ table: r.table, columns: r.columns || [], append: r.append || false })) }])),
+    declaredRowChanges: Object.fromEntries([...new Set(options.expectedRowChanges)].map((name) => [name, REVIEWED_UPDATES[name]])),
     passes: [],
   };
-  Object.assign(report.checkout, gitState(REPO), checkoutProvenance(), { allowDirty: options.allowDirty });
+  Object.assign(report.checkout, gitState(REPO), checkoutProvenance(options.profile), { allowDirty: options.allowDirty });
 
   const workDb = path.join(work, WORK_DB_NAME);
   const copyPass = { pass: 0, steps: [] };
@@ -1037,6 +1215,7 @@ if (require.main === module) main();
 module.exports = {
   EXPECTED_CHANGES,
   LEGACY_STAGE_TO_FAO,
+  rainDirtyRule,
   WORK_MARKER,
   REPORT_NAME,
   parseArgs,

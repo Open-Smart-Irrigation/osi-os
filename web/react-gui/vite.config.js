@@ -11,6 +11,7 @@ export function manualChunksForVendor(id) {
 
 export default defineConfig({
   plugins: [react()],
+  define: { __OSI_INTERNAL_PHONE_CHARTS__: false },
   base: process.env.VITE_BASE_PATH || '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
   resolve: { dedupe: ['react', 'react-dom'] },
   server: {

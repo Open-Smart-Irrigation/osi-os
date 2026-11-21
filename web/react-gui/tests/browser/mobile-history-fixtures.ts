@@ -314,6 +314,7 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
     const known = method === 'GET' && path === '/api/me'
       || method === 'GET' && path === '/api/system/stats'
       || method === 'GET' && path === '/api/system/features'
+      || method === 'GET' && path === '/api/system/settings'
       || method === 'GET' && path === '/api/irrigation-zones'
       || method === 'GET' && path === '/api/analysis/channels'
       || method === 'POST' && path === '/api/analysis/series';
@@ -329,6 +330,8 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
       await fulfillJson(route, record(route, 'gateway-stats', null), 200, edgeStats());
     } else if (method === 'GET' && path === '/api/system/features') {
       await fulfillJson(route, record(route, 'feature-flags', null), 200, features);
+    } else if (method === 'GET' && path === '/api/system/settings') {
+      await fulfillJson(route, record(route, 'gateway-settings', null), 200, { dataModuleEnabled: true });
     } else if (method === 'GET' && path === '/api/irrigation-zones') {
       await fulfillJson(route, record(route, 'zones', null), 200, edgeZone());
     } else if (method === 'GET' && path === '/api/analysis/channels') {

@@ -98,14 +98,17 @@ export const HeaderMenu: React.FC<HeaderMenuProps> = ({
         className={`flex w-full items-center justify-center gap-1.5 rounded-lg font-bold transition-colors ${triggerClassName}`}
       >
         {label}
-        <span aria-hidden="true" className="text-xs opacity-70">{open ? '^' : 'v'}</span>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}>
+          <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
 
       {open && (
         <div
           role="menu"
           onKeyDown={onMenuKeyDown}
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1 min-w-[180px] rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl`}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-50 mt-1 min-w-[180px] max-w-[calc(100vw-2rem)] rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl`}
         >
           {items.map((item, index) =>
             item.to ? (

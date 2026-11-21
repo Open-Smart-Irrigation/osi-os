@@ -395,6 +395,18 @@
       "max": 6,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
+    },
+    {
+      "path": "tools/raspi5/check-concentratord.sh",
+      "max": 3,
+      "reason": "Synthetic WM1302 OTP EUI shared by the emulator and the guest-local MQTT assertions",
+      "issue": 384
+    },
+    {
+      "path": "tools/raspi5/probe-wm1302.c",
+      "max": 1,
+      "reason": "Synthetic WM1302 OTP EUI asserted by the Semtech HAL probe",
+      "issue": 384
     }
   ]
 }

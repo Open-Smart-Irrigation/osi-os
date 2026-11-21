@@ -151,6 +151,9 @@ function runStartService(t, overrides = {}) {
     try { fs.chmodSync(sandboxDir, 0o700); } catch (_) {}
     fs.rmSync(sandboxDir, { recursive: true, force: true });
   });
+  const userDir = path.join(sandboxDir, 'srv', 'node-red');
+  fs.mkdirSync(userDir, { recursive: true });
+  fs.writeFileSync(path.join(userDir, 'flows.json'), '[{"id":"fixture","type":"tab"},{"id":"route","type":"http in","z":"fixture","url":"/api/fixture","method":"get"}]');
   const initPath = buildSandboxInit(sandboxDir);
   const harnessPath = path.join(sandboxDir, 'harness.sh');
   fs.writeFileSync(harnessPath, HARNESS_SCRIPT);

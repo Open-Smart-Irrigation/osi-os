@@ -1,0 +1,431 @@
+{
+  "contract_version": 1,
+  "suite": "schedules-history",
+  "consumers": [
+    "EB9",
+    "EB10",
+    "EB21"
+  ],
+  "cases": [
+    {
+      "id": "timezone-weekly-retains-wall-clock",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 2,
+          "start_time": "06:00",
+          "timezone": "Europe/Zurich",
+          "duration_minutes": 30
+        },
+        "events": [
+          {
+            "type": "zone_timezone_change",
+            "timezone": "Africa/Kampala",
+            "effective_at": "2026-11-20T00:00:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "weekdays_mask": 2,
+        "start_time": "06:00",
+        "timezone": "Africa/Kampala",
+        "next_due_at": "2026-11-23T03:00:00.000Z"
+      }
+    },
+    {
+      "id": "timezone-once-retains-instant",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "kind": "ONCE",
+          "fire_at": "2026-11-23T05:00:00.000Z",
+          "timezone": "Europe/Zurich"
+        },
+        "events": [
+          {
+            "type": "zone_timezone_change",
+            "timezone": "Africa/Kampala"
+          }
+        ]
+      },
+      "expected": {
+        "fire_at": "2026-11-23T05:00:00.000Z"
+      },
+      "decision": "S5"
+    },
+    {
+      "id": "dst-gap",
+      "basis": "baseline",
+      "check": "occurrences",
+      "input": {
+        "schedule": {
+          "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "02:30",
+          "duration_minutes": 30,
+          "timezone": "Europe/Zurich",
+          "enabled": true
+        },
+        "from": "2026-03-28T23:00:00.000Z",
+        "to": "2026-03-30T00:00:00.000Z"
+      },
+      "expected": {
+        "due_at": []
+      }
+    },
+    {
+      "id": "dst-fold",
+      "basis": "baseline",
+      "check": "occurrences",
+      "input": {
+        "schedule": {
+          "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "02:30",
+          "duration_minutes": 30,
+          "timezone": "Europe/Zurich",
+          "enabled": true
+        },
+        "from": "2026-10-24T22:00:00.000Z",
+        "to": "2026-10-26T00:00:00.000Z"
+      },
+      "expected": {
+        "due_at": [
+          "2026-10-25T00:30:00.000Z"
+        ]
+      }
+    },
+    {
+      "id": "plan-saved-is-not-confirmed",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "save_weekly"
+          },
+          {
+            "type": "push_enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "plan_confirmed": false,
+        "onboard_plan_readback": null
+      }
+    },
+    {
+      "id": "plan-push-only-on-change-or-resend",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "save_weekly"
+          },
+          {
+            "type": "push"
+          },
+          {
+            "type": "unchanged_tick"
+          },
+          {
+            "type": "explicit_resend"
+          },
+          {
+            "type": "push"
+          }
+        ]
+      },
+      "expected": {
+        "plan_push_batches": 2
+      }
+    },
+    {
+      "id": "downstream-refusal-is-not-watering",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "source": "daily_swt"
+        },
+        "events": [
+          {
+            "type": "decision",
+            "action": "IRRIGATE"
+          },
+          {
+            "type": "dispatch_refused",
+            "reason": "scope_denied"
+          }
+        ]
+      },
+      "expected": {
+        "decision_action": "IRRIGATE",
+        "admission": "refused",
+        "observed_watering": false,
+        "measured_flow_liters": null
+      }
+    },
+    {
+      "id": "late-correction-one-run",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "source": "once"
+        },
+        "events": [
+          {
+            "type": "skip",
+            "reason": "one_time_uncertain"
+          },
+          {
+            "type": "late_open_correction"
+          },
+          {
+            "type": "closed"
+          }
+        ]
+      },
+      "expected": {
+        "opportunities": 1,
+        "physical_runs": 1,
+        "original_skip_retained": true
+      }
+    },
+    {
+      "id": "calibration-rate-is-still-estimated-volume",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "encoded_duration_seconds": 600,
+          "measured_calibration_rate_lpm": 2
+        },
+        "events": [
+          {
+            "type": "command_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "estimated_gross_liters": 20,
+        "volume_source": "estimated",
+        "measured_flow_liters": null
+      }
+    },
+    {
+      "id": "no-calibration-no-fabricated-volume",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "encoded_duration_seconds": 600,
+          "measured_calibration_rate_lpm": null
+        },
+        "events": [
+          {
+            "type": "command_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "estimated_gross_liters": null,
+        "measured_flow_liters": null
+      }
+    },
+    {
+      "id": "local-source-survives-cloud-mirror",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "command_source": "manual_local",
+          "expectation_id": "exp-1"
+        },
+        "events": [
+          {
+            "type": "archive"
+          },
+          {
+            "type": "cloud_mirror"
+          }
+        ]
+      },
+      "expected": {
+        "command_source": "manual_local",
+        "expectation_id": "exp-1"
+      }
+    },
+    {
+      "id": "uc512-weekly-outlet-isolation",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "valve_index": 2,
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "06:00",
+          "timezone": "UTC",
+          "duration_minutes": 30
+        },
+        "events": [
+          {
+            "type": "due"
+          },
+          {
+            "type": "dispatch"
+          },
+          {
+            "type": "restart"
+          },
+          {
+            "type": "tick"
+          }
+        ]
+      },
+      "expected": {
+        "target_outlet": 2,
+        "outlet_1_enqueues": 0,
+        "physical_enqueues": 1
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "uc512-schedule-disabled-after-handoff",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "valve_index": 2
+        },
+        "events": [
+          {
+            "type": "dispatch"
+          },
+          {
+            "type": "disable_schedule"
+          }
+        ]
+      },
+      "expected": {
+        "future_dispatches": 0,
+        "physical_run_stopped": null
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "fixed-weekly-duration-0",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 0,
+        "enabled": true
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_duration"
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 1
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-240",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 240,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 240
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-241",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 241,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 241
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1439",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1439,
+        "enabled": true
+      },
+      "expected": {
+        "ok": true,
+        "value": {
+          "duration_minutes": 1439
+        }
+      }
+    },
+    {
+      "id": "fixed-weekly-duration-1440",
+      "basis": "baseline",
+      "check": "fixed_schedule",
+      "input": {
+        "kind": "WEEKLY",
+        "weekdays_mask": 2,
+        "start_time": "00:00",
+        "duration_minutes": 1440,
+        "enabled": true
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_duration"
+      }
+    }
+  ]
+}

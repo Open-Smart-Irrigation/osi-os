@@ -55,6 +55,18 @@ function errorsOf(root) {
   return verify(root).errors.join('\n');
 }
 
+test('direct Python tests are covered only when their exit status can fail the step', () => {
+  for (const suffix of ['', ' || true']) {
+    const root = repo({
+      [INVENTORY]: EMPTY_INVENTORY,
+      '.github/workflows/test.yml': workflow(['python3 tools/test_example.py' + suffix]),
+      'tools/test_example.py': 'raise SystemExit(0)\n',
+    });
+    if (suffix) assert.match(errorsOf(root), /tools\/test_example\.py/);
+    else assert.equal(errorsOf(root), '');
+  }
+});
+
 // ---------------------------------------------------------------- YAML subset
 
 test('parseYaml reads the workflow subset: maps, sequences, flow lists, quotes, comments', () => {

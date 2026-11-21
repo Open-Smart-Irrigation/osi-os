@@ -17,3 +17,5 @@ it('bounds and wraps all four translated navigation tabs', () => {
   expect(strip).toHaveClass('max-w-full', 'flex-wrap');
   expect(screen.getByRole('link', { name: 'Netzwerk' })).toHaveAttribute('href', '/network');
 });
+
+vi.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => <button>Language</button> }));

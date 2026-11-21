@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SWRConfig } from 'swr';
 
 import { HistoryDashboard } from '../../../pages/HistoryDashboard';
@@ -25,8 +25,15 @@ const { translateForTest } = vi.hoisted(() => {
     'history.shell.noZonesBody': 'Create an irrigation zone from the legacy dashboard before opening thematic history.',
     'history.shell.cardsFailed': 'History cards failed to load.',
     'history.shell.retryCards': 'Retry cards',
-    'history.mobile.actions': 'History actions',
-    'history.mobile.openActions': 'Open history actions',
+    'header.menu': 'Menu',
+    'header.primaryNavigation': 'Primary navigation',
+    'tabs.zones': 'Zones',
+    'tabs.data': 'Data',
+    'tabs.journal': 'Journal',
+    'settings:entryPoint': 'Settings',
+    account: 'Account',
+    'accountMenu.osiServer': 'OSI Server',
+    logout: 'Log out',
     'history.mobile.zoneLabel': 'Zone',
     'history.overview.empty': 'No history cards are available for this zone yet.',
     'history.overview.openCard': 'Open {{title}} history',
@@ -77,7 +84,12 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+vi.mock('../../../utils/isDesktopBrowser', () => ({ isDesktopBrowser: () => false }));
+
 vi.mock('../../../services/api', () => ({
+  systemSettingsAPI: {
+    get: vi.fn().mockResolvedValue({ dataModuleEnabled: true, journalModuleEnabled: true, networkModuleEnabled: true }),
+  },
   systemAPI: {
     getFeatures: vi.fn(),
   },
@@ -96,6 +108,10 @@ vi.mock('../../../services/api', () => ({
     getAll: vi.fn(),
   },
 }));
+
+function RouteLocation() {
+  return <output aria-label="Current route">{useLocation().pathname}</output>;
+}
 
 function renderWithProviders(ui: React.ReactElement, route = '/history') {
   return render(
@@ -359,17 +375,34 @@ describe('History mobile overview', () => {
     expect(screen.queryByRole('button', { name: 'Update workspace' })).not.toBeInTheDocument();
   });
 
-  it('keeps mobile utility actions behind one compact overflow button', async () => {
-    renderHistoryAtMobileWidth('/history');
+  it('keeps utility actions in the shared phone menu and navigates through its account link', async () => {
+    setViewportWidth(390);
+    renderWithProviders(<><HistoryDashboard /><RouteLocation /></>);
 
     await screen.findByRole('heading', { name: 'History' });
-    expect(screen.getByRole('button', { name: 'Open history actions' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Legacy dashboard' })).not.toBeInTheDocument();
+    const menu = screen.getByRole('button', { name: 'Menu' });
+    const panel = document.getElementById(menu.getAttribute('aria-controls')!);
+    expect(menu).toHaveAttribute('aria-expanded', 'false');
+    // JSDOM does not apply Tailwind media queries; the disclosure controls this panel's hidden class.
+    expect(panel).toHaveClass('hidden');
+    expect(screen.getByRole('link', { name: 'Zones' })).toHaveAttribute('href', '/dashboard');
+    const data = await screen.findByRole('link', { name: 'Data' });
+    expect(data).toHaveAttribute('href', '/history');
+    expect(data).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Journal' })).toHaveAttribute('href', '/journal');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open history actions' }));
-
-    expect(screen.getByRole('link', { name: 'Legacy dashboard' })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
+    fireEvent.click(menu);
+    expect(menu).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).not.toHaveClass('hidden');
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
+    expect(screen.getByText('Language')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('menuitem', { name: 'Log out' })).toBeInTheDocument();
+    const serverLink = screen.getByRole('menuitem', { name: 'OSI Server' });
+    expect(serverLink).toHaveAttribute('href', '/account-link');
+    fireEvent.click(serverLink);
+    expect(screen.getByRole('status', { name: 'Current route' })).toHaveTextContent('/account-link');
+    expect(menu).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('toggles pinned card preference through the existing history API path', async () => {

@@ -4,17 +4,24 @@ export const DESKTOP_MIN_WIDTH = 1024;
 
 export function useIsDesktop(): boolean {
   const query = `(min-width: ${DESKTOP_MIN_WIDTH}px)`;
-  const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(query).matches
-      : false,
-  );
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia?.(query).matches ?? window.innerWidth >= DESKTOP_MIN_WIDTH;
+  });
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mql = window.matchMedia(query);
-    const onChange = () => setIsDesktop(mql.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
+    const mql = window.matchMedia?.(query);
+    const onChange = () => setIsDesktop(mql?.matches ?? window.innerWidth >= DESKTOP_MIN_WIDTH);
+    onChange();
+    if (typeof mql?.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    if (typeof mql?.addListener === 'function') {
+      mql.addListener(onChange);
+      return () => mql.removeListener(onChange);
+    }
+    window.addEventListener('resize', onChange);
+    return () => window.removeEventListener('resize', onChange);
   }, [query]);
   return isDesktop;
 }

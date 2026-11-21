@@ -15,6 +15,15 @@ fs.statfsSync = AMPLE_DISK;
 test.after(() => { fs.statfsSync = realStatfs; });
 const ROOT = path.resolve(__dirname, '..');
 const NR = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
+const receiptClock = require(path.join(NR, 'osi-irrigation-policy/clock'));
+const realReadRuntimeClock = receiptClock.readRuntimeClock;
+const trustedClock = now => ({
+  bootId: 'test-boot', uptime: 60000,
+  marker: { boot_id: 'test-boot', epoch_ms: now - 60000, uptime_ms: 0, stratum: 2 },
+});
+const fixtureClock = () => trustedClock(Date.now());
+receiptClock.readRuntimeClock = fixtureClock;
+test.after(() => { receiptClock.readRuntimeClock = realReadRuntimeClock; });
 const codec = {};
 vm.runInNewContext(fs.readFileSync(path.join(NR, 'codecs/dragino_sdi12_decoder.js'), 'utf8'), codec);
 const manifest = fs.readFileSync(path.join(NR, 'edge-channels.json'), 'utf8');
@@ -784,11 +793,53 @@ test('native sqlite3 isolated archive transaction waits through a 6.5 second wri
   }
 });
 
-// Free-disk floor: the archive has no retention rule yet, so it stops inserting
-// below ARCHIVE_MIN_FREE_BYTES and never lets the probe itself stop a write.
+// The archive pauses capture below the floor and continues if the probe fails.
 const MIB = 1024 * 1024;
 const freeBytes = bytes => () => ({bavail: bytes / 4096, bsize: 4096});
 const lowDiskInfo = {deveui:EUI,fPort:2,decoded:{Payver:1,data_sum:RAW},frames:[]};
+
+test('untrusted receipt times skip capture before opening its transaction and canonical ingest still writes', async () => {
+  const archiveModule = require(path.join(NR, 'osi-sdi12-archive'));
+  const db = fixture();
+  const realNow = Date.now;
+  const syncedAt = Date.parse('2026-11-20T12:00:00Z');
+  let archiveTransactions = 0;
+  const osiDb = { ...osiDbFor(db), isolatedFarmingTransaction(fn) {
+    archiveTransactions++;
+    return fn(facadeDb(db));
+  } };
+  const run = async (at, readClock, fCnt) => {
+    Date.now = () => at;
+    receiptClock.readRuntimeClock = readClock;
+    archiveModule.resetDiskWarnings();
+    const gated = await gate(db, event(RAW, { fCnt }));
+    return archive(db, gated.result[0], { libOverrides: { osiDb } });
+  };
+  try {
+    const anchored = () => trustedClock(syncedAt);
+    for (const [at, clock, counter, reason] of [
+      [0, () => ({}), 8100, 'clock_untrusted_missing_marker'],
+      [syncedAt + 500 * 86400000, anchored, 8101, 'clock_untrusted_jump'],
+    ]) {
+      const result = await run(at, clock, counter);
+      assert.deepEqual(result.errors, []);
+      assert.ok(result.warnings.some(w => w.includes(reason)));
+      assert.ok(result.statuses.some(s => s.text === 'SDI12 archive skipped: untrusted clock'));
+    }
+    assert.equal(archiveTransactions, 0);
+    assert.equal(records(db).length, 0);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM device_data').get().n, 2);
+    const corrected = await run(syncedAt, anchored, 8102);
+    assert.deepEqual(corrected.errors, []);
+    assert.equal(archiveTransactions, 1);
+    assert.deepEqual(records(db).map(r => r.received_at), [new Date(syncedAt).toISOString()]);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM device_data').get().n, 3);
+  } finally {
+    Date.now = realNow;
+    receiptClock.readRuntimeClock = fixtureClock;
+    db.close();
+  }
+});
 
 test('free space at or above the floor writes the archive row', async () => {
   const archiveModule = require(path.join(NR, 'osi-sdi12-archive'));
@@ -798,7 +849,7 @@ test('free space at or above the floor writes the archive row', async () => {
   try {
     const warnings = [];
     for (const bytes of [archiveModule.ARCHIVE_MIN_FREE_BYTES, 8 * 1024 * MIB]) {
-      const saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, 1000, null, m => warnings.push(m), {statfs: freeBytes(bytes)});
+      const saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, Date.now(), null, m => warnings.push(m), {statfs: freeBytes(bytes)});
       assert.equal(saved, true);
     }
     assert.equal(records(db).length, 2);
@@ -812,7 +863,7 @@ test('below the floor no row is written, the result says low_disk and the readin
   const db = fixture();
   try {
     const warnings = [];
-    const saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, 1000, null, m => warnings.push(m),
+    const saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, Date.now(), null, m => warnings.push(m),
       {statfs: freeBytes(archiveModule.ARCHIVE_MIN_FREE_BYTES - 4096)});
     assert.deepEqual(saved, {archived: false, reason: 'low_disk'});
     assert.equal(records(db).length, 0);
@@ -854,7 +905,7 @@ test('a failing or unusable statfs still writes the archive row and warns', asyn
       let saved;
       if (statfs === 'missing') fs.statfsSync = undefined; // Node without fs.statfsSync
       try {
-        saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, 1000, null, m => warnings.push(m),
+        saved = await archiveModule.record(facadeDb(db), lowDiskInfo, config, Date.now(), null, m => warnings.push(m),
           statfs === 'missing' ? undefined : {statfs});
       } finally { fs.statfsSync = AMPLE_DISK; }
       assert.equal(saved, true, name);
@@ -864,7 +915,7 @@ test('a failing or unusable statfs still writes the archive row and warns', asyn
     }
     // A throwing warn callback must not stop the archive either.
     archiveModule.resetDiskWarnings();
-    assert.equal(await archiveModule.record(facadeDb(db), lowDiskInfo, config, 1000, null, () => { throw Error('warn down'); },
+    assert.equal(await archiveModule.record(facadeDb(db), lowDiskInfo, config, Date.now(), null, () => { throw Error('warn down'); },
       {statfs: () => { throw Error('x'); }}), true);
 
     // Through the real write node with a failing probe: row and canonical reading are both written.
@@ -887,19 +938,21 @@ test('repeated low-disk calls within an hour warn once, and again after the hour
   const db = fixture();
   try {
     const warnings = [];
-    const low = {statfs: freeBytes(10 * MIB)};
     const T = Date.parse('2026-11-10T10:00:00Z');
+    const recordAt = (at, statfs) => archiveModule.record(facadeDb(db), lowDiskInfo, config,
+      at, null, m => warnings.push(m), { statfs, clock: () => trustedClock(at) });
+    const low = freeBytes(10 * MIB);
     for (const at of [T, T + 60 * 1000, T + 59 * 60 * 1000]) {
-      assert.deepEqual(await archiveModule.record(facadeDb(db), lowDiskInfo, config, at, null, m => warnings.push(m), low),
+      assert.deepEqual(await recordAt(at, low),
         {archived: false, reason: 'low_disk'});
     }
     assert.equal(warnings.length, 1);
-    await archiveModule.record(facadeDb(db), lowDiskInfo, config, T + 61 * 60 * 1000, null, m => warnings.push(m), low);
+    await recordAt(T + 61 * 60 * 1000, low);
     assert.equal(warnings.length, 2);
     // Probe failures use their own hourly window.
-    const failing = {statfs: () => { throw Error('statfs unavailable'); }};
-    await archiveModule.record(facadeDb(db), lowDiskInfo, config, T + 62 * 60 * 1000, null, m => warnings.push(m), failing);
-    await archiveModule.record(facadeDb(db), lowDiskInfo, config, T + 63 * 60 * 1000, null, m => warnings.push(m), failing);
+    const failing = () => { throw Error('statfs unavailable'); };
+    await recordAt(T + 62 * 60 * 1000, failing);
+    await recordAt(T + 63 * 60 * 1000, failing);
     assert.equal(warnings.length, 3);
     assert.equal(records(db).length, 2);
   } finally { db.close(); }

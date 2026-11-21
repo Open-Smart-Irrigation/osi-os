@@ -464,6 +464,16 @@ Tracked in `web/react-gui/tests/b4AnalysisPendingLuganda.test.ts`
 to English. A human Luganda pass must remove each key from that list and this
 row in the same change.
 
+## UI FIX-LIST B5 (Shared headers)
+
+| Keys | Reason |
+|---|---|
+| `header.menu`, `header.primaryNavigation` (2 keys in `dashboard.json`) | B5 adds the shared phone action disclosure and the primary navigation accessible name. No human Luganda pass yet, so `lg` ships the English source text: "Menu" and "Primary navigation". |
+
+Tracked in `web/react-gui/src/pages/__tests__/b5NavigationLocales.test.ts`.
+A human Luganda pass must update the pending-key assertion and this entry
+in the same change.
+
 ## UI FIX-LIST B6 (weather and agronomy)
 
 | Keys | Reason |

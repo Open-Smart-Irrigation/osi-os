@@ -715,7 +715,7 @@ function checkRunStep(ctx, step) {
   }
   const resolveToken = (token, mode) => {
     if (token.includes('$') || token.includes('__EXPR__') || token.startsWith('/')) return null;
-    if (!SCRIPT_EXT.test(token)) {
+    if (!(mode === 'python' ? /\.py$/.test(token) : SCRIPT_EXT.test(token))) {
       if (mode === 'test') errors.push(`${where}: node --test argument ${token} is not a test file path`);
       return null;
     }
@@ -952,6 +952,11 @@ function checkRunStep(ctx, step) {
       const scriptRel = resolveToken(rest[0], 'script');
       if (scriptRel) hits.push({ file: scriptRel, via: where, lost: itemLost });
       scriptArgs(scriptRel || rest[0], rest.slice(1), itemLost);
+      return;
+    }
+    if (cmd === 'python3' && args.length === 1) {
+      const file = resolveToken(args[0], 'python');
+      if (file) hits.push({ file, via: where, lost: commandLost });
       return;
     }
     if (cmd === 'sh' || cmd === 'bash') {

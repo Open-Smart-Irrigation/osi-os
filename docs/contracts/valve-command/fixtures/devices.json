@@ -1,0 +1,930 @@
+{
+  "contract_version": 1,
+  "suite": "devices",
+  "consumers": [
+    "EB8",
+    "EB21",
+    "CL1",
+    "GX1",
+    "GX2"
+  ],
+  "cases": [
+    {
+      "id": "r8-open-in-first-receive-window",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN1",
+          "uplink_interval_minutes": 10,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": true,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "r8-open-in-second-receive-window",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN2",
+          "uplink_interval_minutes": 20,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": true,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gen1-late-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN1",
+          "uplink_interval_minutes": 10,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": null
+          },
+          {
+            "type": "check_delivery_status"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 3,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": false,
+        "at_delivery_check": {
+          "ui_delivery_confirmed": false,
+          "history_delivery_confirmed": false,
+          "observation": "unobserved"
+        },
+        "new_interlock": false,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gen1-already-open-ignores-timed-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN1",
+          "already_open": true,
+          "original_duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "deliver_open",
+            "duration_seconds": 600
+          }
+        ]
+      },
+      "expected": {
+        "additional_starts": 0,
+        "original_close_unchanged": true
+      }
+    },
+    {
+      "id": "gen2-late-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN2",
+          "uplink_interval_minutes": 20,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 1,
+            "downlink": null
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 2,
+            "downlink": null
+          },
+          {
+            "type": "check_delivery_status"
+          },
+          {
+            "type": "receive_window_after_uplink",
+            "uplink": 3,
+            "downlink": "OPEN_FOR_DURATION"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          },
+          {
+            "type": "report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "r8_delivered_in_time": false,
+        "at_delivery_check": {
+          "ui_delivery_confirmed": false,
+          "history_delivery_confirmed": false,
+          "observation": "unobserved"
+        },
+        "new_interlock": false,
+        "command_sent": true,
+        "observation": "observed_complete",
+        "history_runs": 1,
+        "history_requested_duration_seconds": 180,
+        "ui_requested_duration_seconds": 180,
+        "ui_reported_position": "CLOSED"
+      },
+      "decision": "S8"
+    },
+    {
+      "id": "gen2-already-open-ignores-timed-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "generation": "GEN2",
+          "already_open": true,
+          "original_duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "deliver_open",
+            "duration_seconds": 600
+          }
+        ]
+      },
+      "expected": {
+        "additional_starts": 0,
+        "original_close_unchanged": true
+      }
+    },
+    {
+      "id": "distinct-opens-can-run-sequentially",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "deliver_open",
+            "command_id": "cmd-1",
+            "duration_seconds": 60
+          },
+          {
+            "type": "self_close"
+          },
+          {
+            "type": "deliver_open",
+            "command_id": "cmd-2",
+            "duration_seconds": 60
+          }
+        ]
+      },
+      "expected": {
+        "physical_starts": 2,
+        "new_interlock": false
+      }
+    },
+    {
+      "id": "partial-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "MOTORIZED",
+          "action": "SET_PARTIAL_OPENING",
+          "valve_action": "OPEN",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "history_action": "partial",
+        "direction": "OPEN",
+        "requested_percentage": 50,
+        "measured_flow_liters": null
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "timed-service-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "action": "TIMED_ACTION",
+          "valve_action": "OPEN",
+          "unit": "SECONDS",
+          "amount": 60
+        },
+        "events": [
+          {
+            "type": "deliver"
+          }
+        ]
+      },
+      "expected": {
+        "initial_position": "OPEN",
+        "return_position": "CLOSED",
+        "duration_seconds": 60
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "partial-close",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "MOTORIZED",
+          "action": "SET_PARTIAL_OPENING",
+          "valve_action": "CLOSE",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "history_action": "partial",
+        "direction": "CLOSE",
+        "requested_percentage": 50,
+        "measured_flow_liters": null
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "timed-service-close",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "action": "TIMED_ACTION",
+          "valve_action": "CLOSE",
+          "unit": "SECONDS",
+          "amount": 60
+        },
+        "events": [
+          {
+            "type": "deliver"
+          }
+        ]
+      },
+      "expected": {
+        "initial_position": "CLOSE",
+        "return_position": "OPEN",
+        "duration_seconds": 60
+      },
+      "decision": "S4"
+    },
+    {
+      "id": "flush-return-open",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "MOTORIZED",
+          "action": "SET_FLUSHING",
+          "return_position": "OPEN",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "history_action": "flushing",
+        "return_position": "OPEN",
+        "requested_percentage": 50,
+        "physical_final_position": null
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "flush-return-close",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "MOTORIZED",
+          "action": "SET_FLUSHING",
+          "return_position": "CLOSE",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "history_action": "flushing",
+        "return_position": "CLOSE",
+        "requested_percentage": 50,
+        "physical_final_position": null
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "unsupported-service-standard",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "STANDARD",
+          "action": "SET_PARTIAL_OPENING",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "request"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "unsupported-service-unknown",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "type_id": "STREGA_VALVE",
+          "model": "UNKNOWN",
+          "action": "SET_PARTIAL_OPENING",
+          "percentage": 50
+        },
+        "events": [
+          {
+            "type": "request"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "uc512-open-outlet-1",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 1,
+        "valve_status": "open",
+        "duration": 300,
+        "sequence_id": 1
+      },
+      "expected": {
+        "bytes": [
+          255,
+          29,
+          1,
+          1,
+          44,
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "uc512-close-outlet-1",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 1,
+        "valve_status": "close",
+        "duration": 0,
+        "sequence_id": 5
+      },
+      "expected": {
+        "bytes": [
+          255,
+          29,
+          1,
+          0,
+          0,
+          0,
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "id": "uc512-open-outlet-2",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 2,
+        "valve_status": "open",
+        "duration": 300,
+        "sequence_id": 1
+      },
+      "expected": {
+        "bytes": [
+          255,
+          29,
+          2,
+          1,
+          44,
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "uc512-close-outlet-2",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 2,
+        "valve_status": "close",
+        "duration": 0,
+        "sequence_id": 5
+      },
+      "expected": {
+        "bytes": [
+          255,
+          29,
+          2,
+          0,
+          0,
+          0,
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "id": "uc512-refuse-zero-open",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 1,
+        "valve_status": "open",
+        "duration": 0
+      },
+      "expected": {
+        "error_pattern": "duration must be > 0"
+      }
+    },
+    {
+      "id": "uc512-refuse-outlet-3",
+      "basis": "baseline",
+      "check": "uc512_codec",
+      "input": {
+        "valve_index": 3,
+        "valve_status": "close",
+        "duration": 0
+      },
+      "expected": {
+        "error_pattern": "valve_index must be 1 or 2"
+      }
+    },
+    {
+      "id": "uc512-currently-unsupported-control",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "command_type": "UC512_OPEN_FOR_DURATION"
+        },
+        "events": [
+          {
+            "type": "edge_route_command"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "no_dispatcher_on_gateway",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "uc512-report-is-outlet-specific",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "command_id": "cmd-1",
+          "valve_index": 1
+        },
+        "events": [
+          {
+            "type": "report",
+            "valve_index": 2,
+            "position": "OPEN"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "unobserved",
+        "credited_to_cmd_1": false
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "uc512-cancel-after-handoff",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "valve_index": 1,
+          "phase": "ACCEPTED"
+        },
+        "events": [
+          {
+            "type": "cancel",
+            "expectation_id": "exp-1"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "handed_off",
+        "new_close_frames": 0,
+        "may_water": true
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "uc512-device-flush-discloses-other-outlet",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "target_valve_index": 1,
+          "other_valve_index": 2
+        },
+        "events": [
+          {
+            "type": "device_queue_flush"
+          }
+        ]
+      },
+      "expected": {
+        "collateral_outlets": [
+          2
+        ],
+        "outlet_2_physically_closed": null
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "uc512-explicit-close-not-cancel",
+      "basis": "proposed",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "valve_index": 2,
+          "action": "CLOSE"
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "report",
+            "valve_index": 2,
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "observed_closed",
+        "cancelled": false
+      },
+      "decision": "S3"
+    },
+    {
+      "id": "uc512-proposed-open-request",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "method": "POST",
+          "path": "/api/v1/valves/A840410000000001/outlets/2/open",
+          "body": {
+            "request_id": "72345678-1234-4234-8234-123456789abc",
+            "duration_seconds": 300
+          }
+        },
+        "events": [
+          {
+            "type": "edge_request"
+          },
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "http_status": 202,
+        "command_type": "UC512_OPEN_FOR_DURATION",
+        "valve_index": 2
+      }
+    },
+    {
+      "id": "uc512-proposed-close-request",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "method": "POST",
+          "path": "/api/v1/valves/A840410000000001/outlets/2/close",
+          "body": {
+            "request_id": "72345678-1234-4234-8234-123456789abc"
+          }
+        },
+        "events": [
+          {
+            "type": "edge_request"
+          },
+          {
+            "type": "enqueue_accepted"
+          }
+        ]
+      },
+      "expected": {
+        "http_status": 202,
+        "command_type": "UC512_CLOSE",
+        "valve_index": 2
+      }
+    },
+    {
+      "id": "uc512-proposed-cancel-request",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "method": "POST",
+          "path": "/api/v1/valves/A840410000000001/outlets/2/cancel",
+          "body": {
+            "request_id": "72345678-1234-4234-8234-123456789abc",
+            "expectation_id": "exp-1"
+          }
+        },
+        "events": [
+          {
+            "type": "edge_request"
+          },
+          {
+            "type": "cancel_after_handoff"
+          }
+        ]
+      },
+      "expected": {
+        "http_status": 409,
+        "command_type": "CANCEL_VALVE_ACTUATION",
+        "valve_index": 2,
+        "cancel_outcome": "handed_off",
+        "new_close_frames": 0
+      }
+    },
+    {
+      "id": "uc512-proposed-invalid-duration-0",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "valve_index": 1,
+          "duration_seconds": 0
+        },
+        "events": [
+          {
+            "type": "open_request"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "uc512-proposed-invalid-duration-15301",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "valve_index": 1,
+          "duration_seconds": 15301
+        },
+        "events": [
+          {
+            "type": "open_request"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "uc512-proposed-invalid-duration-1-5",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "valve_index": 1,
+          "duration_seconds": 1.5
+        },
+        "events": [
+          {
+            "type": "open_request"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "uc512-already-open-keeps-original-stop",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "valve_index": 1,
+          "already_open": true,
+          "original_duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "deliver_open",
+            "valve_index": 1,
+            "duration_seconds": 600
+          }
+        ]
+      },
+      "expected": {
+        "additional_starts": 0,
+        "original_close_unchanged": true
+      }
+    },
+    {
+      "id": "uc512-late-open-waters",
+      "basis": "proposed",
+      "check": "scenario",
+      "decision": "S3",
+      "input": {
+        "context": {
+          "valve_index": 2,
+          "duration_seconds": 180
+        },
+        "events": [
+          {
+            "type": "enqueue_accepted"
+          },
+          {
+            "type": "delivery_unconfirmed"
+          },
+          {
+            "type": "deliver_open"
+          },
+          {
+            "type": "self_close"
+          }
+        ]
+      },
+      "expected": {
+        "physical_starts": 1,
+        "self_closed": true,
+        "new_interlock": false
+      }
+    }
+  ]
+}
