@@ -430,6 +430,11 @@ start_service() {
         logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH.osi-recovery before starting Node-RED."
         return 1
     fi
+    if [ -f /var/run/osi-factory-seed.pending ] &&
+       [ ! -e "/srv/$PACKAGE_NAME/flows.json" ] && [ ! -L "/srv/$PACKAGE_NAME/flows.json" ]; then
+        logger -t node-red.init "Node-RED start deferred: factory seed pending; retry on next boot."
+        return 1
+    fi
     payload_switch_repair
     payload_schema_check || return 0
     payload_hold_check || return 0

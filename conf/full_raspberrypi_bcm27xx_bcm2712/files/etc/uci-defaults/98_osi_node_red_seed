@@ -13,7 +13,7 @@ chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 # node-red.init validates and repairs flows.json before starting the service.
 # Publish the other create-only files durably before their existence can suppress
 # a retry. Use a hard link so a concurrent creator always keeps its own file.
-node - "$SRC" "$DST" "$FLOW_SEED" "$IMAGE_DB" "$LIVE_DB" <<'NODE'
+node - "$SRC" "$DST" "$FLOW_SEED" "$IMAGE_DB" "$LIVE_DB" <<'NODE' || exit 1
 const fs = require('fs');
 const path = require('path');
 const { randomUUID, createHash } = require('crypto');
@@ -22,6 +22,7 @@ const [src, dst, flowSeed, imageDb, liveDb] = process.argv.slice(2);
 const hasEntry = file => fs.lstatSync(file, { throwIfNoEntry: false });
 const origin = path.join(dst, '.image-flows-origin');
 const flow = path.join(dst, 'flows.json');
+const pending = '/var/run/osi-factory-seed.pending';
 
 function freshImageSeed() {
   if (['payloads', 'payload-state.json', '.payload-swap.js'].some(name => hasEntry(path.join(dst, name))) ||
@@ -32,7 +33,11 @@ function freshImageSeed() {
   if (!hasEntry(flowSeed)?.isFile()) return false;
   const imageEntry = hasEntry(imageDb);
   const liveEntry = hasEntry(liveDb);
-  if (!imageEntry?.isFile() || !liveEntry?.isFile() || imageEntry.size !== liveEntry.size) return false;
+  if (!imageEntry?.isFile()) return false;
+  if (!liveEntry && hasEntry('/etc/uci-defaults/97_osi_db_seed')) {
+    throw new Error('image database seed has not published the live database');
+  }
+  if (!liveEntry?.isFile() || imageEntry.size !== liveEntry.size) return false;
 
   let imageFd;
   let liveFd;
@@ -44,24 +49,45 @@ function freshImageSeed() {
     for (let offset = 0; offset < imageEntry.size; offset += image.length) {
       const length = Math.min(image.length, imageEntry.size - offset);
       if (fs.readSync(imageFd, image, 0, length, offset) !== length ||
-          fs.readSync(liveFd, live, 0, length, offset) !== length ||
-          !image.subarray(0, length).equals(live.subarray(0, length))) return false;
+          fs.readSync(liveFd, live, 0, length, offset) !== length) {
+        throw new Error('short read comparing the image and live databases');
+      }
+      if (!image.subarray(0, length).equals(live.subarray(0, length))) return false;
     }
-    return fs.fstatSync(imageFd).size === imageEntry.size && fs.fstatSync(liveFd).size === liveEntry.size;
-  } catch (error) {
-    console.error('WARN: could not prove factory flow ownership: ' + error.message);
-    return false;
+    if (fs.fstatSync(imageFd).size !== imageEntry.size || fs.fstatSync(liveFd).size !== liveEntry.size) {
+      throw new Error('database size changed during factory comparison');
+    }
+    return true;
   } finally {
     if (liveFd !== undefined) fs.closeSync(liveFd);
     if (imageFd !== undefined) fs.closeSync(imageFd);
   }
 }
 
+// OpenWrt retains a failing defaults script. This boot-local record tells
+// Node-RED to wait for that retry without recording a redeploy hold.
+function markPending() {
+  fs.closeSync(fs.openSync(pending, 'a', 0o600));
+}
+
+function shouldSeedFlows() {
+  if (hasEntry(flow) || hasEntry(origin)) return false;
+  try {
+    return freshImageSeed();
+  } catch (error) {
+    markPending();
+    throw new Error('factory seed pending; retry on next boot: ' + error.message);
+  }
+}
+
+const seedFlows = shouldSeedFlows();
+if (seedFlows) markPending();
+else fs.rmSync(pending, { force: true });
 const dir = fs.openSync(dst, 'r');
 try {
   // Only a fresh image can issue this record. A later deploy with a missing
   // flow and a different database must never seed the firmware's old DDL.
-  if (!hasEntry(flow) && !hasEntry(origin) && freshImageSeed()) {
+  if (seedFlows) {
     const digest = createHash('sha256').update(fs.readFileSync(flowSeed)).digest('hex');
     publish(origin, temporary => fs.writeFileSync(temporary, digest + '\n', { flag: 'wx', mode: 0o644 }));
     publish(flow, temporary => fs.copyFileSync(flowSeed, temporary, fs.constants.COPYFILE_EXCL));
@@ -75,6 +101,7 @@ try {
 } finally {
   fs.closeSync(dir);
 }
+if (seedFlows) fs.rmSync(pending, { force: true });
 
 function publish(target, write) {
   const temporary = path.join(dst, '.node-red-seed-' + randomUUID());

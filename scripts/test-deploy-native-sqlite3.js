@@ -2367,6 +2367,8 @@ function r11Script(gw, opts = {}) {
     ['/usr/share/db/farming.db', r2Quote(path.join(img, 'farming.db')), 1],
     ['/data/db/farming.db', r2Quote(path.join(gw.root, 'farming.db')), 1],
     ['/usr/lib/node-red/gui', path.join(gw.root, 'gui'), 1],
+    ['/var/run/osi-factory-seed.pending', path.join(gw.root, 'factory-seed.pending'), 1],
+    ['/etc/uci-defaults/97_osi_db_seed', path.join(gw.root, '97_osi_db_seed'), 1],
     ['\n    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3\n',
       '\n    SQLITE_SRC=' + r2Quote(fw) + '\n', 1],
     ['\nSEED_COPIED=/etc/osi-node-red-seed.copied\n',

@@ -23,6 +23,7 @@ const nodes = [
 const seed = JSON.stringify(nodes) + '\n';
 const swap = require('./deploy-payload-swap');
 const imageSeedScript = fs.readFileSync(profile + '/etc/uci-defaults/98_osi_node_red_seed', 'utf8');
+const pendingPath = '/var/run/osi-factory-seed.pending';
 
 function sqlite(db, query) {
   return execFileSync('sqlite3', ['-batch', '-bail', db, query], { encoding: 'utf8' }).trim();
@@ -72,6 +73,7 @@ function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
     .replaceAll('/usr/libexec/', root + '/usr/libexec/')
     .replaceAll('/usr/lib/node-red/gui', path.join(root, 'gui'))
     .replaceAll('/dev/console', path.join(root, 'console'))
+    .replaceAll(pendingPath, root + pendingPath)
     .replaceAll('/usr/share/flows.json', bundled)
     .replaceAll('/usr/share/db/farming.db', imageDb));
   const bootInit = path.join(root, 'osi-bootstrap');
@@ -481,6 +483,7 @@ for (const [description, editDb] of [
       .replaceAll('/usr/share/db/farming.db', fx.imageDb)
       .replaceAll('/data/db/farming.db', fx.db)
       .replaceAll('/usr/share/node-red', rom)
+      .replaceAll(pendingPath, fx.root + pendingPath)
       .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'));
     const result = spawnSync('sh', ['-c', earlySeed], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
@@ -554,33 +557,89 @@ test('a broken public flow link records a hold for the selected payload', t => {
   assert.equal(swap.flowRecoveryHeld(fx.userDir), true);
 });
 
-test('the image DB seed refuses publication when its parent directory cannot sync', t => {
-  const fx = fixture(t);
-  fs.unlinkSync(fx.db);
-  fs.rmdirSync(path.dirname(fx.db));
-  const source = fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
-    .replace(/^SEED_SRC=.*$/m, () => 'SEED_SRC=' + JSON.stringify(fx.imageDb))
-    .replace(/^DATA_DIR=.*$/m, () => 'DATA_DIR=' + JSON.stringify(path.dirname(fx.db)));
-  const preload = path.join(fx.root, 'fail-data-sync.cjs');
-  fs.writeFileSync(preload, `
+for (const fault of ['parent fsync', 'database read']) {
+  test(`factory defaults and Node-RED recover on the next boot after one ${fault} EIO`, t => {
+    const fx = fixture(t);
+    const rom = path.join(fx.root, 'rom');
+    const native = path.join(rom, 'sqlite3');
+    const defaults = path.join(fx.root, 'etc', 'uci-defaults');
+    const dbSeed = path.join(defaults, '97_osi_db_seed');
+    const nodeRedSeed = path.join(defaults, '98_osi_node_red_seed');
+    const pending = fx.root + pendingPath;
+    const hold = path.join(fx.userDir, 'DEPLOY-HELD');
+    const state = path.join(fx.userDir, 'payload-state.json');
+    for (const dir of [native, defaults, path.dirname(pending)]) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(rom, 'settings.js'), 'module.exports = {};\n');
+    fs.writeFileSync(path.join(rom, 'package-lock.json'), JSON.stringify({
+      packages: { 'node_modules/sqlite3': { version: '5.1.7' } },
+    }));
+    fs.writeFileSync(path.join(native, 'package.json'), JSON.stringify({ name: 'sqlite3', version: '5.1.7' }));
+    fs.writeFileSync(path.join(native, 'index.js'), 'module.exports = {};\n');
+    fs.unlinkSync(fx.origin);
+    fs.unlinkSync(fx.db);
+    fs.rmdirSync(path.dirname(fx.db));
+
+    fs.writeFileSync(dbSeed, fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
+      .replace(/^SEED_SRC=.*$/m, () => 'SEED_SRC=' + JSON.stringify(fx.imageDb))
+      .replace(/^DATA_DIR=.*$/m, () => 'DATA_DIR=' + JSON.stringify(path.dirname(fx.db))));
+    fs.writeFileSync(nodeRedSeed, imageSeedScript
+      .replaceAll('/srv/node-red', fx.userDir)
+      .replaceAll('/usr/share/flows.json', fx.bundled)
+      .replaceAll('/usr/share/db/farming.db', fx.imageDb)
+      .replaceAll('/data/db/farming.db', fx.db)
+      .replaceAll('/usr/share/node-red', rom)
+      .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'))
+      .replaceAll('/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3', native)
+      .replaceAll('/etc/osi-node-red-seed.copied', path.join(fx.root, 'etc', 'osi-node-red-seed.copied'))
+      .replaceAll('/etc/uci-defaults/97_osi_db_seed', dbSeed)
+      .replaceAll(pendingPath, pending));
+    const applyDefaults = fs.readFileSync('openwrt/package/base-files/files/etc/init.d/boot', 'utf8')
+      .match(/^uci_apply_defaults\(\) \{[^]*?^\}/m)[0]
+      .replace('. /lib/functions/system.sh', ':')
+      .replace('/etc/uci-defaults', JSON.stringify(defaults));
+    const preload = path.join(fx.root, 'fail-factory-seed.cjs');
+    fs.writeFileSync(preload, `
 const fs = require('node:fs');
-const sync = fs.fsyncSync;
-fs.fsyncSync = fd => {
-  if (fs.readlinkSync('/proc/self/fd/' + fd) === ${JSON.stringify(fs.realpathSync(path.join(fx.root, 'data')))}) {
-    throw new Error('injected data-directory fsync failure');
+const fault = ${JSON.stringify(fault)};
+const method = fault === 'parent fsync' ? 'fsyncSync' : 'readSync';
+const original = fs[method];
+fs[method] = (fd, ...args) => {
+  const target = fault === 'parent fsync' ? ${JSON.stringify(path.dirname(path.dirname(fx.db)))} : ${JSON.stringify(fx.db)};
+  if (fs.readlinkSync('/proc/self/fd/' + fd) === target) {
+    throw Object.assign(new Error('injected factory seed ' + fault + ' failure'), { code: 'EIO' });
   }
-  return sync(fd);
+  return original(fd, ...args);
 };`);
-  const run = env => spawnSync('sh', ['-c', 'logger() { echo "$@" >&2; }\n' + source],
-    { encoding: 'utf8', env: { ...process.env, ...env } });
-  const failed = run({ NODE_OPTIONS: '--require=' + preload });
-  assert.equal(failed.status, 1, failed.stderr);
-  assert.match(failed.stderr, /injected data-directory fsync failure/);
-  assert.equal(fs.existsSync(fx.db), false);
-  const retry = run({});
-  assert.equal(retry.status, 0, retry.stderr);
-  assert.deepEqual(fs.readFileSync(fx.db), fs.readFileSync(fx.imageDb));
-});
+    const run = env => spawnSync('sh', ['-c',
+      'logger() { echo "$@" >&2; }\nuci() { :; }\n' + applyDefaults + '\nuci_apply_defaults'],
+      { encoding: 'utf8', env: { ...process.env, ...env } });
+    const failed = run({ NODE_OPTIONS: '--require=' + preload });
+    assert.equal(failed.status, 0, failed.stderr);
+    assert.match(failed.stderr, new RegExp('injected factory seed ' + fault + ' failure'));
+    assert.equal(fs.existsSync(fx.db), fault === 'database read');
+    assert.equal(fs.existsSync(dbSeed), fault === 'parent fsync');
+    assert.equal(fs.existsSync(nodeRedSeed), true);
+    assert.equal(fs.existsSync(pending), true);
+    assert.equal(fs.existsSync(fx.origin), false);
+    assert.equal(fs.existsSync(fx.flows), false);
+    const deferred = fx.start({ expectFailure: true });
+    assert.equal(deferred.status, 1, deferred.stderr);
+    assert.match(deferred.stderr, /Node-RED start deferred: factory seed pending/);
+    assert.doesNotMatch(deferred.stdout, /procd start/);
+    assert.equal(fs.existsSync(hold), false);
+    assert.equal(fs.existsSync(state), false);
+
+    fs.unlinkSync(pending); // OpenWrt recreates /var/run on a clean boot.
+    const retry = run({});
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.deepEqual(fs.readdirSync(defaults), []);
+    assert.deepEqual(fs.readFileSync(fx.db), fs.readFileSync(fx.imageDb));
+    assert.equal(fs.readFileSync(fx.origin, 'utf8'), createHash('sha256').update(seed).digest('hex') + '\n');
+    assert.match(fx.start(), /procd start/);
+    assert.equal(fs.existsSync(hold), false);
+    assert.equal(fs.existsSync(state), false);
+  });
+}
 
 test('a failed credentials directory sync restores the prior inode and removes rollback names', t => {
   const fx = fixture(t, { password: 'replacement-password' });
