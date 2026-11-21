@@ -289,11 +289,21 @@ test('the deploy script uses a pinned staged dependency installer and seed insta
   }
   assert.match(DEPLOY, /sha256/);
   assert.match(DEPLOY, /atomic|rename|install-command-ledger/i);
+  const shellFetches = [...DEPLOY.matchAll(/fetch_required "[^"]+" \\\n\s+"([^"]+)" \\\n\s+"[^"]+" 755([^\n]*)/g)];
+  assert.equal(shellFetches.length, 7, 'all live shell downloads are covered by the pin check');
+  const shellPins = shellFetches.map(([, source, args]) => {
+    const match = /^ "\$([A-Z0-9_]+_SHA256)" \|\|/.exec(args);
+    assert.ok(match, `missing shell digest pin for ${source}`);
+    return [match[1], path.join(ROOT, source)];
+  });
   for (const [name, file] of [
     ['COMMAND_LEDGER_HELPER_SHA256', HELPER_PATH],
     ['COMMAND_LEDGER_PACKAGE_SHA256', path.join(LEDGER, 'package.json')],
     ['COMMAND_LEDGER_INDEX_SHA256', path.join(LEDGER, 'index.js')],
     ['COMMAND_LEDGER_BINDING_SHA256', path.join(BINDING, 'canonicalization.js')],
+    ['ATOMIC_WRITER_SHA256', path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js')],
+    ['PAYLOAD_SWAP_SHA256', path.join(ROOT, 'scripts/deploy-payload-swap.js')],
+    ...shellPins,
   ]) {
     const match = new RegExp(`${name}="([0-9a-f]{64})"`).exec(DEPLOY);
     assert.ok(match, `missing independent ${name} pin`);

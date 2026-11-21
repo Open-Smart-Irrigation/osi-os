@@ -1,9 +1,5 @@
 const fs = require('fs');
 
-if (process.env.OSI_NODE_RED_STARTUP_WARNING) {
-    console.warn('[node-red.init] ' + process.env.OSI_NODE_RED_STARTUP_WARNING);
-}
-
 // Runtime config precedence:
 // 1. node-red.init exports UCI values first.
 // 2. node-red.init falls back per key to /srv/node-red/.chirpstack.env.

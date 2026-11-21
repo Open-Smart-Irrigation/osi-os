@@ -40,19 +40,6 @@ Look with: `logread | grep -E 'SQLITE_CORRUPT|malformed|osi-db-startup'`
 
 Measured on a device with two pages of a 103 MiB file overwritten, under the fixed release: the gateway kept answering. The GUI, login, the valve list, zones and schedules answered, and a valve CLOSE was accepted. Requests that read a damaged table fail: there, the device list answered `500 {"error":"device-api failed","message":"Error: SQLITE_CORRUPT: database disk image is malformed"}`. The error line came at every start and the stats answer read `"status":"damaged"`, also after a reboot. Nothing was moved, renamed, restored or deleted. Which requests fail depends on which pages are damaged.
 
-### Boot recovery hold
-
-If the boot integrity check finds corruption, it records
-`/data/db/farming.db.osi-recovery` before it stages a backup. It opens the
-copy read-only for an integrity check and syncs it before moving the damaged
-database and sidecars. It clears the record after the restored database and
-recovery report reach storage. If the operation is interrupted, the record
-holds Node-RED and both seeding paths even when `farming.db` is absent.
-
-Use the backup and validation procedure below to resolve this hold. Keep the
-record while investigating. Clear it only after the operator has restored
-and verified the intended farm database and its sidecar state.
-
 ### Files beside the database
 
 | File | What it is | A backup? |

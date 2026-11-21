@@ -6,8 +6,8 @@
 // (/srv, /etc, /data, /usr, /var) is moved into the fixture; repository-relative
 // fetch paths (".../files/usr/...") are left alone. Stand-ins on PATH:
 // - curl: serves the fetch from this repository (react_gui.tar.gz from the
-//   fixture), and fails like a dropped download for destinations ending in
-//   one of FAIL_DEST;
+//   fixture), and cuts only live-asset transfers for source paths listed in
+//   FAIL_LIVE_SOURCE;
 // - uci: a small store under the fixture's etc/config, failing like uci on a
 //   missing package or section;
 // - ubus: Node-RED's service state from a file the init stand-in writes;
@@ -104,12 +104,8 @@ const fs = require('fs'), path = require('path');
 const a = process.argv.slice(2);
 const dest = a[a.indexOf('-fsSLo') + 1];
 const rel = a[a.length - 1].replace(/^http:\\/\\/localhost:[0-9]+\\//, '');
-const fail = (process.env.FAIL_DEST || '').split(',').filter(Boolean);
-const liveDest = dest.replace(/\\.osi-stage\\.[A-Za-z0-9]+$/, '');
-if (fail.some((f) => liveDest.endsWith(f))) {
-  fs.writeFileSync(dest, 'partial transfer');
-  process.exit(22);
-}
+const fail = (process.env.FAIL_LIVE_SOURCE || '').split(',');
+if (path.basename(dest).startsWith('live-download.') && fail.includes(rel)) process.exit(22);
 const src = rel === 'react_gui.tar.gz' ? ${JSON.stringify(path.join(root, 'react_gui.tar.gz'))} : path.join(${JSON.stringify(REPO)}, rel);
 if (!fs.existsSync(src) || !fs.statSync(src).isFile()) process.exit(22);
 fs.mkdirSync(path.dirname(dest), { recursive: true });

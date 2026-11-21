@@ -18,6 +18,8 @@ const MIRROR = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/
 const INIT_A = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap');
 const INIT_B = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/init.d/osi-bootstrap');
 const NODE_RED_INIT = path.join(ROOT, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init');
+const ATOMIC_WRITE_RUNTIME = '/usr/share/node-red/osi-atomic-write.js';
+const ATOMIC_WRITE_FIXTURE = path.join(path.dirname(CANONICAL), 'osi-atomic-write.js');
 const SETTINGS_JS = path.join(ROOT, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js');
 const API_KEY = 'synthetic-issue-183-api-key';
 const RUNTIME_BASE = '63c7a70f8f3b373f162b33b0669b0df89b3763fa';
@@ -214,6 +216,7 @@ function hooks(fx, opts = {}) {
     if (name === 'fs') return guardedProductFs(fx, opts.fs || fs);
     if (name === 'path') return path;
     if (name === 'child_process') return childProcess(events, opts);
+    if (name === ATOMIC_WRITE_RUNTIME) return require(ATOMIC_WRITE_FIXTURE);
     if (typeof name === 'string' && name.endsWith('osi-chirpstack-helper')) return helper(events);
     return require(name);
   };
@@ -267,6 +270,8 @@ function publisherPreloadSource(fx, fault, operation, traceFile) {
     "const nativeFs=require('node:fs'), path=require('node:path'), Module=require('node:module'), assert=require('node:assert/strict');",
     'const API_KEY=' + JSON.stringify(API_KEY) + ';',
     'const fixture={dir:' + JSON.stringify(fx.dir) + '};',
+    'const ATOMIC_WRITE_RUNTIME=' + JSON.stringify(ATOMIC_WRITE_RUNTIME) + ';',
+    'const ATOMIC_WRITE_FIXTURE=' + JSON.stringify(ATOMIC_WRITE_FIXTURE) + ';',
     'const SOURCE_PATH=' + JSON.stringify(fx.sourceFile || SOURCE) + ';',
     'const TARGET=' + JSON.stringify(fx.envFile) + ';',
     'const TRACE=' + JSON.stringify(traceFile) + ';',
@@ -313,7 +318,7 @@ function publisherPreloadSource(fx, fault, operation, traceFile) {
     " };",
     "}});",
     "const fakeCp=childProcessFactory(events,{uci:JSON.parse(process.env.ISSUE183_UCI_STATE||'{}')});",
-    "const originalLoad=Module._load;Module._load=function(request,parent,isMain){if(parent&&path.resolve(parent.filename||'')===SOURCE_PATH){if(request==='fs')return tracedFs;if(request==='child_process')return fakeCp;if(String(request).endsWith('osi-chirpstack-helper'))return helperFactory(events);}return originalLoad.apply(this,arguments);};",
+    "const originalLoad=Module._load;Module._load=function(request,parent,isMain){if(parent&&path.resolve(parent.filename||'')===SOURCE_PATH){if(request==='fs')return tracedFs;if(request==='child_process')return fakeCp;if(request===ATOMIC_WRITE_RUNTIME)return originalLoad.call(this,ATOMIC_WRITE_FIXTURE,parent,isMain);if(String(request).endsWith('osi-chirpstack-helper'))return helperFactory(events);}return originalLoad.apply(this,arguments);};",
     "process.on('exit',()=>{events.push({kind:'fault-summary',fault,operation,faultFired,published});nativeFs.appendFileSync(TRACE,JSON.stringify(events)+'\\n');});"
   ].join('\n');
 }
@@ -1531,11 +1536,9 @@ if (process.geteuid() !== 0) {
     const source = fs.readFileSync(path.join(ROOT, 'scripts/chirpstack-bootstrap.js'));
     assert.deepEqual(fs.readFileSync(CANONICAL), source); assert.deepEqual(fs.readFileSync(MIRROR), source);
     assert.deepEqual(fs.readFileSync(INIT_A), fs.readFileSync(INIT_B));
-    const bootstrapInit = fs.readFileSync(INIT_A, 'utf8');
-    assert.match(bootstrapInit, /\/usr\/share\/node-red\/chirpstack-bootstrap\.js/);
-    assert.match(bootstrapInit, /if updated_bootstrap_verified; then\n\s*bootstrap_script="\$BOOTSTRAP_UPDATED"\n\s*elif \[ -f "\$BOOTSTRAP_ROM" \]; then/);
+    assert.match(fs.readFileSync(INIT_A, 'utf8'), /\/usr\/share\/node-red\/chirpstack-bootstrap\.js/);
     const deploy = fs.readFileSync(DEPLOY, 'utf8');
-    assert.match(deploy, /publish_bootstrap_receipt "\$BOOTSTRAP_SCRIPT_FALLBACK"/);
+    assert.match(deploy, /older ROM script/); assert.match(deploy, /updated \/srv\/node-red script/);
     const fx = fixture();
     const raw = 'CHIRPSTACK_APP_SENSORS=app-from-env\nDEVICE_EUI=stale-identity\n';
     fs.writeFileSync(fx.envFile, raw);

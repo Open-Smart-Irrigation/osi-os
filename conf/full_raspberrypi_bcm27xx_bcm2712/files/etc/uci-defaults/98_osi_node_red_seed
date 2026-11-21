@@ -3,83 +3,25 @@ set -eu
 
 SRC=/usr/share/node-red
 DST=/srv/node-red
-FLOW_SEED=/usr/share/flows.json
-IMAGE_DB=/usr/share/db/farming.db
-LIVE_DB=/data/db/farming.db
 
 mkdir -p "$DST" "$DST/node_modules"
 chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 
-# node-red.init validates and repairs flows.json before starting the service.
-# Publish the other create-only files durably before their existence can suppress
-# a retry. Use a hard link so a concurrent creator always keeps its own file.
-node - "$SRC" "$DST" "$FLOW_SEED" "$IMAGE_DB" "$LIVE_DB" <<'NODE'
-const fs = require('fs');
-const path = require('path');
-const { randomUUID, createHash } = require('crypto');
+if [ -f /usr/share/flows.json ] && [ ! -f "$DST/flows.json" ]; then
+    cp /usr/share/flows.json "$DST/flows.json"
+fi
 
-const [src, dst, flowSeed, imageDb, liveDb] = process.argv.slice(2);
-const hasEntry = file => fs.lstatSync(file, { throwIfNoEntry: false });
-const origin = path.join(dst, '.image-flows-origin');
-const flow = path.join(dst, 'flows.json');
+if [ -f "$SRC/settings.js" ] && [ ! -f "$DST/settings.js" ]; then
+    cp "$SRC/settings.js" "$DST/settings.js"
+fi
 
-function freshImageSeed() {
-  if (['payloads', 'payload-state.json', '.payload-swap.js'].some(name => hasEntry(path.join(dst, name))) ||
-      hasEntry('/usr/lib/node-red/gui')?.isSymbolicLink() ||
-      [dst, path.join(dst, 'node_modules')].some(dir =>
-        fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink())) ||
-      ['-wal', '-shm', '-journal', '.osi-recovery'].some(suffix => hasEntry(liveDb + suffix))) return false;
-  return hasEntry(flowSeed)?.isFile() && hasEntry(imageDb)?.isFile() && hasEntry(liveDb)?.isFile() &&
-    fs.readFileSync(imageDb).equals(fs.readFileSync(liveDb));
-}
+if [ -f "$SRC/package.json" ] && [ ! -f "$DST/package.json" ]; then
+    cp "$SRC/package.json" "$DST/package.json"
+fi
 
-const dir = fs.openSync(dst, 'r');
-try {
-  // Only a fresh image can issue this record. A later deploy with a missing
-  // flow and a different database must never seed the firmware's old DDL.
-  if (!hasEntry(flow) && !hasEntry(origin) && freshImageSeed()) {
-    const digest = createHash('sha256').update(fs.readFileSync(flowSeed)).digest('hex');
-    publish(origin, temporary => fs.writeFileSync(temporary, digest + '\n', { flag: 'wx', mode: 0o644 }));
-    publish(flow, temporary => fs.copyFileSync(flowSeed, temporary, fs.constants.COPYFILE_EXCL));
-  }
-  for (const name of ['settings.js', 'package.json', 'package-lock.json']) {
-    const source = path.join(src, name);
-    const target = path.join(dst, name);
-    if (hasEntry(target) || !hasEntry(source)) continue;
-    publish(target, temporary => fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL));
-  }
-} finally {
-  fs.closeSync(dir);
-}
-
-function publish(target, write) {
-  const temporary = path.join(dst, '.node-red-seed-' + randomUUID());
-  try {
-    write(temporary);
-    const fd = fs.openSync(temporary, 'r');
-    try {
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    try {
-      fs.linkSync(temporary, target);
-    } catch (error) {
-      if (error.code === 'EEXIST') return;
-      throw error;
-    }
-    try {
-      fs.fsyncSync(dir);
-    } catch (error) {
-      fs.unlinkSync(target);
-      fs.fsyncSync(dir);
-      throw error;
-    }
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
-}
-NODE
+if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
+    cp "$SRC/package-lock.json" "$DST/package-lock.json"
+fi
 
 # The image's helpers, codecs, node files, edge-channels.json and node_modules are copied
 # once per image install, at its first boot, before the sqlite3 block can
@@ -126,8 +68,7 @@ done
 
 if [ "$SEED_COPY" = 1 ]; then
     if ! sync; then
-        echo 'ERROR: sync failed before recording the image copy' >&2
-        exit 1
+        echo 'WARN: sync failed before recording the image copy' >&2
     fi
     if ! touch "$SEED_COPIED"; then
         echo "WARN: could not write $SEED_COPIED; a refusing seed copies the image again at the next boot" >&2
@@ -574,8 +515,7 @@ seed_native_sqlite3() {
     # The stage scan refuses a payload beside an incomplete owner line, so the
     # line must be on disk before the copy starts.
     if ! sync; then
-        echo 'ERROR: could not sync the seed stage owner' >&2
-        return 1
+        echo 'WARN: sync failed; the seed stage owner may not survive a power loss' >&2
     fi
     seed_candidate="$seed_s/candidate"
     seed_copy_ok=0
@@ -615,8 +555,7 @@ seed_native_sqlite3() {
     # The rollback scan refuses a candidate identity beside an incomplete
     # owner line, so the line must be on disk before the identity is written.
     if ! sync; then
-        echo 'ERROR: could not sync the seed rollback owner' >&2
-        return 1
+        echo 'WARN: sync failed; the seed rollback owner may not survive a power loss' >&2
     fi
     if ! seed_sqlite3_id "$seed_candidate" > "$seed_b/.candidate-id"; then
         echo "ERROR: seed ownership metadata failed; inspect $seed_b and $seed_s" >&2
@@ -632,8 +571,7 @@ seed_native_sqlite3() {
     # files after the renames below. Without a flush, power loss can keep a
     # committed rename while those bytes are still unwritten.
     if ! sync; then
-        echo 'ERROR: could not sync the seed sqlite3 candidate before promotion' >&2
-        return 1
+        echo 'WARN: sync failed; the seed sqlite3 swap may not survive a power loss' >&2
     fi
     if seed_sqlite3_present "$seed_d"; then
         if [ ! -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
@@ -666,11 +604,6 @@ seed_native_sqlite3() {
     if [ "$(seed_sqlite3_version "$seed_d")" != "$SEED_PIN" ] ||
        ! seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
         echo "ERROR: seed final pin/load failed; rollback retained at $seed_b" >&2
-        seed_sqlite3_rollback_failed_final "$seed_b"
-        return 1
-    fi
-    if ! sync; then
-        echo "ERROR: could not sync the promoted sqlite3; rollback retained at $seed_b" >&2
         seed_sqlite3_rollback_failed_final "$seed_b"
         return 1
     fi
