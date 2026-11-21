@@ -41,6 +41,19 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const [source, target] = process.argv.slice(2);
 const dir = path.dirname(target);
+const dataRoot = path.dirname(dir);
+function syncDirectory(directory) {
+  const fd = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+// Commit the directory entries before publishing the seed, including if a
+// previous attempt created them and failed before syncing them.
+syncDirectory(dataRoot);
+syncDirectory(path.dirname(dataRoot));
 const temporary = path.join(dir, '.farming-seed-' + randomUUID());
 fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
 try {

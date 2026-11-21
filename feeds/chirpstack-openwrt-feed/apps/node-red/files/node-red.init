@@ -809,15 +809,19 @@ try {
   let sourceName = '/usr/share/flows.json';
   let live;
   try {
-    flowTarget = realTarget(flowVia);
     if (deployed) {
       const realPayloads = fs.realpathSync(payloads);
+      const selected = active && fs.realpathSync(active);
+      if (selected && path.dirname(selected) === realPayloads) stamp = path.basename(selected);
+      flowTarget = realTarget(flowVia);
       const dir = path.dirname(flowTarget);
       if (path.dirname(dir) !== realPayloads || path.basename(flowTarget) !== 'flows.json' ||
-          (active && fs.realpathSync(active) !== dir)) {
+          (selected && selected !== dir)) {
         throw new Error('flows do not belong to the selected payload');
       }
       stamp = path.basename(dir);
+    } else {
+      flowTarget = realTarget(flowVia);
     }
     live = readJson(flowTarget, isFlows);
     source = live;
@@ -841,7 +845,8 @@ try {
       if (source.problem) throw new Error('cannot restore flows.json (' + source.problem + ')');
     }
   } catch (error) {
-    if (deployed || live?.problem) {
+    const unreadable = ['EIO', 'EAGAIN', 'EINTR', 'ESTALE', 'ETIMEDOUT', 'EBUSY', 'EACCES', 'EPERM'];
+    if (!unreadable.includes(error.code) && (deployed || live?.problem)) {
       persistFlowHold(stamp, error.message);
       if (live?.stat && live.problem) {
         const archive = quarantineName(flowTarget);

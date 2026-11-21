@@ -98,8 +98,17 @@ function fixture(t, { linked = false, password = '', pristine = seed } = {}) {
 const fs = require('fs');
 const sync = fs.fsyncSync;
 const rename = fs.renameSync;
+const read = fs.readFileSync;
 const trace = process.env.FS_TRACE;
 let failed = false;
+fs.readFileSync = function(file, ...args) {
+  if (file === process.env.FAIL_FLOW_READ) {
+    const error = new Error('injected flow read failure');
+    error.code = 'EIO';
+    throw error;
+  }
+  return read(file, ...args);
+};
 fs.fsyncSync = function(fd) {
   const kind = fs.fstatSync(fd).isDirectory() ? 'directory' : 'file';
   fs.appendFileSync(trace, kind + '\\n');
@@ -114,7 +123,7 @@ fs.renameSync = function(source, target) {
   return rename(source, target);
 };
 `);
-  function start({ boot = false, failSync = '', expectFailure = false, blockBootstrap = '' } = {}) {
+  function start({ boot = false, failSync = '', failFlowRead = '', expectFailure = false, blockBootstrap = '' } = {}) {
     const result = spawnSync('sh', ['-c', `
 . "$1"
 uci() {
@@ -153,7 +162,8 @@ fi
         TEST_BOOT: boot ? '1' : '0',
         TEST_BOOT_INIT: bootInit,
         TEST_BLOCK_BOOTSTRAP: blockBootstrap,
-        ...(failSync ? { NODE_OPTIONS: '--require=' + preload, FS_TRACE: trace, FAIL_SYNC: failSync } : {}),
+        ...(failSync || failFlowRead ? { NODE_OPTIONS: '--require=' + preload, FS_TRACE: trace,
+          FAIL_SYNC: failSync, FAIL_FLOW_READ: failFlowRead } : {}),
       },
     });
     assert.ifError(result.error);
@@ -452,23 +462,32 @@ for (const [condition, prepare, expected] of [
   });
 }
 
-for (const pristineDb of [true, false]) {
-  test(`first-boot seed ${pristineDb ? 'records factory ownership' : 'refuses to mark an upgraded DB as factory'}`, t => {
+for (const [description, editDb] of [
+  ['records factory ownership'],
+  ['refuses to mark an upgraded DB as factory', db =>
+    sqlite(db, "INSERT INTO schema_migrations VALUES (73,'newer','applied');")],
+  ['continues installing settings beside a large legacy DB', db => fs.truncateSync(db, 4 * 1024 ** 3)],
+]) {
+  test(`first-boot seed ${description}`, t => {
     const fx = fixture(t);
+    const rom = path.join(fx.root, 'rom');
+    fs.mkdirSync(rom);
+    fs.writeFileSync(path.join(rom, 'settings.js'), 'module.exports = {};\n');
     fs.unlinkSync(fx.origin);
-    if (!pristineDb) sqlite(fx.db, "INSERT INTO schema_migrations VALUES (73,'newer','applied');");
+    if (editDb) editDb(fx.db);
     const earlySeed = imageSeedScript.slice(0, imageSeedScript.indexOf('\nNODE\n') + 6)
       .replaceAll('/srv/node-red', fx.userDir)
       .replaceAll('/usr/share/flows.json', fx.bundled)
       .replaceAll('/usr/share/db/farming.db', fx.imageDb)
       .replaceAll('/data/db/farming.db', fx.db)
-      .replaceAll('/usr/share/node-red', path.join(fx.root, 'rom'))
+      .replaceAll('/usr/share/node-red', rom)
       .replaceAll('/usr/lib/node-red/gui', path.join(fx.root, 'gui'));
     const result = spawnSync('sh', ['-c', earlySeed], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(fs.existsSync(fx.origin), pristineDb);
-    assert.equal(fs.existsSync(fx.flows), pristineDb);
-    if (pristineDb) {
+    assert.equal(fs.existsSync(fx.origin), !editDb);
+    assert.equal(fs.existsSync(fx.flows), !editDb);
+    assert.equal(fs.readFileSync(path.join(fx.userDir, 'settings.js'), 'utf8'), 'module.exports = {};\n');
+    if (!editDb) {
       fs.writeFileSync(fx.flows, '[null]');
       assert.match(fx.start(), /restored flows.json .*bundled-flows.json/);
     }
@@ -511,6 +530,56 @@ test('a missing DB with a recovery hold refuses a cold start before payload chec
   assert.match(result.stderr, /HELD: Database recovery is incomplete/);
   assert.doesNotMatch(result.stdout, /procd start/);
   assert.equal(fs.existsSync(fx.db), false);
+});
+
+test('a transient flow read failure stops only the attempted start', t => {
+  const fx = fixture(t, { linked: true });
+  const failed = fx.start({ failFlowRead: fx.target, expectFailure: true });
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.match(failed.stderr, /injected flow read failure/);
+  assert.doesNotMatch(failed.stdout, /procd start/);
+  assert.equal(fs.existsSync(path.join(fx.userDir, 'DEPLOY-HELD')), false);
+  assert.equal(swap.flowRecoveryHeld(fx.userDir), false);
+  assert.match(fx.start(), /procd start/);
+});
+
+test('a broken public flow link records a hold for the selected payload', t => {
+  const fx = fixture(t, { linked: true });
+  fs.unlinkSync(fx.flows);
+  fs.symlinkSync('missing/flows.json', fx.flows);
+  const failed = fx.start({ expectFailure: true });
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.doesNotMatch(failed.stdout, /procd start/);
+  assert.equal(swap.readPayloadState(fx.userDir).active, 'fixture');
+  assert.equal(swap.flowRecoveryHeld(fx.userDir), true);
+});
+
+test('the image DB seed refuses publication when its parent directory cannot sync', t => {
+  const fx = fixture(t);
+  fs.unlinkSync(fx.db);
+  fs.rmdirSync(path.dirname(fx.db));
+  const source = fs.readFileSync(profile + '/etc/uci-defaults/97_osi_db_seed', 'utf8')
+    .replace('/usr/share/db/farming.db', fx.imageDb)
+    .replace('/data/db', path.dirname(fx.db));
+  const preload = path.join(fx.root, 'fail-data-sync.cjs');
+  fs.writeFileSync(preload, `
+const fs = require('node:fs');
+const sync = fs.fsyncSync;
+fs.fsyncSync = fd => {
+  if (fs.readlinkSync('/proc/self/fd/' + fd) === ${JSON.stringify(fs.realpathSync(path.join(fx.root, 'data')))}) {
+    throw new Error('injected data-directory fsync failure');
+  }
+  return sync(fd);
+};`);
+  const run = env => spawnSync('sh', ['-c', 'logger() { echo "$@" >&2; }\n' + source],
+    { encoding: 'utf8', env: { ...process.env, ...env } });
+  const failed = run({ NODE_OPTIONS: '--require=' + preload });
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.match(failed.stderr, /injected data-directory fsync failure/);
+  assert.equal(fs.existsSync(fx.db), false);
+  const retry = run({});
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.deepEqual(fs.readFileSync(fx.db), fs.readFileSync(fx.imageDb));
 });
 
 test('a failed credentials directory sync restores the prior inode and removes rollback names', t => {
