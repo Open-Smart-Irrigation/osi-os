@@ -73,8 +73,18 @@ def prepare(source, work, dtmerge, radio_probe=None, concentratord=False, *,
                         '::osi-probe'], check=True)
 
 
-def rf_frame(payload, frequency, bandwidth=0):
-    return struct.pack('>BBBIB', len(payload), 255, 7, frequency, bandwidth) + payload
+RF_RECEIPT_CHANNEL = 254
+RF_REQUEST_ID_SIZE = 8
+
+
+def rf_frame(payload, frequency, bandwidth=0, *, request_id=None):
+    channel = 255
+    if request_id is not None:
+        if len(request_id) != RF_REQUEST_ID_SIZE:
+            raise ValueError('invalid WM1302 request ID size')
+        channel = RF_RECEIPT_CHANNEL
+    return (struct.pack('>BBBIB', len(payload), channel, 7, frequency, bandwidth)
+            + (request_id or b'') + payload)
 
 
 def smoke(command, work, args, packet_socket, ethernet_socket, pass_fds):
