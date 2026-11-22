@@ -3629,13 +3629,16 @@ async function resolveExportFieldPresence(db, scope) {
   const presence = new Map();
   const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
   const budget = scope.budget;
+  // An empty instant interval (Pacific/Apia's skipped 2011-12-30) has no
+  // samples: no scan, and every fallback device projects no channel.
+  const emptyInterval = !(scope.start < scope.end);
   for (const card of scope.cards) {
     for (const device of sourceDevicesForCard(card, scope.devices)) {
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       if (!deveui || exportFamilyChannelKeys(card, device) !== null) continue;
       const fields = Array.from(new Set(exportCandidateChannels(card, device, scope).flatMap(channelFieldNames)));
       let present = new Set();
-      if (fields.length) {
+      if (fields.length && !emptyInterval) {
         const remaining = budget ? Math.min(budget.workRows, Math.floor(budget.workCells / fields.length)) : null;
         if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
         const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
@@ -3946,6 +3949,26 @@ async function buildAllZonesExportCsv(db, options = {}) {
   return { columns: RAW_CSV_COLUMNS, csv: chunks.join(''), rowCount: budget.rows, zoneCount: zones.length };
 }
 
+// Daily rewrites stream the old file and yield between records, so two
+// writers for one zone (the scheduled rollup and a manual run) could each read
+// the same old file and rename over the other's result. Node-RED is one
+// process: an in-process queue per destination path serialises the whole
+// read-to-rename interval. A failed rewrite still rejects for its own caller;
+// the queue only waits for it to settle.
+const dailyRewriteTails = new Map();
+
+async function withDailyRewriteLock(file, task) {
+  const previous = dailyRewriteTails.get(file) || Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.then(() => undefined, () => undefined);
+  dailyRewriteTails.set(file, tail);
+  try {
+    return await run;
+  } finally {
+    if (dailyRewriteTails.get(file) === tail) dailyRewriteTails.delete(file);
+  }
+}
+
 async function writeZoneCsv(options = {}) {
   const fs = require('fs');
   const path = require('path');
@@ -3980,33 +4003,35 @@ async function writeZoneCsv(options = {}) {
   writeRows(path.join(base, 'raw', `${day}.csv`), RAW_CSV_COLUMNS, options.rawRows || []);
   writeRows(path.join(base, 'hourly', `${day}.csv`), AGG_CSV_COLUMNS, options.hourlyRows || []);
   const dailyPath = path.join(base, 'daily.csv');
-  const temp = temporary(dailyPath);
-  let fd = null;
-  try {
-    fd = fs.openSync(temp, 'wx');
-    fs.writeSync(fd, exportLimits.header(AGG_CSV_COLUMNS));
-    if (fs.existsSync(dailyPath)) {
-      let header = true;
-      let previousTimestamp;
-      let previousDay;
-      const timezone = normalizeTimezone(zone.timezone);
-      for await (const record of exportLimits.records(dailyPath)) {
-        if (header) { header = false; continue; }
-        const timestamp = exportLimits.firstCell(record);
-        if (timestamp !== previousTimestamp) {
-          previousTimestamp = timestamp;
-          previousDay = localDateKey(parseRecordedAtMs(timestamp), timezone);
+  await withDailyRewriteLock(path.resolve(dailyPath), async () => {
+    const temp = temporary(dailyPath);
+    let fd = null;
+    try {
+      fd = fs.openSync(temp, 'wx');
+      fs.writeSync(fd, exportLimits.header(AGG_CSV_COLUMNS));
+      if (fs.existsSync(dailyPath)) {
+        let header = true;
+        let previousTimestamp;
+        let previousDay;
+        const timezone = normalizeTimezone(zone.timezone);
+        for await (const record of exportLimits.records(dailyPath)) {
+          if (header) { header = false; continue; }
+          const timestamp = exportLimits.firstCell(record);
+          if (timestamp !== previousTimestamp) {
+            previousTimestamp = timestamp;
+            previousDay = localDateKey(parseRecordedAtMs(timestamp), timezone);
+          }
+          if (previousDay !== day) fs.writeSync(fd, record + '\n');
         }
-        if (previousDay !== day) fs.writeSync(fd, record + '\n');
       }
+      for (const row of options.dailyRows || []) fs.writeSync(fd, renderCsvRow(AGG_CSV_COLUMNS, stamp(row)));
+      fs.closeSync(fd); fd = null;
+      fs.renameSync(temp, dailyPath);
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
     }
-    for (const row of options.dailyRows || []) fs.writeSync(fd, renderCsvRow(AGG_CSV_COLUMNS, stamp(row)));
-    fs.closeSync(fd); fd = null;
-    fs.renameSync(temp, dailyPath);
-  } finally {
-    if (fd !== null) fs.closeSync(fd);
-    fs.rmSync(temp, { force: true });
-  }
+  });
 }
 
 async function rotateZoneCsv(options = {}) {

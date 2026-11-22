@@ -98,9 +98,13 @@ zone-local date, including UTC timestamps on the preceding calendar date.
 The nightly writers have no HTTP row, input or byte budgets. Raw and hourly
 files are written independently before daily processing. Daily history is
 rewritten through a UTF-8 record stream and atomically renamed, without loading
-the whole file or refusing it at 8 MiB. A malformed old daily file leaves that
-file intact and does not undo the raw/hourly updates. Legacy BOM-less files gain
-one BOM.
+the whole file or refusing it at 8 MiB. Rewrites of one zone's `daily.csv` are
+serialised in the Node-RED process from the first read to the rename, so a
+scheduled rollup and a manual run that overlap keep both days. An old daily
+file the record splitter cannot parse (an unterminated quoted field) is left
+intact, and the raw/hourly updates stand. Other damage is not validated: a
+record with an unreadable timestamp or the wrong field count is copied through
+unchanged. Legacy BOM-less files gain one BOM.
 
 ## Stable refusal codes and shared slot
 

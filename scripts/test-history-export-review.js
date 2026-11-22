@@ -121,15 +121,21 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     try {
       raw.exec("UPDATE irrigation_zones SET timezone='Pacific/Apia';");
       raw.exec(`INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES('${first}','2011-12-29T12:00:00Z',29),('${first}','2011-12-30T12:00:00Z',31)`);
+      // A typed CLOVER keeps the card-wide fallback, so its column discovery
+      // must also skip the empty interval; 24 hourly rows sit in the lexical range.
+      raw.exec(`INSERT INTO devices(deveui,user_id,irrigation_zone_id,name,type_id,chameleon_enabled,created_at,updated_at) VALUES('A840410000000003',1,1,'Clover','TEKTELIC_CLOVER',0,'x','x')`);
+      const clover = raw.prepare('INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES(?,?,?)');
+      for (let hour = 0; hour < 24; hour++) clover.run('A840410000000003', new Date(Date.parse('2011-12-30T10:00:00Z') + hour * 3600000).toISOString(), 40);
       for (const build of [helper.buildZoneExportCsv, helper.buildAllZonesExportCsv]) {
         for (const granularity of ['raw','hourly','daily']) {
           const { db, queries } = recording(raw);
-          const empty = await build(db, { ...opts, from: '2011-12-30', to: '2011-12-30', granularity });
+          const empty = await build(db, { ...opts, from: '2011-12-30', to: '2011-12-30', granularity, maxWorkRows: 1 });
           if (empty.rows) assert.deepEqual(empty.rows, []);
           else assert.equal(empty.rowCount, 0);
           assert.deepEqual(queries, []);
         }
       }
+      raw.exec("DELETE FROM devices WHERE deveui='A840410000000003'");
       const span = await helper.buildZoneExportCsv(facadeDb(raw), { ...opts, from: '2011-12-29', to: '2011-12-31', granularity: 'daily' });
       assert.deepEqual(span.rows.filter(r => r.channel_key === 'swt_1').map(r => [r.timestamp,r.value]), [['2011-12-29T10:00:00.000Z',29],['2011-12-30T10:00:00.000Z',31]]);
     } finally { raw.close(); }

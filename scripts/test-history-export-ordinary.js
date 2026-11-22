@@ -75,6 +75,7 @@ for(const profile of ['bcm2712','bcm2709']) {
       const db=fixture(1,type);
       try {
         populate(db,1,1,15);
+        if(type==='SENSECAP_S2120') db.exec(`UPDATE device_data SET wind_speed_mps=3`);
         const normal=traced(db);
         const result=await helper.buildZoneExportCsv(normal.db,{...range(1),zoneId:2});
         // TEKTELIC_CLOVER has no soil family: like the interactive grid it keeps
@@ -90,7 +91,10 @@ for(const profile of ['bcm2712','bcm2709']) {
           if(type==='SENSECAP_S2120') assert.doesNotMatch(query.sql,/swt_|vwc_|soil_/);
         }
         assert.ok(result.rows.every(r=>!/^soil$/.test(r.card_type)||permitted>0));
-        if(type==='TEKTELIC_CLOVER') assert.deepEqual(result.rows.map(r=>r.channel_key).sort(),['swt_1','swt_1_pf','swt_2','swt_2_pf']);
+        // Pin the measured rows, so an empty export cannot pass.
+        const measured=result.rows.filter(r=>!/_pf$/.test(r.channel_key)).map(r=>[r.card_type,r.channel_key,r.value]);
+        assert.deepEqual(measured,type==='SENSECAP_S2120'?[['environment','wind_speed_mps',3]]:[['soil','swt_1',20],['soil','swt_2',30]],type);
+        assert.equal(result.rows.length,type==='SENSECAP_S2120'?1:4,type);
         db.exec('DROP INDEX idx_device_data_deveui_recorded_at');
         const fallback=await helper.buildZoneExportCsv(facadeDb(db),{...range(1),zoneId:2});
         assert.deepEqual(fallback.rows,result.rows);
@@ -235,6 +239,43 @@ for(const profile of ['bcm2712','bcm2709']) {
       populate(db,1,65,15);
       await assert.rejects(helper.buildZoneExportCsv(facadeDb(db),{...range(65),zoneId:2,channels:'swt_1',maxWorkRows:65*96-1}),{statusCode:413,code:'EXPORT_INPUT_TOO_LARGE'});
     }finally{db.close();}
+  });
+  test(`${profile}: overlapping nightly writes for distinct days keep every day`,async()=>{
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nightly-overlap-'));
+    try {
+      const zone={zone_uuid:'nightly',timezone:'UTC',name:'Nightly'};
+      const row=(day,value)=>({timestamp:`${day}T00:00:00.000Z`,channel_key:'swt_1',value});
+      const write=(day,value)=>helper.writeZoneCsv({exportDir:dir,zone,day,rawRows:[row(day,value)],hourlyRows:[row(day,value)],dailyRows:[row(day,value)]});
+      await write('2025-01-01',1);
+      // A large old file makes each streaming read yield many times.
+      const daily=path.join(dir,'nightly/daily.csv');
+      const header=helper.toCsv(helper.AGG_CSV_COLUMNS,[]);
+      fs.appendFileSync(daily,helper.toCsv(helper.AGG_CSV_COLUMNS,[row('2024-12-31',0)]).slice(header.length).repeat(20000));
+      await Promise.all([write('2025-01-02',2),write('2025-01-03',3),write('2025-01-04',4)]);
+      const days=new Set(fs.readFileSync(daily,'utf8').split('\n').slice(1).filter(Boolean).map(line=>line.slice(0,10)));
+      assert.deepEqual([...days].sort(),['2024-12-31','2025-01-01','2025-01-02','2025-01-03','2025-01-04']);
+      assert.deepEqual(fs.readdirSync(path.dirname(daily)).sort(),['daily.csv','hourly','raw'],'no temp file left');
+    }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  });
+  test(`${profile}: a scheduled rollup and a concurrent manual run on one zone lose no day`,async()=>{
+    // Both the rollup tick and the HTTP manual run call runRollupJob. A manual
+    // run started after local midnight writes the next day while the
+    // scheduled run is still rewriting daily.csv for the previous one.
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nightly-rollup-overlap-'));
+    const db=fixture(1,'DRAGINO_LSN50');
+    try {
+      populate(db,1,4,60);
+      const run=day=>helper.runRollupJob(facadeDb(db),{exportDir:dir,levels:['hourly'],nowMs:Date.parse(day)+DAY+2*3600000});
+      assert.deepEqual((await run('2025-01-01')).errors,[]);
+      const daily=path.join(dir,'z-second/daily.csv');
+      const lines=fs.readFileSync(daily,'utf8').split('\n');
+      fs.appendFileSync(daily,(lines[1].replace(/^2025-01-01/,'2024-12-31')+'\n').repeat(20000));
+      const [scheduled,manual]=await Promise.all([run('2025-01-02'),run('2025-01-03')]);
+      assert.deepEqual([scheduled.errors,manual.errors],[[],[]]);
+      const days=new Set(fs.readFileSync(daily,'utf8').split('\n').slice(1).filter(Boolean).map(line=>line.slice(0,10)));
+      assert.deepEqual([...days].sort(),['2024-12-31','2025-01-01','2025-01-02','2025-01-03']);
+      for(const day of ['2025-01-01','2025-01-02','2025-01-03']) assert.ok(fs.existsSync(path.join(dir,`z-second/raw/${day}.csv`)),day);
+    }finally{db.close();fs.rmSync(dir,{recursive:true,force:true});}
   });
   test(`${profile}: nightly raw and hourly files survive a malformed daily file`,async()=>{
     const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nightly-independent-'));

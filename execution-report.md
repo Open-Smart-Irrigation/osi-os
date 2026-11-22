@@ -9,6 +9,44 @@ Startup after updating from main: READY at `7725a09f2b`, based on `origin/main`
 Pi 4 acceptance, codec helpers and atomic Node-RED startup writes; the rebase
 was clean, with both existing patches unchanged in `git range-diff`.
 
+## Round-6 findings and fixes (head `6e59cef7` → this revision)
+
+Sol's full pass at `6e59cef7`: P1 1, P2 3, P3 2. The lead asked for P1, P2 #2,
+P3 #5 and P3 #6 in this round. P2 #3 (the nightly job skips the completed
+spring-forward day) and P2 #4 (uncharged Chameleon array lookup) are inherited
+from main; the lead files them as separate issues.
+
+| Finding | Fix |
+|---|---|
+| P1: concurrent `daily.csv` rewrites lose a day | `withDailyRewriteLock` queues rewrites per resolved `daily.csv` path, from the first streamed read to the rename. Streaming stays. Raw and hourly files are still written before the lock (one file per day, atomic rename). A failed rewrite still rejects for its own caller; the queue only waits for it to settle. |
+| P2 #2: discovery scans on an empty instant interval | `resolveExportFieldPresence` skips the scan when `start >= end` (Pacific/Apia 2011-12-30): fallback devices project no channel, and the request returns a header-only CSV with no `device_data` query. |
+| P3 #5: runbook promised too much for malformed files | Narrowed: only a file the record splitter cannot parse (unterminated quoted field) is left intact. Records with an unreadable timestamp or the wrong field count are copied through. The serialisation is documented in the same paragraph. |
+| P3 #6: projection test passed on an empty export | It now pins the measured rows: `swt_1` 20 and `swt_2` 30 on the soil card for LSN50, KIWI, CLOVER and SDI12 (four rows with pF). The S2120 gets `wind_speed_mps` 3 and must export exactly that environment row. |
+
+Tests (red against the round-5 helper, green now, both profiles):
+- `a scheduled rollup and a concurrent manual run on one zone lose no day`
+  (CTO test): `runRollupJob` for 2025-01-01, a 20,000-record old history,
+  then two concurrent `runRollupJob` calls writing 2025-01-02 and 2025-01-03.
+  The daily file keeps every day and both runs report no error. On the old
+  helper 2025-01-02 is lost.
+- `overlapping nightly writes for distinct days keep every day`: three
+  concurrent `writeZoneCsv` calls; no day lost, no temp file left.
+- `test-history-export-review.js` skipped-civil-date test: adds a typed
+  CLOVER with 24 hourly rows in the lexical range and runs all three
+  granularities in both builders with `maxWorkRows: 1`. Each returns no rows
+  and no `device_data` query. Without the guard it fails with
+  `EXPORT_INPUT_TOO_LARGE`.
+
+Round-6 checks (local, this revision): source guards 20/20; ordinary suite
+38/38 and export review 30/30 and bounds 10/10 (each with
+`--max-old-space-size=192`); source-v2 68/68; all-zones and recorded-at
+formats 68/68; helper `index.test.js` 45/45 and router 76/0 on each profile;
+vectors 4/4; `test-history-helper.js` R6_HELPER; `verify-sync-flow.js` R6_VSF;
+test inventory, profile parity (helper byte-identical), silent-catch, doc
+hygiene and `git diff --check` OK.
+
+Round time: R6_TIME
+
 ## Round-5 finding and fix (head `5a7723ca` → this revision)
 
 Round 5 (Sol): one P1. The discovery subquery applied the exact `strftime`
