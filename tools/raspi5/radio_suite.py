@@ -18,6 +18,18 @@ STREGA = bytes.fromhex('333630377423ffffffff23')
 LSN50 = bytes.fromhex('A2030CE404E209290220080008000800080021FFFFFFFF08000800')
 RECEIPT_TIMEOUT = 10
 EARLY_WINDOW_TIMEOUT = 2
+JOIN_WINDOW = 40
+# A late SX1302 TX trigger can wait a full 32-bit wrap at 32 MHz (~134 s).
+JOIN_DRAIN_WINDOW = 150
+JOIN_ATTEMPTS = 3
+
+PERSISTENT_LOGS = '''persistent_logs() {
+    # Read the rotated file before the active file so a marker can span rotation.
+    for file in /data/log/osi-system.log?* /data/log/osi-system.log; do
+        if [ -r "$file" ]; then cat "$file"; fi
+    done
+}
+'''
 
 
 class LocalOnly(urllib.request.HTTPRedirectHandler):
@@ -125,25 +137,52 @@ def _mark_crc_window(vm):
     return marker
 
 
-def _radio_evidence(vm, marker, delivered):
+def _crc_ok_count(vm, marker, delivered):
     if delivered <= 0:
         raise RuntimeError('WM1302 model delivered zero frames')
-    # logread emits five timestamp fields, then facility.level, tag and
-    # message. Concentratord emits this message after the CRC filter.
+    # Both sinks use five timestamp fields, then facility.level, tag and
+    # message. Concentratord logs the frame after the CRC filter.
     code, count = vm.command(rf"""set -e
 grep -Eq '^ *disable_crc_filter *= *false *$' /var/etc/chirpstack-concentratord/concentratord.toml
-logs=$(logread)
-printf '%s\n' "$logs" | awk -v marker='{marker}' '
+{PERSISTENT_LOGS}
+count_crc_ok() {{ awk -v marker='{marker}' '
 $6 == "user.notice" && $7 == "osi-radio-suite:" && $8 == marker && NF == 8 {{ seen=1; next }}
 seen && $6 == "user.info" && $7 ~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ &&
     $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" {{ count++ }}
 END {{ if (!seen) exit 1; print count+0 }}'
+}}
+persistent_logs | count_crc_ok || logread | count_crc_ok
 """)
     if code or not count.isdecimal():
         raise RuntimeError(f'Concentratord CRC_OK count unavailable (model delivered {delivered})')
     if int(count) <= 0:
         raise RuntimeError(f'Concentratord CRC_OK=0 (model delivered {delivered})')
+    return int(count)
+
+
+def _radio_evidence(vm, marker, delivered):
+    count = _crc_ok_count(vm, marker, delivered)
     return f'WM1302 model delivered={delivered}, Concentratord CRC_OK={count}'
+
+
+def radio_diagnostics(vm):
+    # Write fixed labels and counts only. Application logs can contain credentials.
+    _, counts = vm.command(PERSISTENT_LOGS + r'''count_messages() {
+    awk 'BEGIN {
+        n = split("JoinRequest|join-request|invalid MIC|InvalidMIC|unknown device|region mismatch|device-profile|Frame received, uplink_id:|downlink frame|Too late|TX_ACK", needles, "[|]")
+        for (i = 1; i <= n; i++) patterns[i] = tolower(needles[i])
+    }
+    { line = tolower($0); for (i = 1; i <= n; i++) if (index(line, patterns[i])) counts[i]++ }
+    END { for (i = 1; i <= n; i++) print needles[i], counts[i] + 0 }'
+}
+echo 'persistent /data/log/osi-system.log*'
+persistent_logs | count_messages
+echo 'logread'
+logread | count_messages
+for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302; do
+    if pidof "$svc" >/dev/null; then echo "$svc running"; fi
+done''')
+    (vm.receipts/'radio-diagnostics.log').write_text(counts + '\n')
 
 
 def _wait_history(vm, query, expected):
@@ -204,29 +243,65 @@ def register(vm,password):
     return sessions
 
 
-def inject(vm, air, sessions):
-    air.begin_case()
-    marker = _mark_crc_window(vm)
-    delivered = 0
-    for eui,session in sessions.items():
-        delivered += air.send(session.join_request())
+def _join(vm, air, eui, session, log):
+    def is_join_accept(packet):
+        return packet[:1] == b'\x20'
+
+    for attempt in range(1, JOIN_ATTEMPTS + 1):
+        if attempt > 1:
+            session.devnonce += 1
+        marker = _mark_crc_window(vm)
+        frame = session.join_request()
+        sent = time.monotonic()
+        delay = None
+        outcome = 'join failed'
         try:
-            reply = air.receive(40, lambda packet: packet[:1] == b'\x20')
-        except TimeoutError:
-            evidence = _radio_evidence(vm, marker, delivered)
-            raise RuntimeError(f'{eui}: join-accept absent ({evidence})')
-        session.accept_join(reply)
+            delivered = air.send(frame)
+            try:
+                reply = air.receive(max(0, sent + JOIN_WINDOW - time.monotonic()), is_join_accept)
+            except TimeoutError:
+                # Drain a wrapped join-accept before sending a fresh DevNonce.
+                try:
+                    air.receive(max(0, sent + JOIN_DRAIN_WINDOW - time.monotonic()), is_join_accept)
+                    outcome = 'late join-accept drained'
+                except TimeoutError:
+                    outcome = 'join-accept absent'
+                continue
+            delay = time.monotonic() - sent
+            if delay > JOIN_WINDOW:
+                outcome = 'late join-accept drained'
+                continue
+            crc_ok = _crc_ok_count(vm, marker, delivered)
+            session.accept_join(reply)
+            outcome = 'join-accept verified'
+            return delivered, crc_ok
+        finally:
+            if delay is None:
+                delay = time.monotonic() - sent
+            log(f'{eui} join attempt {attempt}/{JOIN_ATTEMPTS} after {delay:.2f} s: {outcome}')
+    raise RuntimeError(f'{eui}: join-accept absent after {JOIN_ATTEMPTS} attempts')
+
+
+def inject(vm, air, sessions, *, log=print):
+    air.begin_case()
+    delivered = crc_ok = 0
+    for eui,session in sessions.items():
+        join_delivered, join_crc_ok = _join(vm, air, eui, session, log)
+        delivered += join_delivered
+        crc_ok += join_crc_ok
         delivered += air.send(session.uplink(STREGA if eui==VALVE else LSN50,1,fport=4 if eui==VALVE else 11))
         query = (f"SELECT EXISTS(SELECT 1 FROM device_data WHERE upper(deveui)='{eui}' AND bat_pct=100);" if eui==VALVE else
                  f"SELECT EXISTS(SELECT 1 FROM watermark_readings WHERE upper(deveui)='{eui}' AND soil_temp_c=12.5);")
         _wait_history(vm,query,'1')
-    return _radio_evidence(vm, marker, delivered)
+    if not delivered:
+        raise RuntimeError('WM1302 model delivered zero frames')
+    return f'WM1302 model delivered={delivered}, Concentratord CRC_OK={crc_ok} (join windows)'
 
 
-def run_uplinks(vm, air, password):
+def run_uplinks(vm, air, password, *, log=print):
     configure_gateway(vm)
     sessions = register(vm, password)
-    return sessions, inject(vm, air, sessions)
+    return sessions, inject(vm, air, sessions, log=log)
 
 
 def run_valve(vm, air, session, gui_open):

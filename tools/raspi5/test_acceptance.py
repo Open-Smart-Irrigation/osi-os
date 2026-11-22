@@ -35,6 +35,14 @@ COMMIT = b'node-red.init: committed flows.json digest=' + DIGEST + b' stamp=2026
 
 
 class RadioTests(unittest.TestCase):
+    def run_log_script(self, script, root, ram_log):
+        script = script.replace('/var/etc/chirpstack-concentratord/concentratord.toml',
+                                quote(str(root/'concentratord.toml')))
+        script = script.replace('/data/log/', quote(str(root)) + '/')
+        fixture = f"logread() {{ printf '%s\\n' {quote(ram_log)}; }}\n"
+        result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+        return result.returncode, result.stdout.strip()
+
     def request(self, wire):
         header = wire.read(8)
         self.assertEqual(header[1:], b'\xfe\x07\x35\xc8\x01\x60\x00')
@@ -173,6 +181,97 @@ class RadioTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
             radio_suite.inject(vm, Mock(), {})
 
+    def join_fixture(self, arrivals):
+        now = 0
+        deadline = None
+        air = Mock()
+        valve = Mock(devnonce=1)
+        valve.join_request.side_effect = lambda: bytes([valve.devnonce])
+        valve.uplink.return_value = b'data'
+        replies = iter(arrivals)
+
+        def send(frame):
+            nonlocal deadline
+            if frame != b'data':
+                delay = next(replies)
+                deadline = None if delay is None else now + delay
+            return 1
+
+        def receive(timeout, matches):
+            nonlocal now, deadline
+            if deadline is not None and deadline <= now + timeout:
+                now, deadline = deadline, None
+                reply = b'\x20'
+                self.assertTrue(matches(reply))
+                return reply
+            now += timeout
+            raise TimeoutError
+
+        air.send.side_effect = send
+        air.receive.side_effect = receive
+        return air, valve, lambda: now
+
+    def test_wrapped_join_drains_then_retries_with_fresh_devnonce(self):
+        air, valve, clock = self.join_fixture([139.31, 5.1])
+        vm = Mock()
+        vm.command.return_value = (0, '1')
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock),
+              patch.object(radio_suite, '_wait_history'), redirect_stdout(output)):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'data'])
+        self.assertEqual([round(call.args[0], 2) for call in air.receive.call_args_list], [40, 110, 40])
+        valve.accept_join.assert_called_once()
+        self.assertIn('attempt 1/3 after 139.31 s', output.getvalue())
+        self.assertIn('attempt 2/3 after 5.10 s', output.getvalue())
+
+    def test_three_missed_accepts_fail(self):
+        air, valve, clock = self.join_fixture([None, None, None])
+        vm = Mock()
+        vm.command.return_value = (0, '1')
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(output),
+              self.assertRaisesRegex(RuntimeError, 'join-accept absent after 3 attempts')):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        self.assertEqual(clock(), 450)
+        self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'\x03'])
+        for attempt in range(1, 4):
+            self.assertIn(f'attempt {attempt}/3 after 150.00 s', output.getvalue())
+        valve.accept_join.assert_not_called()
+
+    def test_retry_requires_crc_ok_for_its_own_join(self):
+        air, valve, clock = self.join_fixture([139.31, 5.1])
+        vm = Mock()
+        vm.command.side_effect = [(0, ''), (0, ''), (0, '0')]
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(io.StringIO()),
+              self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0')):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        first, second, count = [call.args[0] for call in vm.command.call_args_list]
+        self.assertNotEqual(first, second)
+        self.assertNotIn(first.split()[-1], count)
+        self.assertIn(second.split()[-1], count)
+        valve.accept_join.assert_not_called()
+        valve.uplink.assert_not_called()
+
+    def test_diagnostics_report_persistent_and_ram_counts_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipts = Path(directory)
+            (receipts/'osi-system.log.old').write_text('Frame received, uplink_id: 81\n')
+            (receipts/'osi-system.log').write_text('Frame received, uplink_id: 82\n')
+
+            def run_uplinks_case(label, fn):
+                if label == 'WM1302 uplinks':
+                    with self.assertRaisesRegex(RuntimeError, 'fixture radio failure'):
+                        fn()
+
+            vm = SimpleNamespace(command=lambda script: self.run_log_script(script, receipts, 'JoinRequest'),
+                                 radio=None, receipts=receipts)
+            with patch.object(radio_suite, 'run_uplinks', side_effect=RuntimeError('fixture radio failure')):
+                acceptance.stock_cases(vm, None, run_uplinks_case)
+            diag = (receipts/'radio-diagnostics.log').read_text()
+            self.assertIn('Frame received, uplink_id: 2', diag)
+            self.assertIn('logread\nJoinRequest 1', diag)
+
     def test_crc_count_matches_the_syslog_tag_and_case_window(self):
         prefix = 'Sat Nov 21 20:00:00 2026 '
         marker = prefix + 'user.notice osi-radio-suite: fixture'
@@ -180,28 +279,47 @@ class RadioTests(unittest.TestCase):
         valid = prefix + 'user.info ' + daemon
         foreign = prefix + 'user.info unrelated[42]: printed ' + daemon
         with tempfile.TemporaryDirectory() as directory:
-            config = Path(directory) / 'concentratord.toml'
+            root = Path(directory)
+            config = root/'concentratord.toml'
             config.write_text('disable_crc_filter=false\n')
-            for current in ([foreign], [foreign, valid]):
-                log = '\n'.join([valid, marker, *current])
+            for source in ('persistent', 'logread'):
+                for current in ([foreign], [foreign, valid]):
+                    with self.subTest(source=source, has_frame=valid in current):
+                        log = '\n'.join([valid, marker, *current])
+                        rotated = root/'osi-system.log.old'
+                        active = root/'osi-system.log'
+                        if source == 'persistent':
+                            rotated.write_text(valid + '\n' + marker + '\n')
+                            active.write_text('\n'.join(current) + '\n')
+                            log = valid
+                        else:
+                            rotated.unlink(missing_ok=True)
+                            active.unlink(missing_ok=True)
 
-                def command(script):
-                    script = script.replace('/var/etc/chirpstack-concentratord/concentratord.toml',
-                                            quote(str(config)))
-                    fixture = f"logread() {{ printf '%s\\n' {quote(log)}; }}\n"
-                    result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
-                    return result.returncode, result.stdout.strip()
-
-                vm = SimpleNamespace(command=command)
-                if current[-1] == valid:
-                    self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
-                                     'WM1302 model delivered=1, Concentratord CRC_OK=1')
-                else:
-                    with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
-                        radio_suite._radio_evidence(vm, 'fixture', 1)
+                        vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, log))
+                        if valid in current:
+                            self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
+                                             'WM1302 model delivered=1, Concentratord CRC_OK=1')
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+                                radio_suite._radio_evidence(vm, 'fixture', 1)
 
 
 class FlowTests(unittest.TestCase):
+    def test_restart_wait_covers_factory_first_boot(self):
+        def command(script, timeout):
+            self.assertEqual(timeout, 420)
+            # With fast curls and two seconds between polls, the 124th
+            # poll represents the measured 246 s console-to-401 delay.
+            fixture = """polls=0
+curl() { [ "$polls" -ge 123 ] && printf 401; }
+sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
+"""
+            result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+            return result.returncode, result.stdout.strip()
+
+        upgrade_suite.wait_for_api(SimpleNamespace(command=command))
+
     def test_candidate_gate_fails_when_pi5_workload_omits_a_required_case(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -219,7 +337,8 @@ class FlowTests(unittest.TestCase):
                 (folder/image.name).write_bytes(image.read_bytes())
                 (folder/'SHA256SUMS').write_text(f'{digest}  {image.name}\n')
 
-            def stock(_guest, _args, record, **_options):
+            def stock(_guest, _args, record, *, log, **_options):
+                log('fixture radio attempt evidence')
                 for label in ('Cold boot', 'First account and login', 'WM1302 uplinks',
                               'Valve open and outcome', 'Reboot persistence', 'Power cut 1', 'Power cut 3'):
                     record(label, lambda: None)
@@ -260,6 +379,7 @@ class FlowTests(unittest.TestCase):
             result = result_file.read_text()
             revision = acceptance.tools_checkout_revision(None)
             self.assertIn(f'Tools revision: {revision}', result)
+            self.assertIn('fixture radio attempt evidence', result)
             self.assertIn(f'tools_revision={revision}', result_file.with_name('inputs.txt').read_text())
             self.assertEqual(status, 1, result)
             self.assertIn('Power cut 2 | REQUIRED | NOT RUN | FAIL', result)
