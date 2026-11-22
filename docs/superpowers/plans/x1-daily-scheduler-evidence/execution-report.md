@@ -153,7 +153,10 @@ The lead granted the flows.json reservation at 15:31Z, after EB2 #701 merged as 
 | Patch verified (no re-render needed) | 15:33:30 |
 | Handoff applied, both profiles | 15:33:38 |
 | Handoff check green after receipt refresh | 15:44:35 |
+| Push 1 (`64ca3674`) | 15:44:55 |
+| Local gates done | 15:56:05 |
 
 ### Push log
 
 1. Push 1 (~15:45Z): merge, applied handoff and refreshed receipt. Green before push: parity (378), additional (42), sequences (50), handoff (integrated mode), boundaries, prepared-adapter tests. Still running or not yet run: prepared-adapter guards and the repo verifiers.
+2. Push 2 (~15:57Z): local gates done, report updated. Passed locally: parity (378), additional (42), sequences (50), handoff (integrated mode), boundaries, prepared-adapter tests (5 suites, 427 s), `verify-profile-parity`, `verify-flows-size-ratchet` (HEAD 3,041,858 vs main 3,085,262 embedded chars, so no growth), `verify-no-new-silent-catch` (59/320 per profile, baseline 59), `verify-no-stray-ddl` (694 = main), `verify-runtime-schema-parity`, `verify-doc-hygiene`, `verify-flows-fn-parse`, bare-require scan, `test-flows-wiring`, `check-mqtt-topics.sh`, `verify-helper-registration` and `verify-agents-size`. No `OSI_*_BASE_REF` pin was needed: the branch contains `origin/main`. Left to exact-head CI by CTO order (no osi-heavy, machine restart): the prepared-adapter guards step, which runs the full `verify-sync-flow`, plus both native Node-RED runtimes (Node 20.18.3 with Node-RED 3.1.15 and 4.0.9) and their extra-port, duplicate-send and Catch-wire negative controls. A local guards run started outside osi-heavy was stopped mid-`verify-sync-flow` for that reason.
