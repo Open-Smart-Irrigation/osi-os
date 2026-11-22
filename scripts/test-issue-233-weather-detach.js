@@ -7,6 +7,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { accountGatewayIo } = require('./lib/installation-osi-lib');
 const Module = require('node:module');
 const { DatabaseSync } = require('node:sqlite');
 const {
@@ -36,8 +37,17 @@ function policyFor(profile) {
   return require(path.join(profile.nodeRedModules, 'osi-irrigation-policy'));
 }
 
+// EB2 puts an account-recovery guard in front of the ACK MQTT node. The
+// traversal runs it with the real installation helper on a clean gateway.
+const CLEAN_GATEWAY_FS = { existsSync: () => false, readdirSync: () => [] };
+
 function wiring(profile) {
-  const mqttAck = loadNode('weather-zones-command-apply-fn', profile.flowsPath).wires[1][0];
+  const guard = loadNode(loadNode('weather-zones-command-apply-fn', profile.flowsPath).wires[1][0], profile.flowsPath);
+  assert.match(guard.id, /^account-cloud-guard-/);
+  assert.equal(guard.wires.length, 1);
+  assert.equal(guard.wires[0].length, 1);
+  const mqttAck = guard.wires[0][0];
+  assert.equal(guard.id, 'account-cloud-guard-' + mqttAck);
   assert.equal(loadNode(mqttAck, profile.flowsPath).type, 'mqtt out');
   return { mqttAck, legacySql: loadNode(ADAPTER, profile.flowsPath).wires[0][0] };
 }
@@ -144,7 +154,10 @@ function productionFacade(raw, beforeBegin) {
 
 function libsFor(profile, facade, policy) {
   const Database = function Database() { return facade; };
-  const osiLibModules = { 'osi-db-helper': { Database } };
+  const osiLibModules = {
+    'osi-db-helper': { Database },
+    installation: require(path.join(profile.nodeRedModules, 'osi-installation-helper')),
+  };
   if (policy) osiLibModules['osi-irrigation-policy'] = policy;
   return { nodeRedModules: profile.nodeRedModules, osiLibModules, libOverrides: { osiDb: { Database } } };
 }
@@ -202,7 +215,7 @@ async function traverse(profile, startId, msg, raw, options = {}) {
     } else if (node.type === 'function') {
       current = id;
       const call = await executeFunction(node, Object.assign({
-        msg: value, db: raw, flowState, env, globals: options.globals || {}
+        msg: value, db: raw, flowState, env, globals: Object.assign({ fs: CLEAN_GATEWAY_FS }, options.globals || {})
       }, libs));
       out.errors.push(...call.errors.map((error) => id + ': ' + error));
       out.warnings.push(...call.warnings.map((warning) => id + ': ' + warning));
@@ -887,9 +900,12 @@ async function accountCase(profile) {
       weatherEvents: weatherEvents(f.first),
       state: weatherVersion(f.first)
     };
+    // Disconnect writes the account journal and UCI MQTT section (EB2); it gets
+    // an in-memory gateway instead of the host's fs and child_process.
+    const io = accountGatewayIo();
     const call = await executeFunction(loadNode('al-unlink-db', profile.flowsPath),
-      Object.assign({ msg: { _unlinkAuth: { userId: 1, username: 'admin1' } }, db: f.first }, libs));
-    assert.ok(call.result[0]);
+      Object.assign({ msg: { _unlinkAuth: { userId: 1, username: 'admin1' } }, db: f.first, globals: { fs: io.fs, cp: io.cp } }, libs));
+    assert.ok(call.result[0], 'disconnect must continue: ' + JSON.stringify(call.result[1] && call.result[1].payload));
     const format = await executeFunction(loadNode('al-unlink-format', profile.flowsPath),
       Object.assign({ msg: call.result[0], db: f.first }, libs));
     assert.equal(format.result.statusCode, 200);
