@@ -105,6 +105,8 @@ jobs:
       - name: Merge allowance preservation checker tests
         run: node --test scripts/verify-merge-allowance-preservation.test.js
       - run: node scripts/test-history-helper.js
+      - name: Nightly CSV day selection across DST transitions, both profiles
+        run: node scripts/test-history-dst-day-selection.js
       - name: All-zones history export and saved-view delete, both profiles
         run: node --test scripts/test-history-all-zones-export.js
       - name: Install pinned history HTTP response fixture runtime

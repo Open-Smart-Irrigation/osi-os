@@ -3871,8 +3871,10 @@ async function runRollupJob(db, options = {}) {
       if (exportDir) {
         const timezone = zone.timezone || 'UTC';
         const dayEndMs = startOfLocalDayMs(nowMs, timezone);
-        const dayStartMs = dayEndMs - (24 * 60 * 60 * 1000);
-        const day = localDateKey(dayStartMs, timezone);
+        // The completed day is the local calendar date that ends at that
+        // midnight instant; DST days are 23 or 25 hours long, so no fixed-hour
+        // offset can select it.
+        const day = localDateKey(dayEndMs - 1, timezone);
         const csvRows = await buildZoneCsvRows(db, zone, day, dayEndMs);
         await writeZoneCsv({ exportDir, zone, day, rawRows: csvRows.rawRows, hourlyRows: csvRows.hourlyRows, dailyRows: csvRows.dailyRows });
         await rotateZoneCsv({ exportDir, zone, nowMs, retentionDays });
