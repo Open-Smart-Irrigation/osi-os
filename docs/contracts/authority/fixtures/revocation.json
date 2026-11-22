@@ -2317,7 +2317,12 @@
           "token": "old"
         },
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": false,
           "incarnation": "unlink-tombstone",
           "revision": 0,
@@ -2410,7 +2415,12 @@
       },
       "steps": [
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": false,
           "incarnation": "unlink-tombstone",
           "revision": 0,
@@ -2428,7 +2438,12 @@
           "transport_revision": 1
         },
         {
+          "op": "begin_link",
+          "ticket": "link-2"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-2",
           "linked": true,
           "incarnation": "link-b",
           "revision": 1,
@@ -2486,6 +2501,161 @@
       ]
     },
     {
+      "id": "overlapping-relink-delayed-finalize-cannot-overwrite",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "begin_link",
+          "ticket": "relink-slow"
+        },
+        {
+          "op": "begin_link",
+          "ticket": "relink-fast"
+        },
+        {
+          "op": "link_transition",
+          "ticket": "relink-fast",
+          "linked": true,
+          "incarnation": "link-c",
+          "revision": 1,
+          "credential": "credential-account-c",
+          "cloud_account": "cloud-c",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          },
+          "transport_token": "transport-link-c",
+          "transport_revision": 1
+        },
+        {
+          "op": "link_transition",
+          "ticket": "relink-slow",
+          "linked": true,
+          "incarnation": "link-b",
+          "revision": 1,
+          "credential": "credential-account-b",
+          "cloud_account": "cloud-b",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_link_finalize"
+          },
+          "transport_token": "transport-link-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 8,
+            "linked": true,
+            "link_incarnation": "link-c",
+            "cloud_account": "cloud-c",
+            "credential": "credential-account-c",
+            "credential_revision": 1,
+            "transport_token": "transport-link-c",
+            "transport_revision": 1,
+            "used_incarnations": [
+              "link-a",
+              "link-c"
+            ]
+          }
+        },
+        {
+          "op": "login",
+          "token": "slow",
+          "credential": "credential-account-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        },
+        {
+          "op": "login",
+          "token": "fast",
+          "credential": "credential-account-c",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-c",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "link_transition",
+          "ticket": "relink-slow",
+          "linked": true,
+          "incarnation": "link-b",
+          "revision": 1,
+          "credential": "credential-account-b",
+          "cloud_account": "cloud-b",
+          "installation": "installation-a",
+          "gateway": "gateway-a",
+          "scheme": "v2",
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "link_context_not_captured"
+          },
+          "transport_token": "transport-link-b",
+          "transport_revision": 1
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 8,
+            "link_incarnation": "link-c",
+            "cloud_account": "cloud-c"
+          }
+        }
+      ]
+    },
+    {
       "id": "link-transition-rollback-atomic",
       "initial": {
         "account_uuid": "11111111-1111-4111-8111-111111111111",
@@ -2525,7 +2695,12 @@
       },
       "steps": [
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": true,
           "incarnation": "link-b",
           "revision": 1,
@@ -2731,7 +2906,12 @@
       },
       "steps": [
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": false,
           "incarnation": "unlink-tombstone",
           "revision": 0,
@@ -2749,7 +2929,12 @@
           "transport_revision": 1
         },
         {
+          "op": "begin_link",
+          "ticket": "link-2"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-2",
           "linked": true,
           "incarnation": "link-b",
           "revision": 1,
@@ -2830,7 +3015,12 @@
           "token": "old"
         },
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": true,
           "incarnation": "identity-b",
           "revision": 1,
@@ -2909,7 +3099,12 @@
           "token": "old"
         },
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": true,
           "incarnation": "identity-b",
           "revision": 1,
@@ -3667,7 +3862,12 @@
           "token": "old"
         },
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": true,
           "incarnation": "rebind-b",
           "revision": 1,
@@ -3753,7 +3953,12 @@
           "token": "old"
         },
         {
+          "op": "begin_link",
+          "ticket": "link-1"
+        },
+        {
           "op": "link_transition",
+          "ticket": "link-1",
           "linked": true,
           "incarnation": "rebind-b",
           "revision": 1,

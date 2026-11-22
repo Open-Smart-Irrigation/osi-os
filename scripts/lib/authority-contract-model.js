@@ -94,6 +94,11 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
   const s = clone(initial); const sessions = new Map(); const logins = new Map();
   const usedLinks = new Set(s.used_incarnations);
   const scopeLoads = new Map();
+  // Link/relink finalize is a compare-and-set against the committed link tuple
+  // captured before remote link work (v1.md, "Link incarnation and credential ordering").
+  const linkTickets = new Map();
+  const linkTuple = () => JSON.stringify([s.linked, s.link_incarnation, s.account_uuid, s.cloud_account, s.installation, s.gateway,
+    s.scheme, s.credential_revision, s.transport_token, s.transport_revision, s.generation]);
   const credentialPayload = e => JSON.stringify({ credential: e.credential, scheme: e.scheme, ...(e.enabled === undefined ? {} : { enabled: e.enabled }), ...(e.role === undefined ? {} : { role: e.role }) });
   let acceptedCredentialPayload = credentialPayload(s.credential_snapshot);
   const input = token => merge(defaults, {
@@ -148,7 +153,12 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         break;
       }
       case 'login': result = loginValid(step) ? { ...allow(0), generation: s.generation } : deny('invalid_credential_context'); if (result.decision === 'allow') issue(step.token); break;
-      case 'link_transition':
+      case 'begin_link': linkTickets.set(step.ticket, linkTuple()); result = allow(0); break;
+      case 'link_transition': {
+        const captured = linkTickets.get(step.ticket);
+        linkTickets.delete(step.ticket);
+        if (captured === undefined) { result = deny('link_context_not_captured'); break; }
+        if (captured !== linkTuple()) { result = deny('stale_link_finalize'); break; }
         if (!step.commit) { result = deny('mutation_rollback'); break; }
         if (usedLinks.has(step.incarnation)) { result = deny('incarnation_reuse'); break; }
         usedLinks.add(step.incarnation);
@@ -157,6 +167,7 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         s.credential_snapshot = { credential: s.credential, scheme: s.scheme };
         acceptedCredentialPayload = credentialPayload(s.credential_snapshot);
         s.generation++; result = { decision: 'committed', effects: 0, generation: s.generation }; break;
+      }
       case 'credential_delivery': {
         const e = step.envelope;
         if (!s.connected) { result = { decision: 'pending_offline', effects: 0 }; break; }

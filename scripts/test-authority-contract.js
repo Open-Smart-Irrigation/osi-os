@@ -270,6 +270,12 @@ function verify() {
   const deliveredOffline = mutantModel("if (!s.connected) { result = { decision: 'pending_offline', effects: 0 }; break; }", '');
   assert.throws(() => deliveredOffline.runLifecycle(offline.initial, offline.steps, authority.valid_defaults,
     (actual, expected, op) => projection(actual, expected, op)), /decision|generation/);
+  // Link finalize must compare against the captured context, not only refuse incarnation reuse.
+  const overlapping = revocation.cases.find(c => c.id === 'overlapping-relink-delayed-finalize-cannot-overwrite');
+  assert.ok(overlapping, 'overlapping link finalize case');
+  const uncheckedFinalize = mutantModel("if (captured !== linkTuple()) { result = deny('stale_link_finalize'); break; }", '');
+  assert.throws(() => uncheckedFinalize.runLifecycle(overlapping.initial, overlapping.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|reason/);
   const missingBootstrap = upgrades.cases.find(c => c.id === 'missing-bootstrap-operator-fallback');
   const selectedSurvivor = mutantModel('state.accounts.find(a => a.id === 1)', 'state.accounts.reduce((first, a) => !first || a.id < first.id ? a : first, null)');
   assert.throws(() => selectedSurvivor.runAdminUpgrade(missingBootstrap.initial, missingBootstrap.steps,

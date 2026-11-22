@@ -1136,6 +1136,23 @@
                 "type": "object",
                 "properties": {
                   "op": {
+                    "const": "begin_link"
+                  },
+                  "ticket": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "op",
+                  "ticket"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
                     "const": "link_transition"
                   },
                   "linked": {
@@ -1174,6 +1191,11 @@
                   },
                   "transport_revision": {
                     "type": "integer"
+                  },
+                  "ticket": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Ticket from the begin_link step that captured the committed link tuple before remote link work."
                   }
                 },
                 "required": [
@@ -1187,6 +1209,7 @@
                   "op",
                   "revision",
                   "scheme",
+                  "ticket",
                   "transport_revision",
                   "transport_token"
                 ],
