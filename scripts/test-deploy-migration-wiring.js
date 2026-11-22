@@ -276,7 +276,7 @@ test('deploy migration wiring flips the payload BEFORE restarting Node-RED on mi
   // must skip the flip when run_schema_migration already did it, and only
   // flip there for the no-live-DB / no-migration-needed path.
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
-  const nodeRedRestartAfterFlipIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
+  const nodeRedRestartAfterFlipIdx = deploy.indexOf('repair_health_start restart || true', healthCheckHeaderIdx);
   const healthCheckBlock = deploy.slice(healthCheckHeaderIdx, nodeRedRestartAfterFlipIdx);
   assert.match(healthCheckBlock, /PAYLOAD_FLIPPED/, 'the post-migration flip block must consult PAYLOAD_FLIPPED before re-flipping');
 
@@ -324,7 +324,7 @@ test('deploy migration wiring: a boot-node "devices rebuild ABORTED" log line du
   // A refused devices-CHECK rebuild does not stop Node-RED or its HTTP
   // listener, so /gui reachability alone cannot prove schema init succeeded.
   const healthCheckHeaderIdx = indexOf('--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---');
-  const restartIdx = deploy.indexOf('/etc/init.d/node-red restart || true', healthCheckHeaderIdx);
+  const restartIdx = deploy.indexOf('repair_health_start restart || true', healthCheckHeaderIdx);
   const markIdx = deploy.indexOf('mark_node_red_log', healthCheckHeaderIdx);
   const checkCallIdx = deploy.indexOf('check_node_red_start "${NODE_RED_INIT_TIMEOUT:-45}"', healthCheckHeaderIdx);
   const failedIdx = deploy.indexOf('PROBE_OK=1', checkCallIdx);
@@ -374,7 +374,7 @@ test('rollback waits for the same Node-RED readiness used by forward activation'
   const rollbackStart = indexOf('    # payload rollback begin');
   const rollbackEnd = indexOf('    # payload rollback end', rollbackStart);
   const rollback = deploy.slice(rollbackStart, rollbackEnd);
-  const restartIdx = rollback.indexOf('NODE_RED_INIT" restart');
+  const restartIdx = rollback.indexOf('if ! repair_health_start restart; then');
   const readinessIdx = rollback.indexOf('wait_for_node_red_health');
   assert.ok(restartIdx >= 0, 'rollback must restart Node-RED after restoring the pair');
   assert.ok(readinessIdx > restartIdx, 'rollback must wait for Node-RED readiness after restart');

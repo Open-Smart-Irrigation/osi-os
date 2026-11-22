@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const fs = require('node:fs');
+const { OLD_MARKERS, assertRepairHealth, retiredPayloadIdentity } = require('./recovery-hold');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { execFileSync } = require('node:child_process');
@@ -187,7 +188,9 @@ function recordHold(marker) {
   syncDirectory(path.dirname(marker));
 }
 
-function clearHold(marker) {
+function clearHold(marker, owned) {
+  const current = fs.lstatSync(marker);
+  if (!current.isFile() || current.dev !== owned.dev || current.ino !== owned.ino) throw new Error('database recovery hold changed; preserve it');
   fs.unlinkSync(marker);
   try {
     syncDirectory(path.dirname(marker));
@@ -201,8 +204,13 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   const { recentBackupMaxAgeMs = 24 * 3600 * 1000, backupKeep = 5, now = Date.now() } = opts;
   const marker = dbPath + '.osi-recovery';
 
-  if (fs.lstatSync(marker, { throwIfNoEntry: false })) {
-    return { status: 'held', marker };
+  for (const suffix of ['.osi-recovery', ...OLD_MARKERS]) {
+    if (fs.lstatSync(dbPath + suffix, { throwIfNoEntry: false })) return { status: 'held', marker: dbPath + suffix };
+  }
+  if (!fs.lstatSync(dbPath, { throwIfNoEntry: false })) {
+    for (const suffix of ['-wal', '-shm', '-journal']) {
+      if (fs.lstatSync(dbPath + suffix, { throwIfNoEntry: false })) return { status: 'held', marker: dbPath + suffix };
+    }
   }
   const live = fs.lstatSync(dbPath, { throwIfNoEntry: false });
   if (!live) return { status: 'ok-missing' };
@@ -219,17 +227,18 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
   }
 
   recordHold(marker);
+  const ownedHold = fs.lstatSync(marker);
   // A concurrent recovery can finish between our first check and acquiring
   // the hold. Recheck before replacing anything under the exclusive marker.
   let liveRecovered;
   try {
     liveRecovered = liveQuickCheck(dbPath);
   } catch (error) {
-    clearHold(marker);
+    clearHold(marker, ownedHold);
     throw error;
   }
   if (liveRecovered) {
-    clearHold(marker);
+    clearHold(marker, ownedHold);
     return { status: 'ok' };
   }
   const goodBackup = findPassingBackup(dbPath);
@@ -252,6 +261,11 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
       fs.closeSync(fd);
     }
 
+    for (const suffix of OLD_MARKERS) {
+      if (fs.lstatSync(dbPath + suffix, { throwIfNoEntry: false })) return { status: 'held', marker: dbPath + suffix };
+    }
+    const currentHold = fs.lstatSync(marker, { throwIfNoEntry: false });
+    if (!currentHold?.isFile() || currentHold.dev !== ownedHold.dev || currentHold.ino !== ownedHold.ino) return { status: 'held', marker };
     const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
     const quarantinedTo = quarantine(dbPath, stamp);
     syncDirectory(dir);
@@ -263,14 +277,32 @@ async function runBootIntegrityCheck(dbPath, opts = {}) {
       quarantinedTo,
       timestamp: new Date(now).toISOString(),
     });
-    clearHold(marker);
+    clearHold(marker, ownedHold);
     return { status: 'recovered', restoredFrom: goodBackup, quarantinedTo, stampPath };
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
 }
 
-if (require.main === module) {
+function checkRepairHealth(dbPath, flowsPath) {
+  assertRepairHealth(dbPath, flowsPath);
+  const check = execFileSync('sqlite3', ['-init', '/dev/null', '-batch', '-bail', '-readonly', '-cmd', '.timeout 30000', dbPath, 'PRAGMA integrity_check; PRAGMA foreign_key_check;'], SQLITE_EXEC_OPTIONS).trim();
+  if (check !== 'ok') throw new Error('repaired database health check failed: ' + check);
+}
+
+function recordRepairHealth(dbPath, flowsPath) {
+  checkRepairHealth(dbPath, flowsPath);
+  const proof = { kind: 'legacy-device-retirement-health', ...retiredPayloadIdentity(flowsPath) };
+  publishAtomic(path.join(dbPath + '.osi-recovery', 'retirement-health.json'), file => fs.writeFileSync(file, JSON.stringify(proof) + '\n', { mode: 0o600 }));
+}
+
+if (require.main === module && process.argv[2] === '--record-repair-health') {
+  try { recordRepairHealth(process.argv[3], process.argv[4]); }
+  catch (error) { console.error('HELD: ' + error.message); process.exitCode = 1; }
+} else if (require.main === module && process.argv[2] === '--repair-health-check') {
+  try { checkRepairHealth(process.argv[3], process.argv[4]); }
+  catch (error) { console.error('HELD: ' + error.message); process.exitCode = 1; }
+} else if (require.main === module) {
   const dbPath = process.argv[2] || '/data/db/farming.db';
   runBootIntegrityCheck(dbPath).then(result => {
     console.error(`[osi-db-integrity] ${result.status}${result.restoredFrom ? ` (restored from ${result.restoredFrom})` : ''}${result.quarantinedTo ? ` (quarantined to ${result.quarantinedTo})` : ''}`);
@@ -282,4 +314,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runBootIntegrityCheck };
+module.exports = { runBootIntegrityCheck, checkRepairHealth, recordRepairHealth };

@@ -59,6 +59,10 @@ This skill never routes around change control: it does not grant permission to
 hand-edit ledger tables, reseed a live DB, or add schema behavior to the boot node
 outside the one sanctioned exception.
 
+The AGENTS.md-sanctioned offline `scripts/repair-legacy-device-fk.js` recovery
+also recomputes existing fingerprints, only on its fully proven repair copy
+before atomic publication. It never creates a migration or changes ledger rows.
+
 ## NEVER-do list
 
 | Never | Why |
