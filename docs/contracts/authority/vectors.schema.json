@@ -489,6 +489,20 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 1
+            },
+            "http_status": {
+              "enum": [
+                401,
+                409,
+                503
+              ],
+              "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+            },
+            "cloud_change_status": {
+              "enum": [
+                "superseded"
+              ],
+              "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
             }
           },
           "additionalProperties": true
@@ -682,7 +696,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   },
                   "exp_ms": {
                     "type": "integer"
@@ -718,7 +748,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -783,7 +829,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -801,7 +863,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -818,7 +896,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -849,7 +943,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   },
                   "legacy_hash_available": {
                     "type": "boolean"
@@ -877,7 +987,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -898,7 +1024,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -919,7 +1061,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -940,7 +1098,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -996,7 +1170,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1096,7 +1286,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   },
                   "account_mutation_authorized": {
                     "type": "boolean"
@@ -1129,7 +1335,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1190,7 +1412,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   },
                   "transport_token": {
                     "type": "string"
@@ -1235,7 +1473,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   },
                   "transport_revision": {
                     "type": "integer"
@@ -1276,7 +1530,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1301,7 +1571,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1326,7 +1612,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1367,7 +1669,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1541,7 +1859,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1577,7 +1911,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1594,7 +1944,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1611,7 +1977,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1767,7 +2149,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1944,7 +2342,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -1962,7 +2376,23 @@
                   },
                   "expected": {
                     "type": "object",
-                    "minProperties": 1
+                    "minProperties": 1,
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          401,
+                          409,
+                          503
+                        ],
+                        "description": "401 session refused; 409 local reset of a linked account; 503 authority store unavailable."
+                      },
+                      "cloud_change_status": {
+                        "enum": [
+                          "superseded"
+                        ],
+                        "description": "Cloud outcome for a queued credential change the edge refused as stale because a higher revision already committed; never reported applied."
+                      }
+                    }
                   }
                 },
                 "required": [

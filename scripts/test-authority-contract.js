@@ -283,6 +283,18 @@ function verify() {
     assert.doesNotMatch(r.revocation_path, /shared guard/, r.name);
     assert.match(r.revocation_path, /at apply/, r.name);
   }
+  // The command router rows split by command class: R1 writers, R3 owner/admin, R8b system actor.
+  for (const r of inventory.flow_state_consumers.filter(x => ['Route Command', 'Replay Pending Commands'].includes(x.name))) {
+    assert.match(r.revocation_path, /REBOOT and SET_FAN need the gateway owner or an enabled admin \(R3\)/, r.name);
+    assert.match(r.revocation_path, /FORCE_EDGE_SYNC and SYNC_LINKED_AUTH need the system actor bound to the gateway's own transport credential and current link \(R8b\)/, r.name);
+    assert.match(r.revocation_path, /current mapped enabled writer with current target scope \(R1 bounded stop continuation excepted\)/, r.name);
+    assert.match(r.revocation_path, /A missing human actor is refused/, r.name);
+  }
+  // Generation is part of the captured link tuple.
+  const generationOnly = revocation.cases.find(x => x.id === 'generation-only-commit-during-link-work-refuses-finalize');
+  assert.ok(generationOnly, 'generation-only link case');
+  assert.throws(() => mutantModel(', s.transport_revision, s.generation]);', ', s.transport_revision]);').runLifecycle(generationOnly.initial, generationOnly.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|reason/);
   // Review-thread regressions: each fix must be load-bearing.
   const lifecycleMutant = (before, after, id, pattern) => {
     const c = revocation.cases.find(x => x.id === id);

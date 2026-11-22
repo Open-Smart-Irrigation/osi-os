@@ -6370,7 +6370,7 @@
       "checks_today": [
         "msg._actorUserUuid = String(cmd.actor_user_uuid || cmd.actorUserUuid || '').trim() || null;"
       ],
-      "revocation_path": "REST pending command with no browser session: at apply, inside the apply transaction, authorize the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted); a missing actor is refused. Browser session generation checks apply only to local browser work.",
+      "revocation_path": "REST pending command with no browser session: authorize at apply, inside the apply transaction, by command class. Ordinary valve/zone/device commands need the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted). REBOOT and SET_FAN need the gateway owner or an enabled admin (R3). FORCE_EDGE_SYNC and SYNC_LINKED_AUTH need the system actor bound to the gateway's own transport credential and current link (R8b). A missing human actor is refused. Browser session generation checks apply only to local browser work.",
       "gaps": [
         "G1",
         "G4"
@@ -6516,7 +6516,7 @@
       "checks_today": [
         "actorUserUuid: cmd.actorUserUuid || cmd.actor_user_uuid || null,"
       ],
-      "revocation_path": "REST pending command with no browser session: at apply, inside the apply transaction, authorize the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted); a missing actor is refused. Browser session generation checks apply only to local browser work.",
+      "revocation_path": "REST pending command with no browser session: authorize at apply, inside the apply transaction, by command class. Ordinary valve/zone/device commands need the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted). REBOOT and SET_FAN need the gateway owner or an enabled admin (R3). FORCE_EDGE_SYNC and SYNC_LINKED_AUTH need the system actor bound to the gateway's own transport credential and current link (R8b). A missing human actor is refused. Browser session generation checks apply only to local browser work.",
       "gaps": [
         "G1",
         "G4"
