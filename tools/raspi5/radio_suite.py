@@ -226,6 +226,11 @@ def _concentratord_frames(vm, marker, channel=UPLINK):
     # to reach the file. Only the persistent log counts; the RAM ring is read
     # for the failure message.
     code, output = vm.command(rf"""grep -Eq '^ *disable_crc_filter *= *false *$' /var/etc/chirpstack-concentratord/concentratord.toml || {{ echo crc-filter-off; exit 0; }}
+# The stamp binding assumes the HAL's legacy timestamp correction; fine
+# timestamps select another one (sx1302_hal loragw_sx1302_timestamp.c).
+awk '/^[[:space:]]*\[/ {{ section = $0; gsub(/[[:space:]]/, "", section); next }}
+     section == "[gateway.fine_timestamp]" && /^[[:space:]]*enable[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/ {{ on = 1 }}
+     END {{ exit on ? 1 : 0 }}' /var/etc/chirpstack-concentratord/concentratord.toml || {{ echo fine-timestamp-on; exit 0; }}
 inode() {{ if [ -e "$1" ]; then set -- $(ls -i "$1"); echo "$1"; fi; }}
 window_logs() {{
     started=0
@@ -299,6 +304,9 @@ printf 'ram %s\n' "$(logread 2>/dev/null | frames | grep -c '^match ')"
         words = line.split()
         if words == ['crc-filter-off']:
             frames.error = 'disable_crc_filter is not false, so a logged frame does not prove a valid CRC'
+        elif words == ['fine-timestamp-on']:
+            frames.error = ('fine timestamps are enabled ([gateway.fine_timestamp] enable = true); '
+                            'the receipt assumes legacy timestamps')
         elif words == ['rotated-away']:
             frames.error = 'persistent log rotated past the attempt marker before the evidence was read'
         elif words == ['rotating']:

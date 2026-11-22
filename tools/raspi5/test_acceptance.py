@@ -342,7 +342,7 @@ class RadioTests(unittest.TestCase):
         air, valve, clock = self.join_fixture([5.0])
         send = air.send.side_effect
 
-        def send_join(frame, channel):
+        def send_join(frame, channel=radio_suite.UPLINK):
             delivered = send(frame, channel)
             air.last_stamp = 102000000 * 32 % (1 << 32)
             return delivered
@@ -751,6 +751,28 @@ class RadioTests(unittest.TestCase):
                     frames = radio_suite._concentratord_frames(vm, self.snapshot(root/'osi-system.log', 0))
                     self.assertEqual(frames.matched, matched)
                     self.assertEqual(frames.ram_matched, ram_matched)
+
+    def test_window_requires_legacy_timestamps(self):
+        settings = (
+            ('section absent', '', ''),
+            ('enable = false', '[gateway.fine_timestamp]\nenable = false\nsource = "ALL"\n', ''),
+            ('enable elsewhere', '[gateway.other]\nenable = true\n[gateway.fine_timestamp]\nenable=false\n', ''),
+            ('enable = true', '[gateway.fine_timestamp]\nenable = true\nsource = "ALL"\n', 'fine timestamps are enabled'),
+            ('enable=true, comment', '[gateway]\n[ gateway.fine_timestamp ]\n  enable=true # PPS\n',
+             'fine timestamps are enabled'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for name, toml, error in settings:
+                with self.subTest(name=name):
+                    root = self.log_root(directory, [self.marker_line('fixture'), self.frame_line(81)])
+                    (root/'concentratord.toml').write_text('disable_crc_filter = false\n' + toml)
+                    frames = radio_suite._concentratord_frames(self.guest_logs(root),
+                                                               self.snapshot(root/'osi-system.log', 0))
+                    if error:
+                        self.assertIn(error, frames.error)
+                        self.assertEqual(frames.matched, [])
+                    else:
+                        self.assertEqual((frames.error, frames.matched), ('', [('81', 137293609)]))
 
     def test_window_requires_the_crc_filter(self):
         with tempfile.TemporaryDirectory() as directory:

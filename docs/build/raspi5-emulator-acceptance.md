@@ -92,7 +92,10 @@ received only with three parts:
    (RX1) or 6 s (RX2) after the frame corroborates it and is reported, but is
    not required. Concentratord 4.4.8 logs
    `Frame received` at INFO only after its CRC filter, and the image sets
-   `disable_crc_filter=false`, so the line proves a CRC-valid frame.
+   `disable_crc_filter=false`, so the line proves a CRC-valid frame. The
+   stamp binding assumes the HAL's legacy timestamps, so the case fails
+   with a named reason if the guest's `concentratord.toml` enables
+   `[gateway.fine_timestamp]`. The image leaves that section unset.
 2. The change in ChirpStack's state for that DevEUI across the send, read from
    `/srv/chirpstack/chirpstack.sqlite`: the attempt's DevNonce absent from
    `device_keys.dev_nonces` before and present after, `device_keys.join_nonce`
