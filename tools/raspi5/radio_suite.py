@@ -141,17 +141,25 @@ def _crc_ok_count(vm, marker, delivered):
     if delivered <= 0:
         raise RuntimeError('WM1302 model delivered zero frames')
     # Both sinks use five timestamp fields, then facility.level, tag and
-    # message. Concentratord logs the frame after the CRC filter.
+    # message. Concentratord logs the frame after the CRC filter. The RAM
+    # ring can have newer frames, and frames in both sinks share an uplink ID.
     code, count = vm.command(rf"""set -e
 grep -Eq '^ *disable_crc_filter *= *false *$' /var/etc/chirpstack-concentratord/concentratord.toml
 {PERSISTENT_LOGS}
-count_crc_ok() {{ awk -v marker='{marker}' '
-$6 == "user.notice" && $7 == "osi-radio-suite:" && $8 == marker && NF == 8 {{ seen=1; next }}
+{{
+    persistent_logs || true
+    printf '\n%s\n' '--- logread ---'
+    logread || true
+}} | awk -v marker='{marker}' '
+$0 == "--- logread ---" {{ seen=0; next }}
+$6 == "user.notice" && $7 == "osi-radio-suite:" && $8 == marker && NF == 8 {{ marked=seen=1; next }}
 seen && $6 == "user.info" && $7 ~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ &&
-    $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" {{ count++ }}
-END {{ if (!seen) exit 1; print count+0 }}'
-}}
-persistent_logs | count_crc_ok || logread | count_crc_ok
+    $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" && $11 ~ /^[0-9]+,?$/ {{
+        id=$11
+        sub(/,$/, "", id)
+        if (!(id in uplinks)) {{ uplinks[id]=1; count++ }}
+    }}
+END {{ if (!marked) exit 1; print count+0 }}'
 """)
     if code or not count.isdecimal():
         raise RuntimeError(f'Concentratord CRC_OK count unavailable (model delivered {delivered})')

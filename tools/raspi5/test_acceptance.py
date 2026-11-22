@@ -304,6 +304,29 @@ class RadioTests(unittest.TestCase):
                             with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
                                 radio_suite._radio_evidence(vm, 'fixture', 1)
 
+    def test_crc_count_combines_attempt_evidence_across_log_sinks(self):
+        prefix = 'Sat Nov 21 20:00:00 2026 user.'
+        marker = prefix + 'notice osi-radio-suite: fixture'
+        frame = prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: '
+        first, second = frame + '81, count_us: 100', frame + '82, count_us: 200'
+        cases = (
+            ('persistent log lags', [marker], [marker, first], 1),
+            ('sinks overlap', [marker, first], [marker, first, second], 2),
+            ('RAM has no attempt marker', [marker], [first], 0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'concentratord.toml').write_text('disable_crc_filter=false\n')
+            for name, persistent, ram, expected in cases:
+                with self.subTest(name=name):
+                    (root/'osi-system.log').write_text('\n'.join(persistent) + '\n')
+                    vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, '\n'.join(ram)))
+                    if expected:
+                        self.assertEqual(radio_suite._crc_ok_count(vm, 'fixture', 1), expected)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+                            radio_suite._crc_ok_count(vm, 'fixture', 1)
+
 
 class FlowTests(unittest.TestCase):
     def test_restart_wait_covers_factory_first_boot(self):
