@@ -3586,16 +3586,58 @@ function exportChannelsForCard(card, scope) {
     : channels;
 }
 
+// The channels a device's type is known to report on this card, or null when
+// the device has no type or its type has no family for the card.
+function exportFamilyChannelKeys(card, device) {
+  return deviceTypeId(device) ? deviceFamilyChannelKeys(device, normalizeCardType(card.cardType)) : null;
+}
+
+// Same rule as the interactive grid (deviceFamilySupportsChannel): a device
+// without a type, or whose type has no family for the card (TEKTELIC_CLOVER on
+// the soil card), keeps the card-wide channel list. Rain tips stay LoRain-only,
+// as on main; swt_3 needs an eligible LSN50.
 function exportChannelsForDevice(card, device, scope) {
   const channels = channelsForCard(card, [device]);
   const type = deviceTypeId(device);
-  const supported = type ? deviceFamilyChannelKeys(device, normalizeCardType(card.cardType)) : null;
+  const supported = exportFamilyChannelKeys(card, device);
+  // Card-wide fallback: project only the columns this device stored in the
+  // range (resolveExportFieldPresence), so the null columns of ~50 soil
+  // channels do not count against the per-read memory sentinel.
+  const byDevice = supported === null && scope && scope.fieldPresence ? scope.fieldPresence.get(card) : null;
+  const present = byDevice ? byDevice.get(normalizeDeveui(device.deveui || device.device_eui)) : null;
   const deviceChannels = channels.filter(channel =>
-    (!type || (supported && supported.has(channel.id)))
+    (supported === null
+      ? (!present || channelFieldNames(channel).some(field => present.has(field)))
+      : supported.has(channel.id))
+    && (channel.id !== 'rain_tips_delta' || type === 'AQUASCOPE_LORAIN')
     && (channel.id !== 'swt_3' || isLsn50Swt3Eligible(device)));
   return scope && scope.requestedChannelKeys
     ? deviceChannels.filter(channel => scope.requestedChannelKeys.has(channel.id))
     : deviceChannels;
+}
+
+// Columns that hold at least one value in the export range, per card and
+// device, for devices that keep the card-wide channel list. One aggregate scan
+// per such device; nothing is fetched into memory.
+async function resolveExportFieldPresence(db, scope) {
+  const presence = new Map();
+  const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
+  for (const card of scope.cards) {
+    for (const device of sourceDevicesForCard(card, scope.devices)) {
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      if (!deveui || exportFamilyChannelKeys(card, device) !== null) continue;
+      const fields = Array.from(new Set(channelsForCard(card, [device]).flatMap(channelFieldNames)));
+      let present = new Set();
+      if (fields.length) {
+        const sql = `SELECT ${fields.map(field => `MAX(${field} IS NOT NULL) AS ${field}`).join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql}`;
+        const row = (await dbAll(db, sql, [deveui].concat(range.params)))[0] || {};
+        present = new Set(fields.filter(field => Number(row[field]) === 1));
+      }
+      if (!presence.has(card)) presence.set(card, new Map());
+      presence.get(card).set(deveui, present);
+    }
+  }
+  return presence;
 }
 
 function retainExportRows(rows, expanded, scope) {
@@ -3731,6 +3773,13 @@ async function aggregateZoneExportRows(db, scope) {
       if (!deveui) continue;
       for (const window of scope.windows || exportMonthWindows(scope)) {
         const input = await readExportRows(db, scope, deveui, channels, window.start, window.end);
+        // A daily blank row means "this device sent nothing that day". Any
+        // stored row counts, including rows that carry none of the requested
+        // channels, so a filtered export never fabricates blanks for a day the
+        // device reported other channels.
+        const reportedDays = scope.granularity === 'daily'
+          ? new Set(input.map(row => localDateKey(parseRecordedAtMs(row.recorded_at), scope.timezone)).filter(Boolean))
+          : null;
         const aggregate = aggregateRows(input, {
           zoneId: scope.zone.id,
           cardType: card.cardType,
@@ -3749,6 +3798,9 @@ async function aggregateZoneExportRows(db, scope) {
           site: scope.site,
           zone: zoneName,
           includeMissing: scope.granularity === 'daily',
+          reportedDays,
+          timezone: scope.timezone,
+          blankChannelKeys: exportFamilyChannelKeys(card, device),
         })) retainExportRows(rows, expanded, scope);
       }
     }
@@ -3763,6 +3815,8 @@ async function aggregateZoneExportRows(db, scope) {
 async function buildZoneExportCsv(db, options = {}) {
   const scope = await resolveZoneExportScope(db, options);
   assertExportRangeAllowed(scope);
+  // After the range refusal: the presence scan reads device_data.
+  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   scope.budget = exportLimits.createBudget(options, exportLimits.header(RAW_CSV_COLUMNS));
   scope.maxRows = scope.budget.maxRows;
   scope.windows = exportMonthWindows(scope);
@@ -3850,6 +3904,7 @@ async function buildAllZonesExportCsv(db, options = {}) {
     });
     scope.maxRows = maxRows;
     scope.budget = budget;
+    scope.fieldPresence = await resolveExportFieldPresence(db, scope);
     scope.windows = exportMonthWindows(scope);
     bucketCount += assertExportBucketBudget(scope, maxRows - bucketCount);
     scopes.push(scope);
@@ -3956,6 +4011,7 @@ async function buildZoneCsvRows(db, zone, day, nowMs) {
     to: day,
     nowMs,
   });
+  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   return {
     rawRows: await rawZoneExportRows(db, { ...scope, granularity: 'raw' }),
     hourlyRows: await aggregateZoneExportRows(db, { ...scope, granularity: 'hourly' }),
@@ -4139,11 +4195,18 @@ function* csvRowsFromAggregate(aggregate, card, device, sourceName, channels, ar
     if (channel.id === 'rain_mm_today') return stats.latest;
     return stats.mean;
   };
+  // Blank (null-value) rows are emitted only for a day on which the device
+  // stored no row at all, and only for channels its type's family lists. A
+  // device without a type or family keeps main's rule: measured rows only.
+  const emptyBucket = (bucket) => context.includeMissing
+    && !(context.reportedDays && context.reportedDays.has(localDateKey(bucket.bucketStart, context.timezone)))
+    && Number(bucket.sampleCount || 0) === 0;
   for (const bucket of aggregate.buckets || []) {
+    const blankAllowed = emptyBucket(bucket);
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       const missing = !stats || Number(stats.sampleCount || 0) === 0;
-      if (missing && (!context.includeMissing || Number(bucket.sampleCount || 0) > 0)) continue;
+      if (missing && !(blankAllowed && context.blankChannelKeys && context.blankChannelKeys.has(channel.id))) continue;
       const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,

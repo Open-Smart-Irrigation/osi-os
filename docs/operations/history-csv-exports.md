@@ -24,8 +24,12 @@ Options can lower these limits for tests or smaller callers; they cannot raise
 them. Output and request work share a budget across the response. Input memory
 is bounded per read, so a year of daily aggregates does not exhaust a single
 month's memory allowance. Each projection and empty-cell preflight uses the
-channels declared for that device type, with SWT3 eligibility preserved. Known
-types without a family for a card contribute no channels to that card.
+channels declared for that device type, with SWT3 eligibility preserved. A
+device without a type, or whose type has no family for a card (a
+TEKTELIC_CLOVER on the soil card), keeps the card-wide channel list, as the
+interactive grid does; its projection is narrowed to the columns it stored in
+the range, found by one aggregate scan. Rain tips (`rain_tips_delta`) stay
+AQUASCOPE_LORAIN-only, as on main.
 
 The work ceiling comes from the supported date range and observed reporting
 cadence: four five-minute sources over all 3,660 daily dates require 4,216,320
@@ -68,9 +72,11 @@ this is a host qualification, not a measurement on target hardware.
 
 ## Local days and stored CSV records
 
-Daily buckets follow each zone's local calendar. An empty day emits blank
-values only for channels that device type supports. A day with observations
-emits its measured channels, as on main; it gains no fabricated blank channels.
+Daily buckets follow each zone's local calendar. A day on which a device
+stored no row at all emits blank values for the channels its type's family
+lists; main emitted no rows for such a day. A device without a type or family
+emits no blanks. A day on which the device stored any row, even one carrying
+none of the requested channels, emits only its measured channels, as on main.
 Measured zero remains zero, and another depth never fills a missing depth. pF is derived after aggregating canonical kPa and stays undefined at zero.
 
 An absent civil date maps to the next existing local boundary. For example,

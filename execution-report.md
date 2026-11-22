@@ -9,6 +9,79 @@ Startup after updating from main: READY at `7725a09f2b`, based on `origin/main`
 Pi 4 acceptance, codec helpers and atomic Node-RED startup writes; the rebase
 was clean, with both existing patches unchanged in `git range-diff`.
 
+## Round-3 findings and fixes (head `29c4554d` → this revision)
+
+Startup: the worktree readiness file (mode start, 11:40 UTC) reports
+MISMATCH: STALE_BASE and INSTRUCTIONS_STALE for the worktree's original branch
+at `1a984f31f`, 17 behind `origin/main` `382c63a91`. Intended: this is a review
+fix on the existing PR branch. The branch is checked out in another worktree,
+so this revision was built on a local branch at
+`origin/fix/eb12-history-export-bounds` (`29c4554d`, 3 behind / 5 ahead of
+`origin/main` before this commit) and pushed to that branch with a normal
+push; no rebase. AGENTS.md blob `2dd8013b` (last change `c63103827`) matches
+base. The stale instruction file is a live-ops skill reference this PR does
+not use.
+
+| Finding | Fix |
+|---|---|
+| R3-1: TEKTELIC_CLOVER soil rows dropped from every export path | `exportChannelsForDevice` now follows the interactive rule (`deviceFamilySupportsChannel`): a device without a type, or whose type has no family for the card, keeps the card-wide list. A new `resolveExportFieldPresence` runs one `MAX(col IS NOT NULL)` scan per such device during scope resolution and narrows its projection to the columns it stored, so ~50 null soil columns do not shrink the per-read sentinel. The nightly writer, per-zone and all-zones paths share it. |
+| R3-2: required `migrations` check red (blank `rain_tips_delta` for an ambient-only S2120) | Root cause: blanks keyed on the projection-wide `bucket.sampleCount`. Daily blanks now require that the device stored no row at all that local day (any `device_data` row counts, even one with none of the requested channels), and only for channels its type's family lists. Main's `rain_tips_delta` LoRain-only rule is restored as a second layer. With the rain rule removed, the blank rule alone turns the guard suite green (checked, then reverted). The guard test is unchanged. |
+
+Decisions:
+- Card-wide fallback plus a presence scan, not a new CLOVER soil family.
+  `describeDeviceSource` also feeds Analysis (`analysis.js` returns no soil
+  channels for CLOVER by design), so a family entry would change another
+  surface. The CLOVER flow writes `swt_wm1/2` and `swt_1/2`; the vendor soil
+  module (#709) is not wired yet, and card-wide keeps whatever it writes later.
+- Devices without a type or family emit no blank rows (main's rule). Typed
+  devices with a family keep the round-2 empty-day blanks.
+- The presence scan is not charged to the work budget: it fetches one row per
+  device and holds nothing in memory. It runs after the range refusal in all
+  three callers (per-zone, all-zones, nightly), never inside the scope
+  resolver, so an over-range request reads no `device_data` before its 413
+  (new traced test).
+
+Red then green (both profiles):
+- Old helper (`29c4554d`) with the new tests: ordinary suite 22/28, failing
+  the projection test, the new CLOVER test (probe9) and the new blank-rule
+  test; source guards 18/20. New helper: ordinary 30/30, source guards 20/20.
+- The over-range test fails against a helper that scans inside the resolver
+  (0/1) and passes on this revision.
+- Reviewer probes against this tree, same results as round 3: probe1 all OK
+  (730/1098/1656/4308/246/18), probe2 nightly 36 records / 4,220 bytes and
+  past-8-MiB write OK, probe4 112/224/480/240, probe5 4 rows, probe5b blanks on
+  the empty day only, probe6 DST/Apia/encodings/BOM 1, probe7 6 cells/day,
+  probe8 dense sources refused at 30,001 under 192 MiB, probe9 8/168/8.
+- `plan-0.9/glm-702/probe9.js` against this tree: daily 8, raw 168, all-zones
+  8, as main.
+- `scripts/test-history-export-ordinary.js` projection test: CLOVER's row
+  fetch now selects only `swt_1/swt_wm1/swt_2/swt_wm2`. The old `permitted=0`
+  pin for CLOVER, which encoded the drop, now expects the two SWT channels.
+
+Round-3 checks (local, this revision):
+
+| Command | Result |
+|---|---|
+| `node scripts/test-history-source-guards.js` | 20/20 (both profiles) |
+| `node --max-old-space-size=192 --test --test-concurrency=1 scripts/test-history-export-ordinary.js` | 30/30 |
+| `node --test scripts/test-history-source-v2.js` | 68/68 |
+| `node --test osi-history-helper/index.test.js` (both profiles) | 45/45 each |
+| `node osi-history-router/index.test.js` (both profiles) | 76/0 each |
+| export triad + `test-history-recorded-at-formats.js` (`--max-old-space-size=192`) | 108/108 |
+| `scripts/test-history-helper.js` | PASS, rc 0 (996 s; final tree) |
+| `scripts/capture-history-router-vectors.js --verify` | 4/4 routes PASS; golden vector unchanged |
+| `node scripts/verify-test-inventory.js` | OK (1024 files) |
+| `node scripts/verify-profile-parity.js` | all passed; helper and router `cmp`-identical across profiles |
+| `node scripts/verify-sync-flow.js` | rc 0, all parity checks passed (1,045 s; run directly, alone) |
+| `node scripts/verify-doc-hygiene.js` | OK |
+| `verify-no-new-silent-catch`, `verify-history-api-contract`, `git diff --check` | baseline 65/314; OK; clean |
+
+Not run locally: osi-heavy and full CI suites (the gate-904491b1 proof chain
+had no PROOF_END, so osi-heavy stayed free for it). CI on the pushed head is
+the gate.
+
+Round time: about 50 minutes: authoring and focused tests 11:40–12:00 UTC, then serial `test-history-helper.js` (17 min) and `verify-sync-flow.js` (17 min) to 12:28 UTC. CI wait is in the PR comment after push.
+
 ## Round-2 findings and fixes
 
 | Finding | Fix |

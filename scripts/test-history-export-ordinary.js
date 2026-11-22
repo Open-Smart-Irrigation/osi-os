@@ -77,20 +77,66 @@ for(const profile of ['bcm2712','bcm2709']) {
         populate(db,1,1,15);
         const normal=traced(db);
         const result=await helper.buildZoneExportCsv(normal.db,{...range(1),zoneId:2});
-        const permitted=type==='DRAGINO_SDI12'?26:type==='DRAGINO_LSN50'||type==='KIWI_SENSOR'?2:0;
+        // TEKTELIC_CLOVER has no soil family: like the interactive grid it keeps
+        // the card-wide soil list, narrowed to the columns it stored (swt_1/2).
+        const permitted=type==='DRAGINO_SDI12'?26:type==='DRAGINO_LSN50'||type==='KIWI_SENSOR'||type==='TEKTELIC_CLOVER'?2:0;
         for(const query of normal.queries) {
           assert.doesNotMatch(query.sql,/INDEXED BY/);
-          assert.match(query.plan,/USING INDEX idx_device_data_deveui_recorded_at/);
+          assert.match(query.plan,/USING (?:COVERING )?INDEX idx_device_data_deveui_recorded_at/);
           assert.doesNotMatch(query.plan,/USE TEMP B-TREE/);
-          if(type==='DRAGINO_LSN50'||type==='KIWI_SENSOR') assert.doesNotMatch(query.sql,/vwc_|soil_(?:vic|temp|ec)_|swt_3/);
-          if(type==='SENSECAP_S2120'||type==='TEKTELIC_CLOVER') assert.doesNotMatch(query.sql,/swt_|vwc_|soil_/);
+          // The presence scan of a card-wide device names every card column but fetches one row.
+          if(/^SELECT MAX\(/.test(query.sql)) { assert.equal(type,'TEKTELIC_CLOVER'); assert.equal(query.rows.length,1); continue; }
+          if(type==='DRAGINO_LSN50'||type==='KIWI_SENSOR'||type==='TEKTELIC_CLOVER') assert.doesNotMatch(query.sql,/vwc_|soil_(?:vic|temp|ec)_|swt_3/);
+          if(type==='SENSECAP_S2120') assert.doesNotMatch(query.sql,/swt_|vwc_|soil_/);
         }
         assert.ok(result.rows.every(r=>!/^soil$/.test(r.card_type)||permitted>0));
+        if(type==='TEKTELIC_CLOVER') assert.deepEqual(result.rows.map(r=>r.channel_key).sort(),['swt_1','swt_1_pf','swt_2','swt_2_pf']);
         db.exec('DROP INDEX idx_device_data_deveui_recorded_at');
         const fallback=await helper.buildZoneExportCsv(facadeDb(db),{...range(1),zoneId:2});
         assert.deepEqual(fallback.rows,result.rows);
       }finally{db.close();}
     }
+  });
+  test(`${profile}: TEKTELIC_CLOVER soil rows match main in every export path`,async()=>{
+    // Review round 3 probe9: one CLOVER, 48 hourly swt_1/swt_2 readings.
+    const db=fixture(1,'TEKTELIC_CLOVER');
+    try {
+      populate(db,1,2,60);
+      const daily=await helper.buildZoneExportCsv(facadeDb(db),{...range(2),zoneId:2});
+      assert.deepEqual(daily.rows.map(r=>r.channel_key).sort(),['swt_1','swt_1','swt_1_pf','swt_1_pf','swt_2','swt_2','swt_2_pf','swt_2_pf']);
+      assert.ok(daily.rows.every(r=>r.card_type==='soil'&&r.value!==null),JSON.stringify(daily.rows));
+      const raw=await helper.buildZoneExportCsv(facadeDb(db),{...range(2),granularity:'raw',zoneId:2});
+      assert.equal(raw.rows.length,48*4);
+      const all=await helper.buildAllZonesExportCsv(facadeDb(db),{...range(2),zoneIds:[1,2]});
+      assert.equal(all.rowCount,8);
+      // An empty day: the soil card (no family) gains no blanks; the environment
+      // family's blanks are the documented empty-day rule.
+      const empty=await helper.buildZoneExportCsv(facadeDb(db),{...range(1,'2025-01-03'),zoneId:2});
+      assert.deepEqual(empty.rows.map(r=>[r.card_type,r.channel_key,r.value]),[['environment','ambient_temperature',null],['environment','light_lux',null],['environment','relative_humidity',null]]);
+    }finally{db.close();}
+  });
+  test(`${profile}: an over-range request refuses before any device_data read`,async()=>{
+    const db=fixture(1,'TEKTELIC_CLOVER');
+    try {
+      populate(db,1,2,60);
+      const trace=traced(db);
+      await assert.rejects(helper.buildZoneExportCsv(trace.db,{...range(93),granularity:'raw',zoneId:2}),e=>e.statusCode===413);
+      await assert.rejects(helper.buildAllZonesExportCsv(trace.db,{...range(93),granularity:'raw',zoneIds:[1,2]}),e=>e.statusCode===413);
+      assert.deepEqual(trace.queries,[]);
+    }finally{db.close();}
+  });
+  test(`${profile}: daily blanks only for a day the device stored no row at all`,async()=>{
+    const db=fixture(1,'DRAGINO_LSN50');
+    try {
+      // Day 1 carries swt_1; day 2 carries only swt_2; day 3 has no rows.
+      db.prepare('INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES(?,?,?)').run(eui(1),'2025-01-01T06:00:00.000Z',20);
+      db.prepare('INSERT INTO device_data(deveui,recorded_at,swt_2) VALUES(?,?,?)').run(eui(1),'2025-01-02T06:00:00.000Z',30);
+      const result=await helper.buildZoneExportCsv(facadeDb(db),{...range(3),zoneId:2,channels:'swt_1'});
+      const byDay=day=>result.rows.filter(r=>r.timestamp.startsWith(day)).map(r=>[r.channel_key,r.value]);
+      assert.deepEqual(byDay('2025-01-01'),[['swt_1',20],['swt_1_pf',byDay('2025-01-01')[1][1]]]);
+      assert.deepEqual(byDay('2025-01-02'),[],'a day with other channels gains no fabricated blank');
+      assert.deepEqual(byDay('2025-01-03'),[['swt_1',null]]);
+    }finally{db.close();}
   });
   test(`${profile}: adjacent windows fetch and charge each margin row only once`,async()=>{
     const db=fixture();
