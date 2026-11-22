@@ -132,23 +132,59 @@ def expected_cases(args, image_capability, customer_selected, *, historical=Fals
     return cases
 
 
+READY_PROBE = """test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/"""
+READY_ADDRESS = """ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0"""
 READY_POLL_SECONDS = 3
-READY_BUDGET_SECONDS = 540
-# Host-side slack over the poll budget: each poll can add two 2 s wget timeouts.
-READY_HOST_SLACK_SECONDS = 260
+# Worst case for one probe round: two wget calls, each with a 2 s connect
+# and a 2 s read timeout.
+READY_PROBE_SECONDS = 8
+# Shell start, the address step and the hex-encoded reply over the console.
+READY_COMMAND_SLACK_SECONDS = 60
 
 
-def ready(vm, *, budget=READY_BUDGET_SECONDS, poll=READY_POLL_SECONDS):
-    checked(vm, f"""for i in $(seq 1 {budget // poll}); do
-if test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; then
-ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0
+def ready_host_timeout(budget, poll=READY_POLL_SECONDS):
+    # The last round can start just before the guest deadline, then probe and
+    # sleep once more before the loop sees the deadline.
+    return budget + READY_PROBE_SECONDS + poll + READY_COMMAND_SLACK_SECONDS
+
+
+def ready(vm, *, budget=None, poll=READY_POLL_SECONDS):
+    if budget is None:
+        # Unchanged legacy wait: 180 rounds, 800 s on the host.
+        script, timeout = f"""for i in $(seq 1 180); do
+if {READY_PROBE}; then
+{READY_ADDRESS}
+exit $?
+fi
+sleep 3
+done
+exit 1""", 800
+    else:
+        # Guest wall-clock deadline (uptime, so clock steps do not move it):
+        # probe time counts against the budget, unlike a fixed round count.
+        script, timeout = f"""end=$(( $(cut -d. -f1 /proc/uptime) + {budget} ))
+while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
+if {READY_PROBE}; then
+{READY_ADDRESS}
 exit $?
 fi
 sleep {poll}
 done
-exit 1""", budget + READY_HOST_SLACK_SECONDS)
+exit 1""", ready_host_timeout(budget, poll)
+    checked(vm, script, timeout)
     if sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('integrity check failed')
+
+
+def upgrade_boot_ready(vm, old):
+    # Only the 0.8.1 boot failed on a slow host (about 6x slower, out of polls
+    # before the upgrade began), and every flows-cut, minimal-cut, recovery and
+    # transfer case boots 0.8.1. It gets the before_console budget
+    # (SLOW_BOOT_SECONDS); the stock 0.8.0 upgrade keeps the default wait.
+    if old == '0.8.1':
+        ready(vm, budget=SLOW_BOOT_SECONDS)
+    else:
+        ready(vm)
 
 
 def gui(vm, password, mode, *args):
@@ -463,9 +499,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 guest.start(flow_cut='committed')
             else:
                 guest.start()
-            # Old-release boot: same budget as the before_console marker wait
-            # (SLOW_BOOT_SECONDS explains the slow-host failure).
-            ready(guest, budget=SLOW_BOOT_SECONDS)
+            upgrade_boot_ready(guest, old)
             previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer,
                                release=probe_release if minimal else release)
             if recovery == 'zero':
