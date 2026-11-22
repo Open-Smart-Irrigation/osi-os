@@ -123,7 +123,8 @@ class RadioTests(unittest.TestCase):
         _, other_wire = self.downlink(2)
         _, mac_wire = self.downlink(valve.devaddr, port=0)
         vm = Mock()
-        vm.command.return_value = (0, 'match 81\nmatch 82\nmarked\nram 2')
+        vm.command.side_effect = lambda script, *_: (0, '1000' if 'logger' in script else
+                                                     'match 81 1\nmatch 82 2\nmarked\nram 2')
         with (host, model, ThreadPoolExecutor(1) as worker,
               patch.object(radio_suite, '_wait_history'),
               patch.object(radio_suite, 'EARLY_WINDOW_TIMEOUT', 0.01)):
@@ -153,7 +154,7 @@ class RadioTests(unittest.TestCase):
         valve = Mock(devaddr=1)
         _, command_wire = self.downlink(valve.devaddr)
         vm = Mock()
-        vm.command.return_value = (0, '')
+        vm.command.return_value = (0, '1000')
         with host, model:
             with self.assertRaisesRegex(RuntimeError, 'valve downlink before receive window'):
                 radio_suite.run_valve(vm, radio_suite.Radio(host), {radio_suite.VALVE: valve},
@@ -167,7 +168,7 @@ class RadioTests(unittest.TestCase):
 
     def test_unavailable_concentratord_log_fails(self):
         vm = Mock()
-        vm.command.return_value = (1, 'match 4\nmarked')
+        vm.command.return_value = (1, 'match 4 1\nmarked')
         with self.assertRaisesRegex(RuntimeError, 'persistent log unreadable'):
             radio_suite._radio_evidence(vm, 'fixture', 4)
 
@@ -179,7 +180,7 @@ class RadioTests(unittest.TestCase):
 
     def test_positive_model_and_concentratord_counts_pass(self):
         vm = Mock()
-        vm.command.return_value = (0, 'match 81\nmatch 82\nmarked\nram 0')
+        vm.command.return_value = (0, 'match 81 1\nmatch 82 2\nmarked\nram 0')
         self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 2),
                          'WM1302 model delivered=2, Concentratord frames received=2')
 
@@ -201,11 +202,12 @@ class RadioTests(unittest.TestCase):
         valve = Mock(devnonce=1, app_eui=bytes(8))
         valve.join_request.side_effect = lambda: bytes([valve.devnonce])
         valve.uplink.return_value = b'data'
-        valve.accept_join.return_value = {'devaddr': 0x0037032B}
+        valve.accept_join.return_value = {'devaddr': 0x0037032B, 'appnonce': (1).to_bytes(3, 'little')}
         replies = iter(arrivals)
 
-        def send(frame):
+        def send(frame, channel=radio_suite.UPLINK):
             nonlocal deadline
+            self.assertEqual(channel, radio_suite.UPLINK)
             if frame != b'data':
                 delay = next(replies)
                 deadline = None if delay is None else now + delay
@@ -237,11 +239,11 @@ class RadioTests(unittest.TestCase):
             scripts.append(script)
             attempt = sum('logger -t osi-radio-suite' in s for s in scripts)
             if 'logger -t osi-radio-suite' in script:
-                return 0, ''
+                return 0, str(1000 * attempt)
             if 'osi-radio-suite:' in script:
-                return 0, (frames or {}).get(attempt, 'match 81\nmarked\nram 1')
+                return 0, (frames or {}).get(attempt, 'match 81 137293609\nmarked\nram 1')
             if 'device_keys' in script:
-                return 0, (chirpstack or {}).get(attempt, '1 0037032B')
+                return 0, (chirpstack or {}).get(attempt, f'1 0037032B 1 {1000 * attempt + 1}')
             raise AssertionError('unexpected guest command')
 
         return SimpleNamespace(command=command), scripts
@@ -260,9 +262,10 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(result, 'WM1302 model delivered=2, complete join receipts=1 '
                                  '(Concentratord frame, ChirpStack DevNonce, join-accept)')
         self.assertEqual(output.strip(), (
-            f'{radio_suite.VALVE} join attempt 1/3 (DevNonce 1): received | '
+            f'{radio_suite.VALVE} join attempt 1/3 (DevNonce 1, sent 902300000 Hz, 125000 Hz, SF7): received | '
             'frame: Concentratord uplink_id 81 at 902300000 Hz, 125000 Hz, SF7; '
-            'chirpstack: ChirpStack DevNonce 1 recorded, DevAddr 0037032B; '
+            'chirpstack: ChirpStack DevNonce 1 recorded, JoinNonce 1, DevAddr 0037032B, '
+            'keys updated after the marker; '
             'join-accept: join-accept after 5.00 s'))
         frame_query = next(s for s in scripts if 'osi-radio-suite:' in s)
         self.assertIn("-v freq='902300000' -v bw='125000' -v dr='SF7'", frame_query)
@@ -281,7 +284,7 @@ class RadioTests(unittest.TestCase):
               self.assertRaisesRegex(RuntimeError, 'incomplete join receipt') as raised):
             radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
         line = output.getvalue().strip()
-        self.assertIn(f'attempt 1/3 (DevNonce 1): missing {missing} |', line)
+        self.assertIn(f'attempt 1/3 (DevNonce 1, sent {radio_suite.UPLINK}): missing {missing} |', line)
         self.assertIn(reason, line)
         self.assertIn(line, str(raised.exception))
         # A join-accept arrived, so a missing part is not retried.
@@ -289,8 +292,8 @@ class RadioTests(unittest.TestCase):
         valve.uplink.assert_not_called()
 
     def test_join_without_concentratord_frame_fails(self):
-        self.assert_incomplete('frame', 'no Concentratord "Frame received" line after the attempt marker '
-                                        'in the persistent log (RAM ring has 1)',
+        self.assert_incomplete('frame', 'no Concentratord "Frame received" line in the attempt window '
+                                        'of the persistent log (RAM ring has 1)',
                                frames={1: 'marked\nram 1'})
 
     def test_join_frame_at_another_frequency_or_sf_fails(self):
@@ -302,15 +305,15 @@ class RadioTests(unittest.TestCase):
 
     def test_join_frame_without_attempt_marker_fails(self):
         self.assert_incomplete('frame', 'attempt marker absent from the persistent log',
-                               frames={1: 'match 81\nunmarked\nram 1'})
+                               frames={1: 'match 81 1\nunmarked\nram 1'})
 
     def test_join_without_chirpstack_record_fails(self):
         self.assert_incomplete('chirpstack', 'ChirpStack has no DevNonce 1 recorded',
-                               chirpstack={1: '0 0037032B'})
+                               chirpstack={1: '0 0037032B 1 1001'})
 
     def test_join_accept_from_another_join_fails(self):
         self.assert_incomplete('chirpstack', 'ChirpStack DevAddr 01E1EE61 differs from join-accept DevAddr 0037032B',
-                               chirpstack={1: '1 01E1EE61'})
+                               chirpstack={1: '1 01E1EE61 1 1001'})
 
     def test_unreadable_chirpstack_database_fails(self):
         self.assert_incomplete('chirpstack', 'ChirpStack database unreadable', chirpstack={1: ''})
@@ -321,9 +324,9 @@ class RadioTests(unittest.TestCase):
         self.assertEqual([round(call.args[0], 2) for call in air.receive.call_args_list], [40, 110, 40])
         valve.accept_join.assert_called_once()
         first, second = output.splitlines()
-        self.assertIn('attempt 1/3 (DevNonce 1): missing join-accept |', first)
+        self.assertIn('(DevNonce 1, sent 902300000 Hz, 125000 Hz, SF7): missing join-accept |', first)
         self.assertIn('join-accept: MISSING (join-accept late after 139.31 s (drained))', first)
-        self.assertIn('attempt 2/3 (DevNonce 2): received |', second)
+        self.assertIn('attempt 2/3 (DevNonce 2, sent 902300000 Hz, 125000 Hz, SF7): received |', second)
         self.assertIn('join-accept after 5.10 s', second)
         chirpstack = [s for s in scripts if 'device_keys' in s]
         self.assertIn('n.value = 1)', chirpstack[0])
@@ -341,7 +344,8 @@ class RadioTests(unittest.TestCase):
         lines = output.getvalue().splitlines()
         self.assertEqual(len(lines), 3)
         for attempt, line in enumerate(lines, 1):
-            self.assertIn(f'attempt {attempt}/3 (DevNonce {attempt}): missing join-accept |', line)
+            self.assertIn(f'attempt {attempt}/3 (DevNonce {attempt}, sent {radio_suite.UPLINK}): '
+                          'missing join-accept |', line)
             self.assertIn('join-accept: MISSING (join-accept absent after 150.00 s)', line)
         valve.accept_join.assert_not_called()
 
@@ -351,13 +355,75 @@ class RadioTests(unittest.TestCase):
         with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(io.StringIO()),
               self.assertRaisesRegex(RuntimeError, 'attempt 2/3 .*missing frame')):
             radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
-        first, second = [s.split()[-1] for s in scripts if 'logger -t osi-radio-suite' in s]
+        first, second = [s.split()[3] for s in scripts if 'logger -t osi-radio-suite' in s]
         self.assertNotEqual(first, second)
         queries = [s for s in scripts if 'osi-radio-suite:' in s]
         self.assertIn(f"marker='{first}'", queries[0])
         self.assertIn(f"marker='{second}'", queries[1])
         self.assertNotIn(first, queries[1])
         valve.uplink.assert_not_called()
+
+    def test_join_keys_updated_before_the_marker_fail(self):
+        self.assert_incomplete('chirpstack', 'device keys for A840410000000001 not updated after the attempt marker',
+                               chirpstack={1: '1 0037032B 1 999'})
+
+    def test_join_accept_with_another_join_nonce_fails(self):
+        self.assert_incomplete('chirpstack', 'ChirpStack JoinNonce 2 differs from join-accept JoinNonce 1',
+                               chirpstack={1: '1 0037032B 2 1001'})
+
+    def test_join_accept_dropped_as_too_old_is_named(self):
+        # Concentratord queued the join-accept for count_us + 5 s and dropped
+        # it 6.5 ms late; ChirpStack had answered (DevNonce 1 recorded).
+        air, valve, clock = self.join_fixture([None, 5.0])
+        vm, _ = self.guest(frames={1: 'match 81 137293609\ntoo-old 142293609 142300075\nmarked\nram 1'},
+                           chirpstack={1: '1 0037032B 1 1001', 2: '1 0037032B 1 2001'})
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock),
+              patch.object(radio_suite, '_wait_history'), redirect_stdout(output)):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        first, second = output.getvalue().splitlines()
+        self.assertIn('missing join-accept | frame: Concentratord uplink_id 81', first)
+        self.assertIn('chirpstack: ChirpStack DevNonce 1 recorded', first)
+        self.assertIn('join-accept: MISSING (join-accept dropped by concentratord: too old '
+                      '(scheduled count_us 142293609, counter 142300075, 6.5 ms late); '
+                      'join-accept absent after 150.00 s)', first)
+        self.assertIn('attempt 2/3', second)
+        self.assertIn('received', second)
+
+    def test_join_sends_and_matches_the_attempt_channel(self):
+        channel = radio_suite.Channel(902500000, 125000, 9)
+        air, valve, clock = self.join_fixture([5.0])
+        air.send.side_effect = lambda frame, sent: self.assertEqual(sent, channel) or 1
+        air.receive.side_effect = lambda timeout, matches: b'\x20'
+        vm, scripts = self.guest()
+        line = []
+        with patch.object(radio_suite.time, 'monotonic', clock):
+            radio_suite._join(vm, air, radio_suite.VALVE, valve, line.append, channel)
+        self.assertIn('sent 902500000 Hz, 125000 Hz, SF9', line[0])
+        query = next(s for s in scripts if 'osi-radio-suite:' in s)
+        self.assertIn("-v freq='902500000' -v bw='125000' -v dr='SF9'", query)
+
+    def test_frame_window_ends_at_the_next_marker(self):
+        prefix = 'Sun Apr 13 16:45:08 2025 user.'
+        frame = (prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: {}, count_us: 1, '
+                 'freq: 902300000, bw: 125000, mod: LoRa, dr: SF7, ftime_received: false, ftime_ns: 0')
+        too_old = (prefix + 'err chirpstack-concentratord-sx1302[51]: Scheduled packet is too old, dropped: '
+                   'count_us: 142293609, current_counter_us: 142300075')
+        too_late = (prefix + 'warn chirpstack-concentratord-sx1302[51]: Too late to enqueue packet, downlink_id: 7, '
+                    'counter_us: 5, current_counter_us: 9')
+        lines = [prefix + 'notice osi-radio-suite: fixture', frame.format(81), too_old,
+                 prefix + 'notice osi-radio-suite: next', frame.format(82), too_late]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'concentratord.toml').write_text('disable_crc_filter=false\n')
+            (root/'osi-system.log').write_text('\n'.join(lines) + '\n')
+            vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, ''))
+            first = radio_suite._concentratord_frames(vm, 'fixture')
+            second = radio_suite._concentratord_frames(vm, 'next')
+        self.assertEqual((first.matched, first.too_old, first.too_late),
+                         ([('81', '1')], [('142293609', '142300075')], []))
+        self.assertEqual((second.matched, second.too_old, second.too_late), ([('82', '1')], [], [('5', '9')]))
+        self.assertIn('too late to enqueue', radio_suite._dropped_downlink(second))
 
     def test_diagnostics_report_persistent_and_ram_counts_separately(self):
         stats = 'Sun Apr 13 16:45:{} 2025 user.info chirpstack-concentratord-sx1302[{}]: Publishing stats event, rx_received: {}, rx_received_ok: {}, tx_received: 0, tx_emitted: 0\n'
@@ -385,6 +451,7 @@ class RadioTests(unittest.TestCase):
             self.assertIn('concentratord pid 77 stats windows 1 rx_received total 0 last window 0\n', diag)
             self.assertNotIn('CRC_OK', diag)
             self.assertNotIn('JoinRequest', diag)
+            self.assertIn('Scheduled packet is too old 0\n', diag)
             # One label and one count per line: no doubled "0" from `grep -c ... || echo 0`.
             persistent = diag.split('logread\n')[0].splitlines()[1:]
             for line in persistent:
@@ -409,7 +476,7 @@ class RadioTests(unittest.TestCase):
                     vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, valid))
                     frames = radio_suite._concentratord_frames(vm, 'fixture')
                     if valid in current:
-                        self.assertEqual(frames.matched, ['81'])
+                        self.assertEqual(frames.matched, [('81', '154102266')])
                         self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
                                          'WM1302 model delivered=1, Concentratord frames received=1')
                     else:
@@ -432,7 +499,7 @@ class RadioTests(unittest.TestCase):
             vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, ''))
             frames = radio_suite._concentratord_frames(vm, 'fixture')
         self.assertTrue(frames.marked)
-        self.assertEqual(frames.matched, ['83'])
+        self.assertEqual(frames.matched, [('83', '1')])
         self.assertEqual(frames.other, [('81', '902500000', '125000', 'SF7'), ('82', '902300000', '125000', 'SF8')])
 
     def test_frame_receipt_reads_only_the_persistent_log(self):
@@ -443,7 +510,7 @@ class RadioTests(unittest.TestCase):
         first, second = frame.format(81), frame.format(82)
         cases = (
             ('persistent log lags', [marker], [marker, first], [], 1),
-            ('sinks overlap', [marker, first], [marker, first, second], ['81'], 2),
+            ('sinks overlap', [marker, first], [marker, first, second], [('81', '1')], 2),
             ('RAM has no attempt marker', [marker], [first], [], 0),
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -460,7 +527,7 @@ class RadioTests(unittest.TestCase):
                     if matched:
                         self.assertIsNone(missing)
                     else:
-                        self.assertIn('in the persistent log', missing)
+                        self.assertIn('of the persistent log', missing)
 
     def test_frame_receipt_requires_the_crc_filter(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -478,12 +545,14 @@ class RadioTests(unittest.TestCase):
             with closing(sqlite3.connect(database)) as db:
                 db.executescript("""
 CREATE TABLE device (dev_eui blob not null primary key, dev_addr blob, join_eui blob not null);
-CREATE TABLE device_keys (dev_eui blob not null primary key, nwk_key blob not null, app_key blob not null,
-                          dev_nonces text not null, join_nonce int not null);
+CREATE TABLE device_keys (dev_eui blob not null primary key, updated_at datetime not null, nwk_key blob not null,
+                          app_key blob not null, dev_nonces text not null, join_nonce int not null);
 INSERT INTO device VALUES (x'A840410000000001', x'0037032B', x'0000000000000000');
 INSERT INTO device VALUES (x'A840410000000002', NULL, x'0000000000000000');
-INSERT INTO device_keys VALUES (x'A840410000000001', x'00', x'00', '{"0000000000000000":[1,2]}', 2);
-INSERT INTO device_keys VALUES (x'A840410000000002', x'00', x'00', '{"0102030405060708":[1]}', 1);
+INSERT INTO device_keys VALUES (x'A840410000000001', '2025-04-13 16:47:42.790123456+00:00', x'00', x'00',
+                                '{"0000000000000000":[1,2]}', 2);
+INSERT INTO device_keys VALUES (x'A840410000000002', '2025-04-13 16:47:51.17+00:00', x'00', x'00',
+                                '{"0102030405060708":[1]}', 1);
 """)
 
             def command(script, timeout=None):
@@ -493,13 +562,39 @@ INSERT INTO device_keys VALUES (x'A840410000000002', x'00', x'00', '{"0102030405
 
             vm = SimpleNamespace(command=command)
             join = bytes(8).hex()
-            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 2), (True, '0037032B', None))
-            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 3), (False, '0037032B', None))
-            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000002', join, 1), (False, None, None))
-            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000003', join, 1), (False, None, None))
+            record = radio_suite.ChirpStackJoin
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 2),
+                             record(True, '0037032B', 2, 1744562862))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 3),
+                             record(False, '0037032B', 2, 1744562862))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000002', join, 1),
+                             record(False, None, 1, 1744562871))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000003', join, 1), record())
             database.unlink()
             self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 1),
-                             (False, None, 'ChirpStack database unreadable'))
+                             record(error='ChirpStack database unreadable'))
+
+
+class BundleNameTests(unittest.TestCase):
+    def test_upgrade_bundle_is_named_after_the_candidate_revision(self):
+        # A suite copy once hard-coded BUNDLE_SHA, which mislabelled the bundle
+        # when another image was tested. The name must follow --release-revision,
+        # which acceptance.py checks against the release tree's SERVED-FROM.txt.
+        seen = []
+
+        def deploy_bundle(command, env, **_):
+            seen.append(env['BUNDLE_SHA'])
+            raise RuntimeError('stop after the bundle script')
+
+        with (tempfile.TemporaryDirectory() as directory,
+              patch.object(upgrade_suite.subprocess, 'run', side_effect=deploy_bundle)):
+            for revision in ('904491b1' + 'c' * 32, '234a3635' + 'd' * 32):
+                folder = Path(directory)/revision
+                folder.mkdir()
+                with self.assertRaisesRegex(RuntimeError, 'stop after the bundle script'):
+                    upgrade_suite.build_media(Path(directory), folder, revision=revision)
+        self.assertEqual(seen, ['904491b1', '234a3635'])
+        self.assertNotIn('BUNDLE_SHA', Path(upgrade_suite.__file__).read_text().replace("BUNDLE_SHA=revision[:8]", ''))
 
 
 class FlowTests(unittest.TestCase):

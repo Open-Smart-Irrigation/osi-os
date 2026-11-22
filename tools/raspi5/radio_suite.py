@@ -24,11 +24,27 @@ JOIN_WINDOW = 40
 # A late SX1302 TX trigger can wait a full 32-bit wrap at 32 MHz (~134 s).
 JOIN_DRAIN_WINDOW = 150
 JOIN_ATTEMPTS = 3
-# Every injected uplink uses US915 channel 0. Concentratord prints bandwidth in
-# Hz and the data rate as SFn, so the receipt compares those spellings.
-UPLINK_FREQUENCY_HZ = 902300000
-UPLINK_BANDWIDTH_HZ = 125000
-UPLINK_SF = 7
+
+
+@dataclass(frozen=True)
+class Channel:
+    """Frequency, bandwidth and spreading factor the WM1302 model sends on.
+
+    Concentratord prints bandwidth in Hz and the data rate as SFn, so the
+    receipt compares those spellings.
+    """
+    frequency: int
+    bandwidth: int
+    sf: int
+
+    def __str__(self):
+        return f'{self.frequency} Hz, {self.bandwidth} Hz, SF{self.sf}'
+
+
+# run.rf_frame bandwidth codes.
+BANDWIDTH_CODES = {125000: 0}
+# Every injected uplink uses US915 channel 0.
+UPLINK = Channel(902300000, 125000, 7)
 CHIRPSTACK_DB = '/srv/chirpstack/chirpstack.sqlite'
 
 PERSISTENT_LOGS = '''persistent_logs() {
@@ -104,12 +120,13 @@ class Radio:
                     raise RuntimeError('incomplete WM1302 packet at the case boundary') from exc
         raise RuntimeError('could not drain pending WM1302 packets before the case')
 
-    def send(self, frame):
+    def send(self, frame, channel=UPLINK):
         request_id = secrets.token_bytes(RF_REQUEST_ID_SIZE)
         deadline = time.monotonic() + RECEIPT_TIMEOUT
         try:
             self.sock.settimeout(RECEIPT_TIMEOUT)
-            self.sock.sendall(rf_frame(frame, UPLINK_FREQUENCY_HZ, sf=UPLINK_SF, request_id=request_id))
+            self.sock.sendall(rf_frame(frame, channel.frequency, BANDWIDTH_CODES[channel.bandwidth],
+                                       sf=channel.sf, request_id=request_id))
             while True:
                 channel, sf, payload = self._packet(deadline)
                 if channel != RF_RECEIPT_CHANNEL:
@@ -140,45 +157,63 @@ class Radio:
 
 
 def _mark_attempt(vm):
+    """Write a syslog marker; return it with the guest's clock in epoch seconds."""
     marker = secrets.token_hex(8)
-    checked(vm, f'logger -t osi-radio-suite {marker}')
-    return marker
+    clock = checked(vm, f'logger -t osi-radio-suite {marker} && date +%s').strip()
+    if not clock.isdecimal():
+        raise RuntimeError('guest clock unreadable at the attempt marker')
+    return marker, int(clock)
 
 
 @dataclass
 class Frames:
-    """Concentratord "Frame received" lines after one marker."""
-    matched: list = field(default_factory=list)   # uplink IDs at the expected channel
+    """Concentratord lines between one marker and the next."""
+    matched: list = field(default_factory=list)   # (uplink ID, count_us) at the sent channel
     other: list = field(default_factory=list)     # (uplink ID, freq, bw, dr) elsewhere
+    too_old: list = field(default_factory=list)   # (count_us, current_counter_us) dropped by the JIT queue
+    too_late: list = field(default_factory=list)  # (counter_us, current_counter_us) refused at enqueue
     marked: bool = False
     ram_matched: int = 0                          # RAM ring fallback, diagnostic only
     error: str = ''
 
 
-def _concentratord_frames(vm, marker, frequency=UPLINK_FREQUENCY_HZ,
-                          bandwidth=UPLINK_BANDWIDTH_HZ, sf=UPLINK_SF):
+def _concentratord_frames(vm, marker, channel=UPLINK):
     # Concentratord logs "Frame received" at INFO only after its CRC filter
     # (chirpstack-concentratord-sx1302 4.4.8, src/handler/uplink.rs), so with
-    # disable_crc_filter=false each line is a CRC-valid frame. Both sinks use
-    # five timestamp fields, then facility.level, tag and message. Only the
-    # persistent log counts; the RAM ring is read for the failure message.
+    # disable_crc_filter=false each line is a CRC-valid frame. Its JIT queue
+    # logs a downlink it drops (libconcentratord/src/jitqueue.rs). Both sinks
+    # use five timestamp fields, then facility.level, tag and message. The
+    # window ends at the next marker. Only the persistent log counts; the RAM
+    # ring is read for the failure message.
     code, output = vm.command(rf"""grep -Eq '^ *disable_crc_filter *= *false *$' /var/etc/chirpstack-concentratord/concentratord.toml || {{ echo crc-filter-off; exit 0; }}
 {PERSISTENT_LOGS}
 frames() {{
-    awk -v marker='{marker}' -v freq='{frequency}' -v bw='{bandwidth}' -v dr='SF{sf}' '
+    awk -v marker='{marker}' -v freq='{channel.frequency}' -v bw='{channel.bandwidth}' -v dr='SF{channel.sf}' '
     function value(key,    i, v) {{
         for (i = 8; i < NF; i++) if ($i == key) {{ v = $(i + 1); sub(/,$/, "", v); return v }}
         return ""
     }}
-    $6 == "user.notice" && $7 == "osi-radio-suite:" && $8 == marker && NF == 8 {{ marked = seen = 1; next }}
-    seen && $6 == "user.info" && $7 ~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ &&
-        $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" {{
-            id = value("uplink_id:")
-            if (id !~ /^[0-9]+$/ || id in uplinks) next
-            uplinks[id] = 1
-            if (value("freq:") == freq && value("bw:") == bw && value("dr:") == dr) print "match", id
-            else print "other", id, value("freq:"), value("bw:"), value("dr:")
-        }}
+    $6 == "user.notice" && $7 == "osi-radio-suite:" && NF == 8 {{
+        if ($8 == marker) marked = seen = 1
+        else seen = 0
+        next
+    }}
+    !seen || $7 !~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ {{ next }}
+    $6 == "user.info" && $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" {{
+        id = value("uplink_id:")
+        if (id !~ /^[0-9]+$/ || id in uplinks) next
+        uplinks[id] = 1
+        if (value("freq:") == freq && value("bw:") == bw && value("dr:") == dr) print "match", id, value("count_us:")
+        else print "other", id, value("freq:"), value("bw:"), value("dr:")
+        next
+    }}
+    $8 == "Scheduled" && $9 == "packet" && $10 == "is" && $11 == "too" && $12 == "old," {{
+        print "too-old", value("count_us:"), value("current_counter_us:")
+        next
+    }}
+    $8 == "Too" && $9 == "late" && $10 == "to" && $11 == "enqueue" {{
+        print "too-late", value("counter_us:"), value("current_counter_us:")
+    }}
     END {{ print(marked ? "marked" : "unmarked") }}'
 }}
 persistent_logs | frames
@@ -192,10 +227,12 @@ printf 'ram %s\n' "$(logread 2>/dev/null | frames | grep -c '^match ')"
         words = line.split()
         if words == ['crc-filter-off']:
             frames.error = 'disable_crc_filter is not false, so a logged frame does not prove a valid CRC'
-        elif words[:1] == ['match'] and len(words) == 2:
-            frames.matched.append(words[1])
+        elif words[:1] == ['match'] and len(words) >= 2:
+            frames.matched.append((words[1], words[2] if len(words) > 2 else ''))
         elif words[:1] == ['other'] and len(words) >= 2:
             frames.other.append(tuple(words[1:]))
+        elif words[:1] in (['too-old'], ['too-late']) and len(words) == 3:
+            (frames.too_old if words[0] == 'too-old' else frames.too_late).append((words[1], words[2]))
         elif words == ['marked']:
             frames.marked = True
         elif words[:1] == ['ram'] and len(words) == 2 and words[1].isdecimal():
@@ -203,32 +240,58 @@ printf 'ram %s\n' "$(logread 2>/dev/null | frames | grep -c '^match ')"
     return frames
 
 
-def _frame_part(frames):
+def _frame_part(frames, channel=UPLINK):
     """Return (receipt text, missing reason) for receipt part (a)."""
-    expected = f'{UPLINK_FREQUENCY_HZ} Hz, {UPLINK_BANDWIDTH_HZ} Hz, SF{UPLINK_SF}'
     if frames.error:
         return None, frames.error
     if not frames.marked:
         return None, 'attempt marker absent from the persistent log'
     if frames.matched:
-        return f'Concentratord uplink_id {frames.matched[0]} at {expected}', None
+        return f'Concentratord uplink_id {frames.matched[0][0]} at {channel}', None
     if frames.other:
-        uplink, *channel = frames.other[0]
-        return None, (f'Concentratord uplink_id {uplink} at freq/bw/dr {"/".join(channel)}, '
-                      f'expected {expected}')
-    reason = 'no Concentratord "Frame received" line after the attempt marker in the persistent log'
+        uplink, *seen = frames.other[0]
+        return None, f'Concentratord uplink_id {uplink} at freq/bw/dr {"/".join(seen)}, expected {channel}'
+    reason = 'no Concentratord "Frame received" line in the attempt window of the persistent log'
     if frames.ram_matched:
         reason += f' (RAM ring has {frames.ram_matched})'
     return None, reason
 
 
-def _chirpstack_join(vm, dev_eui, join_eui, devnonce):
-    """Read ChirpStack's own record of a join for receipt part (b).
+def _dropped_downlink(frames):
+    """Name a downlink Concentratord dropped in the attempt window, or None."""
+    def late(scheduled, current):
+        try:
+            return f', {(int(current) - int(scheduled)) / 1000:.1f} ms late'
+        except ValueError:
+            return ''
 
-    The image runs ChirpStack at log level "warn", so it logs no line for a
-    join. ChirpStack 4.12.1 (src/uplink/join.rs) stores the DevNonce only after
-    the MIC check passes, and writes the device's DevAddr before it sends the
-    join-accept. Returns (DevNonce recorded, DevAddr hex or None, error).
+    if frames.too_old:
+        scheduled, current = frames.too_old[0]
+        return (f'join-accept dropped by concentratord: too old (scheduled count_us {scheduled}, '
+                f'counter {current}{late(scheduled, current)})')
+    if frames.too_late:
+        scheduled, current = frames.too_late[0]
+        return (f'join-accept dropped by concentratord: too late to enqueue (counter_us {scheduled}, '
+                f'counter {current}{late(scheduled, current)})')
+    return None
+
+
+@dataclass
+class ChirpStackJoin:
+    nonce_recorded: bool = False
+    dev_addr: str | None = None
+    join_nonce: int | None = None
+    keys_updated: int | None = None   # device_keys.updated_at, guest epoch seconds
+    error: str = ''
+
+
+def _chirpstack_join(vm, dev_eui, join_eui, devnonce):
+    """Read ChirpStack's state for one DevEUI for receipt part (b).
+
+    ChirpStack 4.12.1 writes no log line in these images, so the receipt reads
+    its database. Its join handler (src/uplink/join.rs) stores the DevNonce and
+    increments the JoinNonce only after the MIC check, and writes the DevAddr
+    before it sends the join-accept.
     """
     if not (re.fullmatch(r'[0-9A-Fa-f]{16}', dev_eui) and re.fullmatch(r'[0-9a-f]{16}', join_eui)
             and 0 <= devnonce <= 65535):
@@ -236,31 +299,44 @@ def _chirpstack_join(vm, dev_eui, join_eui, devnonce):
     code, output = vm.command(f"""sqlite3 -readonly -batch -bail -cmd '.timeout 5000' {CHIRPSTACK_DB} <<'SQL'
 SELECT (SELECT count(*) FROM device_keys k, json_each(k.dev_nonces) j, json_each(j.value) n
         WHERE k.dev_eui = x'{dev_eui}' AND lower(j.key) = '{join_eui}' AND n.value = {devnonce})
-       || ' ' || coalesce((SELECT nullif(hex(dev_addr), '') FROM device WHERE dev_eui = x'{dev_eui}'), '-');
+       || ' ' || coalesce((SELECT nullif(hex(dev_addr), '') FROM device WHERE dev_eui = x'{dev_eui}'), '-')
+       || ' ' || coalesce((SELECT join_nonce FROM device_keys WHERE dev_eui = x'{dev_eui}'), '-')
+       || ' ' || coalesce((SELECT strftime('%s', updated_at) FROM device_keys WHERE dev_eui = x'{dev_eui}'), '-');
 SQL""")
     words = output.split()
-    if code or len(words) != 2 or not words[0].isdecimal():
-        return False, None, 'ChirpStack database unreadable'
-    return int(words[0]) > 0, None if words[1] == '-' else words[1].upper(), None
+    if code or len(words) != 4 or not words[0].isdecimal():
+        return ChirpStackJoin(error='ChirpStack database unreadable')
+    number = lambda word: int(word) if word.isdecimal() else None
+    return ChirpStackJoin(int(words[0]) > 0, None if words[1] == '-' else words[1].upper(),
+                          number(words[2]), number(words[3]))
 
 
-def _chirpstack_part(record, dev_eui, devnonce, accepted_addr):
-    """Return (receipt text, missing reason) for receipt part (b)."""
-    recorded, dev_addr, error = record
-    if error:
-        return None, error
-    if not recorded:
+def _chirpstack_part(record, dev_eui, devnonce, marked_at, accept):
+    """Return (receipt text, missing reason) for receipt part (b).
+
+    accept is the verified join-accept's (DevAddr hex, JoinNonce) or None.
+    """
+    if record.error:
+        return None, record.error
+    if not record.nonce_recorded:
         return None, f'ChirpStack has no DevNonce {devnonce} recorded for {dev_eui}'
-    if accepted_addr is not None and dev_addr != accepted_addr:
-        return None, f'ChirpStack DevAddr {dev_addr or "unset"} differs from join-accept DevAddr {accepted_addr}'
-    return f'ChirpStack DevNonce {devnonce} recorded, DevAddr {dev_addr or "unset"}', None
+    if record.keys_updated is None or record.keys_updated < marked_at:
+        return None, f'ChirpStack device keys for {dev_eui} not updated after the attempt marker'
+    if accept is not None:
+        dev_addr, join_nonce = accept
+        if record.dev_addr != dev_addr:
+            return None, f'ChirpStack DevAddr {record.dev_addr or "unset"} differs from join-accept DevAddr {dev_addr}'
+        if record.join_nonce != join_nonce:
+            return None, f'ChirpStack JoinNonce {record.join_nonce} differs from join-accept JoinNonce {join_nonce}'
+    return (f'ChirpStack DevNonce {devnonce} recorded, JoinNonce {record.join_nonce}, '
+            f'DevAddr {record.dev_addr or "unset"}, keys updated after the marker'), None
 
 
 def _radio_evidence(vm, marker, delivered):
     if delivered <= 0:
         raise RuntimeError('WM1302 model delivered zero frames')
     frames = _concentratord_frames(vm, marker)
-    text, missing = _frame_part(frames)
+    _, missing = _frame_part(frames)
     if missing:
         raise RuntimeError(f'Concentratord frames received=0 (model delivered {delivered}): {missing}')
     return f'WM1302 model delivered={delivered}, Concentratord frames received={len(frames.matched)}'
@@ -271,7 +347,7 @@ def radio_diagnostics(vm):
     # contain credentials; the ChirpStack query never selects key columns.
     _, counts = vm.command(PERSISTENT_LOGS + r'''count_messages() {
     awk 'BEGIN {
-        n = split("Frame received, uplink_id:|Received uplink frame|Enqueueing timestamped packet|Scheduled packet for TX|Too late|TX_ACK|chirpstack[|invalid MIC|unknown device|region mismatch", needles, "[|]")
+        n = split("Frame received, uplink_id:|Received uplink frame|Enqueueing timestamped packet|Scheduled packet for TX|Scheduled packet is too old|Too late|TX_ACK|chirpstack[|invalid MIC|unknown device|region mismatch", needles, "[|]")
         for (i = 1; i <= n; i++) patterns[i] = tolower(needles[i])
     }
     { line = tolower($0); for (i = 1; i <= n; i++) if (index(line, patterns[i])) counts[i]++ }
@@ -366,16 +442,17 @@ def register(vm,password):
     return sessions
 
 
-def _join(vm, air, eui, session, log):
+def _join(vm, air, eui, session, log, channel=UPLINK):
     """Join one device; return (frames the model delivered, receipt line).
 
     An attempt counts as received only with all three receipt parts: (a) a
-    Concentratord "Frame received" line after the attempt marker at the
-    injected channel, (b) ChirpStack's record of the attempt's DevNonce with
-    the DevAddr the join-accept carries, (c) the join-accept at the emulated
+    Concentratord "Frame received" line in the attempt's window at the
+    channel the model sent, (b) ChirpStack's state for the DevEUI: the
+    attempt's DevNonce, keys updated after the marker, and the DevAddr and
+    JoinNonce the join-accept carries, (c) the join-accept at the emulated
     device inside the join window. Only a late or absent join-accept is
-    retried, with a fresh DevNonce: a counter wrap can delay it (#736). A
-    join-accept without (a) or (b) contradicts the receipt and fails at once.
+    retried, with a fresh DevNonce (#736). A join-accept without (a) or (b)
+    contradicts the receipt and fails at once.
     """
     def is_join_accept(packet):
         return packet[:1] == b'\x20'
@@ -385,11 +462,11 @@ def _join(vm, air, eui, session, log):
         if attempt > 1:
             session.devnonce += 1
         devnonce = session.devnonce
-        marker = _mark_attempt(vm)
+        marker, marked_at = _mark_attempt(vm)
         frame = session.join_request()
         sent = time.monotonic()
-        delivered += air.send(frame)
-        accept = accept_missing = accepted_addr = None
+        delivered += air.send(frame, channel)
+        accept = accept_missing = accepted = None
         retry = False
         try:
             reply = air.receive(max(0, sent + JOIN_WINDOW - time.monotonic()), is_join_accept)
@@ -408,21 +485,28 @@ def _join(vm, air, eui, session, log):
                 accept_missing = f'join-accept late after {delay:.2f} s (drained)'
             else:
                 try:
-                    accepted_addr = f'{session.accept_join(reply)["devaddr"]:08X}'
+                    fields = session.accept_join(reply)
+                    accepted = (f'{fields["devaddr"]:08X}', int.from_bytes(fields['appnonce'], 'little'))
                     accept = f'join-accept after {delay:.2f} s'
                 except ValueError as exc:
                     accept_missing = f'join-accept after {delay:.2f} s failed verification: {exc}'
 
-        frame_text, frame_missing = _frame_part(_concentratord_frames(vm, marker))
+        frames = _concentratord_frames(vm, marker, channel)
+        frame_text, frame_missing = _frame_part(frames, channel)
+        if accept_missing:
+            dropped = _dropped_downlink(frames)
+            if dropped:
+                accept_missing = f'{dropped}; {accept_missing}'
         record = _chirpstack_join(vm, eui, session.app_eui.hex(), devnonce)
-        chirpstack_text, chirpstack_missing = _chirpstack_part(record, eui, devnonce, accepted_addr)
+        chirpstack_text, chirpstack_missing = _chirpstack_part(record, eui, devnonce, marked_at, accepted)
         parts = [('frame', frame_text, frame_missing), ('chirpstack', chirpstack_text, chirpstack_missing),
                  ('join-accept', accept, accept_missing)]
         missing = [name for name, _, reason in parts if reason]
         verdict = 'received' if not missing else 'missing ' + ', '.join(missing)
         details = '; '.join(f'{name}: {text}' if text else f'{name}: MISSING ({reason})'
                             for name, text, reason in parts)
-        line = f'{eui} join attempt {attempt}/{JOIN_ATTEMPTS} (DevNonce {devnonce}): {verdict} | {details}'
+        line = (f'{eui} join attempt {attempt}/{JOIN_ATTEMPTS} (DevNonce {devnonce}, sent {channel}): '
+                f'{verdict} | {details}')
         log(line)
         if not missing:
             return delivered, line
@@ -467,7 +551,7 @@ def run_valve(vm, air, session, gui_open):
         return port_offset < len(packet) - 4 and packet[port_offset] == 2
 
     air.begin_case()
-    marker = _mark_attempt(vm)
+    marker, _ = _mark_attempt(vm)
     gui_open()
     try: air.receive(EARLY_WINDOW_TIMEOUT, valve_command)
     except TimeoutError: pass

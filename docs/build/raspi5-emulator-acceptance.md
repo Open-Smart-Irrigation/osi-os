@@ -69,30 +69,41 @@ the cached binary lacks the matching receipt protocol. Radio evidence comes
 from the guest's persistent log, `/data/log/osi-system.log*`. The RAM ring
 (`logread`) appears only in failure text and diagnostics.
 
-Each join attempt writes a marker to syslog and counts as received only with
-three parts:
+Each join attempt writes a marker to syslog, records the guest clock, and
+sends on a recorded channel (902300000 Hz, 125000 Hz, SF7 for every uplink
+today). The attempt's window runs from its marker to the next marker. It
+counts as received only with three parts:
 
-1. A Concentratord `Frame received, uplink_id: N` line after the marker, at
-   the channel the model sent (902300000 Hz, 125000 Hz, SF7). Concentratord
+1. A Concentratord `Frame received, uplink_id: N` line in the window, at the
+   channel the attempt recorded. Concentratord
    4.4.8 logs this line at INFO only after its CRC filter, and the image sets
    `disable_crc_filter=false`, so the line proves a CRC-valid frame. A frame
    with a bad CRC is logged at debug and never reaches the INFO log.
-2. ChirpStack's record of the join in `/srv/chirpstack/chirpstack.sqlite`:
-   the attempt's DevNonce in `device_keys.dev_nonces` for that DevEUI, and a
-   `device.dev_addr` equal to the DevAddr in the join-accept. The image runs
-   ChirpStack at log level `warn`, which logs nothing for a successful join.
-   ChirpStack 4.12.1 stores the DevNonce only after the MIC check, and writes
-   the DevAddr before it sends the join-accept.
+2. ChirpStack's state for that DevEUI in `/srv/chirpstack/chirpstack.sqlite`:
+   the attempt's DevNonce in `device_keys.dev_nonces`, `device_keys.updated_at`
+   at or after the marker's guest clock, and, once the join-accept has
+   verified, `device.dev_addr` and `device_keys.join_nonce` equal to the
+   join-accept's DevAddr and JoinNonce. ChirpStack writes no log line for a
+   join: the 0.8.3 candidate images do not route its output to syslog, and
+   main routes it at `warn` only. ChirpStack 4.12.1 stores the DevNonce and
+   increments the JoinNonce only after the MIC check, and writes the DevAddr
+   before it sends the join-accept.
 3. The join-accept at the emulated device inside the 40 s join window, with
    its delay.
 
-The runner prints one line per attempt with all three parts, or `MISSING` and
-the reason for each absent part. A late or absent join-accept is retried with
+The runner prints one line per attempt with the channel it sent on and all
+three parts, or `MISSING` and the reason for each absent part. When
+Concentratord dropped a downlink in the window (`Scheduled packet is too old,
+dropped` or `Too late to enqueue packet`), the join-accept reason starts with
+`join-accept dropped by concentratord: too old` (or `too late to enqueue`) and
+how late it was. One retained 0.8.3 run lost a join-accept this way, 6.5 ms
+late, with no counter wrap. A late or absent join-accept is retried with
 a fresh DevNonce, at most three attempts in total. A join-accept that arrives
 without part 1 or 2 fails the case at once. The valve case needs at least one
 matching `Frame received` line after its own marker.
 
-`radio-diagnostics.log` counts selected log lines in both sinks, lists
+`radio-diagnostics.log` counts selected log lines in both sinks (including
+`Scheduled packet is too old`), lists
 ChirpStack's DevNonce count and DevAddr state per device, and sums
 Concentratord's stats per process. Concentratord publishes stats every 30 s
 and resets its counters after each publish (`libconcentratord/src/stats.rs`).
