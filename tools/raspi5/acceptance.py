@@ -135,23 +135,33 @@ def expected_cases(args, image_capability, customer_selected, *, historical=Fals
 READY_PROBE = """test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/"""
 READY_ADDRESS = """ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0"""
 READY_POLL_SECONDS = 3
-# Worst case for one probe round: two wget calls, each with a 2 s connect
-# and a 2 s read timeout.
-READY_PROBE_SECONDS = 8
-# Shell start, the address step and the hex-encoded reply over the console.
+# Hard bound on one wget probe, enforced by a shell watchdog. wget -T alone
+# does not bound a probe: the image's uclient-fetch rearms its timeout on
+# every chunk of body data, and old images may ship another wget.
+READY_WGET_SECONDS = 4
+# Worst case for one probe round: two bounded wget calls.
+READY_PROBE_SECONDS = 2 * READY_WGET_SECONDS
+# Shell start, the address step, watchdog reaping and the hex-encoded reply
+# over the console.
 READY_COMMAND_SLACK_SECONDS = 60
+# Portable watchdog: no busybox timeout applet in the images. "$@" & makes
+# $p the wget process itself, so kill -9 ends it whatever it is doing.
+READY_SLOW_PROBE = f"""up() {{ cut -d. -f1 /proc/uptime; }}
+left() {{ [ "$(up)" -lt "$end" ]; }}
+bounded() {{ "$@" & p=$!; ( sleep {READY_WGET_SECONDS}; kill -9 "$p" 2>/dev/null ) & w=$!; wait "$p"; rc=$?; kill "$w" 2>/dev/null; return $rc; }}
+probe() {{ test -s /data/db/farming.db && left && bounded wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && left && bounded wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; }}"""
 
 
 def ready_host_timeout(budget, poll=READY_POLL_SECONDS):
-    # The last round can start just before the guest deadline, then probe and
-    # sleep once more before the loop sees the deadline.
+    # A probe starts only before the guest deadline and each is killed after
+    # READY_WGET_SECONDS, so the loop ends by budget + one round + one poll.
     return budget + READY_PROBE_SECONDS + poll + READY_COMMAND_SLACK_SECONDS
 
 
-def ready(vm, *, budget=None, poll=READY_POLL_SECONDS):
+def ready_script(budget=None, poll=READY_POLL_SECONDS):
     if budget is None:
         # Unchanged legacy wait: 180 rounds, 800 s on the host.
-        script, timeout = f"""for i in $(seq 1 180); do
+        return f"""for i in $(seq 1 180); do
 if {READY_PROBE}; then
 {READY_ADDRESS}
 exit $?
@@ -159,18 +169,22 @@ fi
 sleep 3
 done
 exit 1""", 800
-    else:
-        # Guest wall-clock deadline (uptime, so clock steps do not move it):
-        # probe time counts against the budget, unlike a fixed round count.
-        script, timeout = f"""end=$(( $(cut -d. -f1 /proc/uptime) + {budget} ))
-while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
-if {READY_PROBE}; then
+    # Guest wall-clock deadline (uptime, so clock steps do not move it):
+    # probe time counts against the budget, and no probe starts past it.
+    return f"""{READY_SLOW_PROBE}
+end=$(( $(up) + {budget} ))
+while left; do
+if probe; then
 {READY_ADDRESS}
 exit $?
 fi
 sleep {poll}
 done
 exit 1""", ready_host_timeout(budget, poll)
+
+
+def ready(vm, *, budget=None, poll=READY_POLL_SECONDS):
+    script, timeout = ready_script(budget, poll)
     checked(vm, script, timeout)
     if sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('integrity check failed')

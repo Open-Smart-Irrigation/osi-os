@@ -827,8 +827,10 @@ exit 1"""
     def test_slow_boot_ready_uses_a_guest_deadline_of_900_s(self):
         self.assertEqual(SLOW_BOOT_SECONDS, 900)
         script, timeout = self.ready_script(budget=SLOW_BOOT_SECONDS)
-        self.assertIn('end=$(( $(cut -d. -f1 /proc/uptime) + 900 ))', script)
-        self.assertIn('while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do', script)
+        self.assertIn('end=$(( $(up) + 900 ))', script)
+        self.assertIn('\nwhile left; do\nif probe; then\n', script)
+        self.assertEqual(script.count('bounded wget -q -T 2 '), 2)
+        self.assertEqual(script.count('left && bounded wget'), 2)
         self.assertIn('\nsleep 3\n', script)
         self.assertNotIn('seq', script)
         self.assertEqual(timeout, acceptance.ready_host_timeout(SLOW_BOOT_SECONDS))
@@ -841,6 +843,55 @@ exit 1"""
         # Two wget probes, each bounded by a 2 s connect and a 2 s read timeout.
         self.assertEqual(acceptance.READY_PROBE.count('wget -q -T 2 '), 2)
         self.assertGreaterEqual(acceptance.READY_PROBE_SECONDS, 2 * 2 * 2)
+
+    SHELLS = [shell for shell in (['sh'], ['dash'], ['busybox', 'sh'])
+              if subprocess.run(['which', shell[0]], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL).returncode == 0]
+
+    def run_slow_script(self, shell, wget, budget, poll):
+        # Runs the generated guest script on the host with stub commands; the
+        # host's /proc/uptime drives the deadline as the guest's does.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stubs = root/'bin'
+            stubs.mkdir()
+            for name, body in (('wget', wget), ('pidof', 'exit 0'), ('ip', 'exit 0')):
+                (stubs/name).write_text(f'#!/bin/sh\n{body}\n')
+                (stubs/name).chmod(0o755)
+            (root/'farming.db').write_bytes(b'db')
+            script, timeout = acceptance.ready_script(budget, poll)
+            script = script.replace('/data/db/farming.db', str(root/'farming.db')).replace('/tmp/gui', str(root/'gui'))
+            env = dict(os.environ, PATH=f'{stubs}:{os.environ["PATH"]}', STUB_ROOT=str(root))
+            began = time.monotonic()
+            result = subprocess.run([*shell, '-c', script], env=env, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=timeout)
+            elapsed = time.monotonic() - began
+            pids = [int(line) for line in (root/'pids').read_text().split()] if (root/'pids').exists() else []
+            return result.returncode, elapsed, timeout, pids
+
+    def test_slow_boot_probe_that_keeps_sending_is_killed_inside_the_host_timeout(self):
+        # Mimics uclient-fetch rearming -T on every body chunk: never finishes.
+        trickle = 'echo $$ >> "$STUB_ROOT/pids"\nwhile :; do echo chunk; sleep 1; done'
+        budget, poll = 2, 1
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, elapsed, timeout, pids = self.run_slow_script(shell, trickle, budget, poll)
+                self.assertEqual(code, 1)
+                self.assertGreaterEqual(elapsed, acceptance.READY_WGET_SECONDS)
+                self.assertLess(elapsed, budget + acceptance.READY_PROBE_SECONDS + poll)
+                self.assertLess(elapsed, timeout)
+                self.assertEqual(len(pids), 1)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(pids[0], 0)
+
+    def test_slow_boot_script_succeeds_when_both_probes_answer(self):
+        answer = ('while [ $# -gt 0 ]; do [ "$1" = -O ] && out=$2; shift; done\n'
+                  'echo "<html>" > "$out"')
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, elapsed, _, _ = self.run_slow_script(shell, answer, 30, 1)
+                self.assertEqual(code, 0)
+                self.assertLess(elapsed, acceptance.READY_PROBE_SECONDS)
 
     def test_only_the_0_8_1_upgrade_boot_gets_the_slow_boot_budget(self):
         for old, expected in (('0.8.0', unittest.mock.call('vm')),
