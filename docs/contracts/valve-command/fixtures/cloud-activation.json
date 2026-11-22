@@ -635,6 +635,55 @@
       "decision": "S7"
     },
     {
+      "id": "queued-pause-after-demotion-to-viewer-applies",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true,
+          "command_type": "PAUSE_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "demote_to_viewer"
+          },
+          {
+            "type": "edge_apply"
+          },
+          {
+            "type": "edge_ack_applied"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "mirror_match"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "accepted",
+        "attributed_actor": "original_requester",
+        "revocation_noted": "demoted_to_viewer",
+        "open_enqueues": 0,
+        "physical_closed": null,
+        "confirmed_enabled": false,
+        "ack": "APPLIED",
+        "after_first_signal": {
+          "pending": true,
+          "ui": "stop_pending_mirror"
+        },
+        "after_both": {
+          "pending": false,
+          "ui": "stop_applied"
+        }
+      },
+      "decision": "S7"
+    },
+    {
       "id": "queued-cancel-after-disable-applies",
       "basis": "requirement",
       "check": "scenario",

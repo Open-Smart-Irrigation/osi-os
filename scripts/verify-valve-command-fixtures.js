@@ -157,13 +157,15 @@ async function runBaseline(c) {
 
 const observationStates = new Set(['unobserved', 'observed_running', 'observed_complete',
   'observed_closed', 'stale_no_observation', 'stale_open_observed']);
-// K1 R1 (K3 S7): after the requester loses the zone grant, is disabled or is
-// deleted, only a command accepted before that point may continue, and only as
+// K1 R1 (K3 S7): after the requester loses the zone grant (a demotion to viewer
+// counts, CTO 23 Nov), is disabled or is deleted, only a command accepted before that point may continue, and only as
 // a stop (pause, cancel, or confirmed CLOSE-only override). It never opens,
 // stays with the original actor, notes the revocation, is ACKed and shown as
 // applied, and proves no physical closure. Everything else after revocation is
 // refused with no enqueue.
-const revocationNotes = { revoke_zone_grant: 'grant_lost', disable_requester: 'disabled', delete_requester: 'deleted' };
+const revocationNotes = {
+  revoke_zone_grant: 'grant_lost', demote_to_viewer: 'demoted_to_viewer', disable_requester: 'disabled', delete_requester: 'deleted',
+};
 function isStopContinuation(context) {
   if (context.return_position === 'OPEN') return false;
   if (['PAUSE_IRRIGATION_POLICY', 'CANCEL_VALVE_ACTUATION'].includes(context.command_type)) return true;
