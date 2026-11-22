@@ -1,0 +1,126 @@
+[
+  {
+    "name": "baseline",
+    "started_utc": "2026-11-20T00:58:05Z",
+    "seconds": 0.916,
+    "exit": 0,
+    "expected_exit": 0,
+    "output": [
+      "daily-scheduler parity: OK (378 cases across both profiles; legacy = shipped; baseline recorded before extraction)"
+    ]
+  },
+  {
+    "name": "stage-baseline",
+    "started_utc": "2026-11-20T00:58:06Z",
+    "seconds": 0.023,
+    "exit": 0,
+    "expected_exit": 0,
+    "output": []
+  },
+  {
+    "name": "commit-baseline",
+    "started_utc": "2026-11-20T00:58:06Z",
+    "seconds": 0.042,
+    "exit": 0,
+    "expected_exit": 0,
+    "output": [
+      "",
+      "    git commit --amend --reset-author",
+      "",
+      " 8 files changed, 11316 insertions(+)",
+      " create mode 100644 docs/superpowers/plans/2026-11-20-x1-daily-scheduler-extraction.md",
+      " create mode 100644 scripts/fixtures/daily-scheduler/expected.json",
+      " create mode 100644 scripts/fixtures/daily-scheduler/legacy-nodes.json",
+      " create mode 100644 scripts/flow-function-source.js",
+      " create mode 100644 scripts/lib/daily-scheduler-cases.js",
+      " create mode 100644 scripts/lib/daily-scheduler-harness.js",
+      " create mode 100644 scripts/lib/daily-scheduler-persistence.js",
+      " create mode 100644 scripts/test-daily-scheduler-parity.js"
+    ]
+  },
+  {
+    "name": "red-clock",
+    "started_utc": "2026-11-20T00:58:06Z",
+    "seconds": 0.224,
+    "exit": 1,
+    "expected_exit": 1,
+    "output": [
+      "  error: 'test failed'",
+      "  code: 'ERR_TEST_FAILURE'",
+      "  ...",
+      "1..1",
+      "# tests 1",
+      "# suites 0",
+      "# pass 0",
+      "# fail 1",
+      "# cancelled 0",
+      "# skipped 0",
+      "# todo 0",
+      "# duration_ms 121.399263"
+    ]
+  },
+  {
+    "name": "module-extraction",
+    "started_utc": "2026-11-20T00:58:06Z",
+    "seconds": 0.101,
+    "exit": 0,
+    "expected_exit": 0,
+    "output": [
+      "Extracted six bodies; prepared adapters; shipped flows untouched."
+    ]
+  },
+  {
+    "name": "adapter-preparation",
+    "started_utc": "2026-11-20T00:58:07Z",
+    "seconds": 0.228,
+    "exit": 0,
+    "expected_exit": 0,
+    "output": [
+      "byte-identical: true (input full_raspberrypi_bcm27xx_bcm2712)",
+      "byte-identical: true (input full_raspberrypi_bcm27xx_bcm2709)",
+      "byte-identical: true (output conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json)",
+      "byte-identical: true (output conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json)"
+    ]
+  },
+  {
+    "name": "initial-validation-fixture-error",
+    "started_utc": "2026-11-20T00:58:07Z",
+    "seconds": 4.412,
+    "exit": 1,
+    "expected_exit": 0,
+    "output": [
+      "parity-node22 PASS 0",
+      "parity-node20 PASS 0",
+      "negative-control PASS 1",
+      "node-red-image FAIL 1",
+      "TypeError: Cannot read properties of null (reading 'receive')",
+      "    at main (<repo>/scripts/test-daily-scheduler-node-red.js:63:75)",
+      "Error: Circular config node dependency detected: x1-1",
+      "    at Flow.start (/home/phil/builds/osi-v082-fix-20261112/w5/wt-636/scripts/fixtures/release-smoke/node_modules/@node-red/runtime/lib/flows/Flow.js:227:43)",
+      "    at Object.start [as startFlows] (/home/phil/builds/osi-v082-fix-20261112/w5/wt-636/scripts/fixtures/release-smoke/node_modules/@node-red/runtime/lib/flows/index.js:403:39)",
+      ""
+    ]
+  },
+  {
+    "name": "final-focused-validation",
+    "completed_utc": "2026-11-20T01:05:57.840611+00:00",
+    "exit": 0,
+    "seconds": 5.78,
+    "output": [
+      "parity-node22: 0 (expected 0)",
+      "parity-node20: 0 (expected 0)",
+      "negative-control: 1 (expected 1)",
+      "node-red-image: 0 (expected 0)",
+      "node-red-stock: 0 (expected 0)",
+      "clock: 0 (expected 0)",
+      "loader: 0 (expected 0)"
+    ]
+  },
+  {
+    "name": "evidence-comparison",
+    "exit": 0,
+    "output": [
+      "16 before/after records compare equal; reserved flow hashes match base."
+    ]
+  }
+]

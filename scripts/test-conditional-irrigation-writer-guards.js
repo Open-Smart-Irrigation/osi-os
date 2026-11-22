@@ -52,9 +52,12 @@ let canonical;
 for (const file of profilePaths) {
   const flow = JSON.parse(fs.readFileSync(file, 'utf8'));
   const byId = new Map(flow.map((node) => [node.id, node]));
-  const actualWriterCallers = flow.filter((node) => node.type === 'function' && /(queuePushes|enqueueValveCommand|flushValveQueue|clearValveOnUnclaim|flushDeviceQueue)/.test(node.func || '')).map((node) => node.id).sort();
+  // X2 adapters delegate to osi-command-ingress; scan the exported implementation.
+  const profile = file.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+  const implementation = (node) => require('./lib/valve-ingress-x2-source').resolvedNode(node, profile).func || '';
+  const actualWriterCallers = flow.filter((node) => node.type === 'function' && /(queuePushes|enqueueValveCommand|flushValveQueue|clearValveOnUnclaim|flushDeviceQueue)/.test(implementation(node))).map((node) => node.id).sort();
   assert.deepEqual(actualWriterCallers, requiredWriterCallers.slice().sort(), `${file}: exhaustive STREGA writer/flush inventory changed`);
-  for (const id of requiredWriterCallers) assert.match(byId.get(id).func, /osi-valve-control/, `${file}: ${id} must use shared valve-control wrapper`);
+  for (const id of requiredWriterCallers) assert.match(implementation(byId.get(id)), /osi-valve-control/, `${file}: ${id} must use shared valve-control wrapper`);
   const lifecycleAdapter = byId.get('conditional-lifecycle-command-adapter');
   assert.match(lifecycleAdapter.func || '', /osiLib\.require\('osi-irrigation-policy'\)/, `${file}: lifecycle command adapter must load the lifecycle service`);
   assert.match(lifecycleAdapter.func || '', /routes\.conditionalLifecycleCommand/, `${file}: lifecycle command adapter must delegate to the reviewed route implementation`);
