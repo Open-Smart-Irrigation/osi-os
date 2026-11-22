@@ -28,8 +28,14 @@ channels declared for that device type, with SWT3 eligibility preserved. A
 device without a type, or whose type has no family for a card (a
 TEKTELIC_CLOVER on the soil card), keeps the card-wide channel list, as the
 interactive grid does; its projection is narrowed to the columns it stored in
-the range, found by one aggregate scan. Rain tips (`rain_tips_delta`) stay
-AQUASCOPE_LORAIN-only, as on main.
+the range. One aggregate scan finds them, after the range check, the budget and
+the output preflight. The scan probes only the columns the request can return
+(requested channels, SWT3 eligibility, the rain rule below), stops at the
+remaining work allowance (`LIMIT remaining+1`) and charges its candidate rows
+to that allowance; an overflow refuses with `EXPORT_INPUT_TOO_LARGE`. Such a
+device emits measured rows only, so the output preflight reserves no empty
+cells for it; its rows are charged to the output budget as they are produced.
+Rain tips (`rain_tips_delta`) stay AQUASCOPE_LORAIN-only, as on main.
 
 The work ceiling comes from the supported date range and observed reporting
 cadence: four five-minute sources over all 3,660 daily dates require 4,216,320

@@ -85,7 +85,7 @@ for(const profile of ['bcm2712','bcm2709']) {
           assert.match(query.plan,/USING (?:COVERING )?INDEX idx_device_data_deveui_recorded_at/);
           assert.doesNotMatch(query.plan,/USE TEMP B-TREE/);
           // The presence scan of a card-wide device names every card column but fetches one row.
-          if(/^SELECT MAX\(/.test(query.sql)) { assert.equal(type,'TEKTELIC_CLOVER'); assert.equal(query.rows.length,1); continue; }
+          if(/^SELECT COUNT\(\*\) AS candidate_rows/.test(query.sql)) { assert.equal(type,'TEKTELIC_CLOVER'); assert.equal(query.rows.length,1); continue; }
           if(type==='DRAGINO_LSN50'||type==='KIWI_SENSOR'||type==='TEKTELIC_CLOVER') assert.doesNotMatch(query.sql,/vwc_|soil_(?:vic|temp|ec)_|swt_3/);
           if(type==='SENSECAP_S2120') assert.doesNotMatch(query.sql,/swt_|vwc_|soil_/);
         }
@@ -123,6 +123,37 @@ for(const profile of ['bcm2712','bcm2709']) {
       await assert.rejects(helper.buildZoneExportCsv(trace.db,{...range(93),granularity:'raw',zoneId:2}),e=>e.statusCode===413);
       await assert.rejects(helper.buildAllZonesExportCsv(trace.db,{...range(93),granularity:'raw',zoneIds:[1,2]}),e=>e.statusCode===413);
       assert.deepEqual(trace.queries,[]);
+    }finally{db.close();}
+  });
+  test(`${profile}: dense fallback discovery is filtered, preflighted and bounded in both builders`,async()=>{
+    // Round 4: a family-less CLOVER with 1,000 one-minute rows in one day.
+    const db=fixture(1,'TEKTELIC_CLOVER');
+    try {
+      populate(db,1,1,1.44);
+      const builders=[
+        ['per-zone',(trace,extra)=>helper.buildZoneExportCsv(trace.db,{...range(1),zoneId:2,channels:'swt_1',...extra})],
+        ['all-zones',(trace,extra)=>helper.buildAllZonesExportCsv(trace.db,{...range(1),zoneIds:[1,2],channels:'swt_1',...extra})],
+      ];
+      for(const [name,build] of builders) {
+        // The output preflight refuses before any device_data read.
+        let trace=traced(db);
+        await assert.rejects(build(trace,{channels:'ambient_temperature,relative_humidity,swt_1',maxRows:1}),e=>e.statusCode===413,name);
+        assert.deepEqual(trace.queries,[],`${name}: preflight precedes discovery`);
+        // Discovery probes only the requested columns and stops at the work allowance.
+        trace=traced(db);
+        await assert.rejects(build(trace,{maxWorkRows:400}),e=>e.statusCode===413&&e.code==='EXPORT_INPUT_TOO_LARGE',name);
+        assert.equal(trace.queries.length,1,`${name}: refused at discovery`);
+        const [discovery]=trace.queries;
+        assert.match(discovery.sql,/^SELECT COUNT\(\*\) AS candidate_rows, MAX\(swt_1 IS NOT NULL\) AS swt_1, MAX\(swt_wm1 IS NOT NULL\) AS swt_wm1 FROM \(SELECT swt_1, swt_wm1 FROM device_data .* LIMIT 401\)$/);
+        assert.equal(discovery.rows[0].candidate_rows,401);
+        assert.match(discovery.plan,/USING (?:COVERING )?INDEX idx_device_data_deveui_recorded_at/);
+        // Discovery is charged: 1,000 candidates plus a 1,000-row read exceed 1,500.
+        trace=traced(db);
+        await assert.rejects(build(trace,{maxWorkRows:1500}),e=>e.code==='EXPORT_INPUT_TOO_LARGE',name);
+        assert.equal(trace.queries[0].rows[0].candidate_rows,1000);
+        const result=await build(traced(db),{maxWorkRows:2000});
+        assert.equal(result.rowCount??result.rows.length,2,`${name}: swt_1 and its pF`);
+      }
     }finally{db.close();}
   });
   test(`${profile}: daily blanks only for a day the device stored no row at all`,async()=>{

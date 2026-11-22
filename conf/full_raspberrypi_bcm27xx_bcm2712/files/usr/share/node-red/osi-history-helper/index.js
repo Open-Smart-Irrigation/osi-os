@@ -3596,41 +3596,57 @@ function exportFamilyChannelKeys(card, device) {
 // without a type, or whose type has no family for the card (TEKTELIC_CLOVER on
 // the soil card), keeps the card-wide channel list. Rain tips stay LoRain-only,
 // as on main; swt_3 needs an eligible LSN50.
-function exportChannelsForDevice(card, device, scope) {
-  const channels = channelsForCard(card, [device]);
+// The card's channels this request can return for the device before the type
+// policy applies: the requested channel filter, LoRain-only rain tips and
+// swt_3 eligibility.
+function exportCandidateChannels(card, device, scope) {
   const type = deviceTypeId(device);
-  const supported = exportFamilyChannelKeys(card, device);
-  // Card-wide fallback: project only the columns this device stored in the
-  // range (resolveExportFieldPresence), so the null columns of ~50 soil
-  // channels do not count against the per-read memory sentinel.
-  const byDevice = supported === null && scope && scope.fieldPresence ? scope.fieldPresence.get(card) : null;
-  const present = byDevice ? byDevice.get(normalizeDeveui(device.deveui || device.device_eui)) : null;
-  const deviceChannels = channels.filter(channel =>
-    (supported === null
-      ? (!present || channelFieldNames(channel).some(field => present.has(field)))
-      : supported.has(channel.id))
-    && (channel.id !== 'rain_tips_delta' || type === 'AQUASCOPE_LORAIN')
-    && (channel.id !== 'swt_3' || isLsn50Swt3Eligible(device)));
-  return scope && scope.requestedChannelKeys
-    ? deviceChannels.filter(channel => scope.requestedChannelKeys.has(channel.id))
-    : deviceChannels;
+  return channelsForCard(card, [device]).filter(channel =>
+    (channel.id !== 'rain_tips_delta' || type === 'AQUASCOPE_LORAIN')
+    && (channel.id !== 'swt_3' || isLsn50Swt3Eligible(device))
+    && (!scope || !scope.requestedChannelKeys || scope.requestedChannelKeys.has(channel.id)));
 }
 
-// Columns that hold at least one value in the export range, per card and
-// device, for devices that keep the card-wide channel list. One aggregate scan
-// per such device; nothing is fetched into memory.
+function exportChannelsForDevice(card, device, scope) {
+  const supported = exportFamilyChannelKeys(card, device);
+  const candidates = exportCandidateChannels(card, device, scope);
+  if (supported !== null) return candidates.filter(channel => supported.has(channel.id));
+  // Card-wide fallback: project only the candidate columns this device stored
+  // in the range (resolveExportFieldPresence), so the null columns of ~50 soil
+  // channels do not count against the per-read memory sentinel.
+  const byDevice = scope && scope.fieldPresence ? scope.fieldPresence.get(card) : null;
+  const present = byDevice ? byDevice.get(normalizeDeveui(device.deveui || device.device_eui)) : null;
+  return present ? candidates.filter(channel => channelFieldNames(channel).some(field => present.has(field))) : candidates;
+}
+
+// Candidate columns that hold at least one value in the export range, per
+// card and device, for devices that keep the card-wide channel list. Callers
+// run it after the range check, the budget and the output preflight. With a
+// request budget, each scan is bounded by LIMIT and its candidate rows are
+// charged to the shared work allowance; overflow refuses like a read. The
+// nightly writer (no budget) scans one local day.
 async function resolveExportFieldPresence(db, scope) {
   const presence = new Map();
   const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
+  const budget = scope.budget;
   for (const card of scope.cards) {
     for (const device of sourceDevicesForCard(card, scope.devices)) {
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       if (!deveui || exportFamilyChannelKeys(card, device) !== null) continue;
-      const fields = Array.from(new Set(channelsForCard(card, [device]).flatMap(channelFieldNames)));
+      const fields = Array.from(new Set(exportCandidateChannels(card, device, scope).flatMap(channelFieldNames)));
       let present = new Set();
       if (fields.length) {
-        const sql = `SELECT ${fields.map(field => `MAX(${field} IS NOT NULL) AS ${field}`).join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql}`;
+        const remaining = budget ? Math.min(budget.workRows, Math.floor(budget.workCells / fields.length)) : null;
+        if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
+        const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
+        const sql = `SELECT COUNT(*) AS candidate_rows, ${fields.map(field => `MAX(${field} IS NOT NULL) AS ${field}`).join(', ')} FROM (SELECT ${fields.join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql}${limit})`;
         const row = (await dbAll(db, sql, [deveui].concat(range.params)))[0] || {};
+        const candidates = Number(row.candidate_rows || 0);
+        if (remaining !== null && candidates > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
+        if (budget) {
+          budget.workRows -= candidates;
+          budget.workCells -= candidates * fields.length;
+        }
         present = new Set(fields.filter(field => Number(row[field]) === 1));
       }
       if (!presence.has(card)) presence.set(card, new Map());
@@ -3815,12 +3831,12 @@ async function aggregateZoneExportRows(db, scope) {
 async function buildZoneExportCsv(db, options = {}) {
   const scope = await resolveZoneExportScope(db, options);
   assertExportRangeAllowed(scope);
-  // After the range refusal: the presence scan reads device_data.
-  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   scope.budget = exportLimits.createBudget(options, exportLimits.header(RAW_CSV_COLUMNS));
   scope.maxRows = scope.budget.maxRows;
   scope.windows = exportMonthWindows(scope);
   assertExportBucketBudget(scope, scope.maxRows);
+  // Only after every refusal that needs no data: the presence scan reads device_data.
+  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   if (scope.granularity === 'raw') {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
@@ -3846,6 +3862,10 @@ function assertExportBucketBudget(scope, remaining) {
   let cells = 0;
   for (const card of scope.cards) {
     for (const device of sourceDevicesForCard(card, scope.devices)) {
+      // A device on the card-wide fallback emits measured rows only (never
+      // blanks), so it reserves no empty cells here; its rows are charged to
+      // the output budget as they are produced.
+      if (exportFamilyChannelKeys(card, device) === null) continue;
       for (const channel of exportChannelsForDevice(card, device, scope)) {
         cells += buckets * (isSwtKpaChannel(channel) ? 2 : 1);
         if (cells > remaining) throw exportTooLarge(scope.maxRows);
@@ -3904,11 +3924,12 @@ async function buildAllZonesExportCsv(db, options = {}) {
     });
     scope.maxRows = maxRows;
     scope.budget = budget;
-    scope.fieldPresence = await resolveExportFieldPresence(db, scope);
     scope.windows = exportMonthWindows(scope);
     bucketCount += assertExportBucketBudget(scope, maxRows - bucketCount);
     scopes.push(scope);
   }
+  // Presence scans start only after every zone passed its preflight.
+  for (const scope of scopes) scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   const chunks = [exportLimits.header(RAW_CSV_COLUMNS)];
   for (const scope of scopes) {
     const rows = granularity === 'raw' ? await rawZoneExportRows(db, scope) : await aggregateZoneExportRows(db, scope);

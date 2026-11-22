@@ -9,6 +9,54 @@ Startup after updating from main: READY at `7725a09f2b`, based on `origin/main`
 Pi 4 acceptance, codec helpers and atomic Node-RED startup writes; the rebase
 was clean, with both existing patches unchanged in `git range-diff`.
 
+## Round-4 finding and fix (head `ffa7b612` → this revision)
+
+Round 4 (Sol): one P1. Column discovery for card-wide devices ran before the
+per-zone budget and the all-zones bucket preflight, was not charged to the
+work allowance, and probed every card column regardless of the requested
+channels (892 ms on a 300,000-row CLOVER before a 413).
+
+| Part | Fix |
+|---|---|
+| Filter first | New `exportCandidateChannels` applies the requested-channel filter, LoRain-only rain tips and SWT3 eligibility. Discovery and `exportChannelsForDevice` both start from it, so discovery probes only columns the request can return. |
+| Order | Per-zone: range check, budget, windows, output preflight, then discovery. All-zones: every zone is resolved and preflighted first; discovery runs in a second loop. Nightly: unchanged, one local day, no budget. |
+| Bound and charge | Discovery is `SELECT COUNT(*), MAX(col IS NOT NULL)… FROM (SELECT cols … LIMIT remaining+1)`, where `remaining` is the shared work allowance in rows and cells. Candidate rows are charged to it, and an overflow refuses with the existing `EXPORT_INPUT_TOO_LARGE`. |
+| Preflight | A card-wide device emits measured rows only (round 3), so the output preflight reserves no empty cells for it. Its rows are still charged to the output budget as they are produced. Counting its candidate channels instead would have refused a ten-year daily export of two CLOVERs. |
+
+Decision: I bound discovery by the work allowance, not the per-read sentinel.
+A 30,000-row sentinel over the whole range would refuse a year of 15-minute
+CLOVER data in a daily export, which main serves. With the narrow column list,
+the reviewer's dense case now scans only `swt_1`/`swt_wm1`, and the 300,000
+candidate rows count against the 5,000,000-row allowance.
+
+New test `dense fallback discovery is filtered, preflighted and bounded in both
+builders` (per-zone and all-zones, 1,000 one-minute CLOVER rows):
+- an output-preflight refusal issues no `device_data` query;
+- with `maxWorkRows: 400`, the only query is discovery over `swt_1, swt_wm1`
+  with `LIMIT 401`, using `idx_device_data_deveui_recorded_at`, then a 413;
+- with `maxWorkRows: 1500`, the export is refused after discovery charged 1,000
+  rows, and with 2,000 it succeeds with two rows.
+Against the round-4 helper this test fails (0/1). The projection test now
+recognises the discovery query by its `candidate_rows` column.
+
+Round-4 checks (local, this revision):
+
+| Command | Result |
+|---|---|
+| `scripts/test-history-source-guards.js` | 20/20 |
+| `scripts/test-history-export-ordinary.js` (`--max-old-space-size=192`) | 32/32 |
+| `scripts/test-history-source-v2.js` | 68/68 |
+| helper `index.test.js`, each profile | 45/45 |
+| router `index.test.js`, each profile | 76/0 |
+| export triad + recorded-at formats (`--max-old-space-size=192`) | 108/108 |
+| `scripts/test-history-helper.js` | PASS, rc 0 (final tree) |
+| `capture-history-router-vectors.js --verify` | 4/4 |
+| `verify-sync-flow.js` (direct, alone) | rc 0, all parity checks passed (1,581 s) |
+| `verify-test-inventory`, `verify-profile-parity`, silent-catch, doc hygiene | OK; helper byte-identical across profiles |
+| Reviewer probes 1, 2, 4–9 | Same as round 4 (probe9 8/168/8) |
+
+Round time: authoring and focused tests 12:41–12:45 UTC, then serial `test-history-helper.js` and `verify-sync-flow.js` to 13:23 UTC (about 42 minutes before push). The CI wait on the pushed head is recorded in a PR comment, so this file does not change the head after CI.
+
 ## Round-3 findings and fixes (head `29c4554d` → this revision)
 
 Startup: the worktree readiness file (mode start, 11:40 UTC) reports
