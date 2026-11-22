@@ -3997,9 +3997,9 @@ expectFileExists(rootfsResizeInit2709Path, 'bcm2709 ships rootfs resize init');
 if (fs.existsSync(rootfsGrowDefault2712Path) && fs.existsSync(rootfsResizeInit2712Path)) {
   const rootfsGrowDefault = fs.readFileSync(rootfsGrowDefault2712Path, 'utf8');
   const rootfsResizeInit = fs.readFileSync(rootfsResizeInit2712Path, 'utf8');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'parted -s "$DISK"', 'uses parted for in-place partition growth');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'LC_ALL=C parted "$DISK"', 'uses parted with an explicit mounted-partition confirmation for in-place growth');
   expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, '[ -f "$NEEDS_RESIZE" ] && exit 0', 'does not re-partition while filesystem resize is pending');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart $PART 100%', 'grows the root partition to the end of the disk');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart "$PART" 100%', 'grows the root partition to the end of the disk');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'START=08', 'runs filesystem resize before Node-RED startup');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'resize2fs "$ROOT_SRC"', 'grows the mounted filesystem after reboot');
 }

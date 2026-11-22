@@ -8,7 +8,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=fstools
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=$(PROJECT_GIT)/project/fstools.git
@@ -24,7 +24,7 @@ PKG_BUILD_FLAGS:=no-mips16
 PKG_FLAGS:=nonshared
 
 PKG_BUILD_DEPENDS := util-linux
-PKG_CONFIG_DEPENDS := CONFIG_NAND_SUPPORT CONFIG_FSTOOLS_UBIFS_EXTROOT
+PKG_CONFIG_DEPENDS := CONFIG_NAND_SUPPORT CONFIG_FSTOOLS_UBIFS_EXTROOT CONFIG_FSTOOLS_ROOTDISK_EXT4
 
 PKG_MAINTAINER:=John Crispin <john@phrozen.org>
 
@@ -34,6 +34,7 @@ include $(INCLUDE_DIR)/cmake.mk
 CMAKE_OPTIONS += $(if $(CONFIG_FSTOOLS_UBIFS_EXTROOT),-DCMAKE_UBIFS_EXTROOT=y)
 CMAKE_OPTIONS += $(if $(CONFIG_FSTOOLS_OVL_MOUNT_FULL_ACCESS_TIME),-DCMAKE_OVL_MOUNT_FULL_ACCESS_TIME=y)
 CMAKE_OPTIONS += $(if $(CONFIG_FSTOOLS_OVL_MOUNT_COMPRESS_ZLIB),-DCMAKE_OVL_MOUNT_COMPRESS_ZLIB=y)
+TARGET_CFLAGS += $(if $(CONFIG_FSTOOLS_ROOTDISK_EXT4),-DOSI_ROOTDISK_EXT4)
 
 define Package/fstools
   SECTION:=base
@@ -44,6 +45,14 @@ define Package/fstools
 endef
 
 define Package/fstools/config
+	config FSTOOLS_ROOTDISK_EXT4
+		depends on PACKAGE_fstools
+		bool "Use ext4 for newly formatted rootdisk overlays"
+		default n
+		help
+			Format blank rootdisk overlays as ext4 for online growth.
+			Existing ext4 and F2FS filesystems keep their format.
+
 	config FSTOOLS_UBIFS_EXTROOT
 		depends on PACKAGE_fstools
 		depends on NAND_SUPPORT

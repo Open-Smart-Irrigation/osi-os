@@ -51,7 +51,7 @@ function renderWith(rainFocus: Partial<RainFocus>) {
 
 function pillValue(label: string): string | null {
   const pill = screen.getByText(label).parentElement;
-  return pill ? pill.textContent : null;
+  return pill ? pill.textContent?.replace(/\u00a0/g, ' ') ?? null : null;
 }
 
 afterEach(cleanup);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -55,23 +55,23 @@ function renderTab(source: ForecastEnvironment['source']) {
 afterEach(cleanup);
 
 describe('WeatherTab provider attribution', () => {
-  it('credits Open-Meteo behind a HelpTip beside the hourly rain heading', () => {
+  it('credits Open-Meteo visibly below the hourly rain chart', () => {
     renderTab('open_meteo');
 
-    expect(screen.queryByText('Weather data by Open-Meteo.com, CC BY 4.0')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'About the weather data' }));
+    expect(screen.queryByRole('button', { name: 'About the weather data' })).not.toBeInTheDocument();
     expect(screen.getByText('Weather data by Open-Meteo.com, CC BY 4.0')).toBeInTheDocument();
   });
 
   it('credits nobody for a forecast that did not come from Open-Meteo', () => {
     renderTab('openagri');
 
+    expect(screen.queryByText('Weather data by Open-Meteo.com, CC BY 4.0')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'About the weather data' })).not.toBeInTheDocument();
   });
 });
 
 describe('WeatherTab provider attribution without an hourly chart', () => {
-  it('keeps the Open-Meteo credit HelpTip when the forecast has no hourly rows', () => {
+  it('keeps the visible Open-Meteo credit when the forecast has no hourly rows', () => {
     const noHours = forecast('open_meteo');
     noHours.rainFocus = { ...noHours.rainFocus!, hourly: [] };
     render(
@@ -80,7 +80,6 @@ describe('WeatherTab provider attribution without an hourly chart', () => {
       </I18nextProvider>,
     );
     expect(screen.queryByText('Hourly rain (next 24 h)')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'About the weather data' }));
     expect(screen.getByText('Weather data by Open-Meteo.com, CC BY 4.0')).toBeInTheDocument();
   });
 });

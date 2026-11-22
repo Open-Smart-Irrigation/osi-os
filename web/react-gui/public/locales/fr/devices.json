@@ -516,7 +516,22 @@
       "noData": "Aucune donnée agronomique disponible",
       "fromSource": "depuis {{source}}",
       "kcHelpLabel": "À propos du coefficient cultural",
-      "kcHelp": "Kc FAO-56 pour {{crop}} : initial {{ini}}, mi-saison {{mid}}, fin {{end}}. Stade actuel : {{stage}}."
+      "kcHelp": "Kc FAO-56 pour {{crop}} : initial {{ini}}, mi-saison {{mid}}, fin {{end}}. Stade actuel : {{stage}}.",
+      "evapotranspiration": "Évapotranspiration",
+      "conditions": "Conditions",
+      "vpdStatus": {
+        "saturated": "Saturé",
+        "low": "Faible",
+        "moderate": "Modéré",
+        "high": "Élevé",
+        "stressRisk": "Risque de stress"
+      },
+      "thiStatus": {
+        "normal": "Normal",
+        "alert": "Alerte",
+        "danger": "Danger",
+        "emergency": "Urgence"
+      }
     },
     "forecast": {
       "dayToday": "Aujourd'hui",
@@ -534,7 +549,12 @@
       "noData": "Prévisions indisponibles",
       "noLocation": "Définissez les coordonnées de zone pour activer les prévisions",
       "hourlyTitle": "Pluie horaire (proch. 24 h)",
-      "unavailable": "Indisponible"
+      "unavailable": "Indisponible",
+      "rain": "Pluie",
+      "probability": "Probabilité",
+      "hourlyHelpLabel": "À propos de la pluie horaire",
+      "hourlyHelp": "Les barres indiquent la pluie en millimètres ; la ligne pointillée indique la probabilité de pluie en pourcentage.",
+      "relativeHumidityValue": "{{value}} HR"
     },
     "metrics": {
       "air_temperature_c": "Temp. air",
@@ -548,6 +568,24 @@
       "uv_index": "Indice UV",
       "soil_temperature_c": "Temp. sol",
       "soil_moisture_pct": "Humidité sol"
+    },
+    "compass": {
+      "N": "N",
+      "NNE": "NNE",
+      "NE": "NE",
+      "ENE": "ENE",
+      "E": "E",
+      "ESE": "ESE",
+      "SE": "SE",
+      "SSE": "SSE",
+      "S": "S",
+      "SSW": "SSO",
+      "SW": "SO",
+      "WSW": "OSO",
+      "W": "O",
+      "WNW": "ONO",
+      "NW": "NO",
+      "NNW": "NNO"
     }
   },
   "zoneConfig": {
@@ -1160,5 +1198,29 @@
     "rangeState": "État de la plage",
     "outsideRange": "La dernière mesure mécanique dépasse la plage d’étalonnage enregistrée. La variation du tronc est masquée sur la fiche principale jusqu’à la vérification de cette plage.",
     "calibrationDetails": "Les détails d’étalonnage du rapport et de l’ADC sont disponibles dans les paramètres avancés de la fiche LSN50."
+  },
+  "weatherCard": {
+    "minuteInterval": "Intervalle de {{value}} min",
+    "secondInterval": "Intervalle de {{value}} s",
+    "perTenMinutes": "{{value}} {{unit}} par 10 min",
+    "rateOverInterval": "{{value}} mm/h sur {{interval}}",
+    "thisInterval": "Cet intervalle",
+    "gust": "Rafale {{value}} m/s",
+    "lastUplink": "Dernière transmission : {{value}} mm",
+    "manageZones": "Gérer les zones affectées",
+    "zoneAssignments": "Zones affectées",
+    "noZones": "Aucune zone disponible",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saveFailed": "Échec de l’enregistrement",
+    "counterStatus": {
+      "first_sample": "En attente de la prochaine transmission pour calculer la différence.",
+      "duplicate_timestamp": "Transmission avec horodatage en double ignorée.",
+      "out_of_order": "Transmission hors séquence ignorée.",
+      "counter_reset": "Remise à zéro du compteur détectée ; différence de l’intervalle ignorée.",
+      "invalid_interval": "Intervalle de transmission non valide ; différence ignorée.",
+      "cumulative_baseline": "Valeur initiale du compteur de pluie définie ; en attente de la prochaine transmission pour calculer la différence.",
+      "intensity_only": "Quantité de pluie inconnue pour cet intervalle ; seule l’intensité a été transmise."
+    }
   }
 }

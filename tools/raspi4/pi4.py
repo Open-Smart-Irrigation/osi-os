@@ -82,7 +82,6 @@ class Pi4(Guest):
                 '-nic', f'socket,fd={wire_fd}',
                 '-drive', disk,
                 '-device', 'nec-usb-xhci,id=xhci,bus=pcie.1,addr=0,msi=off,msix=off',
-                '-chardev', 'socket,id=wm1302-air,path=radio,server=on,wait=off',
                 '-device', 'loader,file=armstub.bin,addr=0,force-raw=on,cpu-num=0',
                 '-device', 'loader,file=kernel.img,addr=0x8000,force-raw=on',
                 '-device', f'loader,file={dtb.name},addr={FDT_ADDRESS},force-raw=on']
