@@ -446,29 +446,6 @@
       "decision": "S7"
     },
     {
-      "id": "authority-member-operate",
-      "basis": "proposed",
-      "check": "scenario",
-      "input": {
-        "context": {
-          "actor": "member",
-          "zone_permission": "operate",
-          "command_type": "UPSERT_IRRIGATION_POLICY"
-        },
-        "events": [
-          {
-            "type": "activate"
-          }
-        ]
-      },
-      "expected": {
-        "admission": "refused",
-        "authorized": false,
-        "physical_enqueues": 0
-      },
-      "decision": "S7"
-    },
-    {
       "id": "authority-viewer-read",
       "basis": "proposed",
       "check": "scenario",
@@ -585,7 +562,8 @@
       "check": "scenario",
       "input": {
         "context": {
-          "authorized_at_queue": true
+          "authorized_at_queue": true,
+          "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
           {
@@ -603,6 +581,127 @@
         "edge_admission": "refused",
         "physical_enqueues": 0,
         "confirmed_enabled": false
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "queued-pause-after-grant-loss-applies",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true,
+          "command_type": "PAUSE_IRRIGATION_POLICY"
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "revoke_zone_grant"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "accepted",
+        "attributed_actor": "original_requester",
+        "revocation_noted": "grant_lost",
+        "open_enqueues": 0,
+        "physical_closed": null,
+        "confirmed_enabled": false
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "queued-cancel-after-disable-applies",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true,
+          "command_type": "CANCEL_VALVE_ACTUATION"
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "disable_requester"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "accepted",
+        "attributed_actor": "original_requester",
+        "revocation_noted": "disabled",
+        "open_enqueues": 0,
+        "physical_closed": null
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "queued-close-override-after-delete-applies",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true,
+          "command_type": "CLOSE",
+          "confirmed_override": true,
+          "effect": "CLOSE_ONLY"
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "delete_requester"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "accepted",
+        "attributed_actor": "original_requester",
+        "revocation_noted": "deleted",
+        "open_enqueues": 0,
+        "physical_closed": null
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "timed-close-with-open-return-after-revoke-refused",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": true,
+          "command_type": "STREGA_TIMED_CLOSE",
+          "return_position": "OPEN"
+        },
+        "events": [
+          {
+            "type": "cloud_accept"
+          },
+          {
+            "type": "revoke_zone_grant"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "edge_admission": "refused",
+        "physical_enqueues": 0
       },
       "decision": "S7"
     },

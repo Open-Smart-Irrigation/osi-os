@@ -4,7 +4,7 @@
   "edge_source": "ec822b556a4bf789774a2e4deda7841d469dc631",
   "cloud_source": "b002b807b32744979c118bf8f40b3136f2a75a32",
   "authority_contract": "../authority/v1.md",
-  "authority_status": "parallel_pending_K1",
+  "authority_status": "K1_merged",
   "physical_qualification": false,
   "decisions": [
     "S1",
@@ -69,7 +69,7 @@
         "CL1",
         "CL2"
       ],
-      "cases": 33
+      "cases": 36
     }
   ],
   "signed_at": "2026-11-20",
@@ -80,7 +80,7 @@
     "S4": "open_CL1",
     "S5": "signed",
     "S6": "CTO_ruled_fixed_only_0.9_1.0",
-    "S7": "open_until_K1",
+    "S7": "closed_by_K1_R1",
     "S8": "R8_decided_activation_receipts_open"
   },
   "proportional_policy_field_count": null,
