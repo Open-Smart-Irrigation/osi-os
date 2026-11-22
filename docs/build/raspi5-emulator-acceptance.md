@@ -63,12 +63,47 @@ The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
-Both radio cases record the number of frames the WM1302 model accepted into
-its RX FIFO and the number Concentratord logged after its CRC filter. Each
-injection needs a model receipt with the matching request ID. Each case
-drains pending radio packets and needs a positive CRC_OK count from its own
-log window. Rebuild QEMU with these tools if the cached binary lacks the
-matching receipt protocol.
+Both radio cases drain pending radio packets, and each injection needs a WM1302
+model receipt with the matching request ID. Rebuild QEMU with these tools if
+the cached binary lacks the matching receipt protocol. Radio evidence comes
+from the guest's persistent log, `/data/log/osi-system.log*`. The RAM ring
+(`logread`) appears only in failure text and diagnostics.
+
+Each join attempt writes a marker to syslog and counts as received only with
+three parts:
+
+1. A Concentratord `Frame received, uplink_id: N` line after the marker, at
+   the channel the model sent (902300000 Hz, 125000 Hz, SF7). Concentratord
+   4.4.8 logs this line at INFO only after its CRC filter, and the image sets
+   `disable_crc_filter=false`, so the line proves a CRC-valid frame. A frame
+   with a bad CRC is logged at debug and never reaches the INFO log.
+2. ChirpStack's record of the join in `/srv/chirpstack/chirpstack.sqlite`:
+   the attempt's DevNonce in `device_keys.dev_nonces` for that DevEUI, and a
+   `device.dev_addr` equal to the DevAddr in the join-accept. The image runs
+   ChirpStack at log level `warn`, which logs nothing for a successful join.
+   ChirpStack 4.12.1 stores the DevNonce only after the MIC check, and writes
+   the DevAddr before it sends the join-accept.
+3. The join-accept at the emulated device inside the 40 s join window, with
+   its delay.
+
+The runner prints one line per attempt with all three parts, or `MISSING` and
+the reason for each absent part. A late or absent join-accept is retried with
+a fresh DevNonce, at most three attempts in total. A join-accept that arrives
+without part 1 or 2 fails the case at once. The valve case needs at least one
+matching `Frame received` line after its own marker.
+
+`radio-diagnostics.log` counts selected log lines in both sinks, lists
+ChirpStack's DevNonce count and DevAddr state per device, and sums
+Concentratord's stats per process. Concentratord publishes stats every 30 s
+and resets its counters after each publish (`libconcentratord/src/stats.rs`).
+A single `Publishing stats event, rx_received: 0` line therefore covers one
+window, not the run, and can sit next to received frames. The persistent log
+also spans every guest boot on the disk. In the 22 Nov 2026 Pi 5 candidate
+evidence, the radio guest's only stats line in the active log file reads
+`rx_received: 3` for the three frames of its window. The guest stopped before
+the window holding its last two frames was published. The last stats line in
+the file, `rx_received: 0`, came from a later upgrade guest that carried no
+radio traffic.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's

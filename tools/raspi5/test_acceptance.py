@@ -1,6 +1,6 @@
 """Host-only tests for the Pi 5 acceptance runner."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from dataclasses import replace
 import hashlib
 import io
@@ -9,7 +9,9 @@ import os
 from pathlib import Path
 import re
 from shlex import quote
+import shutil
 import socket
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -121,7 +123,7 @@ class RadioTests(unittest.TestCase):
         _, other_wire = self.downlink(2)
         _, mac_wire = self.downlink(valve.devaddr, port=0)
         vm = Mock()
-        vm.command.return_value = (0, '2')
+        vm.command.return_value = (0, 'match 81\nmatch 82\nmarked\nram 2')
         with (host, model, ThreadPoolExecutor(1) as worker,
               patch.object(radio_suite, '_wait_history'),
               patch.object(radio_suite, 'EARLY_WINDOW_TIMEOUT', 0.01)):
@@ -141,7 +143,7 @@ class RadioTests(unittest.TestCase):
             air = radio_suite.Radio(host)
             result = radio_suite.run_valve(vm, air, {radio_suite.VALVE: valve},
                                           lambda: model.sendall(other_wire + mac_wire))
-            self.assertEqual(result, 'WM1302 model delivered=2, Concentratord CRC_OK=2')
+            self.assertEqual(result, 'WM1302 model delivered=2, Concentratord frames received=2')
             self.assertFalse(air.buffer)
             valve.downlink.assert_called_once_with(command)
             waiting.result()
@@ -157,23 +159,34 @@ class RadioTests(unittest.TestCase):
                 radio_suite.run_valve(vm, radio_suite.Radio(host), {radio_suite.VALVE: valve},
                                       lambda: model.sendall(command_wire))
 
-    def test_model_delivery_without_concentratord_crc_ok_fails(self):
+    def test_model_delivery_without_concentratord_frame_fails(self):
         vm = Mock()
-        vm.command.return_value = (0, '0')
-        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+        vm.command.return_value = (0, 'marked\nram 0')
+        with self.assertRaisesRegex(RuntimeError, 'Concentratord frames received=0'):
             radio_suite._radio_evidence(vm, 'fixture', 1)
 
-    def test_unavailable_concentratord_count_fails(self):
+    def test_unavailable_concentratord_log_fails(self):
         vm = Mock()
-        vm.command.return_value = (1, '4')
-        with self.assertRaisesRegex(RuntimeError, 'CRC_OK count unavailable'):
+        vm.command.return_value = (1, 'match 4\nmarked')
+        with self.assertRaisesRegex(RuntimeError, 'persistent log unreadable'):
             radio_suite._radio_evidence(vm, 'fixture', 4)
+
+    def test_frames_without_crc_filter_do_not_count(self):
+        vm = Mock()
+        vm.command.return_value = (0, 'crc-filter-off')
+        with self.assertRaisesRegex(RuntimeError, 'disable_crc_filter is not false'):
+            radio_suite._radio_evidence(vm, 'fixture', 1)
 
     def test_positive_model_and_concentratord_counts_pass(self):
         vm = Mock()
-        vm.command.return_value = (0, '2')
+        vm.command.return_value = (0, 'match 81\nmatch 82\nmarked\nram 0')
         self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 2),
-                         'WM1302 model delivered=2, Concentratord CRC_OK=2')
+                         'WM1302 model delivered=2, Concentratord frames received=2')
+
+    def test_no_output_or_message_names_crc_ok(self):
+        # Concentratord, its HAL wrapper and libconcentratord never log the
+        # string "CRC_OK", so a count of it always reads 0.
+        self.assertNotIn('CRC_OK', Path(radio_suite.__file__).read_text())
 
     def test_uplink_case_without_injections_fails(self):
         vm = Mock()
@@ -185,9 +198,10 @@ class RadioTests(unittest.TestCase):
         now = 0
         deadline = None
         air = Mock()
-        valve = Mock(devnonce=1)
+        valve = Mock(devnonce=1, app_eui=bytes(8))
         valve.join_request.side_effect = lambda: bytes([valve.devnonce])
         valve.uplink.return_value = b'data'
+        valve.accept_join.return_value = {'devaddr': 0x0037032B}
         replies = iter(arrivals)
 
         def send(frame):
@@ -211,53 +225,148 @@ class RadioTests(unittest.TestCase):
         air.receive.side_effect = receive
         return air, valve, lambda: now
 
-    def test_wrapped_join_drains_then_retries_with_fresh_devnonce(self):
-        air, valve, clock = self.join_fixture([139.31, 5.1])
-        vm = Mock()
-        vm.command.return_value = (0, '1')
+    def guest(self, frames=None, chirpstack=None):
+        """A guest that answers markers, frame queries and ChirpStack queries.
+
+        frames and chirpstack map an attempt number to the guest's output;
+        attempts without an entry get a complete receipt.
+        """
+        scripts = []
+
+        def command(script, timeout=None):
+            scripts.append(script)
+            attempt = sum('logger -t osi-radio-suite' in s for s in scripts)
+            if 'logger -t osi-radio-suite' in script:
+                return 0, ''
+            if 'osi-radio-suite:' in script:
+                return 0, (frames or {}).get(attempt, 'match 81\nmarked\nram 1')
+            if 'device_keys' in script:
+                return 0, (chirpstack or {}).get(attempt, '1 0037032B')
+            raise AssertionError('unexpected guest command')
+
+        return SimpleNamespace(command=command), scripts
+
+    def run_join(self, arrivals, **guest):
+        air, valve, clock = self.join_fixture(arrivals)
+        vm, scripts = self.guest(**guest)
         output = io.StringIO()
         with (patch.object(radio_suite.time, 'monotonic', clock),
               patch.object(radio_suite, '_wait_history'), redirect_stdout(output)):
+            result = radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        return result, output.getvalue(), air, valve, scripts
+
+    def test_join_receipt_needs_frame_chirpstack_and_accept(self):
+        result, output, _, valve, scripts = self.run_join([5.0])
+        self.assertEqual(result, 'WM1302 model delivered=2, complete join receipts=1 '
+                                 '(Concentratord frame, ChirpStack DevNonce, join-accept)')
+        self.assertEqual(output.strip(), (
+            f'{radio_suite.VALVE} join attempt 1/3 (DevNonce 1): received | '
+            'frame: Concentratord uplink_id 81 at 902300000 Hz, 125000 Hz, SF7; '
+            'chirpstack: ChirpStack DevNonce 1 recorded, DevAddr 0037032B; '
+            'join-accept: join-accept after 5.00 s'))
+        frame_query = next(s for s in scripts if 'osi-radio-suite:' in s)
+        self.assertIn("-v freq='902300000' -v bw='125000' -v dr='SF7'", frame_query)
+        chirpstack_query = next(s for s in scripts if 'device_keys' in s)
+        self.assertIn(f"k.dev_eui = x'{radio_suite.VALVE}'", chirpstack_query)
+        self.assertIn("lower(j.key) = '0000000000000000' AND n.value = 1", chirpstack_query)
+        self.assertIn('-readonly', chirpstack_query)
+        self.assertNotIn('app_key', chirpstack_query)
+        valve.accept_join.assert_called_once()
+
+    def assert_incomplete(self, missing, reason, **guest):
+        air, valve, clock = self.join_fixture([5.0])
+        vm, _ = self.guest(**guest)
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(output),
+              self.assertRaisesRegex(RuntimeError, 'incomplete join receipt') as raised):
             radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        line = output.getvalue().strip()
+        self.assertIn(f'attempt 1/3 (DevNonce 1): missing {missing} |', line)
+        self.assertIn(reason, line)
+        self.assertIn(line, str(raised.exception))
+        # A join-accept arrived, so a missing part is not retried.
+        self.assertEqual(air.send.call_count, 1)
+        valve.uplink.assert_not_called()
+
+    def test_join_without_concentratord_frame_fails(self):
+        self.assert_incomplete('frame', 'no Concentratord "Frame received" line after the attempt marker '
+                                        'in the persistent log (RAM ring has 1)',
+                               frames={1: 'marked\nram 1'})
+
+    def test_join_frame_at_another_frequency_or_sf_fails(self):
+        for channel in ('902500000 125000 SF7', '902300000 125000 SF8', '902300000 500000 SF7'):
+            with self.subTest(channel=channel):
+                self.assert_incomplete('frame', f'uplink_id 81 at freq/bw/dr {channel.replace(" ", "/")}, '
+                                                'expected 902300000 Hz, 125000 Hz, SF7',
+                                       frames={1: f'other 81 {channel}\nmarked\nram 0'})
+
+    def test_join_frame_without_attempt_marker_fails(self):
+        self.assert_incomplete('frame', 'attempt marker absent from the persistent log',
+                               frames={1: 'match 81\nunmarked\nram 1'})
+
+    def test_join_without_chirpstack_record_fails(self):
+        self.assert_incomplete('chirpstack', 'ChirpStack has no DevNonce 1 recorded',
+                               chirpstack={1: '0 0037032B'})
+
+    def test_join_accept_from_another_join_fails(self):
+        self.assert_incomplete('chirpstack', 'ChirpStack DevAddr 01E1EE61 differs from join-accept DevAddr 0037032B',
+                               chirpstack={1: '1 01E1EE61'})
+
+    def test_unreadable_chirpstack_database_fails(self):
+        self.assert_incomplete('chirpstack', 'ChirpStack database unreadable', chirpstack={1: ''})
+
+    def test_wrapped_join_drains_then_retries_with_fresh_devnonce(self):
+        _, output, air, valve, scripts = self.run_join([139.31, 5.1])
         self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'data'])
         self.assertEqual([round(call.args[0], 2) for call in air.receive.call_args_list], [40, 110, 40])
         valve.accept_join.assert_called_once()
-        self.assertIn('attempt 1/3 after 139.31 s', output.getvalue())
-        self.assertIn('attempt 2/3 after 5.10 s', output.getvalue())
+        first, second = output.splitlines()
+        self.assertIn('attempt 1/3 (DevNonce 1): missing join-accept |', first)
+        self.assertIn('join-accept: MISSING (join-accept late after 139.31 s (drained))', first)
+        self.assertIn('attempt 2/3 (DevNonce 2): received |', second)
+        self.assertIn('join-accept after 5.10 s', second)
+        chirpstack = [s for s in scripts if 'device_keys' in s]
+        self.assertIn('n.value = 1)', chirpstack[0])
+        self.assertIn('n.value = 2)', chirpstack[1])
 
     def test_three_missed_accepts_fail(self):
         air, valve, clock = self.join_fixture([None, None, None])
-        vm = Mock()
-        vm.command.return_value = (0, '1')
+        vm, _ = self.guest()
         output = io.StringIO()
         with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(output),
               self.assertRaisesRegex(RuntimeError, 'join-accept absent after 3 attempts')):
             radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
         self.assertEqual(clock(), 450)
         self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'\x03'])
-        for attempt in range(1, 4):
-            self.assertIn(f'attempt {attempt}/3 after 150.00 s', output.getvalue())
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 3)
+        for attempt, line in enumerate(lines, 1):
+            self.assertIn(f'attempt {attempt}/3 (DevNonce {attempt}): missing join-accept |', line)
+            self.assertIn('join-accept: MISSING (join-accept absent after 150.00 s)', line)
         valve.accept_join.assert_not_called()
 
-    def test_retry_requires_crc_ok_for_its_own_join(self):
+    def test_retry_requires_a_frame_for_its_own_join(self):
         air, valve, clock = self.join_fixture([139.31, 5.1])
-        vm = Mock()
-        vm.command.side_effect = [(0, ''), (0, ''), (0, '0')]
+        vm, scripts = self.guest(frames={2: 'marked\nram 0'})
         with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(io.StringIO()),
-              self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0')):
+              self.assertRaisesRegex(RuntimeError, 'attempt 2/3 .*missing frame')):
             radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
-        first, second, count = [call.args[0] for call in vm.command.call_args_list]
+        first, second = [s.split()[-1] for s in scripts if 'logger -t osi-radio-suite' in s]
         self.assertNotEqual(first, second)
-        self.assertNotIn(first.split()[-1], count)
-        self.assertIn(second.split()[-1], count)
-        valve.accept_join.assert_not_called()
+        queries = [s for s in scripts if 'osi-radio-suite:' in s]
+        self.assertIn(f"marker='{first}'", queries[0])
+        self.assertIn(f"marker='{second}'", queries[1])
+        self.assertNotIn(first, queries[1])
         valve.uplink.assert_not_called()
 
     def test_diagnostics_report_persistent_and_ram_counts_separately(self):
+        stats = 'Sun Apr 13 16:45:{} 2025 user.info chirpstack-concentratord-sx1302[{}]: Publishing stats event, rx_received: {}, rx_received_ok: {}, tx_received: 0, tx_emitted: 0\n'
         with tempfile.TemporaryDirectory() as directory:
             receipts = Path(directory)
-            (receipts/'osi-system.log.old').write_text('Frame received, uplink_id: 81\n')
-            (receipts/'osi-system.log').write_text('Frame received, uplink_id: 82\n')
+            (receipts/'osi-system.log.old').write_text('Frame received, uplink_id: 81\n' + stats.format('27', 51, 0, 0))
+            (receipts/'osi-system.log').write_text(
+                'Frame received, uplink_id: 82\n' + stats.format('57', 51, 3, 3) + stats.format('27', 51, 0, 0)
+                + stats.format('02', 77, 0, 0))
 
             def run_uplinks_case(label, fn):
                 if label == 'WM1302 uplinks':
@@ -269,63 +378,128 @@ class RadioTests(unittest.TestCase):
             with patch.object(radio_suite, 'run_uplinks', side_effect=RuntimeError('fixture radio failure')):
                 acceptance.stock_cases(vm, None, run_uplinks_case)
             diag = (receipts/'radio-diagnostics.log').read_text()
-            self.assertIn('Frame received, uplink_id: 2', diag)
-            self.assertIn('logread\nJoinRequest 1', diag)
+            self.assertIn('Frame received, uplink_id: 2\n', diag)
+            self.assertIn('logread\nFrame received, uplink_id: 0\n', diag)
+            # The last window of process 51 reads 0 although it received 3 frames.
+            self.assertIn('concentratord pid 51 stats windows 3 rx_received total 3 last window 0\n', diag)
+            self.assertIn('concentratord pid 77 stats windows 1 rx_received total 0 last window 0\n', diag)
+            self.assertNotIn('CRC_OK', diag)
+            self.assertNotIn('JoinRequest', diag)
+            # One label and one count per line: no doubled "0" from `grep -c ... || echo 0`.
+            persistent = diag.split('logread\n')[0].splitlines()[1:]
+            for line in persistent:
+                if not line.startswith('concentratord pid'):
+                    self.assertRegex(line, r'^[^\d\n]+ \d+$')
 
-    def test_crc_count_matches_the_syslog_tag_and_case_window(self):
-        prefix = 'Sat Nov 21 20:00:00 2026 '
+    def test_frame_receipt_matches_the_syslog_tag_and_case_window(self):
+        prefix = 'Sun Apr 13 16:45:33 2025 '
         marker = prefix + 'user.notice osi-radio-suite: fixture'
-        daemon = 'chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: 81'
+        daemon = ('chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: 81, count_us: 154102266, '
+                  'freq: 902300000, bw: 125000, mod: LoRa, dr: SF7, ftime_received: false, ftime_ns: 0')
         valid = prefix + 'user.info ' + daemon
         foreign = prefix + 'user.info unrelated[42]: printed ' + daemon
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            config = root/'concentratord.toml'
-            config.write_text('disable_crc_filter=false\n')
-            for source in ('persistent', 'logread'):
-                for current in ([foreign], [foreign, valid]):
-                    with self.subTest(source=source, has_frame=valid in current):
-                        log = '\n'.join([valid, marker, *current])
-                        rotated = root/'osi-system.log.old'
-                        active = root/'osi-system.log'
-                        if source == 'persistent':
-                            rotated.write_text(valid + '\n' + marker + '\n')
-                            active.write_text('\n'.join(current) + '\n')
-                            log = valid
-                        else:
-                            rotated.unlink(missing_ok=True)
-                            active.unlink(missing_ok=True)
+            (root/'concentratord.toml').write_text('disable_crc_filter=false\n')
+            for current in ([foreign], [foreign, valid]):
+                with self.subTest(has_frame=valid in current):
+                    # The marker can sit in the rotated file.
+                    (root/'osi-system.log.old').write_text(valid + '\n' + marker + '\n')
+                    (root/'osi-system.log').write_text('\n'.join(current) + '\n')
+                    vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, valid))
+                    frames = radio_suite._concentratord_frames(vm, 'fixture')
+                    if valid in current:
+                        self.assertEqual(frames.matched, ['81'])
+                        self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
+                                         'WM1302 model delivered=1, Concentratord frames received=1')
+                    else:
+                        self.assertEqual(frames.matched, [])
+                        with self.assertRaisesRegex(RuntimeError, 'Concentratord frames received=0'):
+                            radio_suite._radio_evidence(vm, 'fixture', 1)
 
-                        vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, log))
-                        if valid in current:
-                            self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
-                                             'WM1302 model delivered=1, Concentratord CRC_OK=1')
-                        else:
-                            with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
-                                radio_suite._radio_evidence(vm, 'fixture', 1)
-
-    def test_crc_count_combines_attempt_evidence_across_log_sinks(self):
-        prefix = 'Sat Nov 21 20:00:00 2026 user.'
+    def test_frame_receipt_parses_channel_fields(self):
+        prefix = 'Sun Apr 13 16:45:33 2025 user.'
         marker = prefix + 'notice osi-radio-suite: fixture'
-        frame = prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: '
-        first, second = frame + '81, count_us: 100', frame + '82, count_us: 200'
+        frame = (prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: {}, count_us: 1, '
+                 'freq: {}, bw: {}, mod: LoRa, dr: {}, ftime_received: false, ftime_ns: 0')
+        lines = [frame.format(80, 902300000, 125000, 'SF7'), marker,
+                 frame.format(81, 902500000, 125000, 'SF7'), frame.format(82, 902300000, 125000, 'SF8'),
+                 frame.format(83, 902300000, 125000, 'SF7'), frame.format(83, 902300000, 125000, 'SF7')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'concentratord.toml').write_text('disable_crc_filter = false\n')
+            (root/'osi-system.log').write_text('\n'.join(lines) + '\n')
+            vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, ''))
+            frames = radio_suite._concentratord_frames(vm, 'fixture')
+        self.assertTrue(frames.marked)
+        self.assertEqual(frames.matched, ['83'])
+        self.assertEqual(frames.other, [('81', '902500000', '125000', 'SF7'), ('82', '902300000', '125000', 'SF8')])
+
+    def test_frame_receipt_reads_only_the_persistent_log(self):
+        prefix = 'Sun Apr 13 16:45:33 2025 user.'
+        marker = prefix + 'notice osi-radio-suite: fixture'
+        frame = (prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: {}, count_us: 1, '
+                 'freq: 902300000, bw: 125000, mod: LoRa, dr: SF7, ftime_received: false, ftime_ns: 0')
+        first, second = frame.format(81), frame.format(82)
         cases = (
-            ('persistent log lags', [marker], [marker, first], 1),
-            ('sinks overlap', [marker, first], [marker, first, second], 2),
-            ('RAM has no attempt marker', [marker], [first], 0),
+            ('persistent log lags', [marker], [marker, first], [], 1),
+            ('sinks overlap', [marker, first], [marker, first, second], ['81'], 2),
+            ('RAM has no attempt marker', [marker], [first], [], 0),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root/'concentratord.toml').write_text('disable_crc_filter=false\n')
-            for name, persistent, ram, expected in cases:
+            for name, persistent, ram, matched, ram_matched in cases:
                 with self.subTest(name=name):
                     (root/'osi-system.log').write_text('\n'.join(persistent) + '\n')
                     vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, '\n'.join(ram)))
-                    if expected:
-                        self.assertEqual(radio_suite._crc_ok_count(vm, 'fixture', 1), expected)
+                    frames = radio_suite._concentratord_frames(vm, 'fixture')
+                    self.assertEqual(frames.matched, matched)
+                    self.assertEqual(frames.ram_matched, ram_matched)
+                    _, missing = radio_suite._frame_part(frames)
+                    if matched:
+                        self.assertIsNone(missing)
                     else:
-                        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
-                            radio_suite._crc_ok_count(vm, 'fixture', 1)
+                        self.assertIn('in the persistent log', missing)
+
+    def test_frame_receipt_requires_the_crc_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'concentratord.toml').write_text('disable_crc_filter=true\n')
+            (root/'osi-system.log').write_text('')
+            vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, ''))
+            self.assertIn('disable_crc_filter is not false', radio_suite._concentratord_frames(vm, 'fixture').error)
+
+    @unittest.skipUnless(shutil.which('sqlite3'), 'sqlite3 CLI absent')
+    def test_chirpstack_query_reads_devnonce_and_devaddr(self):
+        # Table shapes and the dev_nonces JSON follow ChirpStack 4.12.1's SQLite schema.
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory)/'chirpstack.sqlite'
+            with closing(sqlite3.connect(database)) as db:
+                db.executescript("""
+CREATE TABLE device (dev_eui blob not null primary key, dev_addr blob, join_eui blob not null);
+CREATE TABLE device_keys (dev_eui blob not null primary key, nwk_key blob not null, app_key blob not null,
+                          dev_nonces text not null, join_nonce int not null);
+INSERT INTO device VALUES (x'A840410000000001', x'0037032B', x'0000000000000000');
+INSERT INTO device VALUES (x'A840410000000002', NULL, x'0000000000000000');
+INSERT INTO device_keys VALUES (x'A840410000000001', x'00', x'00', '{"0000000000000000":[1,2]}', 2);
+INSERT INTO device_keys VALUES (x'A840410000000002', x'00', x'00', '{"0102030405060708":[1]}', 1);
+""")
+
+            def command(script, timeout=None):
+                script = script.replace(radio_suite.CHIRPSTACK_DB, quote(str(database)))
+                result = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
+                return result.returncode, result.stdout.strip()
+
+            vm = SimpleNamespace(command=command)
+            join = bytes(8).hex()
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 2), (True, '0037032B', None))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 3), (False, '0037032B', None))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000002', join, 1), (False, None, None))
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000003', join, 1), (False, None, None))
+            database.unlink()
+            self.assertEqual(radio_suite._chirpstack_join(vm, 'A840410000000001', join, 1),
+                             (False, None, 'ChirpStack database unreadable'))
 
 
 class FlowTests(unittest.TestCase):
