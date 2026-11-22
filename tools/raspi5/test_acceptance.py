@@ -860,8 +860,15 @@ exit 1"""
                 (stubs/name).chmod(0o755)
             (root/'farming.db').write_bytes(b'db')
             script, timeout = acceptance.ready_script(budget, poll)
-            script = script.replace('/data/db/farming.db', str(root/'farming.db')).replace('/tmp/gui', str(root/'gui'))
-            env = dict(os.environ, PATH=f'{stubs}:{os.environ["PATH"]}', STUB_ROOT=str(root))
+            # Absolute stub paths: a busybox built with standalone applets runs its
+            # own wget and pidof before searching PATH.
+            replacements = {'/data/db/farming.db': str(root/'farming.db'), '/tmp/gui': str(root/'gui'),
+                            'bounded wget ': f'bounded {stubs}/wget ', 'pidof chirpstack': f'{stubs}/pidof chirpstack',
+                            acceptance.READY_ADDRESS: f'{stubs}/ip'}
+            for old, new in replacements.items():
+                self.assertIn(old, script)
+                script = script.replace(old, new)
+            env = dict(os.environ, STUB_ROOT=str(root))
             began = time.monotonic()
             result = subprocess.run([*shell, '-c', script], env=env, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, timeout=timeout)
