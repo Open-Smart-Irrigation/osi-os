@@ -596,7 +596,7 @@ function npmCollection(ctx, pkgDir, scriptName, where, add, stack = []) {
 // ------------------------------------------------------------- checks
 
 const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '-h', '--help']);
-const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
+const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--max-old-space-size=[1-9]\d*|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
 const COMPOUND_WORDS = new Set(['if', 'then', 'elif', 'else', 'fi', 'case', 'esac', 'for', 'while', 'until', 'select', 'do', 'done', 'function', '{', '}']);

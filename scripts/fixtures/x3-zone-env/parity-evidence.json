@@ -1,0 +1,6862 @@
+{
+  "node": "22.23.1",
+  "timezone": "UTC",
+  "cases": [
+    {
+      "profile": "bcm2712",
+      "case": "environment/local-zero",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 12,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 12,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "c3a285024e9e02b7eb0edbc30a493ea87478df48b313f1e3d0ed731681720d2d",
+      "afterTraceSha256": "c3a285024e9e02b7eb0edbc30a493ea87478df48b313f1e3d0ed731681720d2d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/local-no-samples",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "2a89a24fa39fdaa6897b603cc884cae38b0b8a06dbd51eb3f0d565cb1baf4cac",
+      "afterTraceSha256": "2a89a24fa39fdaa6897b603cc884cae38b0b8a06dbd51eb3f0d565cb1baf4cac"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/rain-complete",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ed4ec2f441c38aa9ea67addd3edabb2e1e8eaa3c4398441dffb7fc04eaa56df6",
+      "afterTraceSha256": "ed4ec2f441c38aa9ea67addd3edabb2e1e8eaa3c4398441dffb7fc04eaa56df6"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/rain-complete_so_far",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "96d920248c2d5310076f9d09b7dc32bf30b1174122e2b0d771d126c0f5fabfda",
+      "afterTraceSha256": "96d920248c2d5310076f9d09b7dc32bf30b1174122e2b0d771d126c0f5fabfda"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/rain-partial",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "b98ec19aa404a68150a9a4c47e236797c05d5916afb20d59edfcc67c6669de09",
+      "afterTraceSha256": "b98ec19aa404a68150a9a4c47e236797c05d5916afb20d59edfcc67c6669de09"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/rain-unknown",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "abdce844d4c97296686a4d014df3bced40f1bd9c963311d37e21f4794441fec6",
+      "afterTraceSha256": "abdce844d4c97296686a4d014df3bced40f1bd9c963311d37e21f4794441fec6"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/no-location",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "69f56b53f5362ce2beb4147a9670b9ad6844140dfa801d469c1edbbb49777e3c",
+      "afterTraceSha256": "69f56b53f5362ce2beb4147a9670b9ad6844140dfa801d469c1edbbb49777e3c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/stale-local-sensor",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "9031d410070e2b09693827f48221e85984674daca9bbae58940e3e37fb58ba32",
+      "afterTraceSha256": "9031d410070e2b09693827f48221e85984674daca9bbae58940e3e37fb58ba32"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-station",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f1d948d60653e5fa0abc9a16d28a422e4013f2c4e8a9333849b69ddb34ee5b9c",
+      "afterTraceSha256": "f1d948d60653e5fa0abc9a16d28a422e4013f2c4e8a9333849b69ddb34ee5b9c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/server-preferred-unlinked",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "d144de6837ff0b8ed869d87c88555d7fb348b1d5d0306d9bdd9b6e0e6d0b33f5",
+      "afterTraceSha256": "d144de6837ff0b8ed869d87c88555d7fb348b1d5d0306d9bdd9b6e0e6d0b33f5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/linked-no-identity",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "5e0492b243ee9fdd12609c917deca185e3aa490e036bf926ed245468ffa1bb7e",
+      "afterTraceSha256": "5e0492b243ee9fdd12609c917deca185e3aa490e036bf926ed245468ffa1bb7e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-fresh",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "20bb10ba174bd3f97797d267adfc84edddc0211a931897de8a27b0acd777a9e5",
+      "afterTraceSha256": "20bb10ba174bd3f97797d267adfc84edddc0211a931897de8a27b0acd777a9e5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-fetch",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d",
+      "afterTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-stale",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0eade53caaff6760a175b1817079c5324a689d4f02907f65a61c6d4813853bc5",
+      "afterTraceSha256": "0eade53caaff6760a175b1817079c5324a689d4f02907f65a61c6d4813853bc5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-180",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "098dce8888ad5a9c2a945f66372614feb218f9b3e1b6360720562635ec18bed1",
+      "afterTraceSha256": "098dce8888ad5a9c2a945f66372614feb218f9b3e1b6360720562635ec18bed1"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-expired",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0344a801d1d7005102be2653c0730d757b1f1f8ce448f612eae1d5ab71d4f778",
+      "afterTraceSha256": "0344a801d1d7005102be2653c0730d757b1f1f8ce448f612eae1d5ab71d4f778"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-yesterday",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "6e7a25a74719dfbfb0d64c40cb22f2a38c17d366ec170d4d67c00caccc37c62f",
+      "afterTraceSha256": "6e7a25a74719dfbfb0d64c40cb22f2a38c17d366ec170d4d67c00caccc37c62f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-corrupt",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d",
+      "afterTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-empty",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "543280c64e765fe46919c9f57558a5e4a3f13a21e9a9bbcf7491c76dfb4dd26a",
+      "afterTraceSha256": "543280c64e765fe46919c9f57558a5e4a3f13a21e9a9bbcf7491c76dfb4dd26a"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/current-forecast-cache",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e89f349b4ce9685ff3cfc1c901de2708fde907f0050ca01ff59adc8dab0aad9a",
+      "afterTraceSha256": "e89f349b4ce9685ff3cfc1c901de2708fde907f0050ca01ff59adc8dab0aad9a"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-expired-refresh",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-expiry-equal-now",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-current-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "a6fdbe16802a0594e1c932df441f5041cedee7c9b08605f2cef96a78e585eca3",
+      "afterTraceSha256": "a6fdbe16802a0594e1c932df441f5041cedee7c9b08605f2cef96a78e585eca3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-forecast-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "8b15e5ee567f28ea1f22a657eaf433dc4e052f15429f63a24e1c4ad8bee8fdf4",
+      "afterTraceSha256": "8b15e5ee567f28ea1f22a657eaf433dc4e052f15429f63a24e1c4ad8bee8fdf4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-no-location",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "bcd332453f621e7323b8a6db29528c6bb047b8cba16d1245a0fbac076186ea1a",
+      "afterTraceSha256": "bcd332453f621e7323b8a6db29528c6bb047b8cba16d1245a0fbac076186ea1a"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-fresh-unlinked",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "b092369783cc4e72749198f119e5967ccd908a0e15286b5d94d49ad69111f66e",
+      "afterTraceSha256": "b092369783cc4e72749198f119e5967ccd908a0e15286b5d94d49ad69111f66e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-ttl-clamp",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "a850bf1ef230e2753a187ab67b62ec69f238e6972422f93f59ff4ccacdea6f14",
+      "afterTraceSha256": "a850bf1ef230e2753a187ab67b62ec69f238e6972422f93f59ff4ccacdea6f14"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-ttl-invalid",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-expired-offline",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "41985838a53c992c35b6b1ac490dd212750f1b7828e3d72d22b3a5f3cfd04731",
+      "afterTraceSha256": "41985838a53c992c35b6b1ac490dd212750f1b7828e3d72d22b3a5f3cfd04731"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/cache-corrupt",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/openagri-token",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0c3959c0f073de88a60c3b3de1273fb946c4a97e1833a29a7b44097dc38cb530",
+      "afterTraceSha256": "0c3959c0f073de88a60c3b3de1273fb946c4a97e1833a29a7b44097dc38cb530"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/openagri-static",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ac6555c041afcdcec8365edb6b3e3e88491d75b0283a94a70c9ac4085fc80103",
+      "afterTraceSha256": "ac6555c041afcdcec8365edb6b3e3e88491d75b0283a94a70c9ac4085fc80103"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/openagri-no-token",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "3b5f6cf65e83feeb448c5852bf46266c6890f10c1579b43fe30ecee7cd28e41e",
+      "afterTraceSha256": "3b5f6cf65e83feeb448c5852bf46266c6890f10c1579b43fe30ecee7cd28e41e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/openagri-supplemental-rain",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0fd7295e50f322faac68a05892937cd410315cee6e2b777926b37d32612e9ea6",
+      "afterTraceSha256": "0fd7295e50f322faac68a05892937cd410315cee6e2b777926b37d32612e9ea6"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/precipitation-boundaries",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 2,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 2,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "56b754e099494dfd1be04e841adbd0b761c4ba4f25e6d475c808932ea2a0a826",
+      "afterTraceSha256": "56b754e099494dfd1be04e841adbd0b761c4ba4f25e6d475c808932ea2a0a826"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/null-calibration",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "1638eaa1a705a6a6cf4e506c17db50c31d11b9a169d0b952740d76ad13e2a46d",
+      "afterTraceSha256": "1638eaa1a705a6a6cf4e506c17db50c31d11b9a169d0b952740d76ad13e2a46d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/missing-depth-alternatives",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/spring-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "beforeTraceSha256": "fbb56e0ca1e287b439ef44aa080b3da8dca2e7ae4e1cfefb50e0b64d09c72c56",
+      "afterTraceSha256": "fbb56e0ca1e287b439ef44aa080b3da8dca2e7ae4e1cfefb50e0b64d09c72c56"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/fall-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "fbb63fc1d77c81a86da02caf6fee6c81dfb08c4f17371298509323ab81046d86",
+      "afterTraceSha256": "fbb63fc1d77c81a86da02caf6fee6c81dfb08c4f17371298509323ab81046d86"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/not-found",
+      "before": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Zone not found"
+      },
+      "after": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Zone not found"
+      },
+      "beforeTraceSha256": "f0c5f940daa2d6de5483611a7e53a3bac38010aa1b8d864c6da64773c388b762",
+      "afterTraceSha256": "f0c5f940daa2d6de5483611a7e53a3bac38010aa1b8d864c6da64773c388b762"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/invalid-id",
+      "before": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid zone ID"
+      },
+      "after": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid zone ID"
+      },
+      "beforeTraceSha256": "046d91325338a152bcc9f7cb97c4f0e832b18c4c191fcc671c95bd9ac5443059",
+      "afterTraceSha256": "046d91325338a152bcc9f7cb97c4f0e832b18c4c191fcc671c95bd9ac5443059"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/missing-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "ce5318f8c67f820f3941c34acf3a35009aff3aa1ddfb28f6dd7ca8b271d2b599",
+      "afterTraceSha256": "ce5318f8c67f820f3941c34acf3a35009aff3aa1ddfb28f6dd7ca8b271d2b599"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/invalid-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "a561618f484c58996bc8fc44415c5a7c616f765d0215868ab827f87a4686b388",
+      "afterTraceSha256": "a561618f484c58996bc8fc44415c5a7c616f765d0215868ab827f87a4686b388"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/expired-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Token expired"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Token expired"
+      },
+      "beforeTraceSha256": "31385705037b7cdc7f9f8da9dca7781e2915e1d4cee0dbd1873759da40dfda04",
+      "afterTraceSha256": "31385705037b7cdc7f9f8da9dca7781e2915e1d4cee0dbd1873759da40dfda04"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/no-auth-secret",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "beforeTraceSha256": "aa00a9ec43ccc9baf397f12a5c038e2a9695d9c28cbe5058c577be0dae09f19b",
+      "afterTraceSha256": "aa00a9ec43ccc9baf397f12a5c038e2a9695d9c28cbe5058c577be0dae09f19b"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/auth-storage-existing",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "3413b08d2729749e32fef51f6eefd340ae18c8eb7c172461bd22ea1de9ed86d3",
+      "afterTraceSha256": "3413b08d2729749e32fef51f6eefd340ae18c8eb7c172461bd22ea1de9ed86d3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/auth-storage-read-error",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "94be1e99cf67c08611827b67d4ee414687b8de99c36a5d988ebad067fecf6c3c",
+      "afterTraceSha256": "94be1e99cf67c08611827b67d4ee414687b8de99c36a5d988ebad067fecf6c3c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/auth-storage-write-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "beforeTraceSha256": "8289db6ec29f191954338fcd5de92e8ed44521631684e156210125b19a369f42",
+      "afterTraceSha256": "8289db6ec29f191954338fcd5de92e8ed44521631684e156210125b19a369f42"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/auth-storage-generate",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "f09ecf967fb15292b296943646171943fa73783e6d867eddde1fef45c2014736",
+      "afterTraceSha256": "f09ecf967fb15292b296943646171943fa73783e6d867eddde1fef45c2014736"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "36e1e144d655289937753bdeaa0d90db55adc43863b1faa19c4d34356d2da438",
+      "afterTraceSha256": "36e1e144d655289937753bdeaa0d90db55adc43863b1faa19c4d34356d2da438"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-no-zone",
+      "before": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "zone not found"
+      },
+      "after": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "zone not found"
+      },
+      "beforeTraceSha256": "aa665cf87c9f85795806ccac113a6ee9b0020e3324272b32993cb413320470c7",
+      "afterTraceSha256": "aa665cf87c9f85795806ccac113a6ee9b0020e3324272b32993cb413320470c7"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-helper-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Authentication scope helper unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Authentication scope helper unavailable"
+      },
+      "beforeTraceSha256": "6f257ca839d208dcbbffe91fd3c94c27d539e5dfcdd32d8a65fab66114a41676",
+      "afterTraceSha256": "6f257ca839d208dcbbffe91fd3c94c27d539e5dfcdd32d8a65fab66114a41676"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "beforeTraceSha256": "b0a892bc511952f0c66d680d18cc2afcb7f9a792b2095497e52487af62660d65",
+      "afterTraceSha256": "b0a892bc511952f0c66d680d18cc2afcb7f9a792b2095497e52487af62660d65"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-helper-after-auth",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "beforeTraceSha256": "a2aaf00167a910e9c6942c2d6084b2d62fc72ede22b6f332f07849032ec708e5",
+      "afterTraceSha256": "a2aaf00167a910e9c6942c2d6084b2d62fc72ede22b6f332f07849032ec708e5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-user-missing",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "beforeTraceSha256": "a0b77513c235a61b59cddb6ce205b5f9cfae7d0c882951efaaf131f348769c40",
+      "afterTraceSha256": "a0b77513c235a61b59cddb6ce205b5f9cfae7d0c882951efaaf131f348769c40"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/scoped-user-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "cb0d9bf57c0027c3c26dde0b4a9add6d0b6feba3b4692260240d63e9f2b37b0e",
+      "afterTraceSha256": "cb0d9bf57c0027c3c26dde0b4a9add6d0b6feba3b4692260240d63e9f2b37b0e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-write-error",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e3f4334d822caf4a063f9f88bbb52e9693b0c9293761ff0d8e74135953d3a926",
+      "afterTraceSha256": "e3f4334d822caf4a063f9f88bbb52e9693b0c9293761ff0d8e74135953d3a926"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/shared-station-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "42ca4baa48eff26d7b6e3a39d0f6a50f375ba053b84b5071fef8e2861f305e7b",
+      "afterTraceSha256": "42ca4baa48eff26d7b6e3a39d0f6a50f375ba053b84b5071fef8e2861f305e7b"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/zone-helper-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "beforeTraceSha256": "b662b448ed653e628784364a2ce96408ab6d7a872c0dcc5d58cb6da0751ee0f3",
+      "afterTraceSha256": "b662b448ed653e628784364a2ce96408ab6d7a872c0dcc5d58cb6da0751ee0f3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/rain-helper-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "beforeTraceSha256": "e3dc9417b3eda2a6d534dca5e4bd3e5f5cccd4a9c705f761039c9227372099c7",
+      "afterTraceSha256": "e3dc9417b3eda2a6d534dca5e4bd3e5f5cccd4a9c705f761039c9227372099c7"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/valve-helper-missing",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "beforeTraceSha256": "dc64aa36fe2b79306245620db3756711e8bee7a93867294077e6c60211e6a51c",
+      "afterTraceSha256": "dc64aa36fe2b79306245620db3756711e8bee7a93867294077e6c60211e6a51c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-timeout",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-malformed",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-status",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-network",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-empty",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/provider-shape",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/normal",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494",
+      "afterTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/no-user",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 0,
+        "error": "User not found"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 0,
+        "error": "User not found"
+      },
+      "beforeTraceSha256": "255bd3865097e5d3246b057d279cee045e0f5be985d5c01536b96138b8e14982",
+      "afterTraceSha256": "255bd3865097e5d3246b057d279cee045e0f5be985d5c01536b96138b8e14982"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/scoped",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "0dee568c2c46a1bb92810269a9fca7df061b2246d9d3b90d39a25c24c7276126",
+      "afterTraceSha256": "0dee568c2c46a1bb92810269a9fca7df061b2246d9d3b90d39a25c24c7276126"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Forbidden"
+      },
+      "beforeTraceSha256": "dd48c3f103c5ed8a7ec0c1f848f616a2fea32a9ab2154b9d15181cebbb3fe9f0",
+      "afterTraceSha256": "dd48c3f103c5ed8a7ec0c1f848f616a2fea32a9ab2154b9d15181cebbb3fe9f0"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/scope-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "beforeTraceSha256": "63db5b6ce5af71e463e7c9a65ce4dd91a9fcbfbb5b996f3e88c1d2765f234a2d",
+      "afterTraceSha256": "63db5b6ce5af71e463e7c9a65ce4dd91a9fcbfbb5b996f3e88c1d2765f234a2d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/valve-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Valve projection unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Valve projection unavailable"
+      },
+      "beforeTraceSha256": "5a601e6d1cc073e25d274f44675a4e582c2cf9030620c0af503e152c130f4867",
+      "afterTraceSha256": "5a601e6d1cc073e25d274f44675a4e582c2cf9030620c0af503e152c130f4867"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/reports",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494",
+      "afterTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/close-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "7488c7698339b31a2bfbda755667ba87a58e57c307ab2ef113aa0db229f9eb16",
+      "afterTraceSha256": "7488c7698339b31a2bfbda755667ba87a58e57c307ab2ef113aa0db229f9eb16"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/normal",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/missing-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "966a201c8b33035873b14beb3eba7da7611f45625e9971abe52fe24fe78f49dc",
+      "afterTraceSha256": "966a201c8b33035873b14beb3eba7da7611f45625e9971abe52fe24fe78f49dc"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/invalid-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "b7aa67ae9cc272de980e245c8b6ed8572a3c4b6b38f949495d3dcfa8c1dac7a7",
+      "afterTraceSha256": "b7aa67ae9cc272de980e245c8b6ed8572a3c4b6b38f949495d3dcfa8c1dac7a7"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/expired-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Token expired"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Token expired"
+      },
+      "beforeTraceSha256": "2b3257a7464dcc8e1d69f9665a8546cf8a1526c3c56b9e755ebdaff0ad5891a3",
+      "afterTraceSha256": "2b3257a7464dcc8e1d69f9665a8546cf8a1526c3c56b9e755ebdaff0ad5891a3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/invalid-id",
+      "before": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "deveui required"
+      },
+      "after": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "deveui required"
+      },
+      "beforeTraceSha256": "c169233db20ea0d8cb88f8052f9fbb567d6f6e6271bfb436806aa7e56f74a729",
+      "afterTraceSha256": "c169233db20ea0d8cb88f8052f9fbb567d6f6e6271bfb436806aa7e56f74a729"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scoped",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "89c629329d4babc461f2d7b362273dd5466ddec1f627b51eb5a4534e74da21ed",
+      "afterTraceSha256": "89c629329d4babc461f2d7b362273dd5466ddec1f627b51eb5a4534e74da21ed"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scope-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "68ace938ba02a5c6d985fe6a898d511117419cd81395b192fd13568678525138",
+      "afterTraceSha256": "68ace938ba02a5c6d985fe6a898d511117419cd81395b192fd13568678525138"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/valve-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "2e0cb0f3f30603bd37e38e290fc9929cff4ccafb0e64e2f4aabf2c3926c11172",
+      "afterTraceSha256": "2e0cb0f3f30603bd37e38e290fc9929cff4ccafb0e64e2f4aabf2c3926c11172"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/close-error",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "6ce41869b7fee12324cd63480113cbbcbf340112104e5920c3bb2408b7052de4",
+      "afterTraceSha256": "6ce41869b7fee12324cd63480113cbbcbf340112104e5920c3bb2408b7052de4"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/midnight",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/spring-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "9d4b8a0d8d4bc6eb5a53cfb6acc4dff534972c3d1c82b0405532c9492c582bb5",
+      "afterTraceSha256": "9d4b8a0d8d4bc6eb5a53cfb6acc4dff534972c3d1c82b0405532c9492c582bb5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/fall-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/scoped-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "a0e9084a9745452bfccc4b2db012befcc7d247e3b92de104b9403f4ccffb98aa",
+      "afterTraceSha256": "a0e9084a9745452bfccc4b2db012befcc7d247e3b92de104b9403f4ccffb98aa"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/scoped-user-missing",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "6e876c188ef4fd410d640a0a98fbc2c1d229767f03d360122397775b1b8fa00c",
+      "afterTraceSha256": "6e876c188ef4fd410d640a0a98fbc2c1d229767f03d360122397775b1b8fa00c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scoped-helper-after-auth",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "65b4c02105c2a9376aeaf3093fbf410740ff48ac8f3aabb58b391e5524ab17f7",
+      "afterTraceSha256": "65b4c02105c2a9376aeaf3093fbf410740ff48ac8f3aabb58b391e5524ab17f7"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scoped-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "0b237d90975d5c4df17323c6bb8c3e63b9aa7c1474d564ea15e4d7751f280698",
+      "afterTraceSha256": "0b237d90975d5c4df17323c6bb8c3e63b9aa7c1474d564ea15e4d7751f280698"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scoped-user-missing",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "beforeTraceSha256": "72ad0a03cd27c265d4c0178a62352bd0458d276d925d71a4796e5a2c759823ed",
+      "afterTraceSha256": "72ad0a03cd27c265d4c0178a62352bd0458d276d925d71a4796e5a2c759823ed"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/zero-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 0
+      },
+      "beforeTraceSha256": "03efb64b26b74921b07299d46c111b9a16e3c1bfe3901c9f90f802e9f2ad1531",
+      "afterTraceSha256": "03efb64b26b74921b07299d46c111b9a16e3c1bfe3901c9f90f802e9f2ad1531"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/null-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": null
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": null
+      },
+      "beforeTraceSha256": "81ee47b2d0890a2d5bc8f729aefcf2727cbdbf06fdd9ef2c046024415d87aa3d",
+      "afterTraceSha256": "81ee47b2d0890a2d5bc8f729aefcf2727cbdbf06fdd9ef2c046024415d87aa3d"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/scoped-disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "beforeTraceSha256": "d123c269a1da78e135d230d3481b0318715af27a605fac7be7accb8ade3b01f5",
+      "afterTraceSha256": "d123c269a1da78e135d230d3481b0318715af27a605fac7be7accb8ade3b01f5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "response/status-matrix",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "fdb584fff269fb5a2cb9e3a6e2311c575e2f0e63896317f4eadc2190aee19436",
+      "afterTraceSha256": "fdb584fff269fb5a2cb9e3a6e2311c575e2f0e63896317f4eadc2190aee19436"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "response/invalid-rows",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "bcdab1d30d1109948d8d4e61c1fa47dc26973bb647cb5636548d7ece605dab01",
+      "afterTraceSha256": "bcdab1d30d1109948d8d4e61c1fa47dc26973bb647cb5636548d7ece605dab01"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/open-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "e7e5b97bd75427b9b6a43e4c0fca86410ae9eacbfc15abb058ab7e5d7f881005",
+      "afterTraceSha256": "e7e5b97bd75427b9b6a43e4c0fca86410ae9eacbfc15abb058ab7e5d7f881005"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/close-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 2,
+        "error": "fixture close failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 2,
+        "error": "fixture close failure"
+      },
+      "beforeTraceSha256": "7a77f5aa413c7646331d2085ef3bd32b9109544e9de1e81b992bd637e61cffd3",
+      "afterTraceSha256": "7a77f5aa413c7646331d2085ef3bd32b9109544e9de1e81b992bd637e61cffd3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "environment/module-missing-close-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "6d11c01831df1216b0eabd61522f104ee2b02c005df2d3ff742d0f16a992c986",
+      "afterTraceSha256": "6d11c01831df1216b0eabd61522f104ee2b02c005df2d3ff742d0f16a992c986"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "actuations/open-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "dd3474deafbb5c4f8903dc4ac750e189603c41a896ddca3ce572f108e901da5f",
+      "afterTraceSha256": "dd3474deafbb5c4f8903dc4ac750e189603c41a896ddca3ce572f108e901da5f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "liters/open-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "1e5dd9460691c700bdb1a2fa84ed7bfffba1b87215cd75dfca2432c032e2ac27",
+      "afterTraceSha256": "1e5dd9460691c700bdb1a2fa84ed7bfffba1b87215cd75dfca2432c032e2ac27"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-1",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-2",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-3",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-4",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-5",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-6",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-7",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-8",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-9",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-10",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-11",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-12",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-13",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-14",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-15",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-16",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-17",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8a565bd228c7f40902d90b29ffb80cb925b0f67afc964a7bae95e3c66b9bfb25",
+      "afterTraceSha256": "8a565bd228c7f40902d90b29ffb80cb925b0f67afc964a7bae95e3c66b9bfb25"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-18",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "32b3b6ef0281d1ad20b737431ffaea824e2910ec9f00df5dca29d3a1d8b35558",
+      "afterTraceSha256": "32b3b6ef0281d1ad20b737431ffaea824e2910ec9f00df5dca29d3a1d8b35558"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-19",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "2edc75e42c9679834865acd6966a38ced978ee88e29afe0a5261f785fdc2f137",
+      "afterTraceSha256": "2edc75e42c9679834865acd6966a38ced978ee88e29afe0a5261f785fdc2f137"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-20",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "fb2bc1850725101413b26a02465aaaf6a32dc8e5b742d1ebfe097a1c99f85bae",
+      "afterTraceSha256": "fb2bc1850725101413b26a02465aaaf6a32dc8e5b742d1ebfe097a1c99f85bae"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-21",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "2c0098ee4024fb7eaf1800b905d65eebe0566a4cbd84d54b4f2f7908e7b1f7f9",
+      "afterTraceSha256": "2c0098ee4024fb7eaf1800b905d65eebe0566a4cbd84d54b4f2f7908e7b1f7f9"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-22",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "1a00cf59c5be61e0a851ebfd113ee8c8efe64d73705be51dcecafd8703fad9c5",
+      "afterTraceSha256": "1a00cf59c5be61e0a851ebfd113ee8c8efe64d73705be51dcecafd8703fad9c5"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-23",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e7d3df8ce45ceba0f029c8d4dc04bff3ecf6dd6f30d0fb9c673838ca4026881c",
+      "afterTraceSha256": "e7d3df8ce45ceba0f029c8d4dc04bff3ecf6dd6f30d0fb9c673838ca4026881c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-24",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "a516df1d40d80cbac9ce96dc20e333bc94ce1a8528afeb46d0075faebf88f983",
+      "afterTraceSha256": "a516df1d40d80cbac9ce96dc20e333bc94ce1a8528afeb46d0075faebf88f983"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-25",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "15efbb5110e89298e4013ea43f9b3743b5335e3da355ca2b1bf5d3245513a63e",
+      "afterTraceSha256": "15efbb5110e89298e4013ea43f9b3743b5335e3da355ca2b1bf5d3245513a63e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-26",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "19ce0c25a38f42397230cff5e25955cbff4e376790d465637cb87d2d6c21e9e3",
+      "afterTraceSha256": "19ce0c25a38f42397230cff5e25955cbff4e376790d465637cb87d2d6c21e9e3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-27",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b99f2db2528f4818df51ff51b3490beacda6cb77289fc1ddbfad938981f43eba",
+      "afterTraceSha256": "b99f2db2528f4818df51ff51b3490beacda6cb77289fc1ddbfad938981f43eba"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-28",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8f76edb1a397b79faf7a4f8a29b6dbf3da6df1f078b6e7c1895145f92bb77bf9",
+      "afterTraceSha256": "8f76edb1a397b79faf7a4f8a29b6dbf3da6df1f078b6e7c1895145f92bb77bf9"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-29",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b0a17f6888c9e60dae477bb01d2c4998d528c6b479a4bb6e2c8904da5c9c43de",
+      "afterTraceSha256": "b0a17f6888c9e60dae477bb01d2c4998d528c6b479a4bb6e2c8904da5c9c43de"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-30",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "dc3127348b6e8044481938a02e22761a099bff58ca2736791f01448760da907f",
+      "afterTraceSha256": "dc3127348b6e8044481938a02e22761a099bff58ca2736791f01448760da907f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-31",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "7c5b2badbf028d46c703f659a1816854812c37eb2aa1bc8b9d91e37f1916fb75",
+      "afterTraceSha256": "7c5b2badbf028d46c703f659a1816854812c37eb2aa1bc8b9d91e37f1916fb75"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-32",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b8335f048410756fe383cee83f7829f71d6779fc0a7c2984c056a74994d5749e",
+      "afterTraceSha256": "b8335f048410756fe383cee83f7829f71d6779fc0a7c2984c056a74994d5749e"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-33",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "c990752b03a0eea54c061ae9e0d0e16eaba9f4145509b3b3e8c8bd587afec010",
+      "afterTraceSha256": "c990752b03a0eea54c061ae9e0d0e16eaba9f4145509b3b3e8c8bd587afec010"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-34",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "41e36683a47e156ee3e6b8be3a276daea1afa7e695d96e2f84af5048e536e9a3",
+      "afterTraceSha256": "41e36683a47e156ee3e6b8be3a276daea1afa7e695d96e2f84af5048e536e9a3"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-35",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "75a34d55ee56212517687342260b687969e19d4723f0a401507a488197ca3058",
+      "afterTraceSha256": "75a34d55ee56212517687342260b687969e19d4723f0a401507a488197ca3058"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-36",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "9fa5df3fa4f482d6929846f1f2d9726d83289bc9816835730c9b5ac889fd0664",
+      "afterTraceSha256": "9fa5df3fa4f482d6929846f1f2d9726d83289bc9816835730c9b5ac889fd0664"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-37",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8d7756b232535ce5c315e8544a3a02871ad36e87df6126b8b341d8c65d1bd86f",
+      "afterTraceSha256": "8d7756b232535ce5c315e8544a3a02871ad36e87df6126b8b341d8c65d1bd86f"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "zone-env-fn/sql-failure-38",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "00e20ad7050dd5770ec07116d52079f72511f18e139160eaf2d53b1a28f5bb3c",
+      "afterTraceSha256": "00e20ad7050dd5770ec07116d52079f72511f18e139160eaf2d53b1a28f5bb3c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "strega-today-liters-fn/sql-failure-1",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "9d03474fb133c6c9ac2efaa683e8c330fbe46f90d76538363876bf1f59290fde",
+      "afterTraceSha256": "9d03474fb133c6c9ac2efaa683e8c330fbe46f90d76538363876bf1f59290fde"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "get-actuations-query/sql-failure-1",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "37995d5ddebc752ff6a251df38c7a65e5ce7a1563cbe5bf2efd0377289d26e5c",
+      "afterTraceSha256": "37995d5ddebc752ff6a251df38c7a65e5ce7a1563cbe5bf2efd0377289d26e5c"
+    },
+    {
+      "profile": "bcm2712",
+      "case": "get-actuations-query/sql-failure-2",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "6a24cf7c0691c46b438fcb2e7c1c5148801eb16c0addb0e21cd23b9c4b4f88ed",
+      "afterTraceSha256": "6a24cf7c0691c46b438fcb2e7c1c5148801eb16c0addb0e21cd23b9c4b4f88ed"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/local-zero",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 12,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 12,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "c3a285024e9e02b7eb0edbc30a493ea87478df48b313f1e3d0ed731681720d2d",
+      "afterTraceSha256": "c3a285024e9e02b7eb0edbc30a493ea87478df48b313f1e3d0ed731681720d2d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/local-no-samples",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "2a89a24fa39fdaa6897b603cc884cae38b0b8a06dbd51eb3f0d565cb1baf4cac",
+      "afterTraceSha256": "2a89a24fa39fdaa6897b603cc884cae38b0b8a06dbd51eb3f0d565cb1baf4cac"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/rain-complete",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ed4ec2f441c38aa9ea67addd3edabb2e1e8eaa3c4398441dffb7fc04eaa56df6",
+      "afterTraceSha256": "ed4ec2f441c38aa9ea67addd3edabb2e1e8eaa3c4398441dffb7fc04eaa56df6"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/rain-complete_so_far",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "96d920248c2d5310076f9d09b7dc32bf30b1174122e2b0d771d126c0f5fabfda",
+      "afterTraceSha256": "96d920248c2d5310076f9d09b7dc32bf30b1174122e2b0d771d126c0f5fabfda"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/rain-partial",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "b98ec19aa404a68150a9a4c47e236797c05d5916afb20d59edfcc67c6669de09",
+      "afterTraceSha256": "b98ec19aa404a68150a9a4c47e236797c05d5916afb20d59edfcc67c6669de09"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/rain-unknown",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "abdce844d4c97296686a4d014df3bced40f1bd9c963311d37e21f4794441fec6",
+      "afterTraceSha256": "abdce844d4c97296686a4d014df3bced40f1bd9c963311d37e21f4794441fec6"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/no-location",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "69f56b53f5362ce2beb4147a9670b9ad6844140dfa801d469c1edbbb49777e3c",
+      "afterTraceSha256": "69f56b53f5362ce2beb4147a9670b9ad6844140dfa801d469c1edbbb49777e3c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/stale-local-sensor",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "9031d410070e2b09693827f48221e85984674daca9bbae58940e3e37fb58ba32",
+      "afterTraceSha256": "9031d410070e2b09693827f48221e85984674daca9bbae58940e3e37fb58ba32"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-station",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f1d948d60653e5fa0abc9a16d28a422e4013f2c4e8a9333849b69ddb34ee5b9c",
+      "afterTraceSha256": "f1d948d60653e5fa0abc9a16d28a422e4013f2c4e8a9333849b69ddb34ee5b9c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/server-preferred-unlinked",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "d144de6837ff0b8ed869d87c88555d7fb348b1d5d0306d9bdd9b6e0e6d0b33f5",
+      "afterTraceSha256": "d144de6837ff0b8ed869d87c88555d7fb348b1d5d0306d9bdd9b6e0e6d0b33f5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/linked-no-identity",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "5e0492b243ee9fdd12609c917deca185e3aa490e036bf926ed245468ffa1bb7e",
+      "afterTraceSha256": "5e0492b243ee9fdd12609c917deca185e3aa490e036bf926ed245468ffa1bb7e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-fresh",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "20bb10ba174bd3f97797d267adfc84edddc0211a931897de8a27b0acd777a9e5",
+      "afterTraceSha256": "20bb10ba174bd3f97797d267adfc84edddc0211a931897de8a27b0acd777a9e5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-fetch",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d",
+      "afterTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-stale",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0eade53caaff6760a175b1817079c5324a689d4f02907f65a61c6d4813853bc5",
+      "afterTraceSha256": "0eade53caaff6760a175b1817079c5324a689d4f02907f65a61c6d4813853bc5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-180",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "098dce8888ad5a9c2a945f66372614feb218f9b3e1b6360720562635ec18bed1",
+      "afterTraceSha256": "098dce8888ad5a9c2a945f66372614feb218f9b3e1b6360720562635ec18bed1"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-expired",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0344a801d1d7005102be2653c0730d757b1f1f8ce448f612eae1d5ab71d4f778",
+      "afterTraceSha256": "0344a801d1d7005102be2653c0730d757b1f1f8ce448f612eae1d5ab71d4f778"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-yesterday",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "6e7a25a74719dfbfb0d64c40cb22f2a38c17d366ec170d4d67c00caccc37c62f",
+      "afterTraceSha256": "6e7a25a74719dfbfb0d64c40cb22f2a38c17d366ec170d4d67c00caccc37c62f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-corrupt",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d",
+      "afterTraceSha256": "631156a387aca046f955f50adefdbd4ca74aebbb65b018aa8bc7a0f0ec05684d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-empty",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "543280c64e765fe46919c9f57558a5e4a3f13a21e9a9bbcf7491c76dfb4dd26a",
+      "afterTraceSha256": "543280c64e765fe46919c9f57558a5e4a3f13a21e9a9bbcf7491c76dfb4dd26a"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/current-forecast-cache",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e89f349b4ce9685ff3cfc1c901de2708fde907f0050ca01ff59adc8dab0aad9a",
+      "afterTraceSha256": "e89f349b4ce9685ff3cfc1c901de2708fde907f0050ca01ff59adc8dab0aad9a"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-expired-refresh",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-expiry-equal-now",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-current-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "a6fdbe16802a0594e1c932df441f5041cedee7c9b08605f2cef96a78e585eca3",
+      "afterTraceSha256": "a6fdbe16802a0594e1c932df441f5041cedee7c9b08605f2cef96a78e585eca3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-forecast-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "8b15e5ee567f28ea1f22a657eaf433dc4e052f15429f63a24e1c4ad8bee8fdf4",
+      "afterTraceSha256": "8b15e5ee567f28ea1f22a657eaf433dc4e052f15429f63a24e1c4ad8bee8fdf4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-no-location",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "bcd332453f621e7323b8a6db29528c6bb047b8cba16d1245a0fbac076186ea1a",
+      "afterTraceSha256": "bcd332453f621e7323b8a6db29528c6bb047b8cba16d1245a0fbac076186ea1a"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-fresh-unlinked",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "b092369783cc4e72749198f119e5967ccd908a0e15286b5d94d49ad69111f66e",
+      "afterTraceSha256": "b092369783cc4e72749198f119e5967ccd908a0e15286b5d94d49ad69111f66e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-ttl-clamp",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "a850bf1ef230e2753a187ab67b62ec69f238e6972422f93f59ff4ccacdea6f14",
+      "afterTraceSha256": "a850bf1ef230e2753a187ab67b62ec69f238e6972422f93f59ff4ccacdea6f14"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-ttl-invalid",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-expired-offline",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "41985838a53c992c35b6b1ac490dd212750f1b7828e3d72d22b3a5f3cfd04731",
+      "afterTraceSha256": "41985838a53c992c35b6b1ac490dd212750f1b7828e3d72d22b3a5f3cfd04731"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/cache-corrupt",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/openagri-token",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0c3959c0f073de88a60c3b3de1273fb946c4a97e1833a29a7b44097dc38cb530",
+      "afterTraceSha256": "0c3959c0f073de88a60c3b3de1273fb946c4a97e1833a29a7b44097dc38cb530"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/openagri-static",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ac6555c041afcdcec8365edb6b3e3e88491d75b0283a94a70c9ac4085fc80103",
+      "afterTraceSha256": "ac6555c041afcdcec8365edb6b3e3e88491d75b0283a94a70c9ac4085fc80103"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/openagri-no-token",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "3b5f6cf65e83feeb448c5852bf46266c6890f10c1579b43fe30ecee7cd28e41e",
+      "afterTraceSha256": "3b5f6cf65e83feeb448c5852bf46266c6890f10c1579b43fe30ecee7cd28e41e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/openagri-supplemental-rain",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "0fd7295e50f322faac68a05892937cd410315cee6e2b777926b37d32612e9ea6",
+      "afterTraceSha256": "0fd7295e50f322faac68a05892937cd410315cee6e2b777926b37d32612e9ea6"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/precipitation-boundaries",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 2,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 2,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "56b754e099494dfd1be04e841adbd0b761c4ba4f25e6d475c808932ea2a0a826",
+      "afterTraceSha256": "56b754e099494dfd1be04e841adbd0b761c4ba4f25e6d475c808932ea2a0a826"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/null-calibration",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "1638eaa1a705a6a6cf4e506c17db50c31d11b9a169d0b952740d76ad13e2a46d",
+      "afterTraceSha256": "1638eaa1a705a6a6cf4e506c17db50c31d11b9a169d0b952740d76ad13e2a46d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/missing-depth-alternatives",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/spring-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "beforeTraceSha256": "fbb56e0ca1e287b439ef44aa080b3da8dca2e7ae4e1cfefb50e0b64d09c72c56",
+      "afterTraceSha256": "fbb56e0ca1e287b439ef44aa080b3da8dca2e7ae4e1cfefb50e0b64d09c72c56"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/fall-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "fbb63fc1d77c81a86da02caf6fee6c81dfb08c4f17371298509323ab81046d86",
+      "afterTraceSha256": "fbb63fc1d77c81a86da02caf6fee6c81dfb08c4f17371298509323ab81046d86"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/not-found",
+      "before": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Zone not found"
+      },
+      "after": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Zone not found"
+      },
+      "beforeTraceSha256": "f0c5f940daa2d6de5483611a7e53a3bac38010aa1b8d864c6da64773c388b762",
+      "afterTraceSha256": "f0c5f940daa2d6de5483611a7e53a3bac38010aa1b8d864c6da64773c388b762"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/invalid-id",
+      "before": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid zone ID"
+      },
+      "after": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid zone ID"
+      },
+      "beforeTraceSha256": "046d91325338a152bcc9f7cb97c4f0e832b18c4c191fcc671c95bd9ac5443059",
+      "afterTraceSha256": "046d91325338a152bcc9f7cb97c4f0e832b18c4c191fcc671c95bd9ac5443059"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/missing-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "ce5318f8c67f820f3941c34acf3a35009aff3aa1ddfb28f6dd7ca8b271d2b599",
+      "afterTraceSha256": "ce5318f8c67f820f3941c34acf3a35009aff3aa1ddfb28f6dd7ca8b271d2b599"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/invalid-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "a561618f484c58996bc8fc44415c5a7c616f765d0215868ab827f87a4686b388",
+      "afterTraceSha256": "a561618f484c58996bc8fc44415c5a7c616f765d0215868ab827f87a4686b388"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/expired-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Token expired"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Token expired"
+      },
+      "beforeTraceSha256": "31385705037b7cdc7f9f8da9dca7781e2915e1d4cee0dbd1873759da40dfda04",
+      "afterTraceSha256": "31385705037b7cdc7f9f8da9dca7781e2915e1d4cee0dbd1873759da40dfda04"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/no-auth-secret",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "beforeTraceSha256": "aa00a9ec43ccc9baf397f12a5c038e2a9695d9c28cbe5058c577be0dae09f19b",
+      "afterTraceSha256": "aa00a9ec43ccc9baf397f12a5c038e2a9695d9c28cbe5058c577be0dae09f19b"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/auth-storage-existing",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "3413b08d2729749e32fef51f6eefd340ae18c8eb7c172461bd22ea1de9ed86d3",
+      "afterTraceSha256": "3413b08d2729749e32fef51f6eefd340ae18c8eb7c172461bd22ea1de9ed86d3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/auth-storage-read-error",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "94be1e99cf67c08611827b67d4ee414687b8de99c36a5d988ebad067fecf6c3c",
+      "afterTraceSha256": "94be1e99cf67c08611827b67d4ee414687b8de99c36a5d988ebad067fecf6c3c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/auth-storage-write-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "AUTH_TOKEN_SECRET or JWT_SECRET must be configured"
+      },
+      "beforeTraceSha256": "8289db6ec29f191954338fcd5de92e8ed44521631684e156210125b19a369f42",
+      "afterTraceSha256": "8289db6ec29f191954338fcd5de92e8ed44521631684e156210125b19a369f42"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/auth-storage-generate",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "f09ecf967fb15292b296943646171943fa73783e6d867eddde1fef45c2014736",
+      "afterTraceSha256": "f09ecf967fb15292b296943646171943fa73783e6d867eddde1fef45c2014736"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "36e1e144d655289937753bdeaa0d90db55adc43863b1faa19c4d34356d2da438",
+      "afterTraceSha256": "36e1e144d655289937753bdeaa0d90db55adc43863b1faa19c4d34356d2da438"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-no-zone",
+      "before": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "zone not found"
+      },
+      "after": {
+        "statusCode": 404,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "zone not found"
+      },
+      "beforeTraceSha256": "aa665cf87c9f85795806ccac113a6ee9b0020e3324272b32993cb413320470c7",
+      "afterTraceSha256": "aa665cf87c9f85795806ccac113a6ee9b0020e3324272b32993cb413320470c7"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-helper-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Authentication scope helper unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Authentication scope helper unavailable"
+      },
+      "beforeTraceSha256": "6f257ca839d208dcbbffe91fd3c94c27d539e5dfcdd32d8a65fab66114a41676",
+      "afterTraceSha256": "6f257ca839d208dcbbffe91fd3c94c27d539e5dfcdd32d8a65fab66114a41676"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "beforeTraceSha256": "b0a892bc511952f0c66d680d18cc2afcb7f9a792b2095497e52487af62660d65",
+      "afterTraceSha256": "b0a892bc511952f0c66d680d18cc2afcb7f9a792b2095497e52487af62660d65"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-helper-after-auth",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "beforeTraceSha256": "a2aaf00167a910e9c6942c2d6084b2d62fc72ede22b6f332f07849032ec708e5",
+      "afterTraceSha256": "a2aaf00167a910e9c6942c2d6084b2d62fc72ede22b6f332f07849032ec708e5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-user-missing",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "beforeTraceSha256": "a0b77513c235a61b59cddb6ce205b5f9cfae7d0c882951efaaf131f348769c40",
+      "afterTraceSha256": "a0b77513c235a61b59cddb6ce205b5f9cfae7d0c882951efaaf131f348769c40"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/scoped-user-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "cb0d9bf57c0027c3c26dde0b4a9add6d0b6feba3b4692260240d63e9f2b37b0e",
+      "afterTraceSha256": "cb0d9bf57c0027c3c26dde0b4a9add6d0b6feba3b4692260240d63e9f2b37b0e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-write-error",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e3f4334d822caf4a063f9f88bbb52e9693b0c9293761ff0d8e74135953d3a926",
+      "afterTraceSha256": "e3f4334d822caf4a063f9f88bbb52e9693b0c9293761ff0d8e74135953d3a926"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/shared-station-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "42ca4baa48eff26d7b6e3a39d0f6a50f375ba053b84b5071fef8e2861f305e7b",
+      "afterTraceSha256": "42ca4baa48eff26d7b6e3a39d0f6a50f375ba053b84b5071fef8e2861f305e7b"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/zone-helper-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "beforeTraceSha256": "b662b448ed653e628784364a2ce96408ab6d7a872c0dcc5d58cb6da0751ee0f3",
+      "afterTraceSha256": "b662b448ed653e628784364a2ce96408ab6d7a872c0dcc5d58cb6da0751ee0f3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/rain-helper-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "module_unavailable"
+      },
+      "beforeTraceSha256": "e3dc9417b3eda2a6d534dca5e4bd3e5f5cccd4a9c705f761039c9227372099c7",
+      "afterTraceSha256": "e3dc9417b3eda2a6d534dca5e4bd3e5f5cccd4a9c705f761039c9227372099c7"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/valve-helper-missing",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 0
+      },
+      "beforeTraceSha256": "dc64aa36fe2b79306245620db3756711e8bee7a93867294077e6c60211e6a51c",
+      "afterTraceSha256": "dc64aa36fe2b79306245620db3756711e8bee7a93867294077e6c60211e6a51c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-timeout",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-malformed",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-status",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-network",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-empty",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/provider-shape",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4",
+      "afterTraceSha256": "f6887c23983cce38f60df01225fe3dc70f880f640730143f1a27bc01a9ec70d4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/normal",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494",
+      "afterTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/no-user",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 0,
+        "error": "User not found"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 0,
+        "error": "User not found"
+      },
+      "beforeTraceSha256": "255bd3865097e5d3246b057d279cee045e0f5be985d5c01536b96138b8e14982",
+      "afterTraceSha256": "255bd3865097e5d3246b057d279cee045e0f5be985d5c01536b96138b8e14982"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/scoped",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "0dee568c2c46a1bb92810269a9fca7df061b2246d9d3b90d39a25c24c7276126",
+      "afterTraceSha256": "0dee568c2c46a1bb92810269a9fca7df061b2246d9d3b90d39a25c24c7276126"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Forbidden"
+      },
+      "beforeTraceSha256": "dd48c3f103c5ed8a7ec0c1f848f616a2fea32a9ab2154b9d15181cebbb3fe9f0",
+      "afterTraceSha256": "dd48c3f103c5ed8a7ec0c1f848f616a2fea32a9ab2154b9d15181cebbb3fe9f0"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/scope-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "scope resolver unavailable"
+      },
+      "beforeTraceSha256": "63db5b6ce5af71e463e7c9a65ce4dd91a9fcbfbb5b996f3e88c1d2765f234a2d",
+      "afterTraceSha256": "63db5b6ce5af71e463e7c9a65ce4dd91a9fcbfbb5b996f3e88c1d2765f234a2d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/valve-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Valve projection unavailable"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Valve projection unavailable"
+      },
+      "beforeTraceSha256": "5a601e6d1cc073e25d274f44675a4e582c2cf9030620c0af503e152c130f4867",
+      "afterTraceSha256": "5a601e6d1cc073e25d274f44675a4e582c2cf9030620c0af503e152c130f4867"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/reports",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494",
+      "afterTraceSha256": "c75085d69b2b33322c63aff041338d44f34275050996050ee9f20f010a6fa494"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/close-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          true,
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "7488c7698339b31a2bfbda755667ba87a58e57c307ab2ef113aa0db229f9eb16",
+      "afterTraceSha256": "7488c7698339b31a2bfbda755667ba87a58e57c307ab2ef113aa0db229f9eb16"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/normal",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/missing-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "966a201c8b33035873b14beb3eba7da7611f45625e9971abe52fe24fe78f49dc",
+      "afterTraceSha256": "966a201c8b33035873b14beb3eba7da7611f45625e9971abe52fe24fe78f49dc"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/invalid-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Invalid token"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Invalid token"
+      },
+      "beforeTraceSha256": "b7aa67ae9cc272de980e245c8b6ed8572a3c4b6b38f949495d3dcfa8c1dac7a7",
+      "afterTraceSha256": "b7aa67ae9cc272de980e245c8b6ed8572a3c4b6b38f949495d3dcfa8c1dac7a7"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/expired-auth",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Token expired"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Token expired"
+      },
+      "beforeTraceSha256": "2b3257a7464dcc8e1d69f9665a8546cf8a1526c3c56b9e755ebdaff0ad5891a3",
+      "afterTraceSha256": "2b3257a7464dcc8e1d69f9665a8546cf8a1526c3c56b9e755ebdaff0ad5891a3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/invalid-id",
+      "before": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "deveui required"
+      },
+      "after": {
+        "statusCode": 400,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "deveui required"
+      },
+      "beforeTraceSha256": "c169233db20ea0d8cb88f8052f9fbb567d6f6e6271bfb436806aa7e56f74a729",
+      "afterTraceSha256": "c169233db20ea0d8cb88f8052f9fbb567d6f6e6271bfb436806aa7e56f74a729"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scoped",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "89c629329d4babc461f2d7b362273dd5466ddec1f627b51eb5a4534e74da21ed",
+      "afterTraceSha256": "89c629329d4babc461f2d7b362273dd5466ddec1f627b51eb5a4534e74da21ed"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scope-missing",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "68ace938ba02a5c6d985fe6a898d511117419cd81395b192fd13568678525138",
+      "afterTraceSha256": "68ace938ba02a5c6d985fe6a898d511117419cd81395b192fd13568678525138"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/valve-missing",
+      "before": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 503,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "2e0cb0f3f30603bd37e38e290fc9929cff4ccafb0e64e2f4aabf2c3926c11172",
+      "afterTraceSha256": "2e0cb0f3f30603bd37e38e290fc9929cff4ccafb0e64e2f4aabf2c3926c11172"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/close-error",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "6ce41869b7fee12324cd63480113cbbcbf340112104e5920c3bb2408b7052de4",
+      "afterTraceSha256": "6ce41869b7fee12324cd63480113cbbcbf340112104e5920c3bb2408b7052de4"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/midnight",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/spring-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "9d4b8a0d8d4bc6eb5a53cfb6acc4dff534972c3d1c82b0405532c9492c582bb5",
+      "afterTraceSha256": "9d4b8a0d8d4bc6eb5a53cfb6acc4dff534972c3d1c82b0405532c9492c582bb5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/fall-DST",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 10
+      },
+      "beforeTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f",
+      "afterTraceSha256": "d244cd2ed257fe5ec9957c606761bd4e96ac1c7033660941e71e2f0760c3340f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/scoped-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "a0e9084a9745452bfccc4b2db012befcc7d247e3b92de104b9403f4ccffb98aa",
+      "afterTraceSha256": "a0e9084a9745452bfccc4b2db012befcc7d247e3b92de104b9403f4ccffb98aa"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/scoped-user-missing",
+      "before": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "after": {
+        "statusCode": 401,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "Unauthorized"
+      },
+      "beforeTraceSha256": "6e876c188ef4fd410d640a0a98fbc2c1d229767f03d360122397775b1b8fa00c",
+      "afterTraceSha256": "6e876c188ef4fd410d640a0a98fbc2c1d229767f03d360122397775b1b8fa00c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scoped-helper-after-auth",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "65b4c02105c2a9376aeaf3093fbf410740ff48ac8f3aabb58b391e5524ab17f7",
+      "afterTraceSha256": "65b4c02105c2a9376aeaf3093fbf410740ff48ac8f3aabb58b391e5524ab17f7"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scoped-read-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "0b237d90975d5c4df17323c6bb8c3e63b9aa7c1474d564ea15e4d7751f280698",
+      "afterTraceSha256": "0b237d90975d5c4df17323c6bb8c3e63b9aa7c1474d564ea15e4d7751f280698"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scoped-user-missing",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "forbidden"
+      },
+      "beforeTraceSha256": "72ad0a03cd27c265d4c0178a62352bd0458d276d925d71a4796e5a2c759823ed",
+      "afterTraceSha256": "72ad0a03cd27c265d4c0178a62352bd0458d276d925d71a4796e5a2c759823ed"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/zero-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": 0
+      },
+      "beforeTraceSha256": "03efb64b26b74921b07299d46c111b9a16e3c1bfe3901c9f90f802e9f2ad1531",
+      "afterTraceSha256": "03efb64b26b74921b07299d46c111b9a16e3c1bfe3901c9f90f802e9f2ad1531"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/null-only",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": null
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "liters": null
+      },
+      "beforeTraceSha256": "81ee47b2d0890a2d5bc8f729aefcf2727cbdbf06fdd9ef2c046024415d87aa3d",
+      "afterTraceSha256": "81ee47b2d0890a2d5bc8f729aefcf2727cbdbf06fdd9ef2c046024415d87aa3d"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/scoped-disabled",
+      "before": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "after": {
+        "statusCode": 403,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "disabled"
+      },
+      "beforeTraceSha256": "d123c269a1da78e135d230d3481b0318715af27a605fac7be7accb8ade3b01f5",
+      "afterTraceSha256": "d123c269a1da78e135d230d3481b0318715af27a605fac7be7accb8ade3b01f5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "response/status-matrix",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "fdb584fff269fb5a2cb9e3a6e2311c575e2f0e63896317f4eadc2190aee19436",
+      "afterTraceSha256": "fdb584fff269fb5a2cb9e3a6e2311c575e2f0e63896317f4eadc2190aee19436"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "response/invalid-rows",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "bcdab1d30d1109948d8d4e61c1fa47dc26973bb647cb5636548d7ece605dab01",
+      "afterTraceSha256": "bcdab1d30d1109948d8d4e61c1fa47dc26973bb647cb5636548d7ece605dab01"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/open-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "e7e5b97bd75427b9b6a43e4c0fca86410ae9eacbfc15abb058ab7e5d7f881005",
+      "afterTraceSha256": "e7e5b97bd75427b9b6a43e4c0fca86410ae9eacbfc15abb058ab7e5d7f881005"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/close-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 2,
+        "error": "fixture close failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 2,
+        "error": "fixture close failure"
+      },
+      "beforeTraceSha256": "7a77f5aa413c7646331d2085ef3bd32b9109544e9de1e81b992bd637e61cffd3",
+      "afterTraceSha256": "7a77f5aa413c7646331d2085ef3bd32b9109544e9de1e81b992bd637e61cffd3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "environment/module-missing-close-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 1
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 1
+      },
+      "beforeTraceSha256": "6d11c01831df1216b0eabd61522f104ee2b02c005df2d3ff742d0f16a992c986",
+      "afterTraceSha256": "6d11c01831df1216b0eabd61522f104ee2b02c005df2d3ff742d0f16a992c986"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "actuations/open-error",
+      "before": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "after": {
+        "statusCode": null,
+        "outputPorts": [
+          false
+        ],
+        "closes": 0
+      },
+      "beforeTraceSha256": "dd3474deafbb5c4f8903dc4ac750e189603c41a896ddca3ce572f108e901da5f",
+      "afterTraceSha256": "dd3474deafbb5c4f8903dc4ac750e189603c41a896ddca3ce572f108e901da5f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "liters/open-error",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 0,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "1e5dd9460691c700bdb1a2fa84ed7bfffba1b87215cd75dfca2432c032e2ac27",
+      "afterTraceSha256": "1e5dd9460691c700bdb1a2fa84ed7bfffba1b87215cd75dfca2432c032e2ac27"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-1",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-2",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-3",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-4",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-5",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-6",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-7",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-8",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-9",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-10",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-11",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-12",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-13",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-14",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-15",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-16",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd",
+      "afterTraceSha256": "ba35ef42b18211d65bf8508e556c117981cf44718efadd435ceb1c182c6da4fd"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-17",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8a565bd228c7f40902d90b29ffb80cb925b0f67afc964a7bae95e3c66b9bfb25",
+      "afterTraceSha256": "8a565bd228c7f40902d90b29ffb80cb925b0f67afc964a7bae95e3c66b9bfb25"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-18",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "32b3b6ef0281d1ad20b737431ffaea824e2910ec9f00df5dca29d3a1d8b35558",
+      "afterTraceSha256": "32b3b6ef0281d1ad20b737431ffaea824e2910ec9f00df5dca29d3a1d8b35558"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-19",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "2edc75e42c9679834865acd6966a38ced978ee88e29afe0a5261f785fdc2f137",
+      "afterTraceSha256": "2edc75e42c9679834865acd6966a38ced978ee88e29afe0a5261f785fdc2f137"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-20",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "fb2bc1850725101413b26a02465aaaf6a32dc8e5b742d1ebfe097a1c99f85bae",
+      "afterTraceSha256": "fb2bc1850725101413b26a02465aaaf6a32dc8e5b742d1ebfe097a1c99f85bae"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-21",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": 0,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "2c0098ee4024fb7eaf1800b905d65eebe0566a4cbd84d54b4f2f7908e7b1f7f9",
+      "afterTraceSha256": "2c0098ee4024fb7eaf1800b905d65eebe0566a4cbd84d54b4f2f7908e7b1f7f9"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-22",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "1a00cf59c5be61e0a851ebfd113ee8c8efe64d73705be51dcecafd8703fad9c5",
+      "afterTraceSha256": "1a00cf59c5be61e0a851ebfd113ee8c8efe64d73705be51dcecafd8703fad9c5"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-23",
+      "before": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "after": {
+        "statusCode": 200,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "rainTodayMm": null,
+        "measuredLiters": 0,
+        "estimatedLiters": 15
+      },
+      "beforeTraceSha256": "e7d3df8ce45ceba0f029c8d4dc04bff3ecf6dd6f30d0fb9c673838ca4026881c",
+      "afterTraceSha256": "e7d3df8ce45ceba0f029c8d4dc04bff3ecf6dd6f30d0fb9c673838ca4026881c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-24",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "a516df1d40d80cbac9ce96dc20e333bc94ce1a8528afeb46d0075faebf88f983",
+      "afterTraceSha256": "a516df1d40d80cbac9ce96dc20e333bc94ce1a8528afeb46d0075faebf88f983"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-25",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "15efbb5110e89298e4013ea43f9b3743b5335e3da355ca2b1bf5d3245513a63e",
+      "afterTraceSha256": "15efbb5110e89298e4013ea43f9b3743b5335e3da355ca2b1bf5d3245513a63e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-26",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "19ce0c25a38f42397230cff5e25955cbff4e376790d465637cb87d2d6c21e9e3",
+      "afterTraceSha256": "19ce0c25a38f42397230cff5e25955cbff4e376790d465637cb87d2d6c21e9e3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-27",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b99f2db2528f4818df51ff51b3490beacda6cb77289fc1ddbfad938981f43eba",
+      "afterTraceSha256": "b99f2db2528f4818df51ff51b3490beacda6cb77289fc1ddbfad938981f43eba"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-28",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8f76edb1a397b79faf7a4f8a29b6dbf3da6df1f078b6e7c1895145f92bb77bf9",
+      "afterTraceSha256": "8f76edb1a397b79faf7a4f8a29b6dbf3da6df1f078b6e7c1895145f92bb77bf9"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-29",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b0a17f6888c9e60dae477bb01d2c4998d528c6b479a4bb6e2c8904da5c9c43de",
+      "afterTraceSha256": "b0a17f6888c9e60dae477bb01d2c4998d528c6b479a4bb6e2c8904da5c9c43de"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-30",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "dc3127348b6e8044481938a02e22761a099bff58ca2736791f01448760da907f",
+      "afterTraceSha256": "dc3127348b6e8044481938a02e22761a099bff58ca2736791f01448760da907f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-31",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "7c5b2badbf028d46c703f659a1816854812c37eb2aa1bc8b9d91e37f1916fb75",
+      "afterTraceSha256": "7c5b2badbf028d46c703f659a1816854812c37eb2aa1bc8b9d91e37f1916fb75"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-32",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "b8335f048410756fe383cee83f7829f71d6779fc0a7c2984c056a74994d5749e",
+      "afterTraceSha256": "b8335f048410756fe383cee83f7829f71d6779fc0a7c2984c056a74994d5749e"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-33",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "c990752b03a0eea54c061ae9e0d0e16eaba9f4145509b3b3e8c8bd587afec010",
+      "afterTraceSha256": "c990752b03a0eea54c061ae9e0d0e16eaba9f4145509b3b3e8c8bd587afec010"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-34",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "41e36683a47e156ee3e6b8be3a276daea1afa7e695d96e2f84af5048e536e9a3",
+      "afterTraceSha256": "41e36683a47e156ee3e6b8be3a276daea1afa7e695d96e2f84af5048e536e9a3"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-35",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "75a34d55ee56212517687342260b687969e19d4723f0a401507a488197ca3058",
+      "afterTraceSha256": "75a34d55ee56212517687342260b687969e19d4723f0a401507a488197ca3058"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-36",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "9fa5df3fa4f482d6929846f1f2d9726d83289bc9816835730c9b5ac889fd0664",
+      "afterTraceSha256": "9fa5df3fa4f482d6929846f1f2d9726d83289bc9816835730c9b5ac889fd0664"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-37",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "8d7756b232535ce5c315e8544a3a02871ad36e87df6126b8b341d8c65d1bd86f",
+      "afterTraceSha256": "8d7756b232535ce5c315e8544a3a02871ad36e87df6126b8b341d8c65d1bd86f"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "zone-env-fn/sql-failure-38",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "00e20ad7050dd5770ec07116d52079f72511f18e139160eaf2d53b1a28f5bb3c",
+      "afterTraceSha256": "00e20ad7050dd5770ec07116d52079f72511f18e139160eaf2d53b1a28f5bb3c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "strega-today-liters-fn/sql-failure-1",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          true
+        ],
+        "closes": 1,
+        "error": "Internal error"
+      },
+      "beforeTraceSha256": "9d03474fb133c6c9ac2efaa683e8c330fbe46f90d76538363876bf1f59290fde",
+      "afterTraceSha256": "9d03474fb133c6c9ac2efaa683e8c330fbe46f90d76538363876bf1f59290fde"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "get-actuations-query/sql-failure-1",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "37995d5ddebc752ff6a251df38c7a65e5ce7a1563cbe5bf2efd0377289d26e5c",
+      "afterTraceSha256": "37995d5ddebc752ff6a251df38c7a65e5ce7a1563cbe5bf2efd0377289d26e5c"
+    },
+    {
+      "profile": "bcm2709",
+      "case": "get-actuations-query/sql-failure-2",
+      "before": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "after": {
+        "statusCode": 500,
+        "outputPorts": [
+          false,
+          true
+        ],
+        "closes": 1,
+        "error": "fixture SQL failure"
+      },
+      "beforeTraceSha256": "6a24cf7c0691c46b438fcb2e7c1c5148801eb16c0addb0e21cd23b9c4b4f88ed",
+      "afterTraceSha256": "6a24cf7c0691c46b438fcb2e7c1c5148801eb16c0addb0e21cd23b9c4b4f88ed"
+    }
+  ]
+}

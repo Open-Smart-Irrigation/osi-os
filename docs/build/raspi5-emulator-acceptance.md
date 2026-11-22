@@ -63,12 +63,89 @@ The default suite checks cold boot, GUI registration and login, WM1302 uplinks,
 a STREGA valve open and its reported state, reboot persistence, three SQLite
 power cuts and offline upgrades from 0.8.0 and 0.8.1.
 
-Both radio cases record the number of frames the WM1302 model accepted into
-its RX FIFO and the number Concentratord logged after its CRC filter. Each
-injection needs a model receipt with the matching request ID. Each case
-drains pending radio packets and needs a positive CRC_OK count from its own
-log window. Rebuild QEMU with these tools if the cached binary lacks the
-matching receipt protocol.
+Both radio cases drain pending radio packets, and each injection needs a WM1302
+model receipt with the matching request ID. Rebuild QEMU with these tools if
+the cached binary lacks the matching receipt protocol. Radio evidence comes
+from the guest's persistent log, `/data/log/osi-system.log*`. The RAM ring
+(`logread`) appears only in failure text and diagnostics.
+
+Each join attempt reads ChirpStack's state, notes the size and inode of the
+active persistent log, writes a marker to syslog and sends on a recorded
+channel (902300000 Hz, 125000 Hz, SF7 for every uplink today). When the
+join-accept has arrived or its wait has run out, the runner writes an end
+marker and reads the log forward from the noted position, following that file
+into the active file if logd rotated it. A change in the log files' inodes
+during a read repeats the read, a failed file read fails the window, and a
+stable layout without the noted inode means the evidence rotated away. The
+read waits up to 10 s for the end marker to reach the file.
+The window is the text between the two markers. The attempt counts as
+received only with three parts:
+
+1. A Concentratord `Frame received, uplink_id: N` line in the window at the
+   recorded channel whose `count_us` comes from this request. The model's
+   delivery receipt carries the 32 MHz timestamp it stamped on the frame. The
+   HAL (sx1302_hal 2.1.0) turns that into `count_us` as timestamp / 32 in 27
+   bits, adds its wrap bits and subtracts a decoding delay of about 0.46 ms at
+   SF7 (15.4 ms at SF12). The line must sit within 20 ms below the stamp,
+   modulo 2^27. Harness uplinks are seconds apart, so no other frame
+   qualifies. A downlink that Concentratord enqueued, sent or dropped 5 s
+   (RX1) or 6 s (RX2) after the frame corroborates it and is reported, but is
+   not required. Concentratord 4.4.8 logs
+   `Frame received` at INFO only after its CRC filter, and the image sets
+   `disable_crc_filter=false`, so the line proves a CRC-valid frame. The
+   stamp binding assumes the HAL's legacy timestamps, so the case fails
+   with a named reason if the guest's `concentratord.toml` enables
+   `[gateway.fine_timestamp]`. The image leaves that section unset.
+2. The change in ChirpStack's state for that DevEUI across the send, read from
+   `/srv/chirpstack/chirpstack.sqlite`: the attempt's DevNonce absent from
+   `device_keys.dev_nonces` before and present after, `device_keys.join_nonce`
+   advanced by one, and a new `device.dev_addr`. Once the join-accept has
+   verified, its DevAddr must equal ChirpStack's new DevAddr, and its JoinNonce
+   must equal ChirpStack's pre-send JoinNonce: ChirpStack 4.12.1 stores the
+   incremented counter and sends the stored value minus one. No timestamps
+   are compared. ChirpStack writes no log line for a join: the 0.8.3 candidate
+   images do not route its output to syslog, and main routes it at `warn`
+   only. ChirpStack 4.12.1 stores the DevNonce and increments the JoinNonce
+   only after the MIC check, and writes the DevAddr before it sends the
+   join-accept.
+3. The join-accept at the emulated device inside the 40 s join window, with
+   its delay.
+
+The runner prints one line per attempt with the channel it sent on and all
+three parts, or `MISSING` and the reason for each absent part. When parts 1
+and 2 hold and only the join-accept is late or absent, the attempt is retried
+with a fresh DevNonce, at most three attempts in total. Any other missing part
+fails the case on that attempt, even if a later attempt could pass.
+
+A failed join-accept reason says what Concentratord did with this join's
+downlink, matched by its scheduled `count_us`:
+`join-accept dropped by concentratord: too old, 6.5 ms after its TX time`
+(the queue reached it after its time), `refused by concentratord at enqueue:
+too late` with the lead time it had or how far past its time it was, or
+`Concentratord scheduled the join-accept for TX`. One retained 0.8.3 run lost
+a join-accept to the first case, with no counter wrap. The valve case needs at
+least one matching `Frame received` line in its own window.
+
+`radio-diagnostics.log` counts selected log lines in both sinks (including
+`Scheduled packet is too old`), lists ChirpStack's DevNonce count and DevAddr
+state per device, and sums Concentratord's stats per process. Concentratord
+publishes stats every 30 s and resets its counters after each publish
+(`libconcentratord/src/stats.rs`), so one `Publishing stats event` line covers
+one window, not the run. The persistent log also spans every guest boot on the
+disk.
+
+In the first 0.8.3 Pi 5 candidate run of 22 Nov 2026 (the radio guest's
+Concentratord had PID 10075), the rotated and active log files together hold
+six frames from that guest. Its publish at 16:45:27 (guest clock) reads
+`rx_received: 1` for the frame at 16:45:27, and its publish at 16:45:57 reads
+`rx_received: 3` for the frames at 16:45:33, 16:45:35 and 16:45:41. The frames
+at 16:46:00 and 16:46:01 were never published: the guest's last line is at
+16:46:09, before the next publish was due at 16:46:27. The last stats lines in
+the file, all `rx_received: 0`, come from later boots of the same disk with no
+radio traffic. The counts for the rotated file come from the gate's
+per-attempt evidence analysis. This repository's own read of that disk could
+not extract the rotated file, so it checked only the active file's window at
+16:45:57.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's

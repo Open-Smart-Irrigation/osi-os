@@ -464,12 +464,12 @@ test('toCsv neutralizes spreadsheet formulas in text cells', () => {
     array_id: '@ARRAY',
     value: 12.5,
   }]);
-  assert.strictEqual(csv, "zone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
+  assert.strictEqual(csv, "\uFEFFzone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
 });
 
 test('toCsv also neutralizes text cells that start with a tab or a carriage return', () => {
   const csv = helper.toCsv(['zone', 'source', 'value'], [{ zone: '\tZone', source: '\r=cmd', value: -3 }]);
-  assert.strictEqual(csv, "zone,source,value\n'\tZone,\"'\r=cmd\",-3\n");
+  assert.strictEqual(csv, "\uFEFFzone,source,value\n'\tZone,\"'\r=cmd\",-3\n");
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
@@ -1760,7 +1760,7 @@ test('buildZoneExportCsv returns header-only row sets for empty valid ranges', a
     });
     assert.deepStrictEqual(res.columns, helper.RAW_CSV_COLUMNS);
     assert.deepStrictEqual(res.rows, []);
-    assert.strictEqual(helper.toCsv(res.columns, res.rows), `${TIDY_CSV_COLUMNS.join(',')}\n`);
+    assert.strictEqual(helper.toCsv(res.columns, res.rows), `\uFEFF${TIDY_CSV_COLUMNS.join(',')}\n`);
   } finally {
     db.close();
   }
@@ -1815,7 +1815,7 @@ test('runRollupJob writes per-source CSV exports for the completed local day', a
     });
     assert.strictEqual(summary.csvZonesWritten, 1);
     const raw = fs.readFileSync(path.join(dir, 'zu', 'raw', '2026-06-02.csv'), 'utf8');
-    assert.match(raw, /^timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value/m);
+    assert.match(raw, /^\uFEFFtimestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value/m);
     assert.match(raw, /2026-06-02T08:10:00.000Z,UNKNOWN,Zone B,Chameleon 1 - Soil tension \(S1\),soil,soil-src-[0-9a-f]{12},swt_1,5,ARR-007,kPa,10/);
     const hourly = fs.readFileSync(path.join(dir, 'zu', 'hourly', '2026-06-02.csv'), 'utf8');
     assert.match(hourly, /2026-06-02T08:00:00.000Z,UNKNOWN,Zone B,Chameleon 1 - Soil tension \(S1\),soil,soil-src-[0-9a-f]{12},swt_1,5,ARR-007,kPa,15/);
@@ -1913,7 +1913,7 @@ test('legacySensorHistory returns raw 24h points and aggregated long-range point
   }
 });
 
-test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () => {
+test('mixed Watermark, Chameleon and SDI12 exports keep supported channels', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -1940,9 +1940,10 @@ test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () =
     const raw = await helper.buildZoneExportCsv(db, { ...options, granularity: 'raw' });
     const hourly = await helper.buildZoneExportCsv(db, { ...options, granularity: 'hourly' });
     const assertSwt3Isolation = (result) => {
+      assert.deepStrictEqual(result.rows.filter(row => row.channel_key === 'swt_1').map(row => row.value).sort((a,b) => a-b), [10,11,12]);
+      // SDI-12's shipped layouts report SWT1/2; only Chameleon reports SWT3.
       const swt3 = result.rows.filter((row) => row.channel_key === 'swt_3');
       assert.deepStrictEqual(swt3.map((row) => [row.source_key, row.value]), [
-        ['soil-src-0c689a161d62', 41],
         ['soil-src-8b90b370f237', 31],
       ]);
     };

@@ -64,3 +64,14 @@ for (const mutation of ['factory await', 'zone await', 'first rain await', 'seco
     assert.ok(bindingGuard.dendroWeatherDelegationProblem(node, index, weather));
   });
 }
+
+require('node:test')('X3 rain delegation pins the awaited facade call', () => {
+ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+ const {adaptNode}=require('./x3-zone-env-adapters');
+ const node=adaptNode(require('./fixtures/x3-zone-env/legacy-nodes.json').find(n=>n.id==='zone-env-fn'));
+ const dir=path.resolve(__dirname,'../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env');
+ const index=fs.readFileSync(path.join(dir,'index.js'),'utf8'),source=fs.readFileSync(path.join(dir,'http-facade.js'),'utf8');
+ const check=require('./verify-osi-lib-db-caller-binding').zoneEnvironmentDelegationProblem;
+ assert.equal(check(node,index,source),null);
+ assert.match(check(node,index,source.replace('await R.resolveAdviceRain','R.resolveAdviceRain')),/unawaited/);
+});

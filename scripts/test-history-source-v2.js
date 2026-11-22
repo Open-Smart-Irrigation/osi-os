@@ -1605,7 +1605,7 @@ for (const profile of PROFILES) {
     assert.deepEqual(liveOverflow.availability, expectedAvailability);
   });
 
-  test(`${profile}: daily export keeps a month with more than 30000 raw rows`, async () => {
+  test(`${profile}: daily export refuses a month beyond the input-work ceiling`, async () => {
     const helper = loadHelper(profile);
     const raw = new DatabaseSync(':memory:');
     raw.exec(seed);
@@ -1626,17 +1626,18 @@ for (const profile of PROFILES) {
         insert.run('A8404100000000A1', new Date(startMs + index * 60000).toISOString(), 20);
       }
       raw.exec('COMMIT');
-      const result = await helper.buildZoneExportCsv(facade(raw), {
-        zoneId: 1,
-        from: '2026-06-01',
-        to: '2026-06-30',
-        granularity: 'daily',
-        nowMs: Date.parse('2026-07-02T00:00:00Z'),
-      });
-      const swt1Days = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => row.timestamp);
-      assert.equal(swt1Days.length, 21);
-      assert.equal(swt1Days[0], '2026-06-01T00:00:00.000Z');
-      assert.equal(swt1Days[20], '2026-06-21T00:00:00.000Z');
+      const db = facade(raw);
+      const queries = [];
+      const bounded = { ...db, all(sql, params) {
+        if (/FROM device_data/.test(sql)) queries.push(sql);
+        return db.all(sql, params);
+      } };
+      await assert.rejects(helper.buildZoneExportCsv(bounded, {
+        zoneId: 1, from: '2026-06-01', to: '2026-06-30', granularity: 'daily',
+        channels: 'swt_1', nowMs: Date.parse('2026-07-02T00:00:00Z'),
+      }), { statusCode: 413, code: 'EXPORT_INPUT_TOO_LARGE' });
+      assert.equal(queries.length, 1);
+      assert.match(queries[0], /ORDER BY recorded_at ASC, id ASC LIMIT 30001$/);
     } finally {
       raw.close();
     }

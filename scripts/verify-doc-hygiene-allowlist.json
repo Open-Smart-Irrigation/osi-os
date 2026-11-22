@@ -413,6 +413,12 @@
       "max": 1,
       "reason": "Synthetic WM1302 OTP EUI asserted by the Semtech HAL probe",
       "issue": 384
+    },
+    {
+      "path": "docs/contracts/authority/fixtures/auth-consumers.json",
+      "max": 46,
+      "reason": "Exact Node-RED route/function node ids from the pinned source in the EB5b auth-consumer inventory; validated against the flow nodes by test-authority-contract.js. These are code identifiers, not deployment EUIs.",
+      "issue": 520
     }
   ]
 }

@@ -15,7 +15,7 @@ function legacyHandoffTree(){
 }
 test('checked-in patch equals independent renderer bytes, including staged catch/DDL receipt',()=>{
  assert.equal(canonicalPatch(canonicalHandoff()),fs.readFileSync(path.join(ROOT,PATCH),'utf8'));
- assert.ok(['legacy','rendered'].includes(verifyHandoff().state));
+ assert.ok(['legacy','rendered','superseded'].includes(verifyHandoff().state));
 });
 test('manifest forbids undeclared mutations, and exactly five libs append one named loader',()=>{
  const manifest=require('./fixtures/valve-ingress-x2/adapters.json'),baseline=require('./fixtures/valve-ingress-x2/baseline.json');let changed=0;
@@ -128,4 +128,31 @@ test('strict patch application rejects a truncated or omitted baseline hunk with
    }
   }
  }finally{tree.close();fs.rmSync(tmp,{recursive:true,force:true});}
+});
+test('after a later handoff, X2 accepts only intact rendered adapters',()=>{
+ const os=require('node:os'),{FLOW_PATHS}=require('./lib/valve-ingress-x2-handoff');
+ const baseline=require('./fixtures/valve-ingress-x2/baseline.json');
+ const files=canonicalHandoff(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'x2-superseded-'));
+ const write=flows=>{for(const rel of FLOW_PATHS){fs.mkdirSync(path.dirname(path.join(dir,rel)),{recursive:true});fs.writeFileSync(path.join(dir,rel),JSON.stringify(flows,null,2)+'\n');}};
+ const router='934bf2bc19a8ce22',first=baseline.nodes[0];
+ const rejects=(flows,pattern,label)=>{write(flows);assert.throws(()=>verifyHandoff(dir),pattern,label);};
+ try{
+  const rendered=JSON.parse(files.find(f=>f.rel===FLOW_PATHS[0]).after);
+  // A later handoff changes an unrelated node: X2 stays verified.
+  const later=rendered.map(n=>n.id==='auth-tab'?{...n,info:String(n.info||'')+' (later handoff)'}:n);
+  assert.notDeepEqual(later,rendered);
+  write(later);
+  assert.equal(verifyHandoff(dir).state,'superseded');
+  // Editor layout is the only X2 field another change may move.
+  write(later.map(n=>n.id===router?{...n,x:n.x+20,y:n.y+20}:n));
+  assert.equal(verifyHandoff(dir).state,'superseded');
+  rejects(later.map(n=>n.id===first.id?{...n,func:first.func,libs:first.libs}:n),/X2 node changed after a later handoff/,'reverted adapter');
+  rejects(later.map(n=>n.id===first.id?{...n,wires:[[]]}:n),/X2 node contract changed/,'changed wire');
+  rejects(later.map(n=>n.id===router?{...n,d:true}:n),/X2 node changed after a later handoff: .*934bf2bc19a8ce22\/d/,'disabled router');
+  rejects(later.filter(n=>n.id!==router),/X2 node missing or duplicated/,'removed node');
+  rejects(later.map(n=>n.id===router?{...n,libs:[...n.libs,{var:'extra',module:'extra'}]}:n),/X2 bindings changed|X2 node changed/,'changed libs');
+  rejects(later.map(n=>n.id===router?{...n,name:'renamed'}:n),/X2 node changed after a later handoff: .*\/name/,'renamed node');
+  // A new node wired into an X2 input.
+  rejects([...later,{id:'x2-intruder',type:'function',z:later.find(n=>n.id===router).z,func:'return msg;',outputs:1,wires:[[router]]}],/references into X2 nodes changed/,'new inbound wire');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

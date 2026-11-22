@@ -27,7 +27,15 @@ test('edge environment summary calls buildForecastSection from the extracted mod
   const node = flows.find((entry: { name?: string }) => entry.name === 'Get Zone Environment Summary');
   assert.ok(node && typeof node.func === 'string', 'Get Zone Environment Summary function node is present');
 
-  assert.ok(node.func.includes('buildForecastSection'), 'adapter calls buildForecastSection');
+  // X3 moved the handler body into osi-zone-env/http-facade.js; the adapter
+  // delegates to environmentSummary, which calls buildForecastSection.
+  assert.ok(node.func.includes("osiLib.require('zone-env')"), 'adapter loads osi-zone-env');
+  assert.ok(node.func.includes('loaded.value.environmentSummary(msg,'), 'adapter delegates to environmentSummary');
+  const facadeSource = fs.readFileSync(path.resolve(
+    import.meta.dirname,
+    '../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/http-facade.js'
+  ), 'utf8');
+  assert.match(facadeSource, /ZE\.buildForecastSection\(/, 'environmentSummary calls buildForecastSection');
 
   const modulePath = path.resolve(
     import.meta.dirname,

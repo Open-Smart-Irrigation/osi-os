@@ -148,7 +148,7 @@ static unsigned wm_find_channel(WmSpiState *s, uint32_t hz, uint8_t bandwidth)
     return 8;
 }
 
-static bool wm_queue_rx(WmSpiState *s)
+static bool wm_queue_rx(WmSpiState *s, uint32_t *stamp)
 {
     uint8_t size = s->frame[0], channel = s->frame[1], sf = s->frame[2];
     const uint8_t *payload = s->frame + 3;
@@ -181,6 +181,7 @@ static bool wm_queue_rx(WmSpiState *s)
     record[size + 11] = record[size + 12] = 125;
     uint32_t ticks = (qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) - s->reset_us) * 32;
     stl_le_p(record + size + 15, ticks);
+    *stamp = ticks;
     stw_le_p(record + size + 19, crc);
     for (unsigned i = 0; i + 1 < len; i++) {
         record[len - 1] += record[i];
@@ -215,16 +216,20 @@ static void wm_air_read(void *opaque, const uint8_t *bytes, int count)
             header += WM_AIR_REQUEST_ID_SIZE;
         }
         if (s->frame_len == s->frame[0] + header) {
-            bool delivered = wm_queue_rx(s);
+            uint32_t stamp = 0;
+            bool delivered = wm_queue_rx(s, &stamp);
             s->frame_len = 0;
             if (receipt_requested) {
                 /* Report the number of packets added to the HAL FIFO by
-                 * this request. Legacy channel 255 never produces a receipt. */
-                uint8_t receipt[4 + WM_AIR_REQUEST_ID_SIZE] = {
-                    1 + WM_AIR_REQUEST_ID_SIZE, WM_AIR_RECEIPT, 0,
+                 * this request and the 32 MHz timestamp stamped on it, from
+                 * which the HAL derives count_us. Legacy channel 255 never
+                 * produces a receipt. */
+                uint8_t receipt[8 + WM_AIR_REQUEST_ID_SIZE] = {
+                    5 + WM_AIR_REQUEST_ID_SIZE, WM_AIR_RECEIPT, 0,
                 };
                 memcpy(receipt + 3, s->frame + WM_AIR_RF_HEADER_SIZE, WM_AIR_REQUEST_ID_SIZE);
-                receipt[sizeof(receipt) - 1] = delivered;
+                receipt[3 + WM_AIR_REQUEST_ID_SIZE] = delivered;
+                stl_be_p(receipt + 4 + WM_AIR_REQUEST_ID_SIZE, stamp);
                 wm_air_write(s, receipt, sizeof(receipt));
             }
         }

@@ -3,35 +3,35 @@
     "full_raspberrypi_bcm27xx_bcm2712": {
       "silentCatch": {
         "functionNodeCount": 320,
-        "silentCatchCount": 53
+        "silentCatchCount": 47
       },
       "ddl": {
-        "createTable": 33,
-        "alterTable": 212,
+        "createTable": 28,
+        "alterTable": 202,
         "createUniqueIndex": 7,
-        "createIndex": 28,
+        "createIndex": 26,
         "createTrigger": 31,
         "dropTable": 3,
         "dropTrigger": 31,
         "writableSchema": 2,
-        "total": 347
+        "total": 330
       }
     },
     "full_raspberrypi_bcm27xx_bcm2709": {
       "silentCatch": {
         "functionNodeCount": 320,
-        "silentCatchCount": 53
+        "silentCatchCount": 47
       },
       "ddl": {
-        "createTable": 33,
-        "alterTable": 212,
+        "createTable": 28,
+        "alterTable": 202,
         "createUniqueIndex": 7,
-        "createIndex": 28,
+        "createIndex": 26,
         "createTrigger": 31,
         "dropTable": 3,
         "dropTrigger": 31,
         "writableSchema": 2,
-        "total": 347
+        "total": 330
       }
     }
   },
