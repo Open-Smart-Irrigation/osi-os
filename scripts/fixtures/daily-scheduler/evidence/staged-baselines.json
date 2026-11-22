@@ -3,7 +3,7 @@
     "full_raspberrypi_bcm27xx_bcm2712": {
       "silentCatch": {
         "functionNodeCount": 320,
-        "silentCatchCount": 59
+        "silentCatchCount": 53
       },
       "ddl": {
         "createTable": 33,
@@ -20,7 +20,7 @@
     "full_raspberrypi_bcm27xx_bcm2709": {
       "silentCatch": {
         "functionNodeCount": 320,
-        "silentCatchCount": 59
+        "silentCatchCount": 53
       },
       "ddl": {
         "createTable": 33,

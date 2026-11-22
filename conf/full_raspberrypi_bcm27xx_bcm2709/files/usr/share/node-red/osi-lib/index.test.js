@@ -26,6 +26,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'agroscope-uplink-transform',
     'chirpstack',
     'clover-soil',
+    'command-ingress',
     'crop-kc',
     'daily-scheduler',
     'dendro-analytics',
@@ -78,6 +79,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['device-writer'], 'osi-device-writer');
   assert.equal(osiLib.NAME_TO_PATH['entity-name'], 'osi-entity-name');
   assert.equal(osiLib.NAME_TO_PATH['uc512-normalize'], 'osi-uc512-normalize');
+  assert.equal(osiLib.NAME_TO_PATH['command-ingress'], 'osi-command-ingress');
   assert.equal(osiLib.NAME_TO_PATH['osi-valve-control'], 'osi-valve-control');
   assert.equal(osiLib.NAME_TO_PATH['watermark-helper'], 'osi-watermark-helper');
   assert.equal(osiLib.NAME_TO_PATH['rejection-recovery'], 'osi-rejection-recovery');

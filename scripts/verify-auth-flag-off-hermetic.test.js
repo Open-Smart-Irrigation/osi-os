@@ -40,7 +40,7 @@ test('discovery finds a healthy population of auth/scope-gated nodes (regression
   // Every discovered node really does reference the literal call this
   // verifier is built around -- pins the regex against silent rot.
   for (const node of targets) {
-    assert.match(node.func, SCOPE_CALL_RE, `${node.id} matched discovery but not SCOPE_CALL_RE on re-check`);
+    assert.match(require('./lib/valve-ingress-x2-source').resolvedNode(node).func, SCOPE_CALL_RE, `${node.id} matched discovery but not SCOPE_CALL_RE on re-check`);
   }
 });
 
@@ -143,4 +143,23 @@ test('verifyProfile reports the target count alongside failures', async () => {
   const { targetCount, failures } = await verifyProfile(PROFILE);
   assert.ok(targetCount >= MIN_EXPECTED_NODES);
   assert.deepEqual(failures, []);
+});
+
+for (const profile of ['bcm2712', 'bcm2709']) test(profile + ': verified adapters retain all eight scope-gated X2 handlers and reject a swallowed scope lookup inside an entry', async () => {
+  const {adaptFlows} = require('./lib/valve-ingress-x2-renderer');
+  const {baseline} = require('./test-valve-ingress-x2-parity');
+  const flows = JSON.parse(fs.readFileSync(path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`)));
+  const rendered = adaptFlows(flows);
+  const targets = findAuthGatedNodes(rendered);
+  assert.equal(targets.length, 100);
+  assert.equal(targets.filter(n => baseline.nodes.some(b => b.id === n.id)).length, 8);
+  const ingress = require(`../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-command-ingress`);
+  const original = ingress.authenticateValveCommand.toString();
+  const changed = original.replace('function getAuthSecret() {', "function getAuthSecret() { try { osiLib.require('scope'); } catch (error) { node.warn('mutant swallowed sentinel'); }");
+  assert.notEqual(changed, original);
+  const mutant = {...ingress, authenticateValveCommand: new Function('return (' + changed + ')')()};
+  const node = rendered.find(n => n.id === '83bb4a452dd9ae37');
+  const modulesRoot = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red`);
+  assert.equal((await checkNode(node, modulesRoot, ingress)).outcome, 'pass');
+  assert.equal((await checkNode(node, modulesRoot, mutant)).outcome, 'scope-helper-touched');
 });

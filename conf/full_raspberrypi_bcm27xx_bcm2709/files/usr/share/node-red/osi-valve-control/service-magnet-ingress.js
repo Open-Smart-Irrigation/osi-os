@@ -1,0 +1,5 @@
+'use strict';
+// Lazy X2 compatibility entry points; the existing loader binding owns the fallback.
+module.exports = {
+  parseStregaMagnetRequest: function parseStregaMagnetRequest(msg, deps) { return require('../osi-lib').invokeCommandIngress('parseStregaMagnetRequest', msg, deps); },
+};
