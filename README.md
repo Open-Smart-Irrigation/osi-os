@@ -274,19 +274,21 @@ If the stamp is missing, fix the cause and run the command again. A reboot witho
 
 Tailscale provides persistent SSH access to field-deployed devices without needing to know their local IP or be on the same network.
 
+OSI Pi images include Tailscale. Run these commands only if you need to install it manually.
+
 ```bash
 ssh root@<pi-ip> 'opkg update && opkg install tailscale'
 ssh root@<pi-ip> '/etc/init.d/tailscale enable && /etc/init.d/tailscale start'
 ```
 
-Then open the firewall to allow inbound traffic on the Tailscale interface (OpenWrt drops it by default):
+If `/usr/share/nftables.d/chain-pre/input/10-osi-tailscale.nft` exists, fw4 already allows input from `tailscale0`. Skip the firewall commands below. On older gateways without the drop-in, run these commands once if you have yet to add the rule.
 
 ```bash
 ssh root@<pi-ip> "printf '#!/bin/sh\nnft insert rule inet fw4 input iifname \"tailscale0\" accept comment \"tailscale-allow\"\n' > /etc/tailscale-firewall.sh && chmod +x /etc/tailscale-firewall.sh"
 ssh root@<pi-ip> "uci add firewall include && uci set firewall.@include[-1].path='/etc/tailscale-firewall.sh' && uci set firewall.@include[-1].type='script' && uci commit firewall && /etc/init.d/firewall restart"
 ```
 
-Then connect the device to your Tailscale network:
+If the gateway has yet to join your tailnet, connect it now:
 
 ```bash
 ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
@@ -294,7 +296,7 @@ ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
 
 Visit the auth URL printed in the output to approve the device in your Tailscale admin console. Once approved, the device is reachable at its Tailscale IP from anywhere on your tailnet — including via SSH: `ssh root@<tailscale-ip>`.
 
-> **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically. The firewall rule is re-applied on every firewall restart via the UCI include.
+Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs and reconnects after reboot. The fw4 drop-in and the legacy UCI include both persist across firewall reloads.
 
 ### Step 5 — Open the UI
 

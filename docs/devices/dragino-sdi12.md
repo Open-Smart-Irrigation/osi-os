@@ -354,8 +354,8 @@ Check the profile's expected count and the exact `AT+DATACUTx` output first. The
 
 ## Full-precision transmission archive
 
-After migration 0080 and the matching runtime are deployed, every complete
-supported periodic SDI-12 transmission is also stored in
+After migration 0080 and the matching runtime are deployed, complete
+supported periodic SDI-12 transmissions can also be stored in
 `farming.db.sdi12_transmissions`. Capture runs before normalization. A rejected
 measurement response remains available even if normalizer loading, manifest
 reading, normalization or the canonical telemetry write fails. Archive failures
@@ -393,10 +393,14 @@ values; TriSCAN moisture scaled frequency and VIC retain their separate meanings
 `recorded_at` preserves the source timestamp selected by the existing ingest
 path: the highest-index segment's timestamp, falling back to the completing
 event's timestamp if the former is absent. It can be null or invalid.
-`received_at` is the local time when the archive write starts; every original
+`received_at` is the local time when archive capture starts. Every original
 network timestamp remains in `frames_json`. Neither time proves the instant
 when the probe sampled the soil. Match sample times against the frame reception
 window and take a fresh reading before disturbing the soil.
+
+Archive capture requires a trusted local clock. An unverified clock or a
+clock step produces an `SDI12 archive skipped: untrusted clock` warning.
+Canonical reading writes continue.
 
 `context_json` snapshots the saved profile, probe identity and layout at ingest,
 including response positions and depths. It also retains the legacy depth-map
@@ -412,8 +416,8 @@ scaled-frequency input to OSI's existing default curve. The archive does not
 prove which coefficients or conversion settings were active. Preserve the known
 PConfig backup with the sampling records.
 
-The archive is local-only and has no automatic expiry or cascading device
-foreign key. Ordinary telemetry pruning and deleting a device do not erase it.
+The archive is local-only and uses a 365-day window within a 1 GiB disk floor.
+Its independent retention job uses the local receipt timestamp.
 Incomplete PAYVER 2 sequences still use the existing in-memory reassembly window
 and quarantine path; they do not become complete archive rows and can be lost
 on a Node-RED restart. The reassembler keeps a 10-minute lazy window and has no
@@ -477,14 +481,12 @@ sum(length(CAST(frames_json AS BLOB)) + length(CAST(context_json AS BLOB)) +
 length(raw_ascii)) FROM sdi12_transmissions;` and include this table in routine
 database backups.
 
-The archive has no retention rule yet. To keep it from filling the gateway
-disk, it stops inserting when the filesystem that holds the database has less
-than 1 GiB free (`ARCHIVE_MIN_FREE_BYTES` in `osi-sdi12-archive`). The normal
-reading write is not affected. The skip is logged as `SDI12 archive skipped:
-free disk ... bytes is below 1073741824`, at most once an hour per Node-RED
-process, and the rows that were skipped are not archived later. If the free-space
-check itself fails, the archive row is written as usual and `SDI12 archive disk
-probe failed` is logged, at most once an hour. Retention is tracked in #625.
+Below 1 GiB free, canonical reading writes continue and the archive skips new
+rows. Capture resumes when free space recovers, starting with the next
+transmission. The archive logs `SDI12 archive skipped: free disk ...` at most
+once an hour. A failed free-space probe logs `SDI12 archive disk probe failed`
+and capture continues. See [SDI-12 transmission archive](../operations/edge-history-retention.md#sdi-12-transmission-archive)
+for the maintenance schedule and storage thresholds.
 
 ## References
 

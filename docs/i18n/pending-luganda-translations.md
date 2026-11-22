@@ -463,3 +463,70 @@ Tracked in `web/react-gui/tests/b4AnalysisPendingLuganda.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts that each key remains byte-identical
 to English. A human Luganda pass must remove each key from that list and this
 row in the same change.
+
+## UI FIX-LIST B5 (Shared headers)
+
+| Keys | Reason |
+|---|---|
+| `header.menu`, `header.primaryNavigation` (2 keys in `dashboard.json`) | B5 adds the shared phone action disclosure and the primary navigation accessible name. No human Luganda pass yet, so `lg` ships the English source text: "Menu" and "Primary navigation". |
+
+Tracked in `web/react-gui/src/pages/__tests__/b5NavigationLocales.test.ts`.
+A human Luganda pass must update the pending-key assertion and this entry
+in the same change.
+
+## UI FIX-LIST B6 (weather and agronomy)
+
+| Keys | Reason |
+|---|---|
+| `environment.agronomic.evapotranspiration` | B6 adds "Evapotranspiration" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.conditions` | B6 adds "Conditions" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.vpdStatus.saturated` | B6 adds "Saturated" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.vpdStatus.low` | B6 adds "Low" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.vpdStatus.moderate` | B6 adds "Moderate" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.vpdStatus.high` | B6 adds "High" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.vpdStatus.stressRisk` | B6 adds "Stress risk" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.thiStatus.normal` | B6 adds "Normal" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.thiStatus.alert` | B6 adds "Alert" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.thiStatus.danger` | B6 adds "Danger" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.agronomic.thiStatus.emergency` | B6 adds "Emergency" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.rain` | B6 adds "Rain" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.probability` | B6 adds "Probability" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.hourlyHelpLabel` | B6 adds "About hourly rain" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.hourlyHelp` | B6 adds "Bars show rain in millimetres; the dashed line shows rain probability in percent." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.minuteInterval` | B6 adds "{{value}} min interval" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.secondInterval` | B6 adds "{{value}} s interval" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.perTenMinutes` | B6 adds "{{value}} {{unit}} per 10 min" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.rateOverInterval` | B6 adds "{{value}} mm/h over {{interval}}" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.thisInterval` | B6 adds "This interval" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.gust` | B6 adds "Gust {{value}} m/s" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.lastUplink` | B6 adds "Last uplink: {{value}} mm" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.manageZones` | B6 adds "Manage zone assignments" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.zoneAssignments` | B6 adds "Zone assignments" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.noZones` | B6 adds "No zones available" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.save` | B6 adds "Save" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.saving` | B6 adds "Saving…" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.saveFailed` | B6 adds "Failed to save" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.first_sample` | B6 adds "Waiting for the next uplink to calculate a delta." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.duplicate_timestamp` | B6 adds "Skipped duplicate uplink timestamp." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.out_of_order` | B6 adds "Skipped out-of-order uplink." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.counter_reset` | B6 adds "Counter reset detected; interval delta skipped." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.invalid_interval` | B6 adds "Invalid uplink interval; delta skipped." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.cumulative_baseline` | B6 adds "Rain counter baseline set; waiting for the next uplink to calculate a delta." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `weatherCard.counterStatus.intensity_only` | B6 adds "Rain amount unknown for this interval; only the intensity was reported." in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.N` | B6 adds "N" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.NNE` | B6 adds "NNE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.NE` | B6 adds "NE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.ENE` | B6 adds "ENE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.E` | B6 adds "E" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.ESE` | B6 adds "ESE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.SE` | B6 adds "SE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.SSE` | B6 adds "SSE" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.S` | B6 adds "S" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.SSW` | B6 adds "SSW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.SW` | B6 adds "SW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.WSW` | B6 adds "WSW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.W` | B6 adds "W" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.WNW` | B6 adds "WNW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.NW` | B6 adds "NW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.compass.NNW` | B6 adds "NNW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
+| `environment.forecast.relativeHumidityValue` | B6 Sol review restores the visible relative-humidity qualifier: "{{value}} RH" (with a nonbreaking space). `lg` ships the English source until a human Luganda pass. |

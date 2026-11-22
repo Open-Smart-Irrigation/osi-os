@@ -1,0 +1,915 @@
+{
+  "contract_version": 1,
+  "suite": "outcomes",
+  "consumers": [
+    "EB7a",
+    "CL1",
+    "GX1"
+  ],
+  "cases": [
+    {
+      "id": "cloud-accepted-is-pending",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "cloud_receipt",
+            "status": 202,
+            "status_text": "PENDING",
+            "command_id": "cmd-1"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "accepted",
+        "layer": "cloud",
+        "transport": "not_attempted",
+        "observation": "unobserved",
+        "physical_closed": null
+      }
+    },
+    {
+      "id": "edge-reservation-is-not-queue",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "reserve",
+            "expectation_id": "exp-1"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "accepted",
+        "layer": "edge",
+        "transport": "not_attempted",
+        "observation": "unobserved"
+      }
+    },
+    {
+      "id": "enqueue-receipt-is-not-open",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "enqueue_accepted",
+            "queue_id": "queue-1"
+          }
+        ]
+      },
+      "expected": {
+        "transport": "queued",
+        "observation": "unobserved",
+        "observed_open_at": null
+      }
+    },
+    {
+      "id": "lost-enqueue-reply",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "enqueue_attempt"
+          },
+          {
+            "type": "timeout"
+          }
+        ]
+      },
+      "expected": {
+        "transport": "uncertain",
+        "observation": "unobserved",
+        "safe_to_resend": false
+      }
+    },
+    {
+      "id": "crash-after-possible-enqueue",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "enqueue_attempt"
+          },
+          {
+            "type": "restart"
+          },
+          {
+            "type": "queue_unreadable"
+          }
+        ]
+      },
+      "expected": {
+        "transport": "uncertain",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "queue-absence-is-not-delivery",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "transport": "queued"
+        },
+        "events": [
+          {
+            "type": "queue_snapshot",
+            "items": []
+          }
+        ]
+      },
+      "expected": {
+        "transport": "handed_off",
+        "observation": "unobserved",
+        "delivered": null
+      },
+      "decision": "S1"
+    },
+    {
+      "id": "open-then-closed",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "expectation_id": "exp-1"
+        },
+        "events": [
+          {
+            "type": "attributed_report",
+            "position": "OPEN",
+            "at": "2026-11-20T06:01:00.000Z"
+          },
+          {
+            "type": "attributed_report",
+            "position": "CLOSED",
+            "at": "2026-11-20T06:11:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "observed_complete",
+        "reconciliation_state": "OBSERVED_COMPLETE",
+        "observed_open_at": "2026-11-20T06:01:00.000Z",
+        "observed_close_at": "2026-11-20T06:11:00.000Z",
+        "measured_flow_liters": null
+      }
+    },
+    {
+      "id": "close-owner-observed",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "action": "CLOSE"
+        },
+        "events": [
+          {
+            "type": "attributed_report",
+            "position": "CLOSED"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "observed_closed",
+        "reconciliation_state": "OBSERVED_CLOSED",
+        "observed_open_at": null
+      }
+    },
+    {
+      "id": "stale-pending-observation",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "reconciliation_state": "PENDING_OBSERVATION",
+          "future_effect_end": "2026-11-20T06:15:00.000Z"
+        },
+        "events": [
+          {
+            "type": "tick",
+            "at": "2026-11-20T06:45:00.001Z"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "stale_no_observation",
+        "physically_closed": null,
+        "definitely_missed": false
+      }
+    },
+    {
+      "id": "stale-observed-running",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "reconciliation_state": "OBSERVED_RUNNING",
+          "future_effect_end": "2026-11-20T06:15:00.000Z"
+        },
+        "events": [
+          {
+            "type": "tick",
+            "at": "2026-11-20T06:45:00.001Z"
+          }
+        ]
+      },
+      "expected": {
+        "observation": "stale_open_observed",
+        "physically_closed": null,
+        "definitely_missed": false
+      }
+    },
+    {
+      "id": "stale-boundary-inclusive",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "reconciliation_state": "PENDING_OBSERVATION",
+          "future_effect_end": "2026-11-20T06:15:00.000Z"
+        },
+        "events": [
+          {
+            "type": "tick",
+            "at": "2026-11-20T06:45:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "reconciliation_state": "PENDING_OBSERVATION"
+      }
+    },
+    {
+      "id": "no-deadline-does-not-age-out",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "reconciliation_state": "PENDING_OBSERVATION",
+          "future_effect_end": null
+        },
+        "events": [
+          {
+            "type": "tick",
+            "at": "2026-11-27T06:45:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "reconciliation_state": "PENDING_OBSERVATION"
+      }
+    },
+    {
+      "id": "duplicate-reordered-reports",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "report",
+            "id": "report-2",
+            "position": "CLOSED",
+            "at": "2026-11-20T06:11:00.000Z"
+          },
+          {
+            "type": "report",
+            "id": "report-1",
+            "position": "OPEN",
+            "at": "2026-11-20T06:01:00.000Z"
+          },
+          {
+            "type": "report",
+            "id": "report-2",
+            "position": "CLOSED",
+            "at": "2026-11-20T06:11:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "last_reported_position": "CLOSED",
+        "physical_runs": 1
+      }
+    },
+    {
+      "id": "ordinary-cancel-can-still-water",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "ordinary",
+          "reconciliation_state": "PENDING_OBSERVATION"
+        },
+        "events": [
+          {
+            "type": "queue_read",
+            "items": [
+              "queue-1"
+            ]
+          },
+          {
+            "type": "radio_fetch",
+            "queue_id": "queue-1"
+          },
+          {
+            "type": "flush_success"
+          },
+          {
+            "type": "cancel_reply",
+            "status": 200,
+            "outcome": "cancelled"
+          },
+          {
+            "type": "report",
+            "position": "OPEN"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "cancelled",
+        "cancellation_proof": "queue_only",
+        "physically_closed": null,
+        "may_water": true,
+        "new_close_frames": 0
+      }
+    },
+    {
+      "id": "conditional-cancel-handoff-race",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "conditional",
+          "phase": "ACCEPTED",
+          "queue_id": "queue-1"
+        },
+        "events": [
+          {
+            "type": "queue_read",
+            "items": [
+              "queue-1"
+            ]
+          },
+          {
+            "type": "radio_fetch",
+            "queue_id": "queue-1"
+          },
+          {
+            "type": "flush_success"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "handed_off",
+        "pending": true,
+        "reconciliation_state": "PENDING_OBSERVATION",
+        "new_close_frames": 0
+      }
+    },
+    {
+      "id": "conditional-cancel-never-sent",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "conditional",
+          "phase": "INTENT",
+          "attempted_at": null
+        },
+        "events": [
+          {
+            "type": "cancel"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "cancelled",
+        "pending": false,
+        "cancellation_proof": "never_enqueued",
+        "reconciliation_state": "CANCELLED",
+        "new_close_frames": 0
+      }
+    },
+    {
+      "id": "conditional-cancel-running",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "conditional",
+          "reconciliation_state": "OBSERVED_RUNNING"
+        },
+        "events": [
+          {
+            "type": "cancel"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "already_running",
+        "pending": true,
+        "flush_calls": 0,
+        "new_close_frames": 0
+      }
+    },
+    {
+      "id": "conditional-cancel-flush-unknown",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "conditional",
+          "phase": "ACCEPTED"
+        },
+        "events": [
+          {
+            "type": "flush_timeout"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "uncertain",
+        "pending": true,
+        "reconciliation_state": "PENDING_OBSERVATION"
+      }
+    },
+    {
+      "id": "cancel-target-must-not-change-on-retry",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "target_expectation_id": "exp-1"
+        },
+        "events": [
+          {
+            "type": "cancel",
+            "expectation_id": "exp-1"
+          },
+          {
+            "type": "new_command",
+            "expectation_id": "exp-2"
+          },
+          {
+            "type": "retry_cancel",
+            "expectation_id": "exp-1"
+          }
+        ]
+      },
+      "expected": {
+        "target_expectation_id": "exp-1",
+        "exp_2_cancelled": false
+      }
+    },
+    {
+      "id": "cancel-ambiguity-none-queued",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "ambiguous_actuation",
+          "ambiguity": "none_queued"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "ambiguous_actuation",
+          "ambiguity": "none_queued"
+        }
+      }
+    },
+    {
+      "id": "cancel-ambiguity-several-queued",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "ambiguous_actuation",
+          "ambiguity": "several_queued"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "ambiguous_actuation",
+          "ambiguity": "several_queued"
+        }
+      }
+    },
+    {
+      "id": "cancel-ambiguity-queue-unreadable",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "ambiguous_actuation",
+          "ambiguity": "queue_unreadable"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "ambiguous_actuation",
+          "ambiguity": "queue_unreadable"
+        }
+      }
+    },
+    {
+      "id": "cancel-ambiguity-conditional-irrigation",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "ambiguous_actuation",
+          "ambiguity": "conditional_irrigation"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "ambiguous_actuation",
+          "ambiguity": "conditional_irrigation"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-no-active-actuation",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "no_active_actuation"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 404,
+        "payload": {
+          "error": "no_active_actuation"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-actuation-not-active",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "actuation_not_active"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "actuation_not_active"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-not-found",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "not_found"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 404,
+        "payload": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-not-a-valve",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "not_a_valve"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "not_a_valve"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-chirpstack-unavailable",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "chirpstack_unavailable"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 500,
+        "payload": {
+          "error": "chirpstack_unavailable"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-handed-off",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "actuation_handed_off",
+          "outcome": "handed_off",
+          "expectationId": "exp-1",
+          "queueScope": "full_flush",
+          "collateral": []
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "actuation_handed_off",
+          "outcome": "handed_off",
+          "expectation_id": "exp-1",
+          "collateral": []
+        }
+      }
+    },
+    {
+      "id": "cancel-http-already-running",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "actuation_handed_off",
+          "outcome": "already_running",
+          "expectationId": "exp-1",
+          "queueScope": "not_queued",
+          "collateral": []
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 409,
+        "payload": {
+          "error": "actuation_handed_off",
+          "outcome": "already_running",
+          "expectation_id": "exp-1",
+          "collateral": []
+        }
+      }
+    },
+    {
+      "id": "cancel-http-uncertain",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": false,
+          "error": "transport_uncertain",
+          "expectationId": "exp-1"
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 503,
+        "payload": {
+          "error": "transport_uncertain",
+          "outcome": "uncertain"
+        }
+      }
+    },
+    {
+      "id": "cancel-http-success",
+      "basis": "baseline",
+      "check": "cancel_http",
+      "input": {
+        "result": {
+          "ok": true,
+          "outcome": "cancelled",
+          "expectationId": "exp-1",
+          "queueScope": "targeted",
+          "droppedOpens": {
+            "count": 1,
+            "expectationIds": [
+              "exp-2"
+            ]
+          },
+          "collateral": null
+        },
+        "deveui": "A840410000000001"
+      },
+      "expected": {
+        "statusCode": 200,
+        "payload": {
+          "status": "cancelled",
+          "outcome": "cancelled",
+          "confirmation": "queue_flushed",
+          "queue_scope": "targeted",
+          "dropped_opens": {
+            "count": 1,
+            "expectationIds": [
+              "exp-2"
+            ]
+          },
+          "transport_uncertain": false
+        }
+      }
+    },
+    {
+      "id": "refuse-scope-denied",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "scope_denied"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "scope_denied",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-scope-actor-required",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "scope_actor_required"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "scope_actor_required",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-invalid-duration",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "invalid_duration"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "invalid_duration",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-not-found",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "not_found"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "not_found",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-unsupported-action",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "unsupported_action"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "unsupported_action",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-version-conflict",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "version_conflict"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "version_conflict",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "refuse-capability-unavailable",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {},
+        "events": [
+          {
+            "type": "pre_enqueue_refusal",
+            "reason": "capability_unavailable"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
+        "reason": "capability_unavailable",
+        "new_physical_enqueues": 0
+      }
+    },
+    {
+      "id": "conditional-flush-collateral",
+      "basis": "baseline",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "mode": "conditional",
+          "target": "exp-1",
+          "owners": [
+            "exp-1",
+            "exp-2",
+            "plan-1"
+          ]
+        },
+        "events": [
+          {
+            "type": "flush_success"
+          }
+        ]
+      },
+      "expected": {
+        "cancel_outcome": "handed_off",
+        "replayed_frames": 0,
+        "collateral_owner_ids": [
+          "exp-2",
+          "plan-1"
+        ],
+        "plan_state": "LOST"
+      }
+    }
+  ]
+}

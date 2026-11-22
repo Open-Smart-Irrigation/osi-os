@@ -289,4 +289,42 @@ trigger touching it.
 
 ## SDI-12 transmission archive
 
-`sdi12_transmissions` (migration 0080) keeps every complete SDI-12 transmission with its original ChirpStack events. It is local-only: no sync trigger, no outbox event, no cloud mirror. It has no retention rule yet and grows about 0.7 MiB per day per node at a 20-minute interval (about 260 MiB per year per node). Until a rule exists, the archive stops inserting when the database filesystem has less than 1 GiB free (`ARCHIVE_MIN_FREE_BYTES`); reading writes continue. Retention is tracked in #625. See "Full-precision transmission archive" in `docs/devices/dragino-sdi12.md`.
+`sdi12_transmissions` (migration 0080) stores complete SDI-12 transmissions and
+their original ChirpStack events locally. At a 20-minute interval, allow about
+0.7 MiB per day or 256 MiB per year per node. Canonical readings and cloud
+history follow their own retention rules.
+
+With the scheduled flow wired, maintenance runs once a minute. It deletes
+up to eight rows per tick, oldest `received_at` first with `id` breaking ties.
+Receipts at least 365 days old expire first. The job uses the current
+boot's last successful NTP sample and elapsed uptime to defer pruning when
+the clock is unverified or has stepped. It yields to an active SQLite writer
+and retries on the next tick.
+
+Capture uses the same trusted clock check. The archive warns and skips
+transmissions received before the clock is trusted, while canonical ingest
+continues. On the first trusted maintenance tick, legacy epoch-dated receipts
+qualify for normal 365-day expiry. Future-stamped receipts remain until they
+qualify under the same receipt-age rule.
+
+| Storage profile | Minimum free space on the database filesystem |
+|---|---:|
+| Pi 5, 16 GB-class media and larger | 1 GiB |
+| Pi 2/3/4/400, 16 GB-class media and larger | 1 GiB |
+
+Below the floor, the archive pauses capture while canonical ingest continues.
+After expiry is caught up, maintenance prunes the oldest remaining receipts
+at least 30 days old. A low-space episode permits at most 32 pressure
+deletions. Each batch records its count and unconfirmed state in the same
+transaction as the deletion. Only the batch's immediate post-delete probe
+can confirm a rise in filesystem free space and allow another batch. A flat
+or failed probe, or a process exit before confirmation, leaves pressure
+pruning stopped. The episode resets at 1 GiB plus 64 MiB of free space.
+
+When a batch frees no filesystem space or the episode reaches its cap,
+maintenance reports `SDI12 archive cannot recover space` in the node status
+and logs. It reports reusable SQLite pages as a separate figure. Below
+16 MiB free, maintenance defers writes to preserve space for canonical
+ingest. A failed filesystem probe defers pruning and logs a warning.
+
+See [Full-precision transmission archive](../devices/dragino-sdi12.md#full-precision-transmission-archive).

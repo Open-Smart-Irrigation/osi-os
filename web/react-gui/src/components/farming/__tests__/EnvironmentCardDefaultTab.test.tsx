@@ -192,12 +192,12 @@ describe('EnvironmentCard default tab (#310)', () => {
   });
 
   it.each<[Partial<DailyForecast>, string]>([
-    [{ maxTempC: 17 }, '17°/—'],
-    [{ minTempC: 6 }, '—/6°'],
-    [{ maxTempC: 0 }, '0°/—'],
+    [{ maxTempC: 17 }, '17 °C / —'],
+    [{ minTempC: 6 }, '— / 6 °C'],
+    [{ maxTempC: 0 }, '0 °C / —'],
     [{ rainMm: 0 }, '0.0 mm'],
-    [{ rainProbabilityPct: 10 }, '10%'],
-    [{ rainProbabilityPct: 0 }, '0%'],
+    [{ rainProbabilityPct: 10 }, '10 %'],
+    [{ rainProbabilityPct: 0 }, '0 %'],
   ])('displays the partial daily forecast that selects Weather: %j', async (fields, visibleValue) => {
     const day: DailyForecast = {
       date: '2026-10-30', description: null, weatherCode: null,

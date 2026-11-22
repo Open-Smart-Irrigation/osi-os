@@ -426,6 +426,10 @@ payload_hold_check() {
 
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
+    if [ -e "$OSI_DB_PATH.osi-recovery" ] || [ -L "$OSI_DB_PATH.osi-recovery" ]; then
+        logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH.osi-recovery before starting Node-RED."
+        return 1
+    fi
     payload_switch_repair
     payload_schema_check || return 0
     payload_hold_check || return 0
@@ -527,8 +531,10 @@ start_service() {
     local flow_file="/srv/$PACKAGE_NAME/flows.json"
     local cloud_broker_node_id="ec43625ea99685a6"
     local agroscope_broker_node_id="agroscope-mqtt-broker"
-    if [ -f "$flow_file" ]; then
+    local startup_report startup_warning committed
+    if startup_report="$(
         FLOW_FILE="$flow_file" \
+        FLOW_DB_PATH="$OSI_DB_PATH" \
         CRED_FILE="$cred_file" \
         CLOUD_BROKER_NODE_ID="$cloud_broker_node_id" \
         DEVICE_EUI_VALUE="$device_eui" \
@@ -539,8 +545,10 @@ start_service() {
         AGROSCOPE_MQTT_PORT_VALUE="$agroscope_runtime_mqtt_port" \
         AGROSCOPE_MQTT_USERNAME_VALUE="$agroscope_mqtt_username" \
         AGROSCOPE_MQTT_PASSWORD_VALUE="$agroscope_mqtt_password" \
-        node <<'NODE'
+        node 2>&1 <<'NODE'
 const fs = require('fs');
+const path = require('path');
+const { createHash, randomUUID } = require('crypto');
 const flowFile = process.env.FLOW_FILE;
 const credFile = process.env.CRED_FILE;
 const cloudBrokerNodeId = process.env.CLOUD_BROKER_NODE_ID;
@@ -553,16 +561,333 @@ const agroscopePort = process.env.AGROSCOPE_MQTT_PORT_VALUE || '1883';
 const agroscopeUsername = process.env.AGROSCOPE_MQTT_USERNAME_VALUE || '';
 const agroscopePassword = process.env.AGROSCOPE_MQTT_PASSWORD_VALUE || '';
 
-function readJson(filePath, fallback) {
+// Resolve the parent and any final symlinks, including when the final file
+// is missing under an existing payloads/<stamp>/ directory.
+function realTarget(file) {
+  for (let hops = 0; hops < 40; hops++) {
+    const dir = fs.realpathSync(path.dirname(file));
+    file = path.join(dir, path.basename(file));
+    let link;
+    try {
+      link = fs.readlinkSync(file);
+    } catch (error) {
+      if (error.code === 'EINVAL' || error.code === 'ENOENT') return file;
+      throw error;
+    }
+    file = path.resolve(dir, link);
+  }
+  throw new Error('too many symlinks resolving ' + file);
+}
+
+function readJson(file, isValid) {
+  let metadata;
   try {
-    if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf8') || '{}');
-  } catch (_) {}
-  return fallback;
+    metadata = fs.statSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { problem: 'missing' };
+    throw error;
+  }
+  if (!metadata.isFile()) throw new Error('expected a regular file at ' + file);
+  return { stat: metadata, ...parseJson(fs.readFileSync(file), isValid) };
+}
+
+function parseJson(bytes, isValid) {
+  if (!bytes.length) return { problem: 'empty' };
+  if (bytes.every(byte => byte === 0)) return { problem: 'zeroed' };
+  let value;
+  try {
+    value = JSON.parse(bytes.toString('utf8'));
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // JSON parser errors can contain fragments of credential values.
+    return { problem: 'invalid JSON' };
+  }
+  if (!isValid(value)) return { problem: 'unexpected JSON shape' };
+  return { bytes, value };
+}
+
+function syncDirectory(file) {
+  const fd = fs.openSync(path.dirname(file), 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function quarantineName(file) {
+  return file + '.corrupt-' + new Date().toISOString().replace(/:/g, '-') + '-' + randomUUID();
+}
+
+function syncPublishedFile(file, rollback) {
+  try {
+    syncDirectory(file);
+  } catch (error) {
+    try {
+      rollback();
+      syncDirectory(file);
+    } catch (rollbackError) {
+      throw new Error(error.message + '. Rollback could not be synced: ' + rollbackError.message);
+    }
+    throw error;
+  }
+}
+
+function quarantine(file) {
+  const saved = quarantineName(file);
+  fs.renameSync(file, saved);
+  syncPublishedFile(file, () => fs.renameSync(saved, file));
+  return saved;
+}
+
+function clearRollbackLinks(file, verify = () => {}) {
+  const parent = path.dirname(file);
+  const prefix = path.basename(file) + '.tmp-';
+  const leftovers = fs.readdirSync(parent).filter(name =>
+    name.startsWith(prefix) && /^[a-f0-9-]{36}\.previous$/.test(name.slice(prefix.length)));
+  if (!leftovers.length || !fs.existsSync(file)) return;
+  verify();
+  const dir = fs.openSync(parent, 'r');
+  try {
+    for (const name of leftovers) {
+      const old = path.join(parent, name);
+      const live = fs.statSync(file);
+      const saved = fs.lstatSync(old);
+      // The live file must already be valid. Even then, only remove an
+      // owned rollback link to a regular file beside it.
+      if (live.isFile() && saved.isFile()) fs.unlinkSync(old);
+    }
+    fs.fsyncSync(dir);
+  } finally {
+    fs.closeSync(dir);
+  }
+}
+
+function writeAtomic(file, content, { mode, uid, gid }, previous, archive) {
+  const temp = file + '.tmp-' + randomUUID();
+  const dir = fs.openSync(path.dirname(file), 'r');
+  let staged = false;
+  try {
+    const fd = fs.openSync(temp, 'wx', 0o600);
+    staged = true;
+    try {
+      fs.fchownSync(fd, uid, gid);
+      fs.fchmodSync(fd, mode & 0o7777);
+      fs.writeFileSync(fd, content);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const saved = previous && (archive ? quarantineName(file) : temp + '.previous');
+    if (saved) fs.linkSync(file, saved);
+    try {
+      fs.renameSync(temp, file);
+      staged = false;
+    } catch (error) {
+      if (saved) {
+        fs.unlinkSync(saved);
+        fs.fsyncSync(dir);
+      }
+      throw error;
+    }
+    try {
+      fs.fsyncSync(dir);
+    } catch (error) {
+      try {
+        if (saved) fs.renameSync(saved, file);
+        else fs.unlinkSync(file);
+        fs.fsyncSync(dir);
+      } catch (rollback) {
+        throw new Error(error.message + '. Rollback could not be synced: ' + rollback.message);
+      }
+      throw error;
+    }
+    if (saved && !archive) {
+      try {
+        fs.unlinkSync(saved);
+        fs.fsyncSync(dir);
+      } catch (error) {
+        console.warn('WARN: could not finish rollback-link cleanup for ' + file + ': ' + error.message);
+      }
+    }
+    return archive ? saved : null;
+  } finally {
+    try {
+      if (staged) fs.rmSync(temp, { force: true });
+    } finally {
+      fs.closeSync(dir);
+    }
+  }
+}
+
+function isFlows(value) {
+  if (!Array.isArray(value) || value.some(node => !node || typeof node.id !== 'string' || typeof node.type !== 'string')) return false;
+  const tabs = new Set(value.filter(node => node.type === 'tab').map(node => node.id));
+  return value.some(node => node.type === 'http in' && tabs.has(node.z) &&
+    typeof node.url === 'string' && node.url.startsWith('/') && typeof node.method === 'string' && node.method);
+}
+
+const root = path.dirname(flowFile);
+const payloads = path.join(root, 'payloads');
+const active = ['active', '.active'].map(name => path.join(payloads, name))
+  .find(file => fs.lstatSync(file, { throwIfNoEntry: false }));
+const flowLink = fs.lstatSync(flowFile, { throwIfNoEntry: false })?.isSymbolicLink();
+const guiLink = fs.lstatSync('/usr/lib/node-red/gui', { throwIfNoEntry: false })?.isSymbolicLink();
+
+const payloadState = path.join(root, 'payload-state.json');
+const recordMode = { mode: 0o644, uid: process.getuid(), gid: process.getgid() };
+
+function assertImageOwnsFlows(seed) {
+  const exists = file => fs.lstatSync(file, { throwIfNoEntry: false });
+  if (exists(payloads) || exists(payloadState) || flowLink || guiLink ||
+      [root, path.join(root, 'node_modules')].some(dir => exists(dir) &&
+        fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink()))) {
+    throw new Error('image flows ownership is contradicted by the deployed payload layout');
+  }
+  // An inconclusive factory probe only defers image fallback. A deployed
+  // payload still gets its normal switch repair, flow recovery, or hold.
+  if (exists('/var/run/osi-factory-seed.pending')) {
+    throw Object.assign(new Error('Node-RED start deferred: factory seed pending; retry on next boot.'), { code: 'EAGAIN' });
+  }
+  const marker = path.join(root, '.image-flows-origin');
+  if (!exists(marker)?.isFile() ||
+      fs.readFileSync(marker, 'utf8').trim() !== createHash('sha256').update(fs.readFileSync(seed)).digest('hex')) {
+    throw new Error('image flows ownership could not be verified from the factory seed record');
+  }
+
+  function ledger(file) {
+    if (!exists(file)?.isFile()) throw new Error('image or live schema ledger database is missing');
+    const query = "SELECT version, checksum, status FROM schema_migrations ORDER BY version";
+    const output = require('node:child_process').execFileSync('sqlite3',
+      ['-batch', '-bail', '-readonly', '-json', '-cmd', '.timeout 5000', file, query],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const rows = JSON.parse(output);
+    if (!rows.length || rows.some(row => row.status !== 'applied' || !Number.isSafeInteger(row.version) ||
+        row.version < 1 || typeof row.checksum !== 'string' || !row.checksum)) {
+      throw new Error('image or live schema ledger has no complete applied history');
+    }
+    return rows;
+  }
+
+  const image = new Map(ledger('/usr/share/db/farming.db').map(row => [row.version, row.checksum]));
+  const live = ledger(process.env.FLOW_DB_PATH);
+  if (live.some(row => image.get(row.version) !== row.checksum)) {
+    throw new Error('the live database schema is newer than or differs from the image seed ledger');
+  }
+}
+
+function persistFlowHold(stamp, reason) {
+  const line = 'HELD: Node-RED stopped. ' + reason + '. You must re-run the deploy for this release before Node-RED can start.';
+  const note = path.join(root, 'DEPLOY-HELD');
+  const record = { format: 1, active: stamp, state: 'held', reason: line, updated_at: new Date().toISOString(), writer: 'flow-recovery' };
+  console.error(line);
+  writeAtomic(payloadState, JSON.stringify(record) + '\n', recordMode, fs.existsSync(payloadState), false);
+  writeAtomic(note, line + '\n', recordMode, fs.existsSync(note), false);
+}
+
+function recordFlowWarning(stamp, problem) {
+  const warning = 'Pristine flow recovery unavailable for this payload: ' + problem +
+    '. Re-run the deploy to restore its recovery copy.';
+  console.warn('WARN: ' + warning);
+  try {
+    const previous = readJson(payloadState, value => value?.format === 1 && value.active === stamp);
+    if (previous.value?.flow_recovery_warning === warning) return;
+    const record = previous.problem
+      ? { format: 1, active: stamp, state: 'unverified', reason: warning, writer: 'flow-recovery' }
+      : previous.value;
+    record.flow_recovery_warning = warning;
+    record.updated_at = new Date().toISOString();
+    writeAtomic(payloadState, JSON.stringify(record) + '\n', recordMode, previous.stat, false);
+  } catch (error) {
+    console.warn('WARN: could not persist the pristine flow warning: ' + error.message);
+  }
 }
 
 try {
-  const flows = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
-  const creds = readJson(credFile, {});
+  const restoreLink = !fs.lstatSync(flowFile, { throwIfNoEntry: false }) && Boolean(active);
+  const flowVia = restoreLink ? path.join(active, 'flows.json') : flowFile;
+  let flowTarget;
+  let stamp = '';
+  const deployed = Boolean(active || flowLink || guiLink);
+  let source;
+  let sourceName = '/usr/share/flows.json';
+  let live;
+  try {
+    if (deployed) {
+      const realPayloads = fs.realpathSync(payloads);
+      const selected = active && fs.realpathSync(active);
+      if (selected && path.dirname(selected) === realPayloads) stamp = path.basename(selected);
+      flowTarget = realTarget(flowVia);
+      const dir = path.dirname(flowTarget);
+      if (path.dirname(dir) !== realPayloads || path.basename(flowTarget) !== 'flows.json' ||
+          (selected && selected !== dir)) {
+        throw new Error('flows do not belong to the selected payload');
+      }
+      stamp = path.basename(dir);
+    } else {
+      flowTarget = realTarget(flowVia);
+    }
+    live = readJson(flowTarget, isFlows);
+    source = live;
+    if (deployed) {
+      const pristine = path.join(path.dirname(flowTarget), 'flows.pristine.json');
+      try {
+        const helper = require(path.join(root, '.payload-swap.js'));
+        const seed = parseJson(helper.readPristineFlows(root, stamp), isFlows);
+        if (seed.problem) throw new Error('invalid pristine flows (' + seed.problem + ')');
+        if (live.problem) {
+          sourceName = pristine;
+          source = { stat: fs.statSync(pristine), ...seed };
+        }
+      } catch (error) {
+        if (live.problem) throw error;
+        recordFlowWarning(stamp, error.message);
+      }
+    } else if (live.problem) {
+      assertImageOwnsFlows(sourceName);
+      source = readJson(sourceName, isFlows);
+      if (source.problem) throw new Error('cannot restore flows.json (' + source.problem + ')');
+    }
+  } catch (error) {
+    const unreadable = ['EIO', 'EAGAIN', 'EINTR', 'ESTALE', 'ETIMEDOUT', 'EBUSY', 'EACCES', 'EPERM'];
+    if (!unreadable.includes(error.code) && (deployed || live?.problem)) {
+      persistFlowHold(stamp, error.message);
+      if (live?.stat && live.problem) {
+        const archive = quarantineName(flowTarget);
+        fs.linkSync(flowTarget, archive);
+        syncDirectory(flowTarget);
+        console.error('HELD: preserved rejected flow bytes at ' + archive);
+      }
+    }
+    throw error;
+  }
+  if (!live.problem) clearRollbackLinks(flowTarget);
+  const settings = realTarget(path.join(root, 'settings.js'));
+  // A completed legacy settings patch can leave a rollback name if power
+  // goes out before cleanup. A valid live file must exist before removing it.
+  clearRollbackLinks(settings, () => {
+    const source = fs.readFileSync(settings, 'utf8');
+    if (!source.trim()) throw new Error('settings.js is empty');
+    new (require('vm').Script)(require('module').wrap(source));
+  });
+  const credTarget = realTarget(credFile);
+
+  const flows = source.value;
+  const credentials = readJson(credTarget, value => value !== null && typeof value === 'object' && !Array.isArray(value));
+  // The init service runs as root. Match that owner and restrict access
+  // even when upgrading a credential file written with an older default mode.
+  const credentialMode = { mode: 0o600, uid: process.getuid(), gid: process.getgid() };
+  if (credentials.stat) {
+    if (credentials.stat.uid !== credentialMode.uid || credentials.stat.gid !== credentialMode.gid) {
+      fs.chownSync(credTarget, credentialMode.uid, credentialMode.gid);
+    }
+    if ((credentials.stat.mode & 0o7777) !== credentialMode.mode) {
+      fs.chmodSync(credTarget, credentialMode.mode);
+    }
+  }
+  if (!credentials.problem) clearRollbackLinks(credTarget);
+  const creds = credentials.value || {};
   let credsChanged = false;
   let flowsChanged = false;
 
@@ -610,17 +935,58 @@ try {
     }
   }
 
-  if (credsChanged) fs.writeFileSync(credFile, JSON.stringify(creds));
-  if (flowsChanged) fs.writeFileSync(flowFile, JSON.stringify(flows, null, 2) + '\n');
+  const corruptCredentials = credentials.stat && credentials.problem;
+  const savedCredentials = credsChanged
+    ? writeAtomic(credTarget, JSON.stringify(creds), credentialMode, credentials.stat, corruptCredentials)
+    : corruptCredentials && quarantine(credTarget);
+  if (savedCredentials) {
+    console.log('WARN: quarantined flows_cred.json (' + credentials.problem + ') at ' + savedCredentials);
+  }
+  if (live.problem || flowsChanged) {
+    const bytes = flowsChanged ? JSON.stringify(flows, null, 2) + '\n' : source.bytes;
+    // Restore inside the selected payload if deployed. The public and active
+    // symlinks still point to the same payload after recovery.
+    const saved = writeAtomic(flowTarget, bytes, live.stat || source.stat, live.stat, live.problem);
+    if (saved) console.log('WARN: quarantined flows.json (' + live.problem + ') at ' + saved);
+    if (live.problem) console.log('WARN: restored flows.json (' + live.problem + ') from ' + sourceName + ' to ' + flowTarget);
+  }
+  if (restoreLink) {
+    fs.symlinkSync(flowVia, flowFile);
+    syncPublishedFile(flowFile, () => fs.unlinkSync(flowFile));
+    console.log('WARN: recreated the public flows.json symlink');
+  }
+  if (live.problem || flowsChanged) {
+    const digest = createHash('sha256').update(fs.readFileSync(flowTarget)).digest('hex');
+    console.log('INFO: committed flows.json digest=' + digest + ' stamp=' + (stamp || 'image'));
+  }
 } catch (error) {
-  console.error('[node-red.init] unable to update MQTT runtime config:', error.message);
+  console.error('ERROR: unable to prepare Node-RED runtime files: ' + error.message);
+  process.exitCode = 1;
 }
 NODE
+    )"; then
+        if [ -n "$startup_report" ]; then
+            printf '%s\n' "$startup_report" | while IFS= read -r line; do
+                logger -t node-red.init "$line"
+            done
+            startup_warning="$(printf '%s\n' "$startup_report" | sed -n '/^WARN: /p')"
+            # Also mark the lasting write on the boot console, before procd
+            # starts Node-RED. The line contains no identity or credentials.
+            committed="$(printf '%s\n' "$startup_report" | sed -n 's/^INFO: \(committed flows.json digest=.*\)$/\1/p')"
+            if [ -n "$committed" ] && [ -c /dev/console ]; then
+                printf 'node-red.init: %s\n' "$committed" 2>/dev/null >/dev/console || true
+            fi
+        fi
+    else
+        printf '%s\n' "$startup_report" >&2
+        logger -t node-red.init "Node-RED startup refused: $startup_report"
+        return 1
     fi
 
     procd_open_instance
     procd_set_param command node /usr/lib/node/$PACKAGE_NAME/red.js --userDir /srv/$PACKAGE_NAME
     procd_set_param env \
+        OSI_NODE_RED_STARTUP_WARNING="$startup_warning" \
         DEVICE_EUI="$device_eui" \
         DEVICE_EUI_SOURCE="$device_eui_source" \
         DEVICE_EUI_CONFIDENCE="$device_eui_confidence" \

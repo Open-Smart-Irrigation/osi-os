@@ -5,7 +5,13 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisCatalogEntry, AnalysisSeries } from '../../analysis/types';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
+  useTranslation: () => ({
+    t: (k: string) => k,
+    i18n: { language: 'en', changeLanguage: vi.fn() },
+  }),
+}));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ username: 'farmer' }) }));
 
 const entry = (seriesId: string, channelKey: string, label: string, unit: string, extra: Partial<AnalysisCatalogEntry> = {}): AnalysisCatalogEntry => ({

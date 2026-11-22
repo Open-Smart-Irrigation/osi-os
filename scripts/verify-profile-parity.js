@@ -49,6 +49,7 @@ const CANONICAL_PAYLOAD = [
   'files/usr/share/db',
   'files/usr/share/flows.json',
   'files/usr/share/node-red',
+  'files/usr/share/nftables.d/chain-pre/input/10-osi-tailscale.nft',
 ];
 
 // Files that must NOT exist in mirror profiles (legacy / superseded).

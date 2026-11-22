@@ -1,4 +1,4 @@
-import type { AnalysisRange, AnalysisSelector, AnalysisViewJson, AnalysisWorkspaceMode, TimelineLayout } from './types';
+import { analysisSourceKey, type AnalysisCatalogEntry, type AnalysisRange, type AnalysisSelector, type AnalysisViewJson, type AnalysisWorkspaceMode, type TimelineLayout } from './types';
 
 export interface AnalysisWorkspaceState {
   schemaVersion: 1;
@@ -28,6 +28,29 @@ export function createDefaultWorkspace(): AnalysisWorkspaceState {
     toggles: { normalize: false },
     labelOverrides: {},
     axisLabelOverrides: {},
+  };
+}
+
+// A restored selection keeps its first available source. Explicitly choosing a
+// channel from another source switches the timeline to that source.
+export function basicTimeline(
+  state: AnalysisWorkspaceState,
+  channelsById: ReadonlyMap<string, AnalysisCatalogEntry>,
+  preferredSeriesId?: string,
+): AnalysisWorkspaceState {
+  const sourceFor = (id: string) => {
+    const channel = channelsById.get(id);
+    return channel?.availability === 'available' ? analysisSourceKey(channel) : null;
+  };
+  const source = preferredSeriesId
+    ? sourceFor(preferredSeriesId)
+    : state.selectors.map(({ seriesId }) => sourceFor(seriesId)).find((key) => key !== null);
+  return {
+    ...state,
+    selectors: source ? state.selectors.filter(({ seriesId }) => sourceFor(seriesId) === source) : [],
+    mode: 'timeline',
+    layout: 'stacked',
+    toggles: { normalize: false },
   };
 }
 

@@ -1342,7 +1342,7 @@ const requiredIndexes = {
   journal_plot_groups: [
     'idx_journal_plot_groups_owner_gateway',
   ],
-  sdi12_transmissions: ['idx_sdi12_transmissions_device_time', 'uq_sdi12_transmissions_uplink'],
+  sdi12_transmissions: ['idx_sdi12_transmissions_device_time', 'idx_sdi12_transmissions_receipt_time', 'uq_sdi12_transmissions_uplink'],
   sdi12_recipe_deployments: ['idx_sdi12_recipe_deployments_status'],
   journal_crop_cycle_plots: [
     'idx_ccp_plot_open',
@@ -1395,6 +1395,9 @@ const requiredIndexSqlFragments = {
   ],
   uq_sdi12_transmissions_uplink: [
     'unique index', 'on sdi12_transmissions(deveui, uplink_key)', 'where uplink_key is not null',
+  ],
+  idx_sdi12_transmissions_receipt_time: [
+    'on sdi12_transmissions(received_at, id)',
   ],
   ux_chameleon_reading_links_device_data: [
     'unique index',

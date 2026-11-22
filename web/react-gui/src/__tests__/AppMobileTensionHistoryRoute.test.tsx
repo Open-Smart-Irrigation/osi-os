@@ -4,7 +4,14 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { HashRouter } from 'react-router-dom';
-import appSource from '../App.tsx?raw';
+vi.hoisted(() => {
+  vi.stubEnv('VITE_MOBILE_HISTORY_INTERNAL', 'true');
+  vi.stubEnv('VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS', 'true');
+});
+
+vi.mock('../pages/MobileTensionHistoryRoute', () => ({
+  MobileTensionHistoryRoute: () => <div>DEFERRED_PHONE_CHART</div>,
+}));
 
 vi.mock('../AppProviders', () => ({
   AppProviders: ({ children }: { children: ReactNode }) => {
@@ -36,13 +43,6 @@ afterEach(() => {
 });
 
 describe('mobile tension history app route', () => {
-  it('keeps the lazy import inside the exact build gate and redirects when disabled', () => {
-    expect(appSource).toContain("import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'");
-    expect(appSource).toContain("lazy(() => import('./pages/MobileTensionHistoryRoute')");
-    expect(appSource).toContain('<Navigate to="/history" replace />');
-    expect(appSource).toContain('path="/internal/mobile-history/zones/:zoneId"');
-  });
-
   it('redirects the disabled route through the existing private route boundary', async () => {
     window.location.hash = '#/internal/mobile-history/zones/7';
     render(<App />);

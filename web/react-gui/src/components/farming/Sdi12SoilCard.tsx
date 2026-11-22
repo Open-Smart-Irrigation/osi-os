@@ -110,6 +110,7 @@ function formatChannelValue(kind: SoilChannel, value: number, swtUnit: 'kPa' | '
 interface TensiomarkProbe {
   channel: number;
   depthCm: number | null;
+  address: string | null;
 }
 
 function positiveDepth(value: unknown): number | null {
@@ -122,14 +123,14 @@ function positiveDepth(value: unknown): number | null {
 function tensiomarkProbes(device: Device, data: NonNullable<Device['latest_data']>): TensiomarkProbe[] {
   const layout = device.sdi12_channel_layout_json;
   if (layout && 'kind' in layout && layout.kind === 'tensiomark') {
-    return layout.sensors.map((sensor) => ({ channel: sensor.channel, depthCm: sensor.depth_cm }));
+    return layout.sensors.map((sensor) => ({ channel: sensor.channel, depthCm: sensor.depth_cm, address: sensor.address }));
   }
   const depths = device.soil_moisture_probe_depths_json ?? {};
   return [1, 2].flatMap((channel) => {
     const depthCm = positiveDepth(depths[`swt_${channel}`] ?? depths[`soil_temp_${channel}`]);
     const hasReading = finiteValue(data[`swt_${channel}` as keyof typeof data]) != null
       || finiteValue(data[`soil_temp_${channel}` as keyof typeof data]) != null;
-    return depthCm != null || hasReading ? [{ channel, depthCm }] : [];
+    return depthCm != null || hasReading ? [{ channel, depthCm, address: null }] : [];
   });
 }
 
@@ -207,6 +208,11 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
       return {
         channel: probe.channel,
         depthCm: probe.depthCm,
+        // Saved layouts are bench-observed with an unverified calibration range in the current API.
+        unverifiedCalibration: {
+          note: t('sdi12.tensiomark.calibrationRange'),
+          addressLabel: probe.address === null ? null : `${t('sdi12.tensiomark.address')} ${probe.address}`,
+        },
         kpa: data[`swt_${probe.channel}` as keyof typeof data],
         onOpenHistory: open(`swt_${probe.channel}`),
         secondary: temperature === null ? null : {

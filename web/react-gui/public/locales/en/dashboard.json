@@ -1,10 +1,10 @@
 {
-  "title": "Open Smart Irrigation Dashboard",
+  "title": "Open Smart Irrigation",
   "welcome": "Welcome, {{username}}",
   "add": "Add",
   "addMenu": {
-    "zone": "Add Zone",
-    "device": "Add Device",
+    "zone": "Add zone",
+    "device": "Add device",
     "activity": "Log activity"
   },
   "data": "Data",
@@ -12,13 +12,13 @@
   "admin": "Admin",
   "adminMenu": {
     "users": "Users",
-    "grants": "Grants"
+    "grants": "Access grants"
   },
   "account": "Account",
   "accountMenu": {
     "osiServer": "OSI Server"
   },
-  "logout": "Logout",
+  "logout": "Log out",
   "loading": "Loading dashboard...",
   "failedToLoad": "Failed to load data",
   "autoRefresh": "Auto-refreshing every 10 seconds",
@@ -38,5 +38,9 @@
     "zones": "Zones",
     "data": "Data",
     "journal": "Journal"
+  },
+  "header": {
+    "menu": "Menu",
+    "primaryNavigation": "Primary navigation"
   }
 }

@@ -14,6 +14,7 @@ interface HistorySidebarProps {
   workspaces?: HistoryWorkspaceRecord[];
   activeWorkspaceId?: number | null;
   workspacesEnabled?: boolean;
+  showWorkspaces?: boolean;
   onTogglePinned?: (cardId: string, pinned: boolean) => void;
   onLoadWorkspace?: (workspace: HistoryWorkspaceRecord) => void;
   onSaveWorkspace?: (name: string) => void;
@@ -31,6 +32,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
   workspaces = [],
   activeWorkspaceId = null,
   workspacesEnabled = false,
+  showWorkspaces = true,
   onTogglePinned,
   onLoadWorkspace,
   onSaveWorkspace,
@@ -101,72 +103,74 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
         />
       </section>
 
-      <section className="mt-6 rounded-lg border border-dashed border-[var(--border)] p-3">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          {t('history.sidebar.savedWorkspaces')}
-        </h2>
-        {!workspacesEnabled && (
-          <p className="mt-2 text-xs text-[var(--text-tertiary)]">{t('history.sidebar.workspaceDisabled')}</p>
-        )}
-        {workspacesEnabled && (
-          <div className="mt-3 space-y-3">
-            <label className="block">
-              <span className="text-xs font-semibold text-[var(--text-tertiary)]">
-                {t('history.sidebar.workspaceName')}
-              </span>
-              <input
-                value={workspaceName}
-                onChange={(event) => setWorkspaceName(event.target.value)}
-                className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-2 text-sm text-[var(--text)]"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => onSaveWorkspace?.(workspaceName)}
-                className="rounded-md border border-[var(--border)] px-2 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
-              >
-                {t('history.sidebar.saveWorkspace')}
-              </button>
-              <button
-                type="button"
-                disabled={!canUpdateWorkspace}
-                onClick={() => onUpdateWorkspace?.(workspaceName)}
-                className="rounded-md border border-[var(--border)] px-2 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t('history.sidebar.updateWorkspace')}
-              </button>
-            </div>
-            {workspaces.length === 0 && (
-              <p className="text-xs text-[var(--text-tertiary)]">{t('history.sidebar.none')}</p>
-            )}
-            {workspaces.map((workspace) => (
-              <div key={workspace.id} className="rounded-md border border-[var(--border)] p-2">
-                <p className="text-sm font-semibold text-[var(--text)]">{workspace.name}</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWorkspaceName(workspace.name);
-                      onLoadWorkspace?.(workspace);
-                    }}
-                    className="rounded-md border border-[var(--border)] px-2 py-1.5 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
-                  >
-                    {t('history.sidebar.loadWorkspace', { name: workspace.name })}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteWorkspace?.(workspace.id)}
-                    className="rounded-md border border-[var(--border)] px-2 py-1.5 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
-                  >
-                    {t('history.sidebar.deleteWorkspace', { name: workspace.name })}
-                  </button>
-                </div>
+      {showWorkspaces && (
+        <section className="mt-6 rounded-lg border border-dashed border-[var(--border)] p-3">
+          <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
+            {t('history.sidebar.savedWorkspaces')}
+          </h2>
+          {!workspacesEnabled && (
+            <p className="mt-2 text-xs text-[var(--text-tertiary)]">{t('history.sidebar.workspaceDisabled')}</p>
+          )}
+          {workspacesEnabled && (
+            <div className="mt-3 space-y-3">
+              <label className="block">
+                <span className="text-xs font-semibold text-[var(--text-tertiary)]">
+                  {t('history.sidebar.workspaceName')}
+                </span>
+                <input
+                  value={workspaceName}
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-2 text-sm text-[var(--text)]"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSaveWorkspace?.(workspaceName)}
+                  className="rounded-md border border-[var(--border)] px-2 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
+                >
+                  {t('history.sidebar.saveWorkspace')}
+                </button>
+                <button
+                  type="button"
+                  disabled={!canUpdateWorkspace}
+                  onClick={() => onUpdateWorkspace?.(workspaceName)}
+                  className="rounded-md border border-[var(--border)] px-2 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t('history.sidebar.updateWorkspace')}
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+              {workspaces.length === 0 && (
+                <p className="text-xs text-[var(--text-tertiary)]">{t('history.sidebar.none')}</p>
+              )}
+              {workspaces.map((workspace) => (
+                <div key={workspace.id} className="rounded-md border border-[var(--border)] p-2">
+                  <p className="text-sm font-semibold text-[var(--text)]">{workspace.name}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorkspaceName(workspace.name);
+                        onLoadWorkspace?.(workspace);
+                      }}
+                      className="rounded-md border border-[var(--border)] px-2 py-1.5 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
+                    >
+                      {t('history.sidebar.loadWorkspace', { name: workspace.name })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteWorkspace?.(workspace.id)}
+                      className="rounded-md border border-[var(--border)] px-2 py-1.5 text-xs font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
+                    >
+                      {t('history.sidebar.deleteWorkspace', { name: workspace.name })}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </aside>
   );
 };

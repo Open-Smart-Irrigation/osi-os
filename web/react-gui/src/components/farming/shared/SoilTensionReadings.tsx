@@ -16,6 +16,8 @@ export interface SoilTensionProbe {
   onOpenHistory?: () => void;
   /** One extra line under the value, e.g. the probe's soil temperature. */
   secondary?: { text: string; onOpenHistory?: () => void } | null;
+  /** Show qualification details and suppress the water-status indicator for this probe. */
+  unverifiedCalibration?: { note: string; addressLabel: string | null };
   /**
    * Gateway-only probe diagnosis shown under a missing value (the WATERMARK probe status, such
    * as "Calibration needed"). The cloud never receives it, so its card has no such line.
@@ -55,7 +57,7 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
   const channelLabel = t('soilTension.channel', { channel: probe.channel });
   const depthLabel = probe.depthCm === null ? null : t('soilTension.depthCm', { depth: probe.depthCm });
   const historyTitle = t('common.viewHistory');
-  const { secondary } = probe;
+  const { secondary, unverifiedCalibration } = probe;
   const valueOpensHistory = formatted !== null && probe.onOpenHistory !== undefined;
   const hasHistoryButton = valueOpensHistory || secondary?.onOpenHistory !== undefined;
   // Spoken with every history button: which probe, and what the button does (the title is hover-only).
@@ -88,7 +90,7 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
         ) : (
           <p className={`${VALUE_CLASS} text-[var(--text)]`}>{formatted}</p>
         )}
-        <SwtStatusIndicator status={classifySwtWaterStatus(probe.kpa)} />
+        {!unverifiedCalibration && <SwtStatusIndicator status={classifySwtWaterStatus(probe.kpa)} />}
       </div>
       <div className="flex min-w-0 flex-col items-start gap-1">
         {invalid && (
@@ -96,6 +98,14 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
         )}
         {formatted === null && !invalid && probe.note && (
           <p className="text-xs text-[var(--text-secondary)]">{probe.note}</p>
+        )}
+        {unverifiedCalibration && (
+          <>
+            {unverifiedCalibration.addressLabel && (
+              <p className="text-xs text-[var(--text-secondary)]">{unverifiedCalibration.addressLabel}</p>
+            )}
+            <p className="text-xs text-[var(--text-secondary)]">{unverifiedCalibration.note}</p>
+          </>
         )}
         {secondary && (secondary.onOpenHistory ? (
           <button
@@ -117,13 +127,11 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
 }
 
 /**
- * The one soil tension block of a device card, shared by every probe family (WATERMARK on an
- * LSN50, Tensiomark on SDI-12) and kept in step with the OSI Cloud component of the same name:
- * a titled section with one tile per probe, ordered by depth, each with its latest stored value
- * (kPa or pF per the display preference) and its water-status pill. There is no freshness rule:
- * the pill follows the latest stored value and the card's last-seen line carries the age. A
- * missing value shows "—"; a value outside the displayable range shows "—" and "Invalid
- * reading"; neither gets a pill or a history link.
+ * Shared by WATERMARK and Tensiomark device cards. Each tile shows the latest stored
+ * value in kPa or pF, ordered by probe depth. Probes marked unverified show a calibration
+ * note in place of the water-status pill. The card's last-seen line carries the age.
+ * Missing and out-of-range values show a dash with no pill or value history link.
+ * Out-of-range values also show "Invalid reading".
  */
 export function SoilTensionReadings({ family, probes }: SoilTensionReadingsProps) {
   const { t } = useTranslation('devices');
