@@ -10940,6 +10940,48 @@
         "reason": "resource_not_found",
         "effects": 0
       }
+    },
+    {
+      "id": "transport-session-denied-on-human-edge-read",
+      "input": {
+        "origin": "edge",
+        "action": "read_history",
+        "actor": {
+          "gateway_role": "admin",
+          "enabled": true,
+          "zone_relation": "owned"
+        },
+        "session": {
+          "kind": "transport"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "human_session_required",
+        "http_status": 401,
+        "effects": 0
+      }
+    },
+    {
+      "id": "transport-session-denied-on-human-edge-write",
+      "input": {
+        "origin": "edge",
+        "action": "valve_open",
+        "actor": {
+          "gateway_role": "admin",
+          "enabled": true,
+          "zone_relation": "owned"
+        },
+        "session": {
+          "kind": "transport"
+        }
+      },
+      "expected": {
+        "decision": "deny",
+        "reason": "human_session_required",
+        "http_status": 401,
+        "effects": 0
+      }
     }
   ],
   "radio_tools": [

@@ -339,7 +339,7 @@
         "installation": "installation-a",
         "gateway": "gateway-a",
         "cloud_account": "cloud-a",
-        "linked": true,
+        "linked": false,
         "link_incarnation": "link-a",
         "credential_revision": 2,
         "credential": "credential-a",
@@ -498,13 +498,103 @@
       ]
     },
     {
-      "id": "password_reset-all-sessions-flag-1",
+      "id": "linked-local-password_reset-refused-409-flag-0",
       "initial": {
         "account_uuid": "11111111-1111-4111-8111-111111111111",
         "installation": "installation-a",
         "gateway": "gateway-a",
         "cloud_account": "cloud-a",
         "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "scoped_access": false,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "password_reset",
+          "commit": true,
+          "credential": "credential-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "linked_account_password_reset_unsupported",
+            "http_status": 409,
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "credential": "credential-a",
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "new-password",
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
+          }
+        }
+      ]
+    },
+    {
+      "id": "password_reset-all-sessions-flag-1",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": false,
         "link_incarnation": "link-a",
         "credential_revision": 2,
         "credential": "credential-a",
@@ -658,6 +748,96 @@
           "expected": {
             "decision": "allow",
             "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "linked-local-password_reset-refused-409-flag-1",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "scoped_access": true,
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "password_reset",
+          "commit": true,
+          "credential": "credential-b",
+          "expected": {
+            "decision": "deny",
+            "reason": "linked_account_password_reset_unsupported",
+            "http_status": 409,
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "generation": 7,
+            "credential": "credential-a",
+            "credential_revision": 2
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "allow",
+            "effects": 0
+          }
+        },
+        {
+          "op": "login",
+          "token": "new-password",
+          "credential": "credential-b",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "deny",
+            "reason": "invalid_credential_context"
           }
         }
       ]
@@ -1142,7 +1322,7 @@
         "installation": "installation-a",
         "gateway": "gateway-a",
         "cloud_account": "cloud-a",
-        "linked": true,
+        "linked": false,
         "link_incarnation": "link-a",
         "credential_revision": 2,
         "credential": "credential-a",
@@ -1562,7 +1742,8 @@
         },
         {
           "op": "cloud_revoke",
-          "change": "password_reset"
+          "change": "password_reset",
+          "revision": 3
         },
         {
           "op": "assert_cloud_session",
@@ -1883,7 +2064,8 @@
         },
         {
           "op": "cloud_revoke",
-          "change": "password_reset"
+          "change": "password_reset",
+          "revision": 3
         },
         {
           "op": "assert_cloud_session",
@@ -3454,7 +3636,7 @@
         "installation": "installation-a",
         "gateway": "gateway-a",
         "cloud_account": "cloud-a",
-        "linked": true,
+        "linked": false,
         "link_incarnation": "link-a",
         "credential_revision": 2,
         "credential": "credential-a",
@@ -3708,6 +3890,143 @@
           "expected": {
             "decision": "committed",
             "generation": 8
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked"
+          }
+        },
+        {
+          "op": "login",
+          "token": "new",
+          "credential": "credential-a",
+          "subject": "installation-a",
+          "installation": "installation-a",
+          "link_incarnation": "link-a",
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "assert_action",
+          "token": "new",
+          "input": {
+            "action": "admin_accounts"
+          },
+          "expected": {
+            "decision": "allow"
+          }
+        },
+        {
+          "op": "commit_account",
+          "change": "disable",
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "last_admin_conflict"
+          }
+        }
+      ]
+    },
+    {
+      "id": "operator-recovery-retry-is-noop",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "researcher",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "scoped_access": false,
+        "enabled_admins": 0,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "upgrade_outcome": "recovery_required",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "issue_session",
+          "token": "old"
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "assert_action",
+          "token": "old",
+          "input": {
+            "action": "admin_accounts"
+          },
+          "expected": {
+            "decision": "deny",
+            "reason": "insufficient_role",
+            "effects": 0
+          }
+        },
+        {
+          "op": "operator_recovery",
+          "trusted_operator": false,
+          "target_uuid": "11111111-1111-4111-8111-111111111111",
+          "expected": {
+            "decision": "deny",
+            "reason": "operator_proof_required"
+          }
+        },
+        {
+          "op": "operator_recovery",
+          "trusted_operator": true,
+          "target_uuid": "11111111-1111-4111-8111-111111111111",
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "operator_recovery",
+          "trusted_operator": true,
+          "target_uuid": "11111111-1111-4111-8111-111111111111",
+          "expected": {
+            "decision": "noop",
+            "reason": "already_recovered",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "enabled_admins": 1,
+            "role": "admin",
+            "generation": 8,
+            "upgrade_outcome": "recovered"
           }
         },
         {
@@ -4184,7 +4503,8 @@
         },
         {
           "op": "cloud_revoke",
-          "change": "disable"
+          "change": "disable",
+          "revision": 3
         },
         {
           "op": "assert_cloud_session",
@@ -4334,7 +4654,8 @@
       "steps": [
         {
           "op": "cloud_revoke",
-          "change": "password_reset"
+          "change": "password_reset",
+          "revision": 3
         },
         {
           "op": "assert_cloud_session",
@@ -4394,7 +4715,8 @@
       "steps": [
         {
           "op": "cloud_revoke",
-          "change": "role_change"
+          "change": "role_change",
+          "revision": 3
         },
         {
           "op": "assert_cloud_session",
@@ -4482,7 +4804,7 @@
         "installation": "installation-a",
         "gateway": "gateway-a",
         "cloud_account": "cloud-a",
-        "linked": true,
+        "linked": false,
         "link_incarnation": "link-a",
         "credential_revision": 2,
         "credential": "credential-a",
@@ -4685,6 +5007,195 @@
             "decision": "deny",
             "reason": "session_revoked",
             "effects": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "earlier-revision-commit-does-not-mark-pending-revocation-applied",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "cloud_revoke",
+          "change": "password_reset",
+          "revision": 4
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "pending",
+            "credential_revision": 3
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 4,
+            "credential": "credential-c",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 9
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "applied",
+            "credential_revision": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "superseded-lower-revision-reported-superseded-never-applied",
+      "initial": {
+        "account_uuid": "11111111-1111-4111-8111-111111111111",
+        "installation": "installation-a",
+        "gateway": "gateway-a",
+        "cloud_account": "cloud-a",
+        "linked": true,
+        "link_incarnation": "link-a",
+        "credential_revision": 2,
+        "credential": "credential-a",
+        "scheme": "v2",
+        "generation": 7,
+        "enabled": true,
+        "role": "admin",
+        "now_ms": 1000,
+        "high_water_ms": 1000,
+        "connected": true,
+        "transport_authorized": true,
+        "transport_token": "transport-a",
+        "policies": {
+          "clock": "persisted_high_water",
+          "offline": "until_reconnect"
+        },
+        "enabled_admins": 2,
+        "used_incarnations": [
+          "link-a"
+        ],
+        "credential_snapshot": {
+          "credential": "credential-a",
+          "scheme": "v2"
+        },
+        "transport_revision": 1,
+        "cloud_sessions_valid": true,
+        "human_account_enabled": true,
+        "transport_subject_kind": "gateway",
+        "cloud_revocation_status": "none"
+      },
+      "steps": [
+        {
+          "op": "cloud_revoke",
+          "change": "password_reset",
+          "revision": 4
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 4,
+            "credential": "credential-c",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "committed",
+            "generation": 8
+          }
+        },
+        {
+          "op": "credential_delivery",
+          "envelope": {
+            "account_uuid": "11111111-1111-4111-8111-111111111111",
+            "installation": "installation-a",
+            "gateway": "gateway-a",
+            "cloud_account": "cloud-a",
+            "incarnation": "link-a",
+            "revision": 3,
+            "credential": "credential-b",
+            "scheme": "v2"
+          },
+          "commit": true,
+          "expected": {
+            "decision": "deny",
+            "reason": "stale_credential_revision",
+            "cloud_change_status": "superseded",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "cloud_revocation_status": "applied",
+            "credential_revision": 4,
+            "credential": "credential-c",
+            "generation": 8
           }
         }
       ]

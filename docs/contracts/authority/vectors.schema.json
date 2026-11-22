@@ -208,7 +208,10 @@
           "type": "object",
           "properties": {
             "kind": {
-              "type": "string"
+              "enum": [
+                "local",
+                "transport"
+              ]
             },
             "signature_valid": {
               "type": "boolean"
@@ -620,7 +623,10 @@
               "const": "gateway"
             },
             "upgrade_outcome": {
-              "type": "string"
+              "enum": [
+                "recovery_required",
+                "recovered"
+              ]
             },
             "cloud_revocation_status": {
               "enum": [
@@ -1339,11 +1345,17 @@
                   },
                   "change": {
                     "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Credential revision that carries this change; cloud status becomes applied only when the edge commits this revision or a higher one."
                   }
                 },
                 "required": [
                   "change",
-                  "op"
+                  "op",
+                  "revision"
                 ],
                 "additionalProperties": false
               },

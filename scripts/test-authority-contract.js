@@ -276,6 +276,30 @@ function verify() {
   const uncheckedFinalize = mutantModel("if (captured !== linkTuple()) { result = deny('stale_link_finalize'); break; }", '');
   assert.throws(() => uncheckedFinalize.runLifecycle(overlapping.initial, overlapping.steps, authority.valid_defaults,
     (actual, expected, op) => projection(actual, expected, op)), /decision|reason/);
+  // Review-thread regressions: each fix must be load-bearing.
+  const lifecycleMutant = (before, after, id, pattern) => {
+    const c = revocation.cases.find(x => x.id === id);
+    assert.ok(c, id);
+    assert.throws(() => mutantModel(before, after).runLifecycle(c.initial, c.steps, authority.valid_defaults,
+      (actual, expected, op) => projection(actual, expected, op)), pattern);
+  };
+  lifecycleMutant("if (step.change === 'password_reset' && s.linked) { result = { ...deny('linked_account_password_reset_unsupported'), http_status: 409 }; break; }", '',
+    'linked-local-password_reset-refused-409-flag-1', /decision|reason/);
+  lifecycleMutant(" && e.revision >= s.pending_revocation_revision", '',
+    'earlier-revision-commit-does-not-mark-pending-revocation-applied', /cloud_revocation_status/);
+  lifecycleMutant("{ ...deny('stale_credential_revision'), cloud_change_status: 'superseded' }", "deny('stale_credential_revision')",
+    'superseded-lower-revision-reported-superseded-never-applied', /cloud_change_status/);
+  lifecycleMutant("if (s.upgrade_outcome === 'recovered' && step.trusted_operator && step.target_uuid === s.account_uuid) { result = { decision: 'noop', reason: 'already_recovered', generation: s.generation, effects: 0 }; break; }", '',
+    'operator-recovery-retry-is-noop', /decision|reason/);
+  lifecycleMutant("ticket.valid && ticket.generation === s.generation && ", 'ticket.valid && ',
+    'concurrent-password-check-reset', /decision|reason/);
+  const transportOnHuman = authority.cases.find(x => x.id === 'transport-session-denied-on-human-edge-read');
+  const noKindCheck = mutantModel("if (input.session.kind !== 'local') return { ...deny('human_session_required'), http_status: 401 };", '');
+  assert.throws(() => projection(noKindCheck.authorize(model.merge(authority.valid_defaults, transportOnHuman.input)), transportOnHuman.expected, 'transport-on-human'), /decision|reason/);
+  const terminalApply = pauses.cases.find(x => x.id === 'apply-refusal-is-terminal-after-binding-restored');
+  const replayableApply = mutantModel("s.ui = 'pause_refused_policy_may_remain_enabled'; s.issued = false; }", "s.ui = 'pause_refused_policy_may_remain_enabled'; }");
+  assert.throws(() => replayableApply.runPause(terminalApply.initial, terminalApply.steps, authority.valid_defaults,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|reason|ack|policy_enabled/);
   const missingBootstrap = upgrades.cases.find(c => c.id === 'missing-bootstrap-operator-fallback');
   const selectedSurvivor = mutantModel('state.accounts.find(a => a.id === 1)', 'state.accounts.reduce((first, a) => !first || a.id < first.id ? a : first, null)');
   assert.throws(() => selectedSurvivor.runAdminUpgrade(missingBootstrap.initial, missingBootstrap.steps,

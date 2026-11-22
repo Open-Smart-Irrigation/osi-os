@@ -57,6 +57,8 @@ function authorize(input) {
       && stop.reduce_only && stop.binding_matches && stop.gateway_matches && stop.policy_matches
       && stop.original_actor_uuid === stop.command_actor_uuid) return { ...allow(1, 'authorized_stop_continuation'), recorded_under_actor: stop.original_actor_uuid, revocation_noted: !a.enabled || a.zone_relation === 'none', opens: 0, reenables: 0, extends: 0 };
   if (origin === 'edge') {
+    // Human edge paths accept only a human (local) session; transport sessions serve service actions only.
+    if (input.session.kind !== 'local') return { ...deny('human_session_required'), http_status: 401 };
     const session = sessionDecision(input);
     if (session.decision === 'deny') return session;
   }
@@ -126,12 +128,15 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         break;
       case 'assert_action': result = authorize(merge(input(step.token), step.input)); break;
       case 'operator_recovery':
+        if (s.upgrade_outcome === 'recovered' && step.trusted_operator && step.target_uuid === s.account_uuid) { result = { decision: 'noop', reason: 'already_recovered', generation: s.generation, effects: 0 }; break; }
         if (s.upgrade_outcome !== 'recovery_required') { result = deny('recorded_upgrade_required'); break; }
         if (!step.trusted_operator || step.target_uuid !== s.account_uuid) { result = deny('operator_proof_required'); break; }
-        s.role = 'admin'; s.enabled = true; s.enabled_admins++; s.generation++; result = { decision: 'committed', generation: s.generation, effects: 0 }; break;
+        s.role = 'admin'; s.enabled = true; s.enabled_admins++; s.generation++; s.upgrade_outcome = 'recovered'; result = { decision: 'committed', generation: s.generation, effects: 0 }; break;
       case 'begin_export': case 'queue_effect': result = sessionDecision(input(step.token)); break;
       case 'commit_account':
         if (!step.commit) { result = deny('mutation_rollback'); break; }
+        // Local password reset refuses a linked account (409); linked credentials change only via credential_delivery.
+        if (step.change === 'password_reset' && s.linked) { result = { ...deny('linked_account_password_reset_unsupported'), http_status: 409 }; break; }
         if ((step.change === 'disable' || step.change === 'role_change' && step.role !== 'admin') && s.role === 'admin' && s.enabled && s.enabled_admins === 1) { result = deny('last_admin_conflict'); break; }
         if (step.change === 'role_change' && step.role === s.role || step.change === 'disable' && !s.enabled) { result = { decision: 'noop', effects: 0 }; break; }
         if (step.change === 'disable') { if (s.enabled && s.role === 'admin') s.enabled_admins--; s.enabled = false; }
@@ -173,7 +178,7 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         if (!s.connected) { result = { decision: 'pending_offline', effects: 0 }; break; }
         if (!s.transport_authorized) { result = { decision: 'pending_stranded', effects: 0 }; break; }
         if (!s.linked || e.incarnation !== s.link_incarnation || e.account_uuid !== s.account_uuid || e.cloud_account !== s.cloud_account || e.installation !== s.installation || e.gateway !== s.gateway) { result = deny('stale_link_context'); break; }
-        if (e.revision < s.credential_revision) { result = deny('stale_credential_revision'); break; }
+        if (e.revision < s.credential_revision) { result = { ...deny('stale_credential_revision'), cloud_change_status: 'superseded' }; break; }
         if (e.revision === s.credential_revision) { result = credentialPayload(e) === acceptedCredentialPayload ? { decision: 'duplicate', effects: 0 } : deny('credential_revision_conflict'); break; }
         if ((e.enabled !== undefined || e.role !== undefined) && !step.account_mutation_authorized) { result = deny('privileged_account_mutation_required'); break; }
         const nextRole = e.role === undefined ? s.role : e.role;
@@ -187,10 +192,10 @@ function runLifecycle(initial, steps, defaults, assertProjection) {
         if (e.role !== undefined) s.role = e.role;
         acceptedCredentialPayload = credentialPayload(e);
         s.credential_snapshot = JSON.parse(acceptedCredentialPayload);
-        if (s.cloud_revocation_status === 'pending') s.cloud_revocation_status = 'applied';
+        if (s.cloud_revocation_status === 'pending' && e.revision >= s.pending_revocation_revision) s.cloud_revocation_status = 'applied';
         s.generation++; result = { decision: 'committed', effects: 0, generation: s.generation }; break;
       }
-      case 'cloud_revoke': s.cloud_sessions_valid = false; s.cloud_revocation_status = 'pending'; if (step.change === 'disable') s.human_account_enabled = false; result = { decision: 'cloud_fenced', effects: 0 }; break;
+      case 'cloud_revoke': s.cloud_sessions_valid = false; s.cloud_revocation_status = 'pending'; s.pending_revocation_revision = step.revision; if (step.change === 'disable') s.human_account_enabled = false; result = { decision: 'cloud_fenced', effects: 0 }; break;
       case 'assert_cloud_session': result = s.cloud_sessions_valid ? allow(0) : deny('cloud_session_revoked'); break;
       case 'transport_principal': s.transport_authorized = step.authorized; result = allow(0); break;
       case 'transport_refresh':
@@ -248,7 +253,7 @@ function runPause(initial, steps, defaults, assertProjection) {
       case 'apply_pause':
         result = s.issued ? decision('apply') : deny('not_issued');
         if (result.decision === 'allow') { s.policy_enabled = false; s.ack = 'APPLIED'; s.ui = 'pause_pending_mirror'; }
-        else { s.ack = 'REJECTED_PERMANENT'; s.ui = 'pause_refused_policy_may_remain_enabled'; }
+        else { s.ack = 'REJECTED_PERMANENT'; s.ui = 'pause_refused_policy_may_remain_enabled'; s.issued = false; }
         result = { ...result, ack: s.ack, recorded_under_actor: s.record_owner, revocation_noted: s.revocation_noted, extends: 0, reenables: 0, ui: s.ui, policy_enabled: s.policy_enabled, confirmed_policy_enabled: s.confirmed_policy_enabled, physical_closed: false, opens: 0, applied_policy_version: result.decision === 'allow' ? s.current_policy_version : null }; break;
       case 'mirror': if (s.ack === 'APPLIED') s.confirmed_policy_enabled = s.policy_enabled; s.ui = s.ack === 'APPLIED' && !s.policy_enabled ? 'paused' : s.ui; result = { ui: s.ui, confirmed_policy_enabled: s.confirmed_policy_enabled, opens: 0 }; break;
       case 'reissue_pause': {
