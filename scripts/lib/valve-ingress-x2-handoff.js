@@ -6,7 +6,7 @@ const {adaptFlows}=require('./valve-ingress-x2-renderer');
 const {countSilentCatchesInFlow}=require('../verify-no-new-silent-catch');
 const {countMarkers,textSourcesFromContent}=require('../verify-no-stray-ddl');
 const ROOT=path.resolve(__dirname,'../..');
-const SOURCE='bda200db621b997c6303144a3d3b1488d7cd85ef';
+const SOURCE='65d4d8d524406a069e0b27f9f4f9e8434c32f7c5';
 const FLOW_PATHS=['bcm2712','bcm2709'].map(p=>`conf/full_raspberrypi_bcm27xx_${p}/files/usr/share/flows.json`);
 const SILENT='scripts/fixtures/silent-catch-baseline.json',DDL='scripts/verify-no-stray-ddl-baseline.json';
 const PATCH='scripts/fixtures/valve-ingress-x2/handoff.patch', RECEIPT='scripts/fixtures/valve-ingress-x2/handoff.json';

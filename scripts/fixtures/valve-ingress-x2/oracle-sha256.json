@@ -1,5 +1,5 @@
 {
-  "scripts/fixtures/valve-ingress-x2/baseline.json": "38badfc0762b1b45ff7a53b9b8c4806f37fda23d52c81ab370409f27297f5513",
+  "scripts/fixtures/valve-ingress-x2/baseline.json": "1e3ed7863f46fc3cdd76e77e11175b231f845b498e8e9060386da2c8a98541b7",
   "scripts/fixtures/valve-ingress-x2/hashes.json": "5d9217418ec638153d50efb64a5fc2ce9c308824b206805b012c6de3b9027bde",
   "scripts/lib/valve-ingress-x2-cases.js": "f9141f90989a643dbd7d24a1debc82c0277c2fd43d6759d99622b27aa7403083",
   "scripts/fixtures/valve-ingress-x2/additive-hashes.json": "54bdb23aef01ea3fcab46febb7d69dc855b8c641e448d33102346415f4cbaab5"
