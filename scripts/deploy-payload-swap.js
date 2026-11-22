@@ -266,6 +266,37 @@ function discardBackup(backup) {
 // never leaves a payload without a health record (which would count as one
 // from before the record, and so as a rollback target). The legacy capture
 // stages without it: a copy of what was running is trusted.
+// Candidate GUI content is untrusted. Pin every traversed directory by fd and
+// open children without following links; retained legacy capture still uses
+// copyTree because its installed GUI can legitimately contain links.
+function copyCandidateGui(source, destination) {
+  const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+  function copy(fd, dest) {
+    fs.mkdirSync(dest, { mode: 0o755 });
+    fs.chmodSync(dest, 0o755);
+    const pinned = `/proc/self/fd/${fd}`;
+    for (const name of fs.readdirSync(pinned)) {
+      const full = path.join(pinned, name);
+      const target = path.join(dest, name);
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) {
+        const next = fs.openSync(full, directoryFlags);
+        try { copy(next, target); } finally { fs.closeSync(next); }
+      } else {
+        const child = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        try {
+          const actual = fs.fstatSync(child);
+          if (!actual.isFile() || actual.nlink !== 1) throw new Error('candidate GUI contains a link or special file');
+          fs.copyFileSync(`/proc/self/fd/${child}`, target, fs.constants.COPYFILE_EXCL);
+          fs.chmodSync(target, 0o644);
+        } finally { fs.closeSync(child); }
+      }
+    }
+  }
+  const fd = fs.openSync(source, directoryFlags);
+  try { copy(fd, destination); } finally { fs.closeSync(fd); }
+}
+
 function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null, staged = '') {
   const dir = payloadDir(root, stamp);
   fs.mkdirSync(dir, { recursive: true });
@@ -275,7 +306,8 @@ function stagePayload(root, stamp, srcFlowsPath, srcGuiPath = null, staged = '')
     if (!fs.existsSync(srcGuiPath) || !fs.statSync(srcGuiPath).isDirectory()) {
       throw new Error(`stagePayload: GUI directory missing: ${srcGuiPath}`);
     }
-    copyTree(srcGuiPath, guiPayloadDir(root, stamp));
+    if (staged === 'staged' || staged === true) copyCandidateGui(srcGuiPath, guiPayloadDir(root, stamp));
+    else copyTree(srcGuiPath, guiPayloadDir(root, stamp));
   }
   return dir;
 }

@@ -372,7 +372,42 @@ function digest(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function shapeDigest(node) {
+// The account-recovery guard (EB2) sits in front of the cloud ACK MQTT node.
+// The pinned hashes predate it and name the MQTT node directly. When the guard
+// node is present, the ACK wire must go through it: the guard id compares as the
+// pinned target, and a direct wire to the MQTT node is drift. Without the guard
+// node (a pre-EB2 flow), wires compare exactly as pinned.
+const ACK_MQTT_TARGET = '9d5e3035c3d069c4';
+const ACK_MQTT_GUARD = 'account-cloud-guard-' + ACK_MQTT_TARGET;
+const BYPASSED_GUARD = 'guard-bypassed:' + ACK_MQTT_TARGET;
+
+function hasAckGuard(byId) {
+  return byId.has(ACK_MQTT_GUARD);
+}
+
+function pinnedAckWires(node, guarded) {
+  const shape = Object.assign({}, node);
+  if (guarded && Array.isArray(shape.wires)) {
+    shape.wires = shape.wires.map((wire) => (Array.isArray(wire)
+      ? wire.map((id) => {
+        if (id === ACK_MQTT_GUARD) return ACK_MQTT_TARGET;
+        if (id === ACK_MQTT_TARGET) return BYPASSED_GUARD;
+        return id;
+      })
+      : wire));
+  }
+  return shape;
+}
+
+function shapeDigest(node, guarded) {
+  const shape = pinnedAckWires(node, guarded);
+  delete shape.func;
+  delete shape.libs;
+  return digest(shape);
+}
+
+// Exact shape (no wire mapping), for the before/after invariant.
+function exactShapeDigest(node) {
   const shape = Object.assign({}, node);
   delete shape.func;
   delete shape.libs;
@@ -396,14 +431,14 @@ function same(value, expected) {
   return JSON.stringify(value) === JSON.stringify(expected);
 }
 
-function isCurrentNode(node, spec) {
-  return !!node && shapeDigest(node) === spec.shapeHash &&
+function isCurrentNode(node, spec, guarded) {
+  return !!node && shapeDigest(node, guarded) === spec.shapeHash &&
     node.func === spec.func && same(node.libs, osiLibOnly);
 }
 
-function matchesPriorCurrentNode(node, id, spec) {
+function matchesPriorCurrentNode(node, id, spec, guarded) {
   const prior = PRIOR_CURRENT_HELPER_SURFACES[id];
-  return !!node && !!prior && shapeDigest(node) === spec.shapeHash &&
+  return !!node && !!prior && shapeDigest(node, guarded) === spec.shapeHash &&
     node.func === prior.func && same(node.libs, prior.libs);
 }
 
@@ -416,7 +451,7 @@ function assertOnlyTargetChanges(before, after) {
       if (!same(oldNode, newNode)) throw new Error('Unexpected non-target flow change: ' + String(oldNode.id));
       continue;
     }
-    if (oldNode.id !== newNode.id || shapeDigest(oldNode) !== shapeDigest(newNode)) {
+    if (oldNode.id !== newNode.id || exactShapeDigest(oldNode) !== exactShapeDigest(newNode)) {
       throw new Error('Helper loading migration changed non-source fields: ' + oldNode.id);
     }
   }
@@ -427,13 +462,14 @@ function migrate(buffer) {
   assertUnique(flows);
   const byId = new Map(flows.filter((node) => node.id).map((node) => [node.id, node]));
   const entries = Object.entries(targetSpecs);
-  if (entries.every(([id, spec]) => isCurrentNode(byId.get(id), spec))) return buffer;
+  const guarded = hasAckGuard(byId);
+  if (entries.every(([id, spec]) => isCurrentNode(byId.get(id), spec, guarded))) return buffer;
 
   const exactPriorCurrent = entries.every(([id, spec]) =>
-    matchesPriorCurrentNode(byId.get(id), id, spec));
+    matchesPriorCurrentNode(byId.get(id), id, spec, guarded));
   const exactDirectHelper = entries.every(([id, spec]) => {
     const node = byId.get(id);
-    return !!node && digest(node) === spec.beforeNodeHash;
+    return !!node && digest(pinnedAckWires(node, guarded)) === spec.beforeNodeHash;
   });
   if (!exactPriorCurrent && !exactDirectHelper) {
     throw new Error('Refusing drifted Task 9 helper-loading node set');

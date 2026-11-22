@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { linkBuilderSource } = require('./lib/installation-osi-lib');
 
 const ROOT = path.join(__dirname, '..');
 const flowPath = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -25,13 +26,14 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
   for (const cap of expectedCaps) assert.match(node.func, new RegExp(cap), `${id} advertises ${cap}`);
 }
 
-const link = byId['al-link-build-req'];
-assert.ok(link, 'link builder exists');
-for (const cap of expectedCaps) assert.match(link.func, new RegExp(cap), `link advertises ${cap}`);
+// The link request is built by the installation helper's build stage, which
+// al-link-build-req ("Build server auth request") delegates to.
+const linkSource = linkBuilderSource(flows, 'bcm27xx_bcm2712');
+for (const cap of expectedCaps) assert.match(linkSource, new RegExp(cap), `link advertises ${cap}`);
 const capabilityLists = [
-  ...flows.filter((node) => /sync-bootstrap-build|sync-force-build|Build server auth request/.test(node.id + ' ' + node.name))
-    .map((node) => [...node.func.matchAll(/['"]([a-z][a-z0-9_]+_v1)['"]/g)].map((m) => m[1]).filter((v) => expectedCaps.includes(v)))
-];
+  ...flows.filter((node) => /sync-bootstrap-build|sync-force-build/.test(node.id + ' ' + node.name)).map((node) => node.func),
+  linkSource,
+].map((source) => [...source.matchAll(/['"]([a-z][a-z0-9_]+_v1)['"]/g)].map((m) => m[1]).filter((v) => expectedCaps.includes(v)));
 assert.ok(capabilityLists.length >= 3, 'all three builders expose capability tokens');
 for (const list of capabilityLists) assert.deepEqual(list, expectedCaps, 'capability order is stable');
 
@@ -97,7 +99,7 @@ const realSqlProbe = spawnSync(process.execPath, ['-'], { cwd: ROOT, encoding: '
   }
   const flowState = {};
   const flow = { get: (key) => flowState[key] || {}, set: (key, value) => { flowState[key] = value; } };
-  global.get = (key) => key === 'fs' ? { existsSync: () => false } : undefined;
+  global.get = (key) => key === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined;
   const env = { get: (key) => ({ DEVICE_EUI: gateway, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active', FIRMWARE_VERSION: 'test-build', OSI_SCOPED_ACCESS: '0' }[key] || '') };
   const node = { warn: () => {}, error: () => {}, status: () => {} };
   const calls = [];

@@ -1,0 +1,39 @@
+{
+  "profiles": {
+    "full_raspberrypi_bcm27xx_bcm2712": {
+      "silentCatch": {
+        "functionNodeCount": 320,
+        "silentCatchCount": 53
+      },
+      "ddl": {
+        "createTable": 33,
+        "alterTable": 212,
+        "createUniqueIndex": 7,
+        "createIndex": 28,
+        "createTrigger": 31,
+        "dropTable": 3,
+        "dropTrigger": 31,
+        "writableSchema": 2,
+        "total": 347
+      }
+    },
+    "full_raspberrypi_bcm27xx_bcm2709": {
+      "silentCatch": {
+        "functionNodeCount": 320,
+        "silentCatchCount": 53
+      },
+      "ddl": {
+        "createTable": 33,
+        "alterTable": 212,
+        "createUniqueIndex": 7,
+        "createIndex": 28,
+        "createTrigger": 31,
+        "dropTable": 3,
+        "dropTrigger": 31,
+        "writableSchema": 2,
+        "total": 347
+      }
+    }
+  },
+  "modulesEmptyCatches": 0
+}

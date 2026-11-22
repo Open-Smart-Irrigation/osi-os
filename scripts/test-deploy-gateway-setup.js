@@ -365,6 +365,8 @@ function runActivationRegion({ logLine, prevStamp, version, migrated = false }) 
     .split('/etc/init.d/node-red restart').join('"$NODE_RED_INIT" restart');
   const script = `set -eu
 ${FW_FUNCTIONS()}
+${extractFunction('recovery_hold_present')}
+${extractFunction('repair_health_start')}
 ${extractFunction('cleanup_failed_first_payload')}
 ${stubs}
 wait_for_node_red_health() { probe_elapsed=1; return 0; }
@@ -372,6 +374,7 @@ hold_node_red_stopped() { return 0; }
 verify_payload_db_compatibility() { return ${migrated ? 1 : 0}; }
 ${startCheck}
 NODE_RED_LOG_MARK=""
+DB_PATH="${fx.binDir}/no-live-db"
 GUI_ROOT=/nonexistent-gui
 PAYLOAD_KEEP_N=5
 PAYLOAD_FLIPPED=0
@@ -445,6 +448,8 @@ function runExitHandler({ version, state }) {
   const stubs = writeEventStubs(fx);
   const script = `set -eu
 ${FW_FUNCTIONS()}
+${extractFunction('recovery_hold_present')}
+${extractFunction('repair_health_start')}
 ${extractFunction('restart_previous_payload')}
 ${extractFunction('cleanup_failed_first_payload')}
 ${extractFunction('deploy_exit_handler')}
@@ -456,6 +461,7 @@ restore_identityd_prior_state() { return 0; }
 verify_payload_db_compatibility() { return 0; }
 restart_node_red() { ${FW_NOW}; echo "restart_node_red fw=$fw" >> "$EVENTS"; return 0; }
 cleanup() { :; }
+DB_PATH="${fx.binDir}/no-live-db"
 GUI_ROOT=/nonexistent-gui
 DEPLOY_STAMP=new-stamp
 DEPLOY_FIRMWARE_VERSION=0.8.0
@@ -532,7 +538,7 @@ test('every switch to the new payload is followed by the write, every switch bac
   // Each forward flip is followed by the write before the next restart.
   for (const i of forward) {
     const rest = lines.slice(i);
-    const restartAt = rest.findIndex((l) => /restart_node_red; then|\/etc\/init\.d\/node-red restart/.test(l));
+    const restartAt = rest.findIndex((l) => /restart_node_red; then|repair_health_start restart|\/etc\/init\.d\/node-red restart/.test(l));
     assert.ok(restartAt > 0, `no restart after the forward flip at line ${i + 1}`);
     assert.match(rest.slice(0, restartAt).join('\n'), /apply_release_firmware_version "\$\{DEPLOY_FIRMWARE_VERSION:-\}"/,
       `forward flip at line ${i + 1}`);

@@ -23,7 +23,7 @@ jobs:
           test "$(readlink -f /bin/sh)" = "$(command -v dash)"
           echo "/bin/sh -> $(readlink -f /bin/sh)"
           dpkg-query -W dash bash
-          for tool in bash node tar sha256sum wget setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
+          for tool in bash node tar gzip sha256sum wget curl setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
             tool_path=$(command -v "$tool") || { echo "missing $tool" >&2; exit 127; }
             echo "$tool=$tool_path"
           done
@@ -33,6 +33,8 @@ jobs:
           DEPLOY_TEST_EXPECT_SH: dash
         run: |
           set -eu
+          sh scripts/deploy-bundle.test.sh
+          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-offline-runtime.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
           sh scripts/deploy-push-bundle.test.sh
           sh scripts/deploy-offline.test.sh
           premarker_log=$(mktemp)
@@ -63,7 +65,7 @@ jobs:
       contents: read
     steps:
       - name: Install fixture prerequisites
-        run: apk add --no-cache bash coreutils util-linux wget tar git
+        run: apk add --no-cache bash coreutils util-linux wget curl tar git gzip
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -73,7 +75,7 @@ jobs:
           busybox --list | grep -qx ash
           test "$(readlink -f /bin/sh)" = "$(command -v busybox)"
           echo "/bin/sh -> $(readlink -f /bin/sh)"
-          for tool in bash node tar sha256sum wget setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
+          for tool in bash node tar gzip sha256sum wget curl setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
             tool_path=$(command -v "$tool") || { echo "missing $tool" >&2; exit 127; }
             echo "$tool=$tool_path"
           done
@@ -83,6 +85,8 @@ jobs:
           DEPLOY_TEST_EXPECT_SH: ash
         run: |
           set -eu
+          sh scripts/deploy-bundle.test.sh
+          node --test --test-concurrency=1 scripts/deploy-bundle-manifest.test.js scripts/deploy-offline-runtime.test.js scripts/deploy-result.test.js scripts/deploy-offline-outcomes.test.js
           sh scripts/deploy-push-bundle.test.sh
           sh scripts/deploy-offline.test.sh
           premarker_log=$(mktemp)

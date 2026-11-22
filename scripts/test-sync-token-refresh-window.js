@@ -209,6 +209,11 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
         setTimeout,
         clearTimeout,
         URL,
+        osiLib: { require(name) {
+          return name === 'installation'
+            ? { ok: true, value: require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper')) }
+            : { ok: false, error: 'unexpected helper' };
+        } },
       },
       scope
     )
@@ -234,8 +239,8 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
     set() {},
   };
   const globalApi = {
-    get() {
-      return undefined;
+    get(key) {
+      return key === 'fs' ? fs : undefined;
     },
     set() {},
   };
@@ -372,6 +377,7 @@ test('Store Refreshed Sync Token logs the new expiry (ISO) on a successful refre
       statusCode: 200,
       payload: { token: 'new-token-value', syncTokenExpiresAt: newExpiresAt },
       _refreshServerUrl: 'https://cloud.example.org',
+      _refreshPriorToken: 'old-token',
     };
     const result = await executeFunctionNode(markNode, responseMsg, {
       flowStore: new Map(),

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgronomicEnvironment } from '../../../types/farming';
 import { cropById, resolveKc } from '../../../agronomy/cropKc';
 import { STAGE_FALLBACK } from '../../../agronomy/stageLabels';
+import { formatWeatherValue } from '../../../utils/forecastFormat';
 import { HelpTip } from '../shared/HelpTip';
 
 interface Props {
@@ -14,22 +15,19 @@ interface Props {
 // ── VPD colour scale ──────────────────────────────────────────────────────────
 // Based on common crop stress thresholds
 
-function vpdConfig(vpd: number): { color: string; label: string; bg: string; border: string } {
-  if (vpd < 0.3)  return { color: '#0ea5e9', label: 'Saturated', bg: 'bg-sky-100',    border: 'border-sky-300' };
-  if (vpd < 0.8)  return { color: '#22c55e', label: 'Low',       bg: 'bg-green-100',  border: 'border-green-300' };
-  if (vpd < 1.5)  return { color: '#f59e0b', label: 'Moderate',  bg: 'bg-amber-100',  border: 'border-amber-300' };
-  if (vpd < 2.5)  return { color: '#f97316', label: 'High',      bg: 'bg-orange-100', border: 'border-orange-300' };
-  return              { color: '#ef4444', label: 'Stress risk', bg: 'bg-red-100',    border: 'border-red-300' };
+function vpdConfig(vpd: number) {
+  if (vpd < 0.3) return { tone: 'info', label: 'saturated' } as const;
+  if (vpd < 0.8) return { tone: 'success', label: 'low' } as const;
+  if (vpd < 1.5) return { tone: 'warn', label: 'moderate' } as const;
+  if (vpd < 2.5) return { tone: 'error', label: 'high' } as const;
+  return { tone: 'error', label: 'stressRisk' } as const;
 }
 
-// ── THI colour scale ──────────────────────────────────────────────────────────
-// Temperature-Humidity Index thresholds
-
-function thiConfig(thi: number): { color: string; label: string } {
-  if (thi < 68)  return { color: '#22c55e', label: 'Normal' };
-  if (thi < 72)  return { color: '#f59e0b', label: 'Alert' };
-  if (thi < 80)  return { color: '#f97316', label: 'Danger' };
-  return             { color: '#ef4444', label: 'Emergency' };
+function thiConfig(thi: number) {
+  if (thi < 68) return { tone: 'success', label: 'normal' } as const;
+  if (thi < 72) return { tone: 'warn', label: 'alert' } as const;
+  if (thi < 80) return { tone: 'error', label: 'danger' } as const;
+  return { tone: 'error', label: 'emergency' } as const;
 }
 
 // ── Source label ─────────────────────────────────────────────────────────────
@@ -37,7 +35,7 @@ function thiConfig(thi: number): { color: string; label: string } {
 function SourceLabel({ source }: { source: string }) {
   const { t } = useTranslation('devices');
   const label = t(`environment.source.${source}`, { defaultValue: source.replace('_', ' ') });
-  return <span className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide">{label}</span>;
+  return <span className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">{label}</span>;
 }
 
 // ── Stat cell ─────────────────────────────────────────────────────────────────
@@ -50,9 +48,9 @@ const StatCell: React.FC<{
   source?: string;
 }> = ({ label, value, unit, color, source }) => (
   <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)] flex flex-col gap-1">
-    <span className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide font-medium">{label}</span>
+    <span className="text-xs text-[var(--text-secondary)] uppercase tracking-wide font-medium">{label}</span>
     <span className="text-xl font-bold tabular-nums" style={color ? { color } : undefined}>
-      {value != null ? `${value}${unit ? ` ${unit}` : ''}` : '—'}
+      {value != null ? `${value}${unit ? `\u00a0${unit}` : ''}` : '—'}
     </span>
     {source && <SourceLabel source={source} />}
   </div>
@@ -72,7 +70,7 @@ interface ETSectionProps {
 const ETSection: React.FC<ETSectionProps> = ({
   et0, serverKc, serverKcSource, serverEtc, cropType, phenologicalStage,
 }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
 
   // Server value first, then the FAO-56 resolver (the edge helper's twin).
   const resolved = resolveKc({ cropType, phenologicalStage });
@@ -87,35 +85,35 @@ const ETSection: React.FC<ETSectionProps> = ({
   return (
     <div className="flex flex-col gap-2">
       <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">
-        Evapotranspiration
+        {t('environment.agronomic.evapotranspiration', { defaultValue: 'Evapotranspiration' })}
       </p>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <StatCell
           label={t('environment.agronomic.et0', { defaultValue: 'Reference ET₀' })}
-          value={et0 != null ? et0.toFixed(2) : null}
+          value={et0 != null ? formatWeatherValue(et0, i18n.language, 2) : null}
           unit="mm/day"
-          color="#0ea5e9"
+          color="var(--info-text)"
         />
         <div className="bg-[var(--card)] rounded-xl p-3 border border-[var(--border)] flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide font-medium">
+            <span className="text-xs text-[var(--text-secondary)] uppercase tracking-wide font-medium">
               {t('environment.agronomic.kc', { defaultValue: 'Crop coeff. Kc' })}
             </span>
             {crop && (
               <HelpTip label={t('environment.agronomic.kcHelpLabel', { defaultValue: 'About the crop coefficient' })}>
                 {t('environment.agronomic.kcHelp', {
                   crop: crop.label,
-                  ini: crop.kc_ini.toFixed(2),
-                  mid: crop.kc_mid.toFixed(2),
-                  end: crop.kc_end.toFixed(2),
+                  ini: formatWeatherValue(crop.kc_ini, i18n.language, 2),
+                  mid: formatWeatherValue(crop.kc_mid, i18n.language, 2),
+                  end: formatWeatherValue(crop.kc_end, i18n.language, 2),
                   stage: stageLabel,
                   defaultValue: 'FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}.',
                 })}
               </HelpTip>
             )}
           </div>
-          <span className="text-xl font-bold tabular-nums" style={{ color: '#8b5cf6' }}>
-            {kc.toFixed(2)}
+          <span className="text-xl font-bold tabular-nums" style={{ color: 'var(--info-text)' }}>
+            {formatWeatherValue(kc, i18n.language, 2)}
           </span>
           {serverProvided ? (
             serverKcSource ? <SourceLabel source={serverKcSource} /> : null
@@ -131,9 +129,9 @@ const ETSection: React.FC<ETSectionProps> = ({
         </div>
         <StatCell
           label={t('environment.agronomic.etc', { defaultValue: 'Crop ET' })}
-          value={etc != null ? etc.toFixed(2) : null}
+          value={etc != null ? formatWeatherValue(etc, i18n.language, 2) : null}
           unit="mm/day"
-          color="#16a34a"
+          color="var(--success-text)"
         />
       </div>
     </div>
@@ -143,7 +141,7 @@ const ETSection: React.FC<ETSectionProps> = ({
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export const AgronomicTab: React.FC<Props> = ({ agronomic, cropType, phenologicalStage }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
 
   if (!agronomic.current) {
     return (
@@ -165,22 +163,28 @@ export const AgronomicTab: React.FC<Props> = ({ agronomic, cropType, phenologica
     <div className="flex flex-col gap-4">
       {/* VPD highlight */}
       {a.vpdKpa != null && vpdCfg && (
-        <div className={`rounded-xl border-2 p-4 ${vpdCfg.bg} ${vpdCfg.border}`}>
-          <div className="flex items-center justify-between">
+        <div
+          className="rounded-xl border-2 p-4"
+          style={{
+            background: `var(--${vpdCfg.tone}-bg)`,
+            borderColor: vpdCfg.tone === 'error' ? 'var(--danger-fg)' : `var(--${vpdCfg.tone}-border)`,
+          }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: vpdCfg.color }}>
+              <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: `var(--${vpdCfg.tone}-text)` }}>
                 {t('environment.agronomic.vpd', { defaultValue: 'VPD' })}
               </p>
-              <p className="text-3xl font-bold tabular-nums" style={{ color: vpdCfg.color }}>
-                {a.vpdKpa.toFixed(2)} kPa
+              <p className="text-3xl font-bold tabular-nums" style={{ color: `var(--${vpdCfg.tone}-text)` }}>
+                {formatWeatherValue(a.vpdKpa, i18n.language, 2, 'kPa')}
               </p>
             </div>
             <div className="text-right">
               <span
                 className="text-sm font-bold rounded-lg px-3 py-1"
-                style={{ color: vpdCfg.color, background: 'rgba(255,255,255,0.6)' }}
+                style={{ color: `var(--${vpdCfg.tone}-text)`, background: `var(--${vpdCfg.tone}-bg)` }}
               >
-                {vpdCfg.label}
+                {t(`environment.agronomic.vpdStatus.${vpdCfg.label}`)}
               </span>
               {a.thermodynamicSource && (
                 <div className="mt-1">
@@ -195,34 +199,34 @@ export const AgronomicTab: React.FC<Props> = ({ agronomic, cropType, phenologica
       {/* Thermodynamic 2×2 grid */}
       <div>
         <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2">
-          Conditions
+          {t('environment.agronomic.conditions', { defaultValue: 'Conditions' })}
         </p>
         <div className="grid grid-cols-2 gap-2">
           <StatCell
-            label="Air Temperature"
-            value={a.airTemperatureC != null ? a.airTemperatureC.toFixed(1) : null}
+            label={t('environment.metrics.air_temperature_c', { defaultValue: 'Air temperature' })}
+            value={a.airTemperatureC != null ? formatWeatherValue(a.airTemperatureC, i18n.language, 1) : null}
             unit="°C"
-            color="#f97316"
+            color="var(--warn-text)"
             source={a.thermodynamicSource ?? undefined}
           />
           <StatCell
-            label="Humidity"
-            value={a.relativeHumidityPct != null ? a.relativeHumidityPct.toFixed(0) : null}
+            label={t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' })}
+            value={a.relativeHumidityPct != null ? formatWeatherValue(a.relativeHumidityPct, i18n.language, 0) : null}
             unit="%"
-            color="#06b6d4"
+            color="var(--info-text)"
             source={a.thermodynamicSource ?? undefined}
           />
           <StatCell
             label={t('environment.agronomic.dewPoint', { defaultValue: 'Dew point' })}
-            value={a.dewPointC != null ? a.dewPointC.toFixed(1) : null}
+            value={a.dewPointC != null ? formatWeatherValue(a.dewPointC, i18n.language, 1) : null}
             unit="°C"
-            color="#38bdf8"
+            color="var(--info-text)"
           />
           <StatCell
             label={t('environment.agronomic.heatIndex', { defaultValue: 'Heat index' })}
-            value={a.heatIndexC != null ? a.heatIndexC.toFixed(1) : null}
+            value={a.heatIndexC != null ? formatWeatherValue(a.heatIndexC, i18n.language, 1) : null}
             unit="°C"
-            color="#fb923c"
+            color="var(--warn-text)"
           />
         </div>
       </div>
@@ -243,14 +247,14 @@ export const AgronomicTab: React.FC<Props> = ({ agronomic, cropType, phenologica
           <span className="text-[var(--text-secondary)]">
             {t('environment.agronomic.thi', { defaultValue: 'THI' })}
           </span>
-          <span className="font-bold tabular-nums" style={{ color: thiCfg.color }}>
-            {a.thi.toFixed(0)}
+          <span className="font-bold tabular-nums" style={{ color: `var(--${thiCfg.tone}-text)` }}>
+            {formatWeatherValue(a.thi, i18n.language, 0)}
           </span>
           <span
             className="rounded-full px-2 py-0.5 text-xs font-semibold"
-            style={{ color: thiCfg.color, background: thiCfg.color + '1a' }}
+            style={{ color: `var(--${thiCfg.tone}-text)`, background: `var(--${thiCfg.tone}-bg)` }}
           >
-            {thiCfg.label}
+            {t(`environment.agronomic.thiStatus.${thiCfg.label}`)}
           </span>
         </div>
       )}

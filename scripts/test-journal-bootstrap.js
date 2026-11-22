@@ -469,6 +469,7 @@ function identityGlobal(options) {
   const restartState = String((options && options.identityRestartState) || 'missing');
   const restartPath = '/var/run/osi-identity-restart.json';
   const fsGlobal = {
+    readdirSync() { return []; },
     existsSync(filePath) {
       return filePath === restartPath && restartState !== 'missing';
     },

@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { functionSource } = require('./flow-function-source');
 const test = require('node:test');
 const {
   executeFunction,
@@ -1029,8 +1030,9 @@ test('E8: disable-all scopes an admin to owned-plus-granted zones like every oth
 
 test('W2: scheduler query counts enabled scope holders and disables an empty zone', async () => {
   const queryNode = loadNode('a0a61f4b7dca1c2e');
-  assert.match(queryNode.func, /enabled_scope_holders/);
-  assert.match(queryNode.func, /user_zone_assignments/);
+  const querySource = functionSource(queryNode, require('node:path').resolve(__dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'));
+  assert.match(querySource, /enabled_scope_holders/);
+  assert.match(querySource, /user_zone_assignments/);
 
   const db = seedScopedDb(VALVE_EUI);
   try {
