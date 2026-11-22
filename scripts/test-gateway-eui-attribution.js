@@ -9,6 +9,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { verifyFlows } = require('./verify-trigger-body-parity.js');
 const { executeFunction, facadeDb, loadNode } = require('./lib/flow-node-harness.js');
+const { accountGatewayIo, accountStageSource, helperFunctionSource } = require('./lib/installation-osi-lib');
 
 const seedPath = path.join(__dirname, '..', 'database', 'seed-blank.sql');
 const seed = fs.readFileSync(seedPath, 'utf8');
@@ -16,10 +17,12 @@ const LINK_EUI = 'AABBCCDDEEFF0011';
 const RELINK_EUI = '1122334455667788';
 const INSTALLATION_UUID = '00000000-0000-4000-8000-000000000099';
 const FINALIZE_NODE = loadNode('al-link-finalize');
+const BUILD_NODE = loadNode('al-link-build-req');
 const installation = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper');
 // Account linking captures a durable link attempt (Task 7b2): the request builder begins it, the
 // auth-response handler validates the server's context and capabilities, and finalization accepts
-// only that attempt. The harness runs the real replication helper for the first step and hands
+// only that attempt. The harness runs the real request builder (al-link-build-req), which also
+// claims the in-process account operation that finalization requires (EB2), and hands
 // finalization the validated context, as al-link-handle-auth does.
 const replication = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication');
 const SERVER_URL = 'https://sync.example.test';
@@ -50,10 +53,58 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
   const stamp = new Date().toISOString();
   db.prepare("INSERT INTO installation_identity(singleton_id, installation_uuid, current_gateway_device_eui, created_at, updated_at) VALUES (1, ?, ?, ?, ?) ON CONFLICT(singleton_id) DO UPDATE SET current_gateway_device_eui=excluded.current_gateway_device_eui, updated_at=excluded.updated_at")
     .run(INSTALLATION_UUID, eui, stamp, stamp);
-  const attempt = await replication.beginLinkAttempt(base, { context: { server_url: SERVER_URL, gateway_device_eui: eui, installation_uuid: INSTALLATION_UUID }, now: new Date().toISOString(), supersede: true });
+  const osiLib = {
+    require(name) {
+      if (name === 'installation') return { ok: true, value: installation };
+      if (name === 'osi-irrigation-policy') return { ok: true, value: replication };
+      return { ok: false, error: `unregistered test helper: ${name}` };
+    },
+  };
+  // One in-memory gateway per link attempt: build and finalize share its
+  // account journal and UCI section. A fresh one per attempt models the
+  // daemon-owned restart that completes between attempts (EB2).
+  const io = accountGatewayIo();
+  const build = await executeFunction(BUILD_NODE, {
+    db,
+    msg: { authUserId: 1, authUsername: 'identity-test' },
+    flowState: {
+      al_server_url: SERVER_URL,
+      al_action: 'link',
+      al_server_username: 'server-user',
+      al_gateway_device_eui: eui,
+      al_gateway_device_eui_confidence: 'authoritative',
+    },
+    globals: { fs: io.fs, cp: io.cp },
+    libOverrides: { osiDb: { Database: function Database() { return base; } }, osiLib },
+  });
+  const [request, buildError] = build.result;
+  assert.equal(buildError, null, 'link request build must succeed: ' + JSON.stringify(buildError && buildError.payload));
+  assert.ok(request._alOperationId, 'the request builder claims the account operation');
+  assert.ok(request._alLinkAttemptNonce, 'the request builder begins the link attempt');
+  // Finalization reads the per-request account state that travels on the
+  // message from al-link-validate through build and handle (EB2). The handler
+  // adds the verified server account, the credentials and the MQTT settings.
+  const finalizeState = {
+    al_local_username: 'identity-test',
+    al_verified_server_username: 'server-user',
+    al_offline_verifier: 'offline-verifier',
+    al_offline_verifier_version: 2,
+    al_server_url: SERVER_URL,
+    al_server_sync_token: 'sync-token',
+    al_server_sync_token_expires_at: Date.now() + 3600000,
+    al_cloud_user_id: 42,
+    al_installation_uuid: INSTALLATION_UUID,
+    al_gateway_device_eui: eui,
+    al_local_user_id: 1,
+    al_mqtt_password: 'mqtt-secret',
+    al_mqtt_broker_url: 'wss://mqtt.example.test:443',
+  };
   const msg = {
-    _alLinkAttemptNonce: attempt.nonce,
-    _alLinkRequestId: attempt.request_id || null,
+    // Keys the builder left unset are dropped, as a message copy drops them.
+    _alState: Object.assign(JSON.parse(JSON.stringify(request._alState)), finalizeState),
+    _alOperationId: request._alOperationId,
+    _alLinkAttemptNonce: request._alLinkAttemptNonce,
+    _alLinkRequestId: request._alLinkRequestId || null,
     _alLinkValidatedContext: context,
     _alLinkCapabilities: ['conditional_irrigation_v1'],
   };
@@ -85,28 +136,9 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
     db,
     msg,
     env: { DEVICE_EUI: 'FFEEDDCCBBAA0099' },
-    flowState: {
-      al_local_username: 'identity-test',
-      al_verified_server_username: 'server-user',
-      al_offline_verifier: 'offline-verifier',
-      al_offline_verifier_version: 2,
-      al_server_url: SERVER_URL,
-      al_server_sync_token: 'sync-token',
-      al_server_sync_token_expires_at: Date.now() + 3600000,
-      al_cloud_user_id: 42,
-      al_installation_uuid: INSTALLATION_UUID,
-      al_gateway_device_eui: eui,
-    },
-    libOverrides: {
-      osiDb: database,
-      osiLib: {
-        require(name) {
-          if (name === 'installation') return { ok: true, value: installation };
-          if (name === 'osi-irrigation-policy') return { ok: true, value: replication };
-          return { ok: false, error: `unregistered test helper: ${name}` };
-        },
-      },
-    },
+    flowState: {},
+    globals: { fs: io.fs, cp: io.cp },
+    libOverrides: { osiDb: database, osiLib },
   });
   return Object.assign(execution, { msg: sent });
 }
@@ -243,10 +275,15 @@ test('finalization source uses one transaction for link state and identity backf
     const flow = JSON.parse(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
     const node = flow.find((item) => item.name === 'Finalize linked account state');
     assert.ok(node);
-    assert.match(node.func, /await db\.transaction\(async \(tx\) => \{/);
-    assert.match(node.func, /UPDATE devices SET gateway_device_eui = \?/);
-    assert.match(node.func, /UPDATE irrigation_zones SET gateway_device_eui = \?/);
-    assert.match(node.func, /await tx\.run\(/g);
+    // The node delegates to the installation helper's finalize stage (EB2).
+    const profile = file.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+    const finalize = accountStageSource(flow, profile, node.id, 'finalize', 'accountLink_finalize');
+    assert.match(finalize, /await accountConfigTransaction\(db, \{[\s\S]*?\}, async \(tx\) => \{/);
+    assert.match(finalize, /UPDATE devices SET gateway_device_eui = \?/);
+    assert.match(finalize, /UPDATE irrigation_zones SET gateway_device_eui = \?/);
+    assert.match(finalize, /await tx\.run\(/g);
+    // accountConfigTransaction runs the finalizer's writes inside one SQLite transaction.
+    assert.match(helperFunctionSource(profile, 'accountConfigTransaction'), /await db\.transaction\(async tx => \{[\s\S]*?await mutate\(tx\);/);
   }
 });
 

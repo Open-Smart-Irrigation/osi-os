@@ -26,24 +26,91 @@ function installationOsiLib(profile = 'bcm27xx_bcm2712', extra = {}) {
   };
 }
 
-// The account-link request builder moved from the al-link-build-req function
-// node into the helper's accountLink_build stage; the node only delegates. This
-// returns the source of that stage after checking the delegation, so tests that
-// inspect the link request's capability list read it where it now lives.
-function linkBuilderSource(flows, profile = 'bcm27xx_bcm2712') {
-  const node = flows.find((candidate) => candidate.id === 'al-link-build-req');
-  assert.ok(node, `${profile}: al-link-build-req exists`);
-  assert.ok((node.libs || []).some((lib) => lib.var === 'osiLib' && lib.module === 'osi-lib'), `${profile}: al-link-build-req loads helpers through osi-lib`);
-  assert.match(node.func, /osiLib\.require\('installation'\)/, `${profile}: al-link-build-req loads the installation helper`);
-  assert.match(node.func, /return load\.value\.accountLinkStage\('build',/, `${profile}: al-link-build-req delegates to the build stage`);
+// Source of one async top-level function of the profile's installation helper.
+// The stage handlers declare plain helper functions at column 0 inside their
+// bodies, so a handler ends only at the next async function or the exports.
+function helperFunctionSource(profile, name) {
   const source = fs.readFileSync(path.join(installationHelperPath(profile), 'index.js'), 'utf8');
-  assert.match(source, /\bbuild: accountLink_build\b/, `${profile}: the build stage is accountLink_build`);
-  const start = source.indexOf('async function accountLink_build(');
-  assert.ok(start >= 0, `${profile}: accountLink_build is defined`);
-  const end = source.indexOf('\nasync function ', start + 1);
-  const body = source.slice(start, end < 0 ? undefined : end);
+  const start = source.search(new RegExp('^async function ' + name + '\\(', 'm'));
+  assert.ok(start >= 0, `${profile}: ${name} is defined in the installation helper`);
+  const rest = source.slice(start + 1);
+  const next = rest.search(/^async function |^module\.exports/m);
+  return source.slice(start, next < 0 ? undefined : start + 1 + next);
+}
+
+// The account-link stages moved from their function nodes into the helper's
+// accountLinkStage handlers; each node only delegates. This returns the source
+// of the handler a node delegates to, after checking the delegation, so tests
+// that inspect a stage read it where it now lives.
+function accountStageSource(flows, profile, nodeId, stage, handler) {
+  const node = flows.find((candidate) => candidate.id === nodeId);
+  assert.ok(node, `${profile}: ${nodeId} exists`);
+  assert.ok((node.libs || []).some((lib) => lib.var === 'osiLib' && lib.module === 'osi-lib'), `${profile}: ${nodeId} loads helpers through osi-lib`);
+  assert.match(node.func, /osiLib\.require\('installation'\)/, `${profile}: ${nodeId} loads the installation helper`);
+  assert.match(node.func, new RegExp("return load\\.value\\.accountLinkStage\\('" + stage + "',"), `${profile}: ${nodeId} delegates to the ${stage} stage`);
+  assert.match(helperFunctionSource(profile, 'accountLinkStage'), new RegExp('\\b' + stage + ': ' + handler + '\\b'), `${profile}: the ${stage} stage is ${handler}`);
+  return helperFunctionSource(profile, handler);
+}
+
+// The link request (al-link-build-req) and its capability list.
+function linkBuilderSource(flows, profile = 'bcm27xx_bcm2712') {
+  const body = accountStageSource(flows, profile, 'al-link-build-req', 'build', 'accountLink_build');
   assert.match(body, /msg\.payload = \{[^}]*\bsyncCapabilities \};/, `${profile}: the link request sends syncCapabilities`);
   return body;
 }
 
-module.exports = { installationOsiLib, installationHelperPath, linkBuilderSource };
+// In-memory gateway IO for the account stages (global 'fs' and 'cp'): the
+// account journal, queued restart requests and the UCI osi-server.cloud
+// section live in maps, so a harness never touches the host's /data, /var/run
+// or uci. One instance models one gateway between Node-RED restarts.
+function accountGatewayIo() {
+  const files = new Map();
+  const config = new Map();
+  const descriptors = new Map();
+  let nextFd = 1;
+  const missing = () => Object.assign(new Error('missing fixture file'), { code: 'ENOENT' });
+  const io = {
+    files,
+    config,
+    fs: {
+      existsSync: (p) => files.has(p),
+      readFileSync: (p) => { if (!files.has(p)) throw missing(); return files.get(p); },
+      readdirSync: (p) => [...files.keys()].filter((file) => path.dirname(file) === p).map((file) => path.basename(file)),
+      openSync: (p, flags) => {
+        if (flags === 'wx') { if (files.has(p)) throw Object.assign(new Error('exists'), { code: 'EEXIST' }); files.set(p, ''); }
+        const fd = nextFd++;
+        descriptors.set(fd, p);
+        return fd;
+      },
+      writeFileSync: (p, data) => { files.set(typeof p === 'number' ? descriptors.get(p) : p, String(data)); },
+      fsyncSync() {},
+      closeSync: (fd) => { descriptors.delete(fd); },
+      renameSync: (from, to) => { if (!files.has(from)) throw missing(); files.set(to, files.get(from)); files.delete(from); },
+      unlinkSync: (p) => { if (!files.delete(p)) throw missing(); },
+      mkdirSync() {},
+    },
+    cp: {
+      execFileSync(command, args) {
+        assert.equal(command, 'uci');
+        if (args.includes('get')) {
+          const key = args.at(-1);
+          if (!config.has(key)) throw Object.assign(new Error('missing'), { status: 1 });
+          return config.get(key);
+        }
+        if (args[0] === 'set') { const at = args[1].indexOf('='); config.set(args[1].slice(0, at), args[1].slice(at + 1)); }
+        if (args.includes('delete')) config.delete(args.at(-1));
+        return '';
+      },
+    },
+  };
+  return io;
+}
+
+module.exports = {
+  installationOsiLib,
+  installationHelperPath,
+  helperFunctionSource,
+  accountStageSource,
+  linkBuilderSource,
+  accountGatewayIo,
+};
