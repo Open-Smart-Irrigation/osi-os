@@ -1,6 +1,6 @@
 --- a/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
 +++ b/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
-@@ -8401,7 +8401,7 @@
+@@ -8469,7 +8469,7 @@
      "type": "function",
      "z": "dendro-analytics-tab",
      "name": "Get Zone Environment Summary",
@@ -9,7 +9,7 @@
      "outputs": 1,
      "noerr": 0,
      "initialize": "",
-@@ -9826,7 +9826,7 @@
+@@ -9918,7 +9918,7 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Query today-liters",
@@ -18,7 +18,7 @@
      "outputs": 1,
      "timeout": "",
      "noerr": 0,
-@@ -10316,7 +10316,7 @@
+@@ -10408,7 +10408,7 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Build Query",
@@ -27,7 +27,7 @@
      "outputs": 2,
      "noerr": 0,
      "initialize": "",
-@@ -10347,12 +10347,17 @@
+@@ -10439,12 +10439,17 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Format Response",
@@ -49,7 +49,7 @@
      "wires": [
 --- a/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
 +++ b/conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json
-@@ -8401,7 +8401,7 @@
+@@ -8469,7 +8469,7 @@
      "type": "function",
      "z": "dendro-analytics-tab",
      "name": "Get Zone Environment Summary",
@@ -58,7 +58,7 @@
      "outputs": 1,
      "noerr": 0,
      "initialize": "",
-@@ -9826,7 +9826,7 @@
+@@ -9918,7 +9918,7 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Query today-liters",
@@ -67,7 +67,7 @@
      "outputs": 1,
      "timeout": "",
      "noerr": 0,
-@@ -10316,7 +10316,7 @@
+@@ -10408,7 +10408,7 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Build Query",
@@ -76,7 +76,7 @@
      "outputs": 2,
      "noerr": 0,
      "initialize": "",
-@@ -10347,12 +10347,17 @@
+@@ -10439,12 +10439,17 @@
      "type": "function",
      "z": "device-api-tab",
      "name": "Format Response",
@@ -107,13 +107,13 @@
    "profiles": {
      "bcm2712": {
        "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
--      "silentCatchCount": 65
-+      "silentCatchCount": 59
+-      "silentCatchCount": 53
++      "silentCatchCount": 47
      },
      "bcm2709": {
        "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
--      "silentCatchCount": 65
-+      "silentCatchCount": 59
+-      "silentCatchCount": 53
++      "silentCatchCount": 47
      }
    }
  }
