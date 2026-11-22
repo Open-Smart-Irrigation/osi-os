@@ -15,7 +15,7 @@ from archives import verified_archive
 from minimal_flows import (
     CUT_RECEIPT, INIT, derive_probe_image, has_atomic_publish, prepare_probe_release, verify_disk,
 )
-from suite_vm import FLOWS_COMMITTED, Guest, external_path
+from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
 
@@ -132,17 +132,73 @@ def expected_cases(args, image_capability, customer_selected, *, historical=Fals
     return cases
 
 
-def ready(vm):
-    checked(vm, """for i in $(seq 1 180); do
-if test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; then
-ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0
+READY_PROBE = """test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/"""
+READY_ADDRESS = """ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0"""
+READY_POLL_SECONDS = 3
+# Hard bound on one wget probe, enforced by a shell watchdog. wget -T alone
+# does not bound a probe: the image's uclient-fetch rearms its timeout on
+# every chunk of body data, and old images may ship another wget.
+READY_WGET_SECONDS = 4
+# Worst case for one probe round: two bounded wget calls.
+READY_PROBE_SECONDS = 2 * READY_WGET_SECONDS
+# Shell start, the address step, watchdog reaping and the hex-encoded reply
+# over the console.
+READY_COMMAND_SLACK_SECONDS = 60
+# Portable watchdog: no busybox timeout applet in the images. "$@" & makes
+# $p the wget process itself, so kill -9 ends it whatever it is doing.
+READY_SLOW_PROBE = f"""up() {{ cut -d. -f1 /proc/uptime; }}
+left() {{ [ "$(up)" -lt "$end" ]; }}
+bounded() {{ "$@" & p=$!; ( sleep {READY_WGET_SECONDS}; kill -9 "$p" 2>/dev/null ) & w=$!; wait "$p"; rc=$?; kill "$w" 2>/dev/null; return $rc; }}
+probe() {{ test -s /data/db/farming.db && left && bounded wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && left && bounded wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; }}"""
+
+
+def ready_host_timeout(budget, poll=READY_POLL_SECONDS):
+    # A probe starts only before the guest deadline and each is killed after
+    # READY_WGET_SECONDS, so the loop ends by budget + one round + one poll.
+    return budget + READY_PROBE_SECONDS + poll + READY_COMMAND_SLACK_SECONDS
+
+
+def ready_script(budget=None, poll=READY_POLL_SECONDS):
+    if budget is None:
+        # Unchanged legacy wait: 180 rounds, 800 s on the host.
+        return f"""for i in $(seq 1 180); do
+if {READY_PROBE}; then
+{READY_ADDRESS}
 exit $?
 fi
 sleep 3
 done
-exit 1""", 800)
+exit 1""", 800
+    # Guest wall-clock deadline (uptime, so clock steps do not move it):
+    # probe time counts against the budget, and no probe starts past it.
+    return f"""{READY_SLOW_PROBE}
+end=$(( $(up) + {budget} ))
+while left; do
+if probe; then
+{READY_ADDRESS}
+exit $?
+fi
+sleep {poll}
+done
+exit 1""", ready_host_timeout(budget, poll)
+
+
+def ready(vm, *, budget=None, poll=READY_POLL_SECONDS):
+    script, timeout = ready_script(budget, poll)
+    checked(vm, script, timeout)
     if sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('integrity check failed')
+
+
+def upgrade_boot_ready(vm, old):
+    # Only the 0.8.1 boot failed on a slow host (about 6x slower, out of polls
+    # before the upgrade began), and every flows-cut, minimal-cut, recovery and
+    # transfer case boots 0.8.1. It gets the before_console budget
+    # (SLOW_BOOT_SECONDS); the stock 0.8.0 upgrade keeps the default wait.
+    if old == '0.8.1':
+        ready(vm, budget=SLOW_BOOT_SECONDS)
+    else:
+        ready(vm)
 
 
 def gui(vm, password, mode, *args):
@@ -457,7 +513,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 guest.start(flow_cut='committed')
             else:
                 guest.start()
-            ready(guest)
+            upgrade_boot_ready(guest, old)
             previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer,
                                release=probe_release if minimal else release)
             if recovery == 'zero':

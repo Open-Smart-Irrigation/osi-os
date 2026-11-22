@@ -8,7 +8,7 @@ import tarfile
 import time
 
 from archives import verified_archive
-from suite_vm import Guest, external_path
+from suite_vm import SLOW_BOOT_SECONDS, Guest, external_path
 from upgrade_suite import DB, MOUNT_USB, build_media, checked, sql
 
 FILES = (
@@ -273,7 +273,9 @@ def run(args, scratch, receipts, release, ready):
                receipts=evidence, private=True)
     try:
         vm.start()
-        ready(vm)
+        # Old-release boots (0.7.0, then 0.8.1) get the slow-boot budget, as in
+        # acceptance.verify_upgrade; the candidate boot keeps the default.
+        ready(vm, budget=SLOW_BOOT_SECONDS)
         version(vm, '0.7.0', '4.12.1')
         checked(vm, FILESYSTEM)
         if sql(vm, 'SELECT (SELECT count(*) FROM users)+(SELECT count(*) FROM devices)+(SELECT count(*) FROM device_data);') != '0':
@@ -282,7 +284,7 @@ def run(args, scratch, receipts, release, ready):
         if rom_asset != identity['rom_gui_sha256']:
             raise FixtureFailure('private guest ROM GUI differs from the qualification pin')
         track_install(vm, log, 'legacy', 'customer-install.sh', 'customer.tar.gz', 'customer-cache.tar')
-        ready(vm)
+        ready(vm, budget=SLOW_BOOT_SECONDS)
         version(vm, '0.8.1', '4.12.1')
         if not rom_asset or rom_asset != checked(vm, 'sha256sum /rom/usr/lib/node-red/gui/index.html | cut -d " " -f 1'):
             raise FixtureFailure('customer overlay changed the factory GUI')

@@ -48,6 +48,14 @@ def reap(process, cut=False):
         return process.wait(timeout=5)
 
 
+# Budget for a boot that has to get far into its first start: the before_console
+# marker, and acceptance.ready() on the old-release (0.8.1) boot of the upgrade
+# cases. On a loaded host the 0.8.1 boot, which carries no candidate code, ran
+# about 6x slower and ran out of the old 300 s marker wait and 180-poll ready()
+# before the upgrade began; a passing rerun on the same image needed 348 s in
+# ready() and up to 204 s to the marker.
+SLOW_BOOT_SECONDS = 900
+
 # PID 1 runs only the shell and the setup needed by mount_root. OpenWrt
 # normally creates block nodes through procd, which must stay stopped here.
 INSPECTION_INIT = (
@@ -142,7 +150,7 @@ class Guest:
             self.send(b'stty -echo\n')
             return
         if before_console is not None:
-            return self.expect(before_console, 300).groups()
+            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
         self.expect(b'Please press Enter to activate this console',180)
         self.send(b'\n')
         self.expect(b':~#',40)
@@ -151,6 +159,60 @@ class Guest:
 
     def stderr(self, filename, mode):
         return open(os.devnull, mode) if self.private else (self.work/filename).open(mode)
+
+    # Per-boot console receipt: the first SERIAL_HEAD_BYTES go to disk as they
+    # arrive; past that only the last SERIAL_TAIL_BYTES are kept and written
+    # after a truncation marker when the boot stops. The parser still sees
+    # every byte through expect().
+    SERIAL_HEAD_BYTES = 16 * 1024 * 1024
+    SERIAL_TAIL_BYTES = 4 * 1024 * 1024
+    # Bound on reading leftover console output in stop(), so a writer that
+    # survived a failed reap cannot hold up cleanup.
+    DRAIN_SECONDS = 2
+
+    def serial_state(self):
+        state = getattr(self, 'serial', None)
+        if state is None or state['boot'] != self.boots:
+            state = self.serial = {'boot': self.boots, 'written': 0, 'omitted': 0, 'tail': bytearray()}
+        return state
+
+    def capture(self, chunk):
+        # Every console byte of every boot, for diagnosis of a boot that never
+        # reached its marker. The private customer fixture keeps no console.
+        # Non-private runs keep every guest command's hex-encoded output here;
+        # they boot synthetic fixtures only, so the file holds no field data.
+        if self.private:
+            return
+        state = self.serial_state()
+        head = chunk[:max(0, self.SERIAL_HEAD_BYTES - state['written'])]
+        if head:
+            with (self.receipts/f'qemu-{self.boots}.serial').open('ab') as trace:
+                trace.write(head)
+            state['written'] += len(head)
+        rest = chunk[len(head):]
+        if rest:
+            tail = state['tail']
+            tail += rest
+            if len(tail) > self.SERIAL_TAIL_BYTES:
+                state['omitted'] += len(tail) - self.SERIAL_TAIL_BYTES
+                del tail[:len(tail) - self.SERIAL_TAIL_BYTES]
+
+    def finish_serial(self):
+        if self.private:
+            return
+        state = self.serial_state()
+        if not state['tail']:
+            return
+        with (self.receipts/f'qemu-{self.boots}.serial').open('ab') as trace:
+            trace.write(f'\n[osi-harness: {state["omitted"]} console bytes omitted after the first '
+                        f'{self.SERIAL_HEAD_BYTES}; last {len(state["tail"])} follow]\n'.encode())
+            trace.write(state['tail'])
+        state['tail'] = bytearray()
+
+    def note(self, line):
+        if not self.private:
+            with (self.receipts/'harness-events.log').open('a') as log:
+                print(f'boot={self.boots} {line}', file=log)
 
     def send(self, data):
         self.process.stdin.write(data)
@@ -170,6 +232,14 @@ class Guest:
             if not chunk:
                 raise RuntimeError('guest serial closed')
             self.buf=(self.buf+chunk)[-2_000_000:]
+            try:
+                self.capture(chunk)
+            except OSError as error:
+                # The receipt is diagnostics; the parser keeps every byte.
+                try:
+                    self.note(f'console receipt write failed: {error!r}')
+                except OSError:
+                    pass
 
     def command(self, shell, timeout=90, *, until=None):
         tag=secrets.token_hex(8)
@@ -208,6 +278,12 @@ class Guest:
                 setattr(self, attr, None)
             except Exception as exc:
                 errors.append(exc)
+            if attr == 'process':
+                self.drain(process)
+                try:
+                    self.finish_serial()
+                except OSError as exc:
+                    errors.append(exc)
             for pipe in (process.stdin, process.stdout):
                 if pipe is not None:
                     try:
@@ -222,6 +298,30 @@ class Guest:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup('guest cleanup or exit receipt failed', errors)
+
+    def drain(self, process):
+        # Best effort: keep the console output QEMU wrote after the last expect().
+        # Diagnostics only, so no failure here may mask the cleanup result.
+        deadline = time.monotonic() + self.DRAIN_SECONDS
+        try:
+            while process.stdout is not None:
+                wait = deadline - time.monotonic()
+                if wait <= 0:
+                    self.note(f'console drain gave up after {self.DRAIN_SECONDS} s; QEMU output not at EOF')
+                    return
+                if not select.select([process.stdout], [], [], min(wait, 0.1))[0]:
+                    if process.poll() is not None:
+                        return
+                    continue
+                rest = os.read(process.stdout.fileno(), 65536)
+                if not rest:
+                    return
+                self.capture(rest)
+        except Exception as error:
+            try:
+                self.note(f'console drain failed: {error!r}')
+            except Exception:
+                pass
 
     def wait_for_reboot(self):
         self.process.wait(timeout=600)

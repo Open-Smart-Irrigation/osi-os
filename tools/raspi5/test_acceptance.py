@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 from types import SimpleNamespace
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -26,7 +27,7 @@ import customer_fixture
 import minimal_flows
 import radio_suite
 import run
-from suite_vm import FLOWS_COMMITTED, Guest, external_path
+from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 import upgrade_suite
 
 
@@ -1179,13 +1180,18 @@ sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
                       patch.object(acceptance, 'checked', side_effect=checked),
                       patch.object(acceptance, 'wait_for_api') as api,
                       patch.object(acceptance, 'stock_cases', side_effect=stock),
-                      patch.object(acceptance, 'ready'), patch.object(acceptance, 'verify_disk') as disk,
+                      patch.object(acceptance, 'ready') as ready, patch.object(acceptance, 'verify_disk') as disk,
                       patch.object(acceptance, 'build_media'), patch.object(acceptance, 'upgrade') as upgrade):
                     if fault == 'clone':
                         disk.side_effect = RuntimeError('clone failed')
                     self.assertEqual(acceptance.run_cases(args, root, root, root, 'minimal', False),
                                      int(fault != 'none'))
                 derive_image.assert_called_once()
+                # Stock 0.8.0 upgrade keeps the default wait; both 0.8.1 boots get the slow-boot budget.
+                vm = guest.return_value
+                self.assertEqual(ready.call_args_list, [unittest.mock.call(vm),
+                                                        unittest.mock.call(vm, budget=SLOW_BOOT_SECONDS),
+                                                        unittest.mock.call(vm, budget=SLOW_BOOT_SECONDS)])
                 self.assertEqual(guest.call_args_list[0].args[1], derive_image.call_args.args[0])
                 self.assertEqual(sum(call.args[1] == derive_image.call_args.args[3]
                                      for call in guest.call_args_list), 2)
@@ -1304,6 +1310,272 @@ sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
         self.assertEqual(set(triggers), {'trg_dp_zone_env_outbox_ai', 'trg_dp_zone_env_outbox_au'})
 
 
+class SlowBootBudgetTests(unittest.TestCase):
+    def ready_script(self, **budget):
+        vm = Mock()
+        with (patch.object(acceptance, 'checked') as checked,
+              patch.object(acceptance, 'sql', return_value='ok')):
+            acceptance.ready(vm, **budget)
+        (_, script, timeout), _ = checked.call_args
+        return script, timeout
+
+    LEGACY_READY = """for i in $(seq 1 180); do
+if test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; then
+ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0
+exit $?
+fi
+sleep 3
+done
+exit 1"""
+
+    def test_default_ready_is_the_legacy_script_and_timeout(self):
+        script, timeout = self.ready_script()
+        self.assertEqual(script, self.LEGACY_READY)
+        self.assertEqual(timeout, 800)
+
+    def test_slow_boot_ready_uses_a_guest_deadline_of_900_s(self):
+        self.assertEqual(SLOW_BOOT_SECONDS, 900)
+        script, timeout = self.ready_script(budget=SLOW_BOOT_SECONDS)
+        self.assertIn('end=$(( $(up) + 900 ))', script)
+        self.assertIn('\nwhile left; do\nif probe; then\n', script)
+        self.assertEqual(script.count('bounded wget -q -T 2 '), 2)
+        self.assertEqual(script.count('left && bounded wget'), 2)
+        self.assertIn('\nsleep 3\n', script)
+        self.assertNotIn('seq', script)
+        self.assertEqual(timeout, acceptance.ready_host_timeout(SLOW_BOOT_SECONDS))
+
+    def test_slow_boot_host_timeout_outlasts_the_last_guest_round(self):
+        for budget in (60, SLOW_BOOT_SECONDS):
+            for poll in (1, acceptance.READY_POLL_SECONDS, 10):
+                last_round_ends = budget + acceptance.READY_PROBE_SECONDS + poll
+                self.assertGreater(acceptance.ready_host_timeout(budget, poll), last_round_ends)
+        # Two wget probes, each bounded by a 2 s connect and a 2 s read timeout.
+        self.assertEqual(acceptance.READY_PROBE.count('wget -q -T 2 '), 2)
+        self.assertGreaterEqual(acceptance.READY_PROBE_SECONDS, 2 * 2 * 2)
+
+    @staticmethod
+    def shells():
+        return [shell for shell in (['sh'], ['dash'], ['busybox', 'sh']) if shutil.which(shell[0])]
+
+    def run_slow_script(self, shell, wget, budget, poll):
+        # Runs the generated guest script on the host with stub commands; the
+        # host's /proc/uptime drives the deadline as the guest's does.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stubs = root/'bin'
+            stubs.mkdir()
+            for name, body in (('wget', wget), ('pidof', 'exit 0'), ('ip', 'exit 0')):
+                (stubs/name).write_text(f'#!/bin/sh\n{body}\n')
+                (stubs/name).chmod(0o755)
+            (root/'farming.db').write_bytes(b'db')
+            script, timeout = acceptance.ready_script(budget, poll)
+            # Absolute stub paths: a busybox built with standalone applets runs its
+            # own wget and pidof before searching PATH.
+            replacements = {'/data/db/farming.db': quote(str(root/'farming.db')), '/tmp/gui': quote(str(root/'gui')),
+                            'bounded wget ': f'bounded {quote(str(stubs/"wget"))} ',
+                            'pidof chirpstack': f'{quote(str(stubs/"pidof"))} chirpstack',
+                            acceptance.READY_ADDRESS: quote(str(stubs/'ip'))}
+            for old, new in replacements.items():
+                self.assertIn(old, script)
+                script = script.replace(old, new)
+            env = dict(os.environ, STUB_ROOT=str(root))
+            began = time.monotonic()
+            result = subprocess.run([*shell, '-c', script], env=env, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=timeout)
+            elapsed = time.monotonic() - began
+            pids = [int(line) for line in (root/'pids').read_text().split()] if (root/'pids').exists() else []
+            return result.returncode, elapsed, timeout, pids
+
+    def test_slow_boot_probe_that_keeps_sending_is_killed_inside_the_host_timeout(self):
+        # Mimics uclient-fetch rearming -T on every body chunk: never finishes.
+        trickle = 'echo $$ >> "$STUB_ROOT/pids"\nwhile :; do echo chunk; sleep 1; done'
+        budget, poll = 2, 1
+        for shell in self.shells():
+            with self.subTest(shell=shell):
+                code, elapsed, timeout, pids = self.run_slow_script(shell, trickle, budget, poll)
+                self.assertEqual(code, 1)
+                self.assertGreaterEqual(elapsed, acceptance.READY_WGET_SECONDS)
+                self.assertLess(elapsed, budget + acceptance.READY_PROBE_SECONDS + poll)
+                self.assertLess(elapsed, timeout)
+                self.assertEqual(len(pids), 1)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(pids[0], 0)
+
+    def test_slow_boot_script_succeeds_when_both_probes_answer(self):
+        answer = ('while [ $# -gt 0 ]; do [ "$1" = -O ] && out=$2; shift; done\n'
+                  'echo "<html>" > "$out"')
+        for shell in self.shells():
+            with self.subTest(shell=shell):
+                code, elapsed, _, _ = self.run_slow_script(shell, answer, 30, 1)
+                self.assertEqual(code, 0)
+                self.assertLess(elapsed, acceptance.READY_PROBE_SECONDS)
+
+    def test_only_the_0_8_1_upgrade_boot_gets_the_slow_boot_budget(self):
+        for old, expected in (('0.8.0', unittest.mock.call('vm')),
+                              ('0.8.1', unittest.mock.call('vm', budget=SLOW_BOOT_SECONDS))):
+            with self.subTest(old=old), patch.object(acceptance, 'ready') as ready:
+                acceptance.upgrade_boot_ready('vm', old)
+            self.assertEqual(ready.call_args_list, [expected])
+
+    def test_old_release_upgrade_boot_gets_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root/'fixtures'/'v0.8.1'
+            folder.mkdir(parents=True)
+            image = folder/'rpi5.img.gz'
+            image.write_bytes(b'fixture')
+            (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
+            args = SimpleNamespace(fixtures=root/'fixtures', candidate=image, qemu=None, ram=8,
+                                   candidate_sha256=hashlib.sha256(b'fixture').hexdigest(),
+                                   release_revision='a'*40, osi_version='0.8.3',
+                                   flows_power_cut_only=True, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            guests = []
+            def make(*_args, **_options):
+                guests.append(Mock())
+                return guests[-1]
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest', side_effect=make),
+                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready') as ready,
+                  patch.object(acceptance, 'cut_after_flows_patch', return_value='ok'),
+                  patch.object(acceptance, 'upgrade', side_effect=RuntimeError('stop after ready'))):
+                acceptance.run_cases(args, root, root, root, 'recovery', False)
+        later_boot, upgrade_boot = guests[1], guests[2]
+        self.assertIn(unittest.mock.call(later_boot), ready.call_args_list)
+        self.assertIn(unittest.mock.call(upgrade_boot, budget=SLOW_BOOT_SECONDS), ready.call_args_list)
+
+    def test_customer_fixture_old_release_boots_get_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = SimpleNamespace(customer_image=root/'image', customer_source=root/'source',
+                                   release_revision='a'*40, qemu=root/'qemu', ram=8)
+            identity = {'rom_gui_sha256': 'f'*64}
+            ready = Mock()
+            stop = RuntimeError('stop after the 0.8.1 boot')
+            with (patch.object(customer_fixture, 'verified_inputs', return_value=(root/'factory', [], identity)),
+                  patch.object(customer_fixture, 'build_media'), patch.object(customer_fixture, 'Guest') as guest,
+                  patch.object(customer_fixture, 'checked', side_effect=['', 'f'*64]),
+                  patch.object(customer_fixture, 'sql', return_value='0'),
+                  patch.object(customer_fixture, 'track_install'),
+                  patch.object(customer_fixture, 'version', side_effect=[None, stop])):
+                with self.assertRaisesRegex(RuntimeError, 'stop after the 0.8.1 boot'):
+                    (root/'scratch').mkdir()
+                    (root/'receipts').mkdir()
+                    customer_fixture.run(args, root/'scratch', root/'receipts', root/'release', ready)
+        vm = guest.return_value
+        self.assertEqual(ready.call_args_list, [unittest.mock.call(vm, budget=SLOW_BOOT_SECONDS)] * 2)
+
+    def guest(self, directory, *, private):
+        vm = Guest.__new__(Guest)
+        vm.work = vm.receipts = Path(directory)
+        vm.qemu = vm.work/'qemu'
+        vm.process = vm.bridge = vm.radio = None
+        vm.boots = 0
+        vm.port = 49152
+        vm.ram = 8
+        vm.private = private
+        vm.upgrade = None
+        vm.direct_io = True
+        (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
+        return vm
+
+    def test_before_console_marker_wait_is_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=True)
+            marker = re.search(rb'(x)', b'x')
+            with (patch('suite_vm.subprocess.Popen', return_value=Mock()),
+                  patch.object(vm, 'expect', return_value=marker) as expect):
+                self.assertEqual(vm.start(before_console=rb'(x)'), (b'x',))
+            expect.assert_called_once_with(rb'(x)', SLOW_BOOT_SECONDS)
+            vm.radio.close()
+
+    def test_console_is_kept_per_boot_except_for_private_guests(self):
+        for private in (False, True):
+            with self.subTest(private=private), tempfile.TemporaryDirectory() as directory:
+                vm = self.guest(directory, private=private)
+                vm.boots = 2
+                read, write = os.pipe()
+                vm.process = SimpleNamespace(stdout=os.fdopen(read, 'rb'), stdin=None, poll=lambda: 0)
+                vm.buf = b''
+                os.write(write, b'boot log\nmarker\nafter marker')
+                vm.expect(rb'marker\n', 5)
+                os.write(write, b' and shutdown')
+                os.close(write)
+                process, vm.process = vm.process, None
+                vm.drain(process)
+                vm.finish_serial()
+                process.stdout.close()
+                serial = vm.receipts/'qemu-2.serial'
+                if private:
+                    self.assertFalse(serial.exists())
+                    self.assertEqual(list(vm.receipts.iterdir()), [vm.receipts/'cmdline.txt'])
+                else:
+                    self.assertEqual(serial.read_bytes(), b'boot log\nmarker\nafter marker and shutdown')
+
+    def test_failed_receipt_write_keeps_the_chunk_for_the_parser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=False)
+            vm.boots = 1
+            read, write = os.pipe()
+            vm.process = SimpleNamespace(stdout=os.fdopen(read, 'rb'))
+            vm.buf = b''
+            os.write(write, b'marker\n')
+            with patch.object(vm, 'capture', side_effect=OSError('disk full')):
+                self.assertEqual(vm.expect(rb'marker\n', 5).group(0), b'marker\n')
+            os.close(write)
+            vm.process.stdout.close()
+            self.assertIn("console receipt write failed: OSError('disk full')",
+                          (vm.receipts/'harness-events.log').read_text())
+
+    def test_serial_receipt_keeps_head_and_tail_with_a_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=False)
+            vm.SERIAL_HEAD_BYTES, vm.SERIAL_TAIL_BYTES = 10, 6
+            vm.boots = 1
+            for chunk in (b'0123456', b'789abcdefghij', b'klmnopqrst'):
+                vm.capture(chunk)
+            self.assertEqual((vm.receipts/'qemu-1.serial').read_bytes(), b'0123456789')
+            vm.finish_serial()
+            self.assertEqual((vm.receipts/'qemu-1.serial').read_bytes(),
+                             b'0123456789\n[osi-harness: 14 console bytes omitted after the first 10; '
+                             b'last 6 follow]\nopqrst')
+            vm.boots = 2
+            vm.capture(b'next boot')
+            self.assertEqual((vm.receipts/'qemu-2.serial').read_bytes(), b'next boot')
+
+    def test_stop_gives_up_draining_a_live_writer_after_a_failed_reap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=False)
+            vm.DRAIN_SECONDS = 0.3
+            vm.boots = 1
+            read, write = os.pipe()
+            # Bytes already waiting when the drain starts: the receipt check does
+            # not depend on when the writer thread is first scheduled.
+            os.write(write, b'still talking\n')
+            running = True
+            def chatty():
+                while running:
+                    try:
+                        os.write(write, b'still talking\n')
+                    except OSError:
+                        return
+                    time.sleep(0.01)
+            with ThreadPoolExecutor(1) as pool:
+                pool.submit(chatty)
+                vm.process = SimpleNamespace(stdout=os.fdopen(read, 'rb'), stdin=None, poll=lambda: None)
+                began = time.monotonic()
+                try:
+                    with patch('suite_vm.reap', side_effect=subprocess.TimeoutExpired('qemu', 5)):
+                        with self.assertRaises(ExceptionGroup):
+                            vm.stop()
+                finally:
+                    running = False
+                elapsed = time.monotonic() - began
+                os.close(write)
+            self.assertLess(elapsed, 3)
+            self.assertIn('console drain gave up after 0.3 s', (vm.receipts/'harness-events.log').read_text())
+            self.assertTrue((vm.receipts/'qemu-1.serial').read_bytes().startswith(b'still talking\n'))
+
+
 class BoundaryTests(unittest.TestCase):
     def test_real_and_symlinked_git_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1341,6 +1613,7 @@ class BoundaryTests(unittest.TestCase):
             host = vm.radio
             vm.boots = 1
             vm.receipts = Path(directory)/'missing'
+            vm.private = False
             guest.poll.return_value = bridge.poll.return_value = None
             guest.wait.side_effect = bridge.wait.side_effect = [subprocess.TimeoutExpired('qemu', 5), -9]
             with peer, self.assertRaises(ExceptionGroup):
