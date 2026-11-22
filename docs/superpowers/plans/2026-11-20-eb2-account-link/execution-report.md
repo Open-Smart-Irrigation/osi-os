@@ -260,3 +260,48 @@ and is the full-suite gate under the current brief.
 
 The draft stays with the assigned Sol reviewer for re-review. K1 policy, B9 GUI
 and the earlier cross-repo deferrals remain outside this correction.
+
+## Round-3 CI correction
+
+Round 3 (`27b8772d1`) found four required checks red: `actuation-text-caps`,
+`schedule-timestamp-wire-format`, `verify-sync-flow` and `migrations`. Ten test
+or generator files passed on main and failed on the head. This round changes
+only tests, one test library and one generator pin. Both `flows.json` files and
+both helper copies are byte-identical to `27b8772d1`; the R2-P1 fence is
+untouched.
+
+Main `51f56dc6f` was merged into the branch first (merge `459f883ce`). Main had
+moved past the reviewed `382c63a91` by one image-only commit (#703), and the
+merge was clean.
+
+| File | Change |
+|---|---|
+| `scripts/test-release-1.0-surfaces.js` | Route Command's UC512 output is expected at the command-ACK account guard; a new assertion checks that guard forwards only to the original MQTT node. |
+| `scripts/test-valve-actuation-text-caps.js`, `scripts/test-valve-schedule-timestamp-wire-format.js`, `scripts/test-command-ack-mark-delivered.js`, `scripts/test-outbox-event-flush.js` | The sandbox `osiLib` resolves `installation` to the real profile helper, so builders run the shipped `gatewayWorkBlocked`. |
+| `scripts/test-entity-name-command-path.js`, `scripts/test-watermark-calibration-bootstrap.js`, `scripts/test-watermark-cloud-command-path.js` | The link request's 11-entry capability list is read from the helper's `accountLink_build`, after checking that `al-link-build-req` delegates to the `build` stage and that the request sends `syncCapabilities`. |
+| `scripts/migrate-flows-journal-helper-loading.js` | Shape and node hashes map the guard id back to the unguarded ACK target before comparison. The journal-commands generator already does this. The generator reports `already current`. |
+| `scripts/migrate-flows-journal-v2-replication.test.js` | Both sides move the six guards to the end in their existing order. The guards are still compared byte for byte; only their position differed. |
+| `scripts/test-gateway-eui-attribution.js` | An eleventh stale test, found by a sweep for the same patterns. It runs in `migrations.yml` after `verify-sync-flow.js`, so CI never reached it. It passes on main 9/9 and failed on the head 3/9 (`stale_link_attempt`). The harness now runs the real `al-link-build-req` before finalization. That claims the account operation, begins the attempt and carries the per-request state. Both stages share one in-memory gateway for the journal and UCI writes. The source check reads `accountLink_finalize` and `accountConfigTransaction`. |
+
+The shared helpers live in `scripts/lib/installation-osi-lib.js`: the `osiLib`
+binding, `accountStageSource`, `linkBuilderSource` and `accountGatewayIo`. A
+fresh in-memory gateway per link attempt stands for the daemon-owned restart
+completing between attempts. The restart-obligation suite covers the paused
+daemon.
+
+Red runs on an extracted copy, reverted afterwards:
+
+- Dropping `watermark_v1` from the helper list fails all three capability tests
+  (entity-name 18/19, calibration-bootstrap 0/1, cloud-command 0/1).
+- Rewiring the guard to `command-ack-queue-rest` fails the release-surface test
+  11/13.
+- `test-gateway-eui-attribution.js` on `27b8772d1` gives 3/9.
+
+### Assumptions to confirm
+
+- The helper-loading pin normalizes the guard id instead of re-pinning hashes,
+  as in the journal-commands generator. Re-pinning would break the pinned
+  prior-current and direct-helper upgrade paths.
+- In the v2-replication proof, the guards move instead of being dropped, so
+  every node is still compared.
+
