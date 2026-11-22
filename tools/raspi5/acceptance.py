@@ -543,7 +543,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
                         record(str(error))
                         return summarize(aborted=True)
-                stock_cases(vm, args, test, verify_board=verify_board, inspect_disk=board == 'pi4')
+                stock_cases(vm, args, test, log=record, verify_board=verify_board, inspect_disk=board == 'pi4')
             finally:
                 vm.stop()
             for old in UPGRADE_VERSIONS:
@@ -586,7 +586,9 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
     return summarize()
 
 
-def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
+def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=False):
+    from radio_suite import Radio, VALVE, radio_diagnostics, run_uplinks, run_valve
+
     def boot():
         ready(vm)
         if verify_board is not None:
@@ -609,23 +611,21 @@ def stock_cases(vm, args, test, *, verify_board=None, inspect_disk=False):
             raise RuntimeError('unexpected stored role')
         return 'stored '+role+'; '+observed
     test('First account and login',account)
+    air = Radio(vm.radio)
     session={}
     def uplinks():
-        from radio_suite import run_uplinks
         try:
-            session.update(run_uplinks(vm,password))
+            joined, evidence = run_uplinks(vm, air, password, log=log)
+            session.update(joined)
+            return evidence
         except Exception:
-            # Report only fixed labels and counts. Application logs can contain credentials.
-            _, diag=vm.command('''for needle in "JoinRequest" "join-request" "invalid MIC" "InvalidMIC" "unknown device" "region mismatch" "device-profile" "uplink frame" "downlink frame" "Too late" "TX_ACK" "CRC_OK"; do
-printf '%s ' "$needle"; logread | grep -Fi -c "$needle"; done
-for svc in chirpstack chirpstack-mqtt-forwarder chirpstack-concentratord-sx1302; do pidof "$svc" >/dev/null && echo "$svc running"; done''')
-            (vm.receipts/'radio-diagnostics.log').write_text(diag+'\n')
+            radio_diagnostics(vm)
             raise
     test('WM1302 uplinks',uplinks)
     def valve():
-        from radio_suite import run_valve, VALVE
-        run_valve(vm,password,session,lambda: gui(vm,password,'open',VALVE))
+        evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE))
         gui(vm,password,'outcome',VALVE)
+        return evidence
     test('Valve open and outcome',valve)
     def reboot():
         sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")

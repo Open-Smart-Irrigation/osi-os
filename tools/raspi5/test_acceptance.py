@@ -1,4 +1,5 @@
 """Host-only tests for the Pi 5 acceptance runner."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 import hashlib
@@ -7,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+from shlex import quote
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -19,6 +22,7 @@ from archives import verified_archive
 import boot_safety
 import customer_fixture
 import minimal_flows
+import radio_suite
 import run
 from suite_vm import FLOWS_COMMITTED, Guest, external_path
 import upgrade_suite
@@ -30,7 +34,315 @@ DIGEST = b'a' * 64
 COMMIT = b'node-red.init: committed flows.json digest=' + DIGEST + b' stamp=20261120T000000Z\r\n'
 
 
+class RadioTests(unittest.TestCase):
+    def run_log_script(self, script, root, ram_log):
+        script = script.replace('/var/etc/chirpstack-concentratord/concentratord.toml',
+                                quote(str(root/'concentratord.toml')))
+        script = script.replace('/data/log/', quote(str(root)) + '/')
+        fixture = f"logread() {{ printf '%s\\n' {quote(ram_log)}; }}\n"
+        result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+        return result.returncode, result.stdout.strip()
+
+    def request(self, wire):
+        header = wire.read(8)
+        self.assertEqual(header[1:], b'\xfe\x07\x35\xc8\x01\x60\x00')
+        request_id = wire.read(run.RF_REQUEST_ID_SIZE)
+        payload = wire.read(header[0])
+        self.assertEqual(len(request_id), run.RF_REQUEST_ID_SIZE)
+        self.assertEqual(len(payload), header[0])
+        return request_id, payload
+
+    def receipt(self, request_id, count):
+        return bytes((len(request_id) + 1, 254, 0)) + request_id + bytes((count,))
+
+    def downlink(self, address, port=2):
+        payload = b'\x60' + address.to_bytes(4, 'little') + b'\x00\x01\x00'
+        payload += bytes((port,)) + b'\x41\x01\x00\x00\x00\x00'
+        return payload, bytes((len(payload), 0, 7)) + payload
+
+    def test_wrong_socket_can_accept_bytes_but_cannot_pass(self):
+        host, wrong_peer = socket.socketpair()
+        with host, wrong_peer, patch.object(radio_suite, 'RECEIPT_TIMEOUT', 0.01):
+            with self.assertRaisesRegex(RuntimeError, 'no matching WM1302 model delivery receipt'):
+                radio_suite.Radio(host).send(b'fixture')
+            self.assertTrue(wrong_peer.recv(32))
+
+    def test_model_receipt_counts_the_requested_frame(self):
+        for count in (0, 1):
+            with self.subTest(count=count):
+                host, model = socket.socketpair()
+                with host, model, ThreadPoolExecutor(1) as worker:
+                    model.settimeout(2)
+
+                    def reply():
+                        with model.makefile('rb') as wire:
+                            request_id, payload = self.request(wire)
+                            self.assertEqual(payload, b'fixture')
+                            model.sendall(self.receipt(request_id, count))
+
+                    waiting = worker.submit(reply)
+                    air = radio_suite.Radio(host)
+                    if count:
+                        self.assertEqual(air.send(b'fixture'), count)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+                            air.send(b'fixture')
+                    waiting.result()
+
+    def test_stale_receipt_cannot_count_for_a_later_injection(self):
+        host, model = socket.socketpair()
+        with host, model, ThreadPoolExecutor(1) as worker:
+            model.settimeout(2)
+
+            def reply_once():
+                with model.makefile('rb') as wire:
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'first')
+                    receipt = self.receipt(request_id, 1)
+                    model.sendall(receipt + receipt)
+                    next_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'second')
+                    self.assertNotEqual(next_id, request_id)
+
+            waiting = worker.submit(reply_once)
+            air = radio_suite.Radio(host)
+            self.assertEqual(air.send(b'first'), 1)
+            with (patch.object(radio_suite, 'RECEIPT_TIMEOUT', 0.05),
+                  self.assertRaisesRegex(RuntimeError, 'no matching WM1302 model delivery receipt')):
+                air.send(b'second')
+            waiting.result()
+
+    def test_valve_ignores_pending_and_unrelated_packets_and_accepts_interleaving(self):
+        host, model = socket.socketpair()
+        valve = Mock(devaddr=1)
+        valve.uplink.side_effect = [b'trigger receive window', b'report opened']
+        valve.downlink.return_value = {'fport': 2, 'payload': b'\x41\x01'}
+        command, command_wire = self.downlink(valve.devaddr)
+        _, other_wire = self.downlink(2)
+        _, mac_wire = self.downlink(valve.devaddr, port=0)
+        vm = Mock()
+        vm.command.return_value = (0, '2')
+        with (host, model, ThreadPoolExecutor(1) as worker,
+              patch.object(radio_suite, '_wait_history'),
+              patch.object(radio_suite, 'EARLY_WINDOW_TIMEOUT', 0.01)):
+            model.settimeout(2)
+            model.sendall(self.receipt(b'old-id!!', 1) + command_wire)
+
+            def reply():
+                with model.makefile('rb') as wire:
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'trigger receive window')
+                    model.sendall(mac_wire + command_wire + self.receipt(request_id, 1))
+                    request_id, payload = self.request(wire)
+                    self.assertEqual(payload, b'report opened')
+                    model.sendall(self.receipt(request_id, 1))
+
+            waiting = worker.submit(reply)
+            air = radio_suite.Radio(host)
+            result = radio_suite.run_valve(vm, air, {radio_suite.VALVE: valve},
+                                          lambda: model.sendall(other_wire + mac_wire))
+            self.assertEqual(result, 'WM1302 model delivered=2, Concentratord CRC_OK=2')
+            self.assertFalse(air.buffer)
+            valve.downlink.assert_called_once_with(command)
+            waiting.result()
+
+    def test_valve_command_after_gui_open_and_before_window_still_fails(self):
+        host, model = socket.socketpair()
+        valve = Mock(devaddr=1)
+        _, command_wire = self.downlink(valve.devaddr)
+        vm = Mock()
+        vm.command.return_value = (0, '')
+        with host, model:
+            with self.assertRaisesRegex(RuntimeError, 'valve downlink before receive window'):
+                radio_suite.run_valve(vm, radio_suite.Radio(host), {radio_suite.VALVE: valve},
+                                      lambda: model.sendall(command_wire))
+
+    def test_model_delivery_without_concentratord_crc_ok_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '0')
+        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+            radio_suite._radio_evidence(vm, 'fixture', 1)
+
+    def test_unavailable_concentratord_count_fails(self):
+        vm = Mock()
+        vm.command.return_value = (1, '4')
+        with self.assertRaisesRegex(RuntimeError, 'CRC_OK count unavailable'):
+            radio_suite._radio_evidence(vm, 'fixture', 4)
+
+    def test_positive_model_and_concentratord_counts_pass(self):
+        vm = Mock()
+        vm.command.return_value = (0, '2')
+        self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 2),
+                         'WM1302 model delivered=2, Concentratord CRC_OK=2')
+
+    def test_uplink_case_without_injections_fails(self):
+        vm = Mock()
+        vm.command.return_value = (0, '4')
+        with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
+            radio_suite.inject(vm, Mock(), {})
+
+    def join_fixture(self, arrivals):
+        now = 0
+        deadline = None
+        air = Mock()
+        valve = Mock(devnonce=1)
+        valve.join_request.side_effect = lambda: bytes([valve.devnonce])
+        valve.uplink.return_value = b'data'
+        replies = iter(arrivals)
+
+        def send(frame):
+            nonlocal deadline
+            if frame != b'data':
+                delay = next(replies)
+                deadline = None if delay is None else now + delay
+            return 1
+
+        def receive(timeout, matches):
+            nonlocal now, deadline
+            if deadline is not None and deadline <= now + timeout:
+                now, deadline = deadline, None
+                reply = b'\x20'
+                self.assertTrue(matches(reply))
+                return reply
+            now += timeout
+            raise TimeoutError
+
+        air.send.side_effect = send
+        air.receive.side_effect = receive
+        return air, valve, lambda: now
+
+    def test_wrapped_join_drains_then_retries_with_fresh_devnonce(self):
+        air, valve, clock = self.join_fixture([139.31, 5.1])
+        vm = Mock()
+        vm.command.return_value = (0, '1')
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock),
+              patch.object(radio_suite, '_wait_history'), redirect_stdout(output)):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'data'])
+        self.assertEqual([round(call.args[0], 2) for call in air.receive.call_args_list], [40, 110, 40])
+        valve.accept_join.assert_called_once()
+        self.assertIn('attempt 1/3 after 139.31 s', output.getvalue())
+        self.assertIn('attempt 2/3 after 5.10 s', output.getvalue())
+
+    def test_three_missed_accepts_fail(self):
+        air, valve, clock = self.join_fixture([None, None, None])
+        vm = Mock()
+        vm.command.return_value = (0, '1')
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(output),
+              self.assertRaisesRegex(RuntimeError, 'join-accept absent after 3 attempts')):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        self.assertEqual(clock(), 450)
+        self.assertEqual([call.args[0] for call in air.send.call_args_list], [b'\x01', b'\x02', b'\x03'])
+        for attempt in range(1, 4):
+            self.assertIn(f'attempt {attempt}/3 after 150.00 s', output.getvalue())
+        valve.accept_join.assert_not_called()
+
+    def test_retry_requires_crc_ok_for_its_own_join(self):
+        air, valve, clock = self.join_fixture([139.31, 5.1])
+        vm = Mock()
+        vm.command.side_effect = [(0, ''), (0, ''), (0, '0')]
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(io.StringIO()),
+              self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0')):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        first, second, count = [call.args[0] for call in vm.command.call_args_list]
+        self.assertNotEqual(first, second)
+        self.assertNotIn(first.split()[-1], count)
+        self.assertIn(second.split()[-1], count)
+        valve.accept_join.assert_not_called()
+        valve.uplink.assert_not_called()
+
+    def test_diagnostics_report_persistent_and_ram_counts_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipts = Path(directory)
+            (receipts/'osi-system.log.old').write_text('Frame received, uplink_id: 81\n')
+            (receipts/'osi-system.log').write_text('Frame received, uplink_id: 82\n')
+
+            def run_uplinks_case(label, fn):
+                if label == 'WM1302 uplinks':
+                    with self.assertRaisesRegex(RuntimeError, 'fixture radio failure'):
+                        fn()
+
+            vm = SimpleNamespace(command=lambda script: self.run_log_script(script, receipts, 'JoinRequest'),
+                                 radio=None, receipts=receipts)
+            with patch.object(radio_suite, 'run_uplinks', side_effect=RuntimeError('fixture radio failure')):
+                acceptance.stock_cases(vm, None, run_uplinks_case)
+            diag = (receipts/'radio-diagnostics.log').read_text()
+            self.assertIn('Frame received, uplink_id: 2', diag)
+            self.assertIn('logread\nJoinRequest 1', diag)
+
+    def test_crc_count_matches_the_syslog_tag_and_case_window(self):
+        prefix = 'Sat Nov 21 20:00:00 2026 '
+        marker = prefix + 'user.notice osi-radio-suite: fixture'
+        daemon = 'chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: 81'
+        valid = prefix + 'user.info ' + daemon
+        foreign = prefix + 'user.info unrelated[42]: printed ' + daemon
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root/'concentratord.toml'
+            config.write_text('disable_crc_filter=false\n')
+            for source in ('persistent', 'logread'):
+                for current in ([foreign], [foreign, valid]):
+                    with self.subTest(source=source, has_frame=valid in current):
+                        log = '\n'.join([valid, marker, *current])
+                        rotated = root/'osi-system.log.old'
+                        active = root/'osi-system.log'
+                        if source == 'persistent':
+                            rotated.write_text(valid + '\n' + marker + '\n')
+                            active.write_text('\n'.join(current) + '\n')
+                            log = valid
+                        else:
+                            rotated.unlink(missing_ok=True)
+                            active.unlink(missing_ok=True)
+
+                        vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, log))
+                        if valid in current:
+                            self.assertEqual(radio_suite._radio_evidence(vm, 'fixture', 1),
+                                             'WM1302 model delivered=1, Concentratord CRC_OK=1')
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+                                radio_suite._radio_evidence(vm, 'fixture', 1)
+
+    def test_crc_count_combines_attempt_evidence_across_log_sinks(self):
+        prefix = 'Sat Nov 21 20:00:00 2026 user.'
+        marker = prefix + 'notice osi-radio-suite: fixture'
+        frame = prefix + 'info chirpstack-concentratord-sx1302[51]: Frame received, uplink_id: '
+        first, second = frame + '81, count_us: 100', frame + '82, count_us: 200'
+        cases = (
+            ('persistent log lags', [marker], [marker, first], 1),
+            ('sinks overlap', [marker, first], [marker, first, second], 2),
+            ('RAM has no attempt marker', [marker], [first], 0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'concentratord.toml').write_text('disable_crc_filter=false\n')
+            for name, persistent, ram, expected in cases:
+                with self.subTest(name=name):
+                    (root/'osi-system.log').write_text('\n'.join(persistent) + '\n')
+                    vm = SimpleNamespace(command=lambda script: self.run_log_script(script, root, '\n'.join(ram)))
+                    if expected:
+                        self.assertEqual(radio_suite._crc_ok_count(vm, 'fixture', 1), expected)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'Concentratord CRC_OK=0'):
+                            radio_suite._crc_ok_count(vm, 'fixture', 1)
+
+
 class FlowTests(unittest.TestCase):
+    def test_restart_wait_covers_factory_first_boot(self):
+        def command(script, timeout):
+            self.assertEqual(timeout, 420)
+            # With fast curls and two seconds between polls, the 124th
+            # poll represents the measured 246 s console-to-401 delay.
+            fixture = """polls=0
+curl() { [ "$polls" -ge 123 ] && printf 401; }
+sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
+"""
+            result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+            return result.returncode, result.stdout.strip()
+
+        upgrade_suite.wait_for_api(SimpleNamespace(command=command))
+
     def test_candidate_gate_fails_when_pi5_workload_omits_a_required_case(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -48,7 +360,8 @@ class FlowTests(unittest.TestCase):
                 (folder/image.name).write_bytes(image.read_bytes())
                 (folder/'SHA256SUMS').write_text(f'{digest}  {image.name}\n')
 
-            def stock(_guest, _args, record, **_options):
+            def stock(_guest, _args, record, *, log, **_options):
+                log('fixture radio attempt evidence')
                 for label in ('Cold boot', 'First account and login', 'WM1302 uplinks',
                               'Valve open and outcome', 'Reboot persistence', 'Power cut 1', 'Power cut 3'):
                     record(label, lambda: None)
@@ -89,6 +402,7 @@ class FlowTests(unittest.TestCase):
             result = result_file.read_text()
             revision = acceptance.tools_checkout_revision(None)
             self.assertIn(f'Tools revision: {revision}', result)
+            self.assertIn('fixture radio attempt evidence', result)
             self.assertIn(f'tools_revision={revision}', result_file.with_name('inputs.txt').read_text())
             self.assertEqual(status, 1, result)
             self.assertIn('Power cut 2 | REQUIRED | NOT RUN | FAIL', result)
@@ -196,7 +510,7 @@ class FlowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             vm = Guest.__new__(Guest)
             vm.work = vm.receipts = Path(directory)
-            vm.process = vm.bridge = None
+            vm.process = vm.bridge = vm.radio = None
             vm.direct_io = True
             (vm.work/'sd.img').write_bytes(b'live disk')
 
@@ -230,10 +544,20 @@ class FlowTests(unittest.TestCase):
             vm.direct_io = True
             (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
             report = re.search(rb'(READY|FAILED)', b'READY')
-            with (patch('suite_vm.subprocess.Popen') as launch,
+            def verify_launch(args, **options):
+                if '-chardev' in args:
+                    radio_fd = options['pass_fds'][1]
+                    self.assertIn(f'socket,id=wm1302-air,fd={radio_fd},server=off', args)
+                    with socket.socket(fileno=os.dup(radio_fd)) as peer:
+                        peer.sendall(b'from this boot')
+                return Mock()
+
+            with (patch('suite_vm.subprocess.Popen', side_effect=verify_launch) as launch,
                   patch.object(vm, 'expect', return_value=report),
                   patch.object(vm, 'send')):
                 vm.start(inspection=True)
+                with vm.radio as host:
+                    self.assertEqual(host.recv(32), b'from this boot')
             command = launch.call_args.args[0]
             self.assertIn('if=sd,format=raw,file=inspect.img,cache=none', command)
             self.assertIn('init=/bin/sh', command[command.index('-append')+1])
@@ -504,11 +828,13 @@ class BoundaryTests(unittest.TestCase):
             vm = Guest.__new__(Guest)
             guest, bridge = Mock(), Mock()
             vm.process, vm.bridge = guest, bridge
+            vm.radio, peer = socket.socketpair()
+            host = vm.radio
             vm.boots = 1
             vm.receipts = Path(directory)/'missing'
             guest.poll.return_value = bridge.poll.return_value = None
             guest.wait.side_effect = bridge.wait.side_effect = [subprocess.TimeoutExpired('qemu', 5), -9]
-            with self.assertRaises(ExceptionGroup):
+            with peer, self.assertRaises(ExceptionGroup):
                 vm.stop()
             for process in (guest, bridge):
                 process.terminate.assert_called_once()
@@ -516,6 +842,8 @@ class BoundaryTests(unittest.TestCase):
                 self.assertEqual(process.wait.call_count, 2)
             self.assertIsNone(vm.process)
             self.assertIsNone(vm.bridge)
+            self.assertIsNone(vm.radio)
+            self.assertEqual(host.fileno(), -1)
 
     def test_firmware_override_checksum(self):
         with tempfile.TemporaryDirectory() as directory:

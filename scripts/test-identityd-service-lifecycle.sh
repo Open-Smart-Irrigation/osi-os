@@ -7,6 +7,7 @@ DEPLOY="$REPO_ROOT/deploy.sh"
 DAEMON="$REPO_ROOT/conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh"
 TEST_ROOT="$(mktemp -d)"
 RUN_DIR="$TEST_ROOT/run"
+DB_PATH="$TEST_ROOT/no-live-db"
 STATE_LOG="$TEST_ROOT/state.log"
 HELPER="$TEST_ROOT/identity-helper.sh"
 

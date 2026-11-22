@@ -35,6 +35,12 @@ function swapCallFunction() {
   return DEPLOY.slice(start, end);
 }
 
+function deployFunction(name) {
+  const found = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(DEPLOY);
+  assert.ok(found, `deploy.sh is missing ${name}()`);
+  return found[0];
+}
+
 function fragment(begin, end) {
   const start = DEPLOY.indexOf(begin);
   const finish = DEPLOY.indexOf(end, start);
@@ -505,6 +511,8 @@ NODE_RED_INIT=${JSON.stringify(restart)}
 NODE_RED_HEALTH_TIMEOUT=1
 export SWAP_ROOT SWAP_JS
 ${swapCallFunction()}
+${deployFunction('recovery_hold_present')}
+${deployFunction('repair_health_start')}
 ${payload}
 cleanup() { :; }
 wait_for_node_red_health() { echo ready > ${JSON.stringify(path.join(root, 'ready'))}; return 0; }

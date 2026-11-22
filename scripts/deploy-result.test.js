@@ -59,6 +59,7 @@ test('the real exit handler publishes after migration recovery and the early tra
     ]) {
       const result = path.join(dir, 'result');
       const script = `set -eu
+DB_PATH='${path.join(dir, 'farming.db')}'
 ${outcome}
 ${lifecycle}
 ${early}
@@ -118,6 +119,7 @@ PAYLOAD_FLIPPED=0
 publish_boot_file '${stage}' '${path.join(dir, 'live.js')}' 644`;
       const script = `set -eu
 SWAP_ROOT='${dir}'
+DB_PATH='${path.join(dir, 'farming.db')}'
 ${outcome}
 ${lifecycle}
 ${payload}
@@ -155,6 +157,7 @@ test('a successful final identityd restore supersedes an earlier failed attempt'
     const lifecycle = deploy.slice(deploy.indexOf('# identityd deploy lifecycle begin'), deploy.indexOf('# identityd deploy lifecycle end'));
     const result = path.join(dir, 'result');
     const script = `set -eu
+DB_PATH='${path.join(dir, 'farming.db')}'
 ${outcome}
 ${lifecycle}
 cleanup() { :; }
@@ -173,3 +176,46 @@ deploy_exit_handler 1
     assert.match(receipt, /^identityd_state=running$/m);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Merge with main's EB19 writer hold: the exit handler's recovery-hold branch
+// must publish a receipt too, `hold` with both stops proven at the hold.
+for (const [status, waitResult, verdict] of [[0, 0, 'hold'], [1, 0, 'hold'], [0, 1, 'incomplete-recovery']]) {
+  test(`a recovery hold through the real exit handler (status ${status}, stop proof ${waitResult ? 'fails' : 'holds'}) reports ${verdict}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-recovery-hold-'));
+    try {
+      const result = path.join(dir, 'result');
+      const db = path.join(dir, 'farming.db');
+      fs.writeFileSync(`${db}.osi-recovery`, '');
+      const fn = name => { const m = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(deploy); assert.ok(m, name); return m[0]; };
+      const outcome = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+      const lifecycle = deploy.slice(deploy.indexOf('# identityd deploy lifecycle begin'), deploy.indexOf('# identityd deploy lifecycle end'));
+      const payload = deploy.slice(deploy.indexOf('# deploy payload lifecycle begin'), deploy.indexOf('# deploy payload lifecycle end'));
+      const init = path.join(dir, 'init'); fs.writeFileSync(init, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const script = `set -eu
+DB_PATH='${db}'
+SWAP_ROOT='${dir}'
+NODE_RED_INIT='${init}'
+${outcome}
+${fn('recovery_hold_present')}
+${lifecycle}
+${payload}
+cleanup() { :; }
+swap_call() { :; }
+wait_for_node_red_stop() { return ${waitResult}; }
+quiesce_identityd_instance() { return 0; }
+DEPLOY_STAMP=candidate
+DEPLOY_COMPLETED=1
+PROBE_OK=0
+DEPLOY_SERVICE_STATE=running
+DEPLOY_IDENTITYD_STATE=running
+deploy_exit_handler ${status}
+`;
+      const run = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, DEPLOY_OUTCOME_FILE: result } });
+      assert.equal(run.status, status, run.stderr);
+      const record = fs.readFileSync(result, 'utf8');
+      assert.match(record, new RegExp(`^verdict=${verdict}$`, 'm'), run.stderr);
+      assert.match(record, /^exit_code=1$/m);
+      if (verdict === 'hold') { assert.match(record, /^service_state=stopped$/m); assert.match(record, /^identityd_state=stopped$/m); }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}

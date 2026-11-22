@@ -188,7 +188,7 @@ directory before reading the persistent receipt.
 | `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
 | `incomplete-recovery` | Recovery could not be confirmed; `service_state` says stopped or unknown. | Nonzero deploy status, or 74 for receipt persistence failure |
 | `interrupted` | A catchable signal interrupted the run; the reason distinguishes pre-start cancellation from an interrupted deploy. | 128 + signal number |
-| `hold` | Required Node-RED and identityd stops were positively established. The hold is recorded in `DEPLOY-HELD`, or in `.osi-command-ledger-hold` for an unloadable command ledger. A hold declared on earlier stops (a failed migration whose restore also failed, an unloadable command ledger) proves both again before it reports `hold`. | Nonzero deploy status |
+| `hold` | Required Node-RED and identityd stops were positively established. The hold is recorded in `DEPLOY-HELD`, in `.osi-command-ledger-hold` for an unloadable command ledger, or in the legacy-catalog recovery hold files beside the database (released with `scripts/repair-legacy-device-fk.js --release-hold`). A hold declared on earlier stops (a failed migration whose restore also failed, an unloadable command ledger) proves both again before it reports `hold`. | Nonzero deploy status |
 | `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
 | `failed` | The deploy process failed without a confirmed rollback, including interruption after its lifecycle report. | Nonzero deploy status |
 | `unverified` | The new payload runs, but its startup could not be confirmed, or no final lifecycle report was received. | 3 |
