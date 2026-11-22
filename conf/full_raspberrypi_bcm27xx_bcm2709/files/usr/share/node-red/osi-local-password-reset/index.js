@@ -14,7 +14,8 @@
 // Every dependency is passed in by the caller: db is the router's osi-db-helper
 // handle, scope the single osi-scope-helper instance the router loads through
 // osi-lib, bcrypt the router's bcryptjs, node the function node (for
-// node.warn). This module loads no other module.
+// node.warn). This module loads no other module itself; local sign-in opens
+// the farming database through the caller's osiLib.
 
 const targetModeSql = 'SELECT auth_mode FROM users WHERE user_uuid=? LIMIT 1';
 

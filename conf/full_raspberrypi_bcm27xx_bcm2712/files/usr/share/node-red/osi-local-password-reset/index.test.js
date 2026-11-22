@@ -257,6 +257,10 @@ test('signInType maps rows to local, server, unknown or missing', () => {
   assert.equal(reset.signInType({ auth_mode: 'LOCAL' }), 'unknown');
 });
 
-test('the module requires nothing; the router injects every dependency', () => {
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8'), /\brequire\(/);
+test('the module requires nothing; callers inject every dependency', () => {
+  // The only loader it calls is the caller's injected osiLib (local sign-in
+  // opens the farming database through osiLib.require('osi-db-helper')).
+  const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
+  assert.doesNotMatch(source, /(?<!osiLib\.)\brequire\(/);
+  assert.deepEqual(source.match(/osiLib\.require\([^)]*\)/g), ["osiLib.require('osi-db-helper')"]);
 });
