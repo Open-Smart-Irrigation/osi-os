@@ -535,4 +535,4 @@ in the same change.
 
 | Keys | Reason |
 |---|---|
-| `passwordChange.*` (11 keys in `auth.json`) | Added for the sign-in step that asks an account to set a new password before the session opens. de-CH, es, fr, it and pt were translated in the same change; no human Luganda pass yet, so `lg` ships the English source text. |
+| `passwordChange.*` (12 keys in `auth.json`) | Added for the sign-in step that asks an account to set a new password before the session opens. de-CH, es, fr, it and pt were translated in the same change; no human Luganda pass yet, so `lg` ships the English source text. |

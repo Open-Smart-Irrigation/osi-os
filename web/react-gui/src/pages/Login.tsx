@@ -28,6 +28,7 @@ export const Login: React.FC = () => {
   const changeError = (response: LoginResponse): string => {
     if (response.passwordChange === 'failed') return t('passwordChange.storeFailed');
     if (response.passwordChangeError === 'password_too_short') return t('passwordChange.tooShort');
+    if (response.passwordChangeError === 'password_too_long') return t('passwordChange.tooLong');
     if (response.passwordChangeError === 'password_unchanged') return t('passwordChange.unchanged');
     return response.passwordChangeMessage || t('passwordChange.storeFailed');
   };
@@ -56,6 +57,11 @@ export const Login: React.FC = () => {
     setError('');
     if (newPassword.length < 6) {
       setError(t('passwordChange.tooShort'));
+      return;
+    }
+    // The gateway hashes with bcrypt, which reads at most 72 bytes.
+    if (new TextEncoder().encode(newPassword).length > 72) {
+      setError(t('passwordChange.tooLong'));
       return;
     }
     if (newPassword !== confirmPassword) {

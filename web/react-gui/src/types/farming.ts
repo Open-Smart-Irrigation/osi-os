@@ -334,7 +334,7 @@ export interface LoginResponse {
   /** The account must set a new password before normal use. */
   passwordChangeRequired?: boolean;
   passwordChange?: PasswordChangeOutcome;
-  /** Set with passwordChange 'rejected': password_too_short or password_unchanged. */
+  /** Set with passwordChange 'rejected': password_too_short, password_too_long or password_unchanged. */
   passwordChangeError?: string;
   passwordChangeMessage?: string;
 }

@@ -123,6 +123,8 @@ async function resetLocalPassword(options) {
 
 const LOCAL_HASH_COST = 10;
 const MIN_PASSWORD_LENGTH = 6;
+// bcrypt reads only the first 72 bytes of its input.
+const MAX_PASSWORD_BYTES = 72;
 const FIRST_ACCOUNT_ID = 1;
 const CHANGE_KEY_PREFIX = 'local_password_change_required:';
 const FARMING_DB = '/data/db/farming.db';
@@ -164,6 +166,9 @@ async function changedRows(tx) {
 function newPasswordProblem(newPassword, password) {
   if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
     return { code: 'password_too_short', message: 'Password must be at least 6 characters' };
+  }
+  if (Buffer.byteLength(newPassword, 'utf8') > MAX_PASSWORD_BYTES) {
+    return { code: 'password_too_long', message: 'Password must be at most 72 bytes' };
   }
   if (newPassword === password) {
     return { code: 'password_unchanged', message: 'Choose a password that differs from the current one' };
@@ -207,10 +212,11 @@ async function rehashStoredValue(db, options) {
 // Resolves to { valid: false } or { valid: true, response }, where response
 // holds the extra login payload fields (empty for an ordinary sign-in). It
 // never rejects: a comparison that throws (a password that is not a string)
-// counts as a mismatch.
+// counts as a mismatch. canSignIn false (the caller refuses the account, e.g.
+// a disabled account in scoped mode) verifies the password and writes nothing.
 async function verifyLocalLogin(options) {
   const { user, password, newPassword, bcrypt, crypto, node, now, osiLib } = options;
-  const canChange = options.canChange !== false;
+  const canSignIn = options.canSignIn !== false;
   const warn = (message) => node.warn('local sign-in: ' + message);
   const stored = user && user.password_hash;
   const bcryptStored = isBcryptValue(stored);
@@ -221,6 +227,7 @@ async function verifyLocalLogin(options) {
     warn('password comparison failed: ' + errorText(error));
   }
   if (!valid) return { valid: false };
+  if (!canSignIn) return { valid: true, response: {} };
 
   const firstAccount = Number(user.id) === FIRST_ACCOUNT_ID;
   if (bcryptStored && !firstAccount) return { valid: true, response: {} };
@@ -242,12 +249,12 @@ async function verifyLocalLogin(options) {
     }
     const response = {};
     if (required && newPassword !== undefined && newPassword !== null && newPassword !== '') {
-      const problem = canChange ? newPasswordProblem(newPassword, password) : null;
+      const problem = newPasswordProblem(newPassword, password);
       if (problem) {
         response.passwordChange = 'rejected';
         response.passwordChangeError = problem.code;
         response.passwordChangeMessage = problem.message;
-      } else if (canChange && db) {
+      } else if (db) {
         try {
           await storeNewPassword(db, { user, bcrypt, newPassword, now });
           return { valid: true, response: { passwordChange: 'changed' } };
@@ -255,7 +262,7 @@ async function verifyLocalLogin(options) {
           warn('new password could not be stored for user ' + String(user.id) + ': ' + errorText(error));
           response.passwordChange = 'failed';
         }
-      } else if (canChange) {
+      } else {
         response.passwordChange = 'failed';
       }
     }
@@ -291,4 +298,5 @@ module.exports = {
   LOCAL_HASH_COST,
   CHANGE_KEY_PREFIX,
   FARMING_DB,
+  MAX_PASSWORD_BYTES,
 };

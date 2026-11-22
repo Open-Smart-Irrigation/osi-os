@@ -78,6 +78,25 @@ describe('Login with a required password change', () => {
     expect(screen.queryByText(en.passwordChange.continueForNow)).not.toBeInTheDocument();
   });
 
+  it('refuses a new password over 72 bytes before sending it, and maps the gateway refusal', async () => {
+    mocks.login
+      .mockResolvedValueOnce(required)
+      .mockResolvedValueOnce({
+        status: 'password-change-required',
+        response: { token: TOKEN, passwordChangeRequired: true, passwordChange: 'rejected', passwordChangeError: 'password_too_long' },
+      });
+    renderLogin();
+    signIn();
+    await screen.findByText(en.passwordChange.title);
+    // 37 two-byte characters: 74 bytes.
+    enterNewPassword('\u00e9'.repeat(37));
+    expect(screen.getByText(en.passwordChange.tooLong)).toBeInTheDocument();
+    expect(mocks.login).toHaveBeenCalledTimes(1);
+    enterNewPassword('z'.repeat(72));
+    expect(await screen.findByText(en.passwordChange.tooLong)).toBeInTheDocument();
+    expect(mocks.login).toHaveBeenLastCalledWith({ username: 'grower', password: 'current-pass', newPassword: 'z'.repeat(72) });
+  });
+
   it('shows a refused new password and stays on the step without a way past it', async () => {
     mocks.login
       .mockResolvedValueOnce(required)

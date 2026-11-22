@@ -125,6 +125,9 @@ function gateway(profile, { realHelper = false } = {}) {
     const hook = hooks.find((h) => !h.fired && h.match.test(sql));
     if (hook) {
       hook.fired = !hook.always;
+      // A hook with `before` changes the database ahead of the statement
+      // (a concurrent writer) and lets the statement run.
+      if (hook.before) { hook.before(native); return; }
       throw new Error(hook.message || 'injected failure');
     }
   }
@@ -375,6 +378,113 @@ for (const profile of PROFILES) {
     assert.ok(g.bcrypt.compareSync('synthetic-old-value-1', g.user(1).password_hash), 'rolled back');
     assert.ok(g.pending(1));
     assert.ok(res.warnings.some((w) => /new password could not be stored for user 1: database is locked/.test(w)));
+  });
+
+  t('a failed pending-record write rolls back the rehash, warns, and both land at the next sign-in', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    g.hooks.push({ match: /^INSERT INTO app_settings/, message: 'database is locked' });
+    const first = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.equal(first.status, 200);
+    assert.ok(first.payload.token);
+    assert.equal(first.payload.passwordChangeRequired, true);
+    assert.equal(g.user(1).password_hash, 'synthetic-old-value-1', 'the rehash is not committed without the pending record');
+    assert.equal(g.pending(1), undefined);
+    assert.equal(first.warnings.length, 1);
+    assert.match(first.warnings[0], /rehash failed for user 1; it is retried at the next sign-in: database is locked/);
+    const second = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.equal(second.payload.passwordChangeRequired, true);
+    assert.match(g.user(1).password_hash, BCRYPT_COST_10);
+    assert.ok(g.pending(1));
+    assert.deepEqual(second.warnings, []);
+  });
+
+  t('a new password with a wrong current password is refused with 401 and writes nothing', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    const legacy = await g.login({ username: 'first-owner', password: 'synthetic-old-value-9', newPassword: 'chosen-pass-42' });
+    assert.equal(legacy.status, 401);
+    assert.equal(legacy.payload.token, undefined);
+    assert.deepEqual(g.writes(), []);
+    assert.equal(g.opens, 0);
+    assert.equal(g.user(1).password_hash, 'synthetic-old-value-1');
+
+    await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.ok(g.pending(1));
+    const pendingHash = g.user(1).password_hash;
+    const opens = g.opens;
+    g.statements.length = 0;
+    const pending = await g.login({ username: 'first-owner', password: 'synthetic-old-value-9', newPassword: 'chosen-pass-42' });
+    assert.equal(pending.status, 401);
+    assert.equal(pending.payload.token, undefined);
+    assert.deepEqual(g.writes(), []);
+    assert.equal(g.opens, opens);
+    assert.equal(g.user(1).password_hash, pendingHash);
+    assert.ok(g.pending(1));
+  });
+
+  t('a password that is not a string answers 401 against a bcrypt value and warns', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync('owner-pass-1', 10) });
+    g.addUser({ username: 'grower', password_hash: g.bcrypt.hashSync('grower-pass-1', 10) });
+    for (const password of [12345, { value: 'grower-pass-1' }, ['grower-pass-1']]) {
+      const res = await g.login({ username: 'grower', password });
+      assert.equal(res.status, 401, JSON.stringify(password));
+      assert.deepEqual(res.payload, { message: 'Invalid username or password' });
+      assert.ok(res.warnings.some((w) => /password comparison failed/.test(w)), JSON.stringify(res.warnings));
+    }
+    assert.deepEqual(g.writes(), []);
+  });
+
+  t('a new password longer than 72 bytes is rejected like a short one and stores nothing', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    const before = g.user(1).password_hash;
+    const long = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'x'.repeat(73) });
+    assert.equal(long.status, 200);
+    assert.equal(long.payload.passwordChange, 'rejected');
+    assert.equal(long.payload.passwordChangeError, 'password_too_long');
+    assert.equal(long.payload.passwordChangeRequired, true);
+    // 37 two-byte characters are 74 bytes although only 37 characters long.
+    const wide = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: '\u00e9'.repeat(37) });
+    assert.equal(wide.payload.passwordChangeError, 'password_too_long');
+    assert.equal(g.user(1).password_hash, before);
+    assert.ok(g.pending(1));
+    const exact = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'y'.repeat(72) });
+    assert.equal(exact.payload.passwordChange, 'changed');
+  });
+
+  t('a new password does not overwrite a value changed by another writer since the read', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    const concurrent = g.bcrypt.hashSync('reset-by-admin-7', 10);
+    // The other writer lands after this request read the account and before
+    // its write transaction starts.
+    g.hooks.push({
+      match: /^SELECT 1 AS pending FROM app_settings/,
+      before: (native) => native.prepare('UPDATE users SET password_hash=? WHERE id=1').run(concurrent),
+    });
+    const res = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'chosen-pass-42' });
+    assert.equal(res.status, 200);
+    assert.equal(res.payload.passwordChange, 'failed');
+    assert.equal(res.payload.passwordChangeRequired, true);
+    assert.equal(g.user(1).password_hash, concurrent);
+    assert.ok(g.pending(1));
+    assert.ok(res.warnings.some((w) => /new password could not be stored for user 1: password change matched 0 rows/.test(w)));
+  });
+
+  t('a correct password on a disabled account answers 403 and writes nothing', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1', disabled_at: '2026-02-01T00:00:00.000Z' });
+    const res = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' }, { OSI_SCOPED_ACCESS: '1' });
+    assert.equal(res.status, 403);
+    assert.equal(res.payload.token, undefined);
+    assert.equal(g.user(1).password_hash, 'synthetic-old-value-1');
+    assert.equal(g.pending(1), undefined);
+    assert.equal(g.opens, 0);
+    assert.deepEqual(g.writes(), []);
   });
 
   t('a new password is ignored without a pending change, and refused for a disabled account', async () => {
