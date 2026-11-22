@@ -447,7 +447,7 @@ if (!commandUpdate || !commandApply || !commandPostconditionRoute || !commandPos
     JSON.stringify(commandVerify.wires || []) !== JSON.stringify([['command-postcondition-ack']]) ||
     JSON.stringify(commandVerifiedAck.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
     failures.push('command ACK postconditions: supported mutations must verify once and unrelated mutations must retain their ACK route');
-} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([['d83e38164efbb860']])) {
+} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([['account-cloud-guard-d83e38164efbb860']])) {
     failures.push('command ACK postconditions: legacy direct ACK must retain its MQTT route');
 } else if (!/FAILED_RETRYABLE/.test(commandVerifiedAck.func || '') ||
     !/postcondition_not_met/.test(commandVerifiedAck.func || '') ||
@@ -497,7 +497,7 @@ if (!dedupe || !requireOsiLibContract(
     'Command helpers unavailable:'
 ) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
     ['watermark-config-command-apply-fn'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
     !/protectedTypes/.test(dedupe.func || '') ||
@@ -538,7 +538,7 @@ if (!scopedAccessApply || !requireOsiLibContract(
     'Scoped access command helpers unavailable:'
 ) || JSON.stringify(scopedAccessApply.wires) !== JSON.stringify([
     ['934bf2bc19a8ce22'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyScopedAccessCommand/.test(scopedAccessApply.func || '') ||
     !/\.close\s*\(/.test(scopedAccessApply.func || '')) {
     failures.push('scoped access commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -550,7 +550,7 @@ if (!terraZoneConfigApply || !requireOsiLibContract(
     'Terra zone-config command helpers unavailable:'
 ) || JSON.stringify(terraZoneConfigApply.wires) !== JSON.stringify([
     ['zone-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyZoneCommand/.test(terraZoneConfigApply.func || '') ||
     !/command_type_recognized:\s*msg\._commandTypeRecognized === true/.test(terraZoneConfigApply.func || '') ||
     !/\.close\s*\(/.test(terraZoneConfigApply.func || '')) {
@@ -568,7 +568,7 @@ if (!zoneCommandApply || !requireOsiLibContract(
     // instead of waiting for the 30 s Flush Sync Outbox inject (measured 25.018 s
     // and 24.988 s on Silvan 2026-09-17). Both nodes are on the sync tab, so this
     // is a direct wire; the gate is pinned separately by test-outbox-event-flush.js.
-    ['9d5e3035c3d069c4', 'sync-outbox-flush-coalesce'],
+    ['account-cloud-guard-9d5e3035c3d069c4', 'sync-outbox-flush-coalesce'],
 ]) || !/applyZoneCommand/.test(zoneCommandApply.func || '') ||
     !/\.close\s*\(/.test(zoneCommandApply.func || '')) {
     failures.push('versioned zone commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -581,7 +581,7 @@ if (!weatherZonesCommandApply || !requireOsiLibContract(
     'Weather station zones command helpers unavailable:'
 ) || JSON.stringify(weatherZonesCommandApply.wires) !== JSON.stringify([
     ['installation-revision-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyWeatherStationZonesCommand/.test(weatherZonesCommandApply.func || '') ||
     !/\.close\s*\(/.test(weatherZonesCommandApply.func || '')) {
     failures.push('weather station zones commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -593,7 +593,7 @@ if (!installationRevisionApply || !requireOsiLibContract(
     'Installation revision command helpers unavailable:'
 ) || JSON.stringify(installationRevisionApply.wires) !== JSON.stringify([
     ['entity-name-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyCommand/.test(installationRevisionApply.func || '') ||
     !/\.close\s*\(/.test(installationRevisionApply.func || '')) {
     failures.push('installation revision commands: applier must delegate, close DB, and hand unrecognized commands to the entity-name applier');
@@ -606,7 +606,7 @@ if (!entityNameApply || !requireOsiLibContract(
     'Entity name command helpers unavailable:'
 ) || JSON.stringify(entityNameApply.wires) !== JSON.stringify([
     ['watermark-config-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyNameCommand/.test(entityNameApply.func || '') ||
     !/updateDeviceName\(client, devEui,/.test(entityNameApply.func || '') ||
     !/\.close\s*\(/.test(entityNameApply.func || '') ||
@@ -1217,7 +1217,7 @@ assertWires('934bf2bc19a8ce22',
     [
         ['745b6db588017e56'],
         ['conditional-lifecycle-command-adapter'],
-        ['9d5e3035c3d069c4', 'command-ack-queue-rest'],
+        ['account-cloud-guard-9d5e3035c3d069c4', 'command-ack-queue-rest'],
         ['cs-reg-cloud-fn'],
         ['lsn50-mode-link-out-sync'],
         ['b1bc51c1d156de8b'],
@@ -1227,7 +1227,7 @@ assertWires('934bf2bc19a8ce22',
 const lifecycleCommandAdapter = byId['conditional-lifecycle-command-adapter'];
 if (!lifecycleCommandAdapter || !/routes\.conditionalLifecycleCommand/.test(lifecycleCommandAdapter.func || '') ||
     lifecycleCommandAdapter.outputs !== 3 ||
-    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['9d5e3035c3d069c4']])) {
+    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['account-cloud-guard-9d5e3035c3d069c4']])) {
     failures.push('lifecycle command adapter must own schedule/device mutations and durable ACKs before the legacy SQL builder, and send its S2120 unclaim ACK (issue #233) to the MQTT ACK node only');
 } else {
     console.log('OK  lifecycle command adapter delegates canonical mutation and durable ACK atomically; its S2120 unclaim ACK goes to MQTT only');

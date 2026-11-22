@@ -10,6 +10,9 @@
 #include "system/memory.h"
 
 #define SSI_FIFO_DEPTH 64
+#define WM_AIR_RECEIPT 254
+#define WM_AIR_RF_HEADER_SIZE 8
+#define WM_AIR_REQUEST_ID_SIZE 8
 
 /* The SX1250 command address is 16 bits. The modeled control registers
  * used by the SX1302 HAL are in the first 4 KiB. */
@@ -40,7 +43,7 @@ typedef struct WmSpiState {
     uint8_t program_ram[0x4000], regs[0x1200];
     CharBackend air;
     WmTx tx[2];
-    uint8_t frame[263], fifo[4096];
+    uint8_t frame[255 + WM_AIR_RF_HEADER_SIZE + WM_AIR_REQUEST_ID_SIZE], fifo[4096];
     unsigned frame_len, fifo_head, fifo_count;
     uint32_t timestamp, pps, ndf, remaining;
     int64_t reset_us;
@@ -145,23 +148,27 @@ static unsigned wm_find_channel(WmSpiState *s, uint32_t hz, uint8_t bandwidth)
     return 8;
 }
 
-static void wm_queue_rx(WmSpiState *s)
+static bool wm_queue_rx(WmSpiState *s)
 {
     uint8_t size = s->frame[0], channel = s->frame[1], sf = s->frame[2];
     const uint8_t *payload = s->frame + 3;
-    if (channel == 255) {
-        channel = wm_find_channel(s, ldl_be_p(payload), payload[4]);
+    if (channel >= WM_AIR_RECEIPT) {
+        unsigned if_channel = wm_find_channel(s, ldl_be_p(payload), payload[4]);
         payload += 5;
+        if (channel == WM_AIR_RECEIPT) {
+            payload += WM_AIR_REQUEST_ID_SIZE;
+        }
+        channel = if_channel;
     }
     uint8_t record[278] = {0xa5, 0xc0, size, channel, (sf << 4) | 3, channel};
     uint16_t crc = 0;
     unsigned len = size + 23;
     /* HAL: CORR_EN (0x5821) has one bit per multi-SF IF; CORR_SF_EN (0x5822)
      * uses bit 0 for SF5 through bit 7 for SF12. */
-    if (!s->active || !(s->regs[0x405] & 2) || channel > 7 || sf < 5 || sf > 12 ||
+    if (!size || !s->active || !(s->regs[0x405] & 2) || channel > 7 || sf < 5 || sf > 12 ||
         !(s->regs[0x621] & (1u << channel)) || !(s->regs[0x622] & (1u << (sf - 5))) ||
         len + s->fifo_count > sizeof(s->fifo)) {
-        return;
+        return false;
     }
     memcpy(record + 9, payload, size);
     for (unsigned i = 0; i < size; i++) {
@@ -181,6 +188,17 @@ static void wm_queue_rx(WmSpiState *s)
     for (unsigned i = 0; i < len; i++) {
         s->fifo[(s->fifo_head + s->fifo_count++) % sizeof(s->fifo)] = record[i];
     }
+    return true;
+}
+
+static void wm_air_write(WmSpiState *s, const uint8_t *frame, int len)
+{
+    if (qemu_chr_fe_backend_open(&s->air) &&
+        qemu_chr_fe_write(&s->air, frame, len) != len) {
+        /* A stalled observer must not stop the virtual CPU or leave a
+         * partial packet in a stream that will receive later frames. */
+        qemu_chr_fe_disconnect(&s->air);
+    }
 }
 
 static void wm_air_read(void *opaque, const uint8_t *bytes, int count)
@@ -191,10 +209,24 @@ static void wm_air_read(void *opaque, const uint8_t *bytes, int count)
         if (s->frame_len < 3) {
             continue;
         }
-        unsigned header = s->frame[1] == 255 ? 8 : 3;
+        bool receipt_requested = s->frame[1] == WM_AIR_RECEIPT;
+        unsigned header = s->frame[1] >= WM_AIR_RECEIPT ? WM_AIR_RF_HEADER_SIZE : 3;
+        if (receipt_requested) {
+            header += WM_AIR_REQUEST_ID_SIZE;
+        }
         if (s->frame_len == s->frame[0] + header) {
-            wm_queue_rx(s);
+            bool delivered = wm_queue_rx(s);
             s->frame_len = 0;
+            if (receipt_requested) {
+                /* Report the number of packets added to the HAL FIFO by
+                 * this request. Legacy channel 255 never produces a receipt. */
+                uint8_t receipt[4 + WM_AIR_REQUEST_ID_SIZE] = {
+                    1 + WM_AIR_REQUEST_ID_SIZE, WM_AIR_RECEIPT, 0,
+                };
+                memcpy(receipt + 3, s->frame + WM_AIR_RF_HEADER_SIZE, WM_AIR_REQUEST_ID_SIZE);
+                receipt[sizeof(receipt) - 1] = delivered;
+                wm_air_write(s, receipt, sizeof(receipt));
+            }
         }
     }
 }
@@ -244,12 +276,7 @@ static void wm_tx_event(void *opaque)
         uint8_t len = reg[99];
         uint8_t frame[258] = {len, tx->chain, reg[96] & 15};
         memcpy(frame + 3, reg + 256, len);
-        if (qemu_chr_fe_backend_open(&s->air) &&
-            qemu_chr_fe_write(&s->air, frame, len + 3) != len + 3) {
-            /* A stalled observer must not stop the virtual CPU or leave a
-             * partial packet in a stream that will receive later frames. */
-            qemu_chr_fe_disconnect(&s->air);
-        }
+        wm_air_write(s, frame, len + 3);
         tx->status = 0x30;
         timer_mod(tx->timer, qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) + wm_airtime(reg));
     } else {

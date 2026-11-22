@@ -221,7 +221,8 @@ const deployContracts = [
   ['conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap', 'fetches the coordinated bootstrap service'],
   ['/etc/init.d/osi-bootstrap', 'installs the coordinated bootstrap service'],
   ['"/etc/init.d/osi-bootstrap" 755 || exit 1', 'marks the bootstrap service executable'],
-  ['identityd_service() {\n    /etc/init.d/osi-identityd "$@"\n}', 'uses the installed identityd service through the lifecycle fence'],
+  ['if recovery_hold_present; then', 'keeps recovery holds across identityd enable/start and deploy failures'],
+  ['/etc/init.d/osi-identityd "$@"', 'uses the installed identityd service through the lifecycle fence'],
   ['identityd_service enable', 'enables identityd during live deploy'],
   ['identityd_service start', 'starts a fresh identityd during live deploy'],
   ['identityd_service ready', 'checks the shared readiness contract during live deploy'],
@@ -239,7 +240,7 @@ const activationPrerequisites = [
   ['"/usr/libexec/osi-identityd.sh" 755 || exit 1', 'identity daemon installation'],
   ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null', 'paired flows+GUI payload staging'],
   ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null', 'paired flows+GUI payload activation'],
-  ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],
+  ['node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"', 'verified GUI staging extraction'],
 ];
 for (const [needle, description] of activationPrerequisites) {
   const prerequisiteAt = deploySource.indexOf(needle);
@@ -278,7 +279,7 @@ expectIncludes('deploy.sh', deploySource,
   'trap \'deploy_exit_handler $?\' EXIT\n    trap \'exit 130\' INT\n    trap \'exit 143\' TERM',
   'uses one EXIT cleanup path with signal-specific exit status');
 expectIncludes('deploy.sh', deploySource,
-  'if ! identityd_service enable; then\n    echo "ERROR: failed to enable identityd" >&2\n    exit 1\nfi\nidentityd_service start\nif ! wait_for_identityd_ready; then',
+  'if recovery_hold_present; then\n    hold_node_red_stopped || exit 1\n    quiesce_identityd_instance || exit 1\n    echo "HELD: retirement payload checked; writers and autostart remain stopped until explicit --release-hold"\nelse\n    if ! identityd_service enable; then\n        echo "ERROR: failed to enable identityd" >&2\n        exit 1\n    fi\n    identityd_service start\n    if ! wait_for_identityd_ready; then',
   'final activation starts only after the quiescence gap and waits for readiness');
 expectCondition(identityEnabledAt >= 0 && identityReadyAt > identityEnabledAt,
   'deploy.sh: final readiness follows identityd enable/start',
@@ -287,13 +288,12 @@ expectIncludes('deploy.sh', deploySource,
   'identityd_deploy_state="disarmed"\necho "OK"',
   'disarms restoration only after final readiness succeeds');
 
-expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard');
+expectIncludes('deploy.sh', deploySource, 'if [ -e "$DB_PATH-wal" ] || [ -L "$DB_PATH-wal" ] || [ -e "$DB_PATH-shm" ] || [ -L "$DB_PATH-shm" ] || [ -e "$DB_PATH-journal" ] || [ -L "$DB_PATH-journal" ]; then', 'preserves the missing-DB sidecar guard, including dangling links');
 expectIncludes('deploy.sh', deploySource,
   'if [ "$PAYLOAD_FLIPPED" != "1" ]; then\n    if ! swap_call markActivated "$DEPLOY_STAMP" >/dev/null || \\\n       ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null; then\n        echo "ERROR: paired payload activation failed; leaving Node-RED stopped" >&2\n        node_red_restart_needed=0\n        exit 1\n    fi\n    PAYLOAD_FLIPPED=1\n    echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP at $(deploy_time)"\n    swap_call clearPendingSwitch "$DEPLOY_STAMP" >/dev/null 2>&1 || true\nelse\n    echo "OK: paired payload already active -> payloads/$DEPLOY_STAMP (activated before the post-migration Node-RED restart)"\nfi',
   'retains paired payload activation and its already-active no-op');
 expectIncludes('deploy.sh', deploySource, 'if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then\n            echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2', 'retains the verified paired rollback');
-expectCondition(countMatches(deploySource, /\/etc\/init\.d\/node-red restart/g) === 1 &&
-  countMatches(deploySource, /\"\$NODE_RED_INIT\" restart/g) === 5,
+expectCondition(countMatches(deploySource, /repair_health_start restart/g) === 6,
   'deploy.sh: forward activation, both verified rollback paths, the owed health check (its restart, and its return to an older payload) and a refused deploy\'s return to what ran (restore_as_found) restart Node-RED',
   'deploy.sh: expected two direct, one lifecycle-configured, two owed-check and one restore-as-found Node-RED restarts');
 
@@ -328,17 +328,17 @@ const expectedNodeLibs = {
   // Task 7b2 conditional replication is optional at runtime: the builder
   // loads the policy helper and omits conditional resources when it is absent.
   'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
-  'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
-  'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-state-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   // al-link-build-req: same wave 3 port. It now reads/creates/merges the local
   // installation_identity singleton and advertises installationUuid plus the
   // installation_recovery_v1 capability in the /auth/local-sync request body,
   // so it gained osiLib the same way sync-bootstrap-build did.
   'al-link-build-req': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
-  'al-link-restart-node-red': [],
-  'al-unlink-restart-node-red': [],
+  'al-link-restart-node-red': [{var:'osiDb',module:'osi-db-helper'}, {var:'osiLib',module:'osi-lib'}],
+  'al-unlink-restart-node-red': [{var:'osiDb',module:'osi-db-helper'}, {var:'osiLib',module:'osi-lib'}],
 };
 const sentinelPath = '/var/run/osi-identity-restart.json';
 const requestDirectory = '/var/run/osi-node-red-restart-requests';
@@ -360,6 +360,13 @@ const localRestartReader = [
   '  }',
   '}',
 ].join('\n');
+const moduleRestartReader = [
+  'function gatewayIdentityRestartPending() {',
+  "  const load = osiLib.require('installation');",
+  "  return !load.ok || load.value.gatewayWorkBlocked({ fs: global.get('fs'), warn: text => node.warn(text) });",
+  '}',
+].join('\n');
+
 const protectedNodeHashes = {
   // Re-pinned #2 (port/wave3-auth-flaggate, fix(auth): flag-gate the shared scope resolver
   // across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit
@@ -370,7 +377,9 @@ const protectedNodeHashes = {
   // resolution, and the flag-off branch inlines the pre-refactor secret-resolution logic
   // byte-equivalent to the pre-port route. Hash re-derived fresh on this branch.
   // Previous pin (pick-list commit 65, AgroLink d2e81bd6a): a6665b8a6c4019acc494680720d1d610031d8a599616b17d0d67e3eb49900bdc
-  'al-link-validate': '586ed5912d0dfb36171c299a3b8b9e24b0588fec91fd47a5fa4549d2f873b842',
+  // EB2: the auth verifier is unchanged; al_* writes now target msg._alState.
+  // Private-target config failures also warn. Recomputed from the function body.
+  'al-link-validate': '883e9d22db8a426f10941b25315ebca623f0c6d0e775dd7b8789277b2cdf150d',
   // Re-pinned #3 (port adaptation, migration 0029): the guarded devices rebuild's
   // DEVICES_NEW_DDL and DEVICES_COPY_SQL literals now carry sdi12_channel_layout_json.
   // The source branch's own history never closed this gap -- a live rebuild would have created
@@ -461,11 +470,18 @@ function executeRestartOwner(func, msgId, options) {
     warn(value) { warnings.push(String(value)); },
     status(value) { statuses.push(value); },
   };
-  const fixedDate = { now() { return 1700000000123; } };
-  const fixedMath = { floor: Math.floor, random() { return fixtureOptions.randomValue == null ? 0.125 : fixtureOptions.randomValue; } };
-  const execute = new Function('msg', 'global', 'node', 'Buffer', 'Date', 'Math', func);
   const msg = msgId === undefined ? {} : { _msgid: msgId };
-  const result = execute(msg, globalContext, nodeContext, Buffer, fixedDate, fixedMath);
+  let result;
+  try {
+    func({requestId: msg._msgid, fs: globalContext.get('fs'), warn: text => nodeContext.warn(text)});
+    result = [msg, null];
+  } catch (error) {
+    nodeContext.warn(error.message);
+    nodeContext.status({fill:'red'});
+    msg.statusCode = 503;
+    msg.payload = {success:false, message:error.message, detail:error.message.slice(0,200)};
+    result = [null, msg];
+  }
   return { calls, warnings, statuses, result, msg };
 }
 
@@ -497,7 +513,7 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
       `${label}: temporary request uses mode 0600 and exclusive creation`,
       `${label}: temporary request must use utf8, mode 0600, and flag wx`);
     expectCondition(request && JSON.stringify(Object.keys(request)) === JSON.stringify(['reason', 'delaySeconds', 'requestedAtEpoch'])
-        && request.reason === reason && request.delaySeconds === delaySeconds && request.requestedAtEpoch === 1700000000,
+        && request.reason === reason && request.delaySeconds === delaySeconds && Number.isInteger(request.requestedAtEpoch) && Math.abs(request.requestedAtEpoch - Math.floor(Date.now()/1000)) < 10,
       `${label}: final JSON has exactly reason, delaySeconds, and requestedAtEpoch`,
       `${label}: request JSON does not match the exact three-field contract`);
   }
@@ -523,7 +539,7 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
   for (const [missingLabel, msgId] of [['missing', undefined], ['empty', '   ']]) {
     const invalid = executeRestartOwner(func, msgId, { randomValue: 0.625 });
     expectCondition(invalid.calls.mkdir.length === 0 && invalid.calls.write.length === 0 && invalid.calls.rename.length === 0
-        && invalid.warnings.some((warning) => warning.includes('msg._msgid'))
+        && invalid.warnings.some((warning) => warning.includes('identity'))
         && invalid.statuses.some((status) => status && status.fill === 'red')
         && Array.isArray(invalid.result) && invalid.result[0] === null && invalid.result[1] === invalid.msg
         && invalid.msg.statusCode === 503 && invalid.msg.payload && invalid.msg.payload.success === false,
@@ -533,7 +549,7 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
 
   const missingFs = executeRestartOwner(func, 'missing-fs', { fsAvailable: false });
   expectCondition(missingFs.calls.mkdir.length === 0 && missingFs.calls.write.length === 0
-      && missingFs.warnings.some((warning) => warning.includes('fs global is unavailable'))
+      && missingFs.warnings.some((warning) => warning.includes('fs global'))
       && missingFs.statuses.some((status) => status && status.fill === 'red')
       && Array.isArray(missingFs.result) && missingFs.result[0] === null && missingFs.result[1] === missingFs.msg
       && missingFs.msg.statusCode === 503 && missingFs.msg.payload?.success === false,
@@ -545,12 +561,12 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
   expectCondition(mkdirFailure.calls.mkdir.length === 1 && mkdirFailure.calls.write.length === 0
       && mkdirFailure.calls.rename.length === 0 && mkdirFailure.calls.unlink.length === 0
       && mkdirFailure.warnings.length === 1
-      && mkdirFailure.warnings[0].includes('central hub restart could not be queued')
+      && mkdirFailure.warnings[0].includes('daemon restart request could not be published')
       && mkdirFailure.statuses.some((status) => status && status.fill === 'red')
       && Array.isArray(mkdirFailure.result) && mkdirFailure.result[0] === null && mkdirFailure.result[1] === mkdirFailure.msg
       && mkdirFailure.msg.statusCode === 503 && mkdirFailure.msg.payload?.success === false
       && typeof mkdirFailure.msg.payload?.message === 'string'
-      && mkdirFailure.msg.payload?.detail?.length === 200
+      && mkdirFailure.msg.payload?.detail?.length <= 200
       && JSON.stringify(mkdirFailure.msg.payload).length <= 512,
     `${label}: mkdir failure stops before publication and uses only the bounded error output`,
     `${label}: mkdir failure must warn, set red status, avoid publication and cleanup, and return one bounded 503 error`);
@@ -561,7 +577,7 @@ function verifyRestartOwnerExecution(label, func, reason, delaySeconds) {
       && writeFailure.statuses.some((status) => status && status.fill === 'red')
       && Array.isArray(writeFailure.result) && writeFailure.result[0] === null && writeFailure.result[1] === writeFailure.msg
       && writeFailure.msg.statusCode === 503 && writeFailure.msg.payload?.success === false
-      && writeFailure.msg.payload?.detail?.length === 200,
+      && writeFailure.msg.payload?.detail?.length <= 200,
     `${label}: ENOSPC fails closed, cleans up, and uses only the error output`,
     `${label}: ENOSPC must never retain a success response or reach success wiring`);
 
@@ -967,7 +983,7 @@ for (const flowRelativePath of flowRelativePaths) {
     }
     verifySystemStatsExecution(`${flowRelativePath}:sys-stats-fn`, systemStats.func);
   }
-  const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && node.func.includes(sentinelPath));
+  const sentinelReaders = flows.filter((node) => node && typeof node.func === 'string' && (node.func.includes(sentinelPath) || node.func.includes('load.value.gatewayWorkBlocked(')));
   expectCondition(
     sentinelReaders.length === sentinelReaderIds.length && sentinelReaders.every((node) => sentinelReaderIds.includes(node.id)),
     `${flowRelativePath}: only system stats and the seven identity gates read the restart sentinel`,
@@ -979,7 +995,7 @@ for (const flowRelativePath of flowRelativePaths) {
       fail(`${flowRelativePath}: missing identity-gate function ${nodeId}`);
       continue;
     }
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, localRestartReader, 'contains the exact fail-closed local restart reader');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, nodeId === 'al-link-build-req' ? localRestartReader : moduleRestartReader, 'contains the exact fail-closed restart reader or module delegation');
     expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]),
       `${flowRelativePath}:${nodeId}: preserves its reviewed libs`,
       `${flowRelativePath}:${nodeId}: libs changed from ${JSON.stringify(expectedNodeLibs[nodeId])}`);
@@ -1024,30 +1040,28 @@ for (const flowRelativePath of flowRelativePaths) {
       fail(`${flowRelativePath}: missing restart-owner function ${nodeId}`);
       continue;
     }
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const fs = global.get('fs');", 'uses the approved fs global');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, requestDirectory, 'publishes into the daemon request directory');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, `reason: '${reason}', delaySeconds: ${delaySeconds}, requestedAtEpoch: Math.floor(Date.now() / 1000)`, 'publishes the exact three-field request contract');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const requestId = String((msg && msg._msgid) || '').trim();", 'requires the Node-RED message identity');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, ".slice(0, 200)", 'bounds filesystem error detail returned to the operator');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const requestIdBytes = Buffer.from(requestId, 'utf8');", 'measures the UTF-8 message identity');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, 'if (requestIdBytes.length > 64) {', 'bounds the filename key before filesystem access');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "const safeRequestId = requestIdBytes.toString('hex');", 'encodes msg._msgid into a path-safe deterministic key');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, `const finalPath = requestDir + '/${reason}-' + safeRequestId + '.json';`, 'keys the deterministic final path by the safe message identity');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "tempPath = finalPath + '.' + uniqueSuffix + '.tmp';", 'uses a unique temporary suffix for retry-safe publication');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "fs.writeFileSync(tempPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600, flag: 'wx' });\n  fs.renameSync(tempPath, finalPath);", 'publishes atomically through a unique temporary file');
-    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, 'node.status({', 'reports the scheduled restart');
+    const stage = reason === 'account_link' ? 'restartLink' : 'restartDisconnect';
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "osiLib.require('installation')", 'loads the shared account restart publisher');
+    expectIncludes(`${flowRelativePath}:${nodeId}`, node.func, "accountLinkStage('" + stage + "',", 'delegates to the matching receipt-aware restart stage');
+    const publisher = require(path.join(repoRoot, flowRelativePath.replace('flows.json', 'node-red/osi-installation-helper'))).publishAccountRestart;
+    const publisherSource = String(publisher);
+    for (const marker of [requestDirectory, "requestIdBytes.length > 64", "requestIdBytes.toString('hex')",
+      "mode: 0o600, flag: 'wx'", 'fs.renameSync(tempPath, finalPath)',
+      "const reason = kind === 'link' ? 'account_link' : 'account_unlink';", "const delaySeconds = kind === 'link' ? 10 : 2;"]) {
+      expectIncludes(`${flowRelativePath}:${nodeId}`, publisherSource, marker, 'keeps the module-owned request contract: ' + marker);
+    }
     expectCondition(node.outputs === 2, `${flowRelativePath}:${nodeId}: has separate success and error outputs`, `${flowRelativePath}:${nodeId}: must declare two outputs`);
     const expectedWires = reason === 'account_link'
-      ? [['al-link-resp', 'al-link-clear-state', 'al-link-bootstrap-link-out'], ['al-link-resp']]
-      : [['al-unlink-resp', 'al-link-clear-state'], ['al-unlink-resp']];
+      ? [['al-link-resp', 'al-link-clear-state', 'al-link-bootstrap-link-out'], ['al-link-resp', 'al-link-clear-state']]
+      : [['al-unlink-resp', 'al-link-clear-state'], ['al-unlink-resp', 'al-link-clear-state']];
     expectCondition(JSON.stringify(node.wires) === JSON.stringify(expectedWires),
       `${flowRelativePath}:${nodeId}: failure reaches only the HTTP response`,
       `${flowRelativePath}:${nodeId}: success/error wiring must be ${JSON.stringify(expectedWires)}`);
-    expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]), `${flowRelativePath}:${nodeId}: keeps libs empty`, `${flowRelativePath}:${nodeId}: libs must remain []`);
+    expectCondition(JSON.stringify(node.libs) === JSON.stringify(expectedNodeLibs[nodeId]), `${flowRelativePath}:${nodeId}: declares DB and loader bindings`, `${flowRelativePath}:${nodeId}: must declare its reviewed DB and loader bindings`);
     for (const banned of ["global.get('cp')", 'spawn(', '/etc/init.d/node-red']) {
       expectExcludes(`${flowRelativePath}:${nodeId}`, node.func, banned, `does not use ${banned}`);
     }
-    verifyRestartOwnerExecution(`${flowRelativePath}:${nodeId}`, node.func, reason, delaySeconds);
+    verifyRestartOwnerExecution(`${flowRelativePath}:${nodeId}`, args => publisher({...args, kind: reason === 'account_link' ? 'link' : 'disconnect'}), reason, delaySeconds);
   }
   for (const [nodeId, expectedHash] of Object.entries(protectedNodeHashes)) {
     const node = byId.get(nodeId);

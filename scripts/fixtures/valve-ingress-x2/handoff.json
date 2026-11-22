@@ -1,0 +1,30 @@
+{
+  "source": "65d4d8d524406a069e0b27f9f4f9e8434c32f7c5",
+  "files": [
+    {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json",
+      "beforeSha256": "c65fc33909af15a0ce2bc99e18fc4d6256cef2d45082eae652d77f32488ef525",
+      "afterSha256": "95c9b1d91d2b534366be1fd8dbf371f475bb3cbe3e7e3305a0034fe2abd9585a"
+    },
+    {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json",
+      "beforeSha256": "c65fc33909af15a0ce2bc99e18fc4d6256cef2d45082eae652d77f32488ef525",
+      "afterSha256": "95c9b1d91d2b534366be1fd8dbf371f475bb3cbe3e7e3305a0034fe2abd9585a"
+    },
+    {
+      "path": "scripts/fixtures/silent-catch-baseline.json",
+      "beforeSha256": "de508c3992c7cc82ad8ecf885977ef1c30649ea56df91f9732523da639174655",
+      "afterSha256": "07eebc7a47ff5c4e5b70d2549419cd86cf817dc15ad1dbf2e20d17b8a99b045c"
+    },
+    {
+      "path": "scripts/verify-no-stray-ddl-baseline.json",
+      "beforeSha256": "b7fe848041370602fcf3021a38f30ef9895ac10bc336af1fdd9c71e69686f7d8",
+      "afterSha256": "b7fe848041370602fcf3021a38f30ef9895ac10bc336af1fdd9c71e69686f7d8"
+    }
+  ],
+  "silentCatchCounts": {
+    "bcm2712": 53,
+    "bcm2709": 53
+  },
+  "ddlTotal": 694
+}

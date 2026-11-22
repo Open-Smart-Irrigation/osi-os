@@ -104,7 +104,7 @@ for (const flowPath of FLOW_PATHS) {
     assert.deepEqual(tick.wires, [['gateway-health-persist-fn']]);
     const hb = byId['062a0f9bf66d9789'];
     assert.ok(hb, 'Build Heartbeat node missing');
-    assert.deepEqual(hb.wires, [['d769e9face3844d5']], 'Build Heartbeat wiring must stay untouched (no tee)');
+    assert.deepEqual(hb.wires, [['account-cloud-guard-d769e9face3844d5']], 'Build Heartbeat must reach only its cloud MQTT recovery guard (no sampling tee)');
   });
 
   test(`${rel}: persist node shape (libs, close, INSERT SQL, self-sampling)`, () => {

@@ -373,6 +373,9 @@ async function beginLinkAttempt(dbOrOptions, maybeOptions) {
     });
     const context = normalizeContext(input.context, {
       ...current,
+      // The authenticated response supplies an unspecified target account.
+      // The current account is retained separately as the mutation baseline.
+      cloud_user_id: null,
       installation_uuid: current.installation_uuid || identity.installation_uuid,
       gateway_device_eui: current.gateway_device_eui || identity.gateway_device_eui,
     });
@@ -398,7 +401,7 @@ async function beginLinkAttempt(dbOrOptions, maybeOptions) {
       ? normalizeContext(parseJson(row.peer_capabilities_context_json, {}))
       : null;
     const contextChanged = Boolean(capturedSupportContext)
-      && (!sameContext(current, capturedSupportContext) || !sameContext(context, capturedSupportContext));
+      && (!sameContext(current, capturedSupportContext) || !sameContext({ ...context, cloud_user_id: context.cloud_user_id || current.cloud_user_id }, capturedSupportContext));
     await tx.run(`
       UPDATE sync_link_state
          SET link_attempt_json=?,
@@ -447,9 +450,9 @@ async function validateLinkAttemptTx(tx, input = {}) {
     gateway_device_eui: row.identity_gateway_device_eui,
     installation_uuid: row.identity_installation_uuid,
   });
-  const firstLinkCloudIdentity = !baseline.cloud_user_id && !attemptContext.cloud_user_id && !current.cloud_user_id;
+  const unknownTargetAccount = !attemptContext.cloud_user_id;
   const expectedMatchesAttempt = CONTEXT_KEYS.every((key) => {
-    if (key === 'cloud_user_id' && firstLinkCloudIdentity) return Boolean(expected.cloud_user_id);
+    if (key === 'cloud_user_id' && unknownTargetAccount) return Boolean(expected.cloud_user_id);
     return expected[key] === attemptContext[key];
   });
   if (!sameContext(current, baseline)

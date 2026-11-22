@@ -50,7 +50,9 @@ function fixture(t) {
       if (n === 'history-sync') return {ok:true,value:helper};
       if (n === 'osi-valve-control') return {ok:true,value:valveControl};
       return {ok:true,value:{getSharedStore:async()=>source}};
-    }},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)}};
+    }},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)},
+      // History transport checks the real account guard (EB2): no journal, queued account request or identity sentinel.
+      global:{get:k=>k==='fs'?{existsSync:()=>false,readdirSync:()=>[]}:undefined}};
     return vm.runInNewContext('(async function(){'+flows.find(n=>n.id===id).func+'})',context)();
   }
   return {farming,radio,memory,warnings,invoke,reads:()=>reads};

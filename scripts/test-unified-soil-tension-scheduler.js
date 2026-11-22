@@ -77,12 +77,16 @@ function chameleonRow(db, values, flags = CLEAN) {
 // The shipped query node with its libs bound: osiLib serves this profile's
 // osi-scheduler-mean-query unless a test passes its own loader.
 function queryNode(profile, osiLib) {
-  const loader = osiLib || { require: (name) => (name === 'scheduler-mean-query'
-    ? { ok: true, value: meanQueryModule(profile) } : { ok: false, error: 'unexpected module ' + name }) };
+  const scheduler = require(path.join(path.dirname(MODULE_DIRS[profile]), 'osi-daily-scheduler'));
+  const loader = { require(name) {
+    if (name === 'daily-scheduler') return { ok: true, value: scheduler };
+    if (osiLib) return osiLib.require(name); // retain selective mean-helper failure injection
+    return name === 'scheduler-mean-query' ? { ok: true, value: meanQueryModule(profile) } : { ok: false, error: 'unexpected module ' + name };
+  } };
   const errors = [];
   const node = { error: (m) => errors.push(String(m)), warn: (m) => errors.push(String(m)) };
-  const fn = new Function('msg', 'node', 'osiLib', loadNode(QUERY_ID, PROFILES[profile]).func); // eslint-disable-line no-new-func
-  return { build: (msg) => fn(msg, node, loader), errors };
+  const fn = new Function('msg', 'node', 'osiLib', 'env', loadNode(QUERY_ID, PROFILES[profile]).func); // eslint-disable-line no-new-func
+  return { build: (msg) => fn(msg, node, loader, { get() {} }), errors };
 }
 
 function zoneRow(metric) {

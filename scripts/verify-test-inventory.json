@@ -2,6 +2,11 @@
   "$comment": "Read by scripts/verify-test-inventory.js. 'indirect': a test that a runner script (itself run by a workflow) starts; the runner must name the file. 'excluded': a test file or pattern no workflow runs, with the reason. Entries that match nothing, or exclude a test a workflow runs, fail the verifier. Remove an exclusion when its test is wired into a workflow. Test files are those named like tests (see TEST_NAME in the verifier); verifiers such as scripts/verify-*.js are outside the inventory.",
   "indirect": [
     {
+      "path": "scripts/rehearse-legacy-catalog.test.js",
+      "runner": "scripts/run-legacy-catalog-rehearsal.js",
+      "note": "Runs the real offline repair in an isolated PID namespace so its fail-closed /proc scan sees every fixture process."
+    },
+    {
       "path": "scripts/test-sync-history-worker.js",
       "runner": "scripts/verify-sync-flow.js"
     },

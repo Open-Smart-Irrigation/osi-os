@@ -10,6 +10,7 @@ const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { applyPending } = require('../lib/osi-migrate');
 const { loadMigrationCorpus, resolveCorpus } = require('../lib/osi-migrate/migrations-loader');
 const { ensureLedger, getApplied } = require('../lib/osi-migrate/ledger');
+const { assertNoLegacyDeviceCatalog } = require('../lib/osi-migrate/legacy-device-catalog');
 const { pruneByPrefix, pruneCandidates, SIDE_FILE_SUFFIXES } = require('../lib/osi-migrate/backup');
 
 const REPO = path.resolve(__dirname, '..');
@@ -134,6 +135,7 @@ async function runMigrateCli({
     throw new Error(`refusing: database file does not exist: ${dbPath}`);
   }
 
+  await assertNoLegacyDeviceCatalog(cliRunner(dbPath, { readOnly: true }));
   fs.mkdirSync(backupDir, { recursive: true });
 
   const risks = await pendingRisksAfterApplied(dbPath, migrationsDir, corpus);

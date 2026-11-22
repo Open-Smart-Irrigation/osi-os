@@ -456,7 +456,7 @@ for (const profile of PROFILES) {
     assert.deepEqual(repairStateWithoutRank(db.prepare("SELECT value FROM app_settings WHERE key LIKE 'history_repair_segment:%'").get().value), repairStateWithoutRank(checkpoint));
   });
   test(`${profile}: persistent mismatches exhaust a bounded repair budget and are visible in progress`, async t => {
-    const { db, h } = fixture(t, profile, 2, { fs: { existsSync: () => false } });
+    const { db, h } = fixture(t, profile, 2, { fs: { existsSync: () => false, readdirSync: () => [] } });
     for (let round = 0; round < 8; round++) {
       h.cloud.index.set('device_data\0' + key(1), 'persistent-cloud-divergence');
       await h.manifest();
@@ -812,7 +812,7 @@ for (const profile of PROFILES) {
     assert.equal(pending(db), 2, 'new cloud lacks the rows');
   });
   test(`${profile}: authenticated sync state reports fresh pending repair counts`, async t => {
-    const { db, h } = fixture(t, profile, 2, { fs: { existsSync: () => false } });
+    const { db, h } = fixture(t, profile, 2, { fs: { existsSync: () => false, readdirSync: () => [] } });
     await h.manifest();
     const payload = Buffer.from(JSON.stringify({ userId: 1, username: 'fixture' })).toString('base64url');
     const token = payload + '.' + crypto.createHmac('sha256', 'fixture-secret').update(payload).digest('base64url');

@@ -69,6 +69,8 @@ const scopeHelper = require(scopeHelperPath);
 const osiLib = {
   require(name) {
     if (name === 'scope') return { ok: true, value: scopeHelper };
+    // X2: the Auth + Parse STREGA * nodes are adapters for osi-command-ingress.
+    if (name === 'command-ingress') return { ok: true, value: require(path.join(path.dirname(scopeHelperPath), '..', 'osi-command-ingress')) };
     return { ok: false, error: `unexpected helper ${name}` };
   },
 };
@@ -132,6 +134,10 @@ async function runFunctionNode(node, payload, secret, deviceEui) {
     console,
     crypto,
     msg,
+    // Node-RED gives every Function node setTimeout; the X2 adapters pass it to
+    // the extracted entry explicitly, so the vm sandbox must provide it too.
+    setTimeout,
+    clearTimeout,
     osiLib,
     env: {
       get(name) {

@@ -107,8 +107,10 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       const route = flows.find((entry) => entry.name === 'Route Command');
       const { result: output } = await run(route, db, accepted);
       assert.deepEqual(output.flatMap((item, index) => item ? route.wires[index] : []), [
-        '9d5e3035c3d069c4', 'command-ack-queue-rest',
+        'account-cloud-guard-9d5e3035c3d069c4', 'command-ack-queue-rest',
       ], 'only the ACK output is wired');
+      assert.deepEqual(node('account-cloud-guard-9d5e3035c3d069c4').wires, [['9d5e3035c3d069c4']],
+        'the account guard forwards only to the original cloud MQTT target');
       const [ack] = output.filter(Boolean);
       assert.deepEqual(JSON.parse(ack.payload), {
         commandId: '561',

@@ -297,7 +297,7 @@ const CASES = [
       assert.equal(ingest.type, 'function');
       assert.equal(ingest.z, 'lsn50-tab');
       assert.equal(ingest.outputs, 1);
-      assert.deepEqual(ingest.wires, [['9b38464d56b05ae0']]);
+      assert.deepEqual(ingest.wires, [['account-cloud-guard-9b38464d56b05ae0']]);
     },
   },
   {

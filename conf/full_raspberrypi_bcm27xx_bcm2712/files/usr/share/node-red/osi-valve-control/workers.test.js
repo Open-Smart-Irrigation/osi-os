@@ -904,9 +904,13 @@ let productionLogBuilder;
 function productionActuatorLog(context) {
   if (!productionLogBuilder) {
     const flows = JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../flows.json'), 'utf8'));
-    productionLogBuilder = new Function('msg', flows.find((node) => node.name === 'Build actuator_log INSERT').func);
+    // X2: the production node is a thin adapter for osi-command-ingress, so bind
+    // the Function-node parameters it reads and resolve the sibling package.
+    productionLogBuilder = new Function('msg', 'env', 'global', 'node', 'osiLib', flows.find((node) => node.name === 'Build actuator_log INSERT').func);
   }
-  return productionLogBuilder({ _log_ctx: context });
+  const osiLib = { require: (name) => (name === 'command-ingress' ? { ok: true, value: require('../osi-command-ingress') } : { ok: false, error: new Error('unexpected helper ' + name) }) };
+  const node = { warn(message) { throw new Error('unexpected warn: ' + message); }, error(message) { throw new Error('unexpected error: ' + message); } };
+  return productionLogBuilder({ _log_ctx: context }, { get: () => undefined }, { get: () => undefined }, node, osiLib);
 }
 
 async function serviceOwnerFixture(t) {

@@ -6,7 +6,7 @@ import type { Device } from '../../../types/farming';
 import { SenseCapWeatherCard } from '../SenseCapWeatherCard';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
+  useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => key.startsWith('weatherCard.') ? options?.defaultValue ?? key : key, i18n: { language: 'en' } }),
 }));
 
 vi.mock('../../../services/api', () => ({
@@ -146,5 +146,14 @@ describe('SenseCapWeatherCard zones line', () => {
     render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
     expect(screen.getByText('deviceCard.noZones')).toBeInTheDocument();
     expect(screen.queryByText('No zones assigned')).not.toBeInTheDocument();
+  });
+});
+
+describe('B6 weather station metric contrast', () => {
+  it('uses the theme foreground for metric buttons on their card surfaces', () => {
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
+    for (const name of ['18.4 °C', '56 %', '1013 hPa', '5.4k lux', '5.1 UVI', '3.2 m/s']) {
+      expect(screen.getByRole('button', { name })).toHaveStyle({ color: 'var(--text)' });
+    }
   });
 });

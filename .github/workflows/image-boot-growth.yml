@@ -1,0 +1,40 @@
+name: Image boot and filesystem growth
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+jobs:
+  shell-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install shell fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox dash shfmt gcc fuse3 libfuse3-dev pkg-config
+          if [ ! -c /dev/fuse ]; then sudo modprobe fuse; fi
+          test -c /dev/fuse
+          sudo chmod a+rw /dev/fuse
+      - name: Exercise image dispatch and growth under ash and dash
+        run: node --test scripts/test-image-boot-growth.js
+      - name: Exercise kernel writeback errors through the packaged flush helper
+        run: node --test scripts/test-rootfs-writeback.js
+      - name: Check POSIX shell formatting
+        run: |
+          shfmt -ln posix -i 2 -d \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-rootfs-resize \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-rootfs-flush \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-rootfs-grow-reboot \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/90_osi_rootfs_grow \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-rootfs-grow.sh
+      - name: Verify image profile parity
+        run: node scripts/verify-profile-parity.js
