@@ -41,11 +41,22 @@ Round-6 checks (local, this revision): source guards 20/20; ordinary suite
 38/38 and export review 30/30 and bounds 10/10 (each with
 `--max-old-space-size=192`); source-v2 68/68; all-zones and recorded-at
 formats 68/68; helper `index.test.js` 45/45 and router 76/0 on each profile;
-vectors 4/4; `test-history-helper.js` R6_HELPER; `verify-sync-flow.js` R6_VSF;
+vectors 4/4; `test-history-helper.js` PASS; `verify-sync-flow.js` rc 0;
 test inventory, profile parity (helper byte-identical), silent-catch, doc
 hygiene and `git diff --check` OK.
 
-Round time: R6_TIME
+Round time: authoring and focused gates 19:11–19:15 UTC (code pushed as `c188a64b` at 19:15), then serial `test-history-helper.js` and `verify-sync-flow.js` 19:15–19:50 UTC. This report commit follows; the CI wait on its head is recorded in a PR comment.
+
+Rebase: CI on `c188a64b` failed two jobs of main's new `valve-ingress-x2.yml`
+workflow. It checks out the PR head, which predated main's valve-ingress
+scripts. I rebased the nine PR commits onto `origin/main` `c1bdea564c`
+(clean, no conflicts; main's new commits do not touch `osi-history-helper` or
+`osi-history-router`) and pushed with `--force-with-lease`. On the rebased
+tree: source guards 20/20, ordinary 38/38, source-v2 68/68, bounds and review
+40/40, all-zones and recorded-at formats 68/68, helper 45/45 and router 76/0
+per profile, vectors 4/4, test inventory (1,055 files), profile parity,
+silent-catch (53/320 baseline) and doc hygiene OK; local `verify-sync-flow.js`
+reran on the rebased tree, see the PR comment.
 
 ## Round-5 finding and fix (head `5a7723ca` → this revision)
 
