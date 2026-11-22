@@ -150,8 +150,8 @@ describe('cross-tab session changes (#378)', () => {
     renderApp();
     const { auth } = authHandle;
 
-    let aliceResult: Promise<void> = Promise.resolve();
-    let bobResult: Promise<void> = Promise.resolve();
+    let aliceResult: Promise<unknown> = Promise.resolve();
+    let bobResult: Promise<unknown> = Promise.resolve();
     act(() => {
       aliceResult = auth().login({ username: 'alice', password: 'synthetic-password' });
       bobResult = auth().login({ username: 'bob', password: 'synthetic-password' });
@@ -175,6 +175,41 @@ describe('cross-tab session changes (#378)', () => {
     expect(localStorage.getItem('username')).toBe('bob');
   });
 
+  it('keeps the session closed while the gateway asks for a new password', async () => {
+    const logins: FakeRequest[] = [];
+    network.on('POST', '/auth/login', (request) => {
+      logins.push(request);
+      return 'defer';
+    });
+    renderApp();
+    const { auth } = authHandle;
+
+    let required: Promise<unknown> = Promise.resolve();
+    act(() => {
+      required = auth().login({ username: 'alice', password: 'synthetic-password' });
+    });
+    await waitFor(() => expect(logins).toHaveLength(1));
+    await act(async () => {
+      logins[0].respond({ token: 'token-alice-pending', passwordChangeRequired: true });
+      await required;
+    });
+    expect(await required).toMatchObject({ status: 'password-change-required' });
+    expect(auth().token).toBeNull();
+    expect(localStorage.getItem('auth_token')).toBeNull();
+
+    let accepted: Promise<unknown> = Promise.resolve();
+    act(() => {
+      accepted = auth().login({ username: 'alice', password: 'synthetic-password' }, { acceptPendingPasswordChange: true });
+    });
+    await waitFor(() => expect(logins).toHaveLength(2));
+    await act(async () => {
+      logins[1].respond({ token: 'token-alice-pending', passwordChangeRequired: true });
+      await accepted;
+    });
+    expect(await accepted).toMatchObject({ status: 'signed-in' });
+    expect(auth().token).toBe('token-alice-pending');
+  });
+
   it('does not resurrect a session when logout happens while login is pending', async () => {
     const logins: FakeRequest[] = [];
     network.on('POST', '/auth/login', (request) => {
@@ -184,7 +219,7 @@ describe('cross-tab session changes (#378)', () => {
     renderApp();
     const { auth } = authHandle;
 
-    let pending: Promise<void> = Promise.resolve();
+    let pending: Promise<unknown> = Promise.resolve();
     act(() => {
       pending = auth().login({ username: 'alice', password: 'synthetic-password' });
     });
@@ -220,8 +255,8 @@ describe('cross-tab session changes (#378)', () => {
       renderApp();
       const { auth } = authHandle;
 
-      let aliceResult: Promise<void> = Promise.resolve();
-      let bobResult: Promise<void> = Promise.resolve();
+      let aliceResult: Promise<unknown> = Promise.resolve();
+      let bobResult: Promise<unknown> = Promise.resolve();
       act(() => {
         aliceResult = auth().login({ username: 'alice', password: 'synthetic-password' });
         bobResult = auth().login({ username: 'bob', password: 'synthetic-password' });
@@ -247,7 +282,7 @@ describe('cross-tab session changes (#378)', () => {
       renderApp();
       const { auth } = authHandle;
 
-      let result: Promise<void> = Promise.resolve();
+      let result: Promise<unknown> = Promise.resolve();
       act(() => {
         result = auth().login({ username: 'alice', password: 'synthetic-password' });
       });
