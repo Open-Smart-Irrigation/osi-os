@@ -1,5 +1,7 @@
 'use strict';
-// osi-local-password-reset: the admin password reset behind
+// osi-local-password-reset: local password handling. Two entry points:
+// verifyLocalLogin for local sign-in (see the section near the end), and
+// resetLocalPassword, the admin password reset behind
 // POST /api/users/:uuid/password-reset (#521). The admin account router
 // (scoped-admin-account-router) checks the scoped-access flag, the bearer
 // token and the actor's admin role, then calls resetLocalPassword and answers
@@ -9,7 +11,7 @@
 // never password_hash, so a local reset cannot change its login. Refuse it;
 // reset only local accounts. Unknown modes fail closed.
 //
-// Every dependency is passed in by the router: db is the router's osi-db-helper
+// Every dependency is passed in by the caller: db is the router's osi-db-helper
 // handle, scope the single osi-scope-helper instance the router loads through
 // osi-lib, bcrypt the router's bcryptjs, node the function node (for
 // node.warn). This module loads no other module.
@@ -95,7 +97,197 @@ async function resetLocalPassword(options) {
   return answer(200, { success: true });
 }
 
+// ---------------------------------------------------------------------------
+// Local sign-in (POST /auth/login, node auth-process-result).
+//
+// verifyLocalLogin checks the password of a local account (any auth_mode other
+// than 'server'; the node keeps the linked branch). A bcrypt value is compared
+// with bcrypt only. A stored value that is not yet bcrypt is compared as
+// stored, and on a match it is replaced by a bcrypt hash at the registration
+// cost before the node issues the token. When that write fails the sign-in
+// still succeeds (a gateway that cannot write must not lock anyone out),
+// node.warn reports it, and the next sign-in tries again.
+//
+// The first local account (users.id 1) on a value that is not yet bcrypt must
+// choose a new password. The rehash stores a pending-change record in
+// app_settings in the same transaction, so the requirement survives the
+// rehash. The sign-in still returns a token; the payload carries
+// passwordChangeRequired and the GUI asks for a new password before it opens
+// the session. The GUI sends the new password with the next sign-in request
+// (newPassword); it is honoured only while the record is pending, only after
+// the current password verified, and only for an account that may sign in.
+//
+// The farming database is opened through the caller's osiLib
+// ('osi-db-helper') only when a read or write is needed, and closed again.
+
+const LOCAL_HASH_COST = 10;
+const MIN_PASSWORD_LENGTH = 6;
+const FIRST_ACCOUNT_ID = 1;
+const CHANGE_KEY_PREFIX = 'local_password_change_required:';
+const FARMING_DB = '/data/db/farming.db';
+
+function openFarmingDb(osiLib) {
+  const load = osiLib.require('osi-db-helper');
+  if (!load.ok) throw new Error('osi-db-helper unavailable: ' + load.error);
+  return new load.value.Database(FARMING_DB);
+}
+
+function isBcryptValue(value) {
+  return typeof value === 'string' && value.startsWith('$2');
+}
+
+function storedValueMatches(stored, password, crypto) {
+  if (typeof stored !== 'string' || typeof password !== 'string') return false;
+  const digest = (value) => crypto.createHash('sha256').update(value, 'utf8').digest();
+  return crypto.timingSafeEqual(digest(stored), digest(password)) && stored === password;
+}
+
+function errorText(error) {
+  return String(error && error.message ? error.message : error);
+}
+
+function changeKey(userId) {
+  return CHANGE_KEY_PREFIX + String(userId);
+}
+
+async function changeIsPending(db, userId) {
+  const row = await db.get('SELECT 1 AS pending FROM app_settings WHERE key=? LIMIT 1', [changeKey(userId)]);
+  return !!(row && row.pending);
+}
+
+async function changedRows(tx) {
+  const counted = await tx.get('SELECT changes() AS n');
+  return counted ? Number(counted.n) : NaN;
+}
+
+function newPasswordProblem(newPassword, password) {
+  if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
+    return { code: 'password_too_short', message: 'Password must be at least 6 characters' };
+  }
+  if (newPassword === password) {
+    return { code: 'password_unchanged', message: 'Choose a password that differs from the current one' };
+  }
+  return null;
+}
+
+async function storeNewPassword(db, options) {
+  const { user, bcrypt, newPassword, now } = options;
+  const passwordHash = bcrypt.hashSync(newPassword, LOCAL_HASH_COST);
+  await db.transaction(async function(tx) {
+    await tx.run(
+      "UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE id=? AND auth_mode<>'server' AND password_hash=?",
+      [passwordHash, now, user.id, user.password_hash]
+    );
+    const n = await changedRows(tx);
+    if (n !== 1) throw new Error('password change matched ' + String(n) + ' rows');
+    await tx.run('DELETE FROM app_settings WHERE key=?', [changeKey(user.id)]);
+  });
+}
+
+async function rehashStoredValue(db, options) {
+  const { user, bcrypt, password, now, markChange } = options;
+  const passwordHash = bcrypt.hashSync(password, LOCAL_HASH_COST);
+  await db.transaction(async function(tx) {
+    await tx.run(
+      "UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND auth_mode<>'server' AND password_hash=?",
+      [passwordHash, now, user.id, user.password_hash]
+    );
+    const n = await changedRows(tx);
+    if (n !== 1) throw new Error('rehash matched ' + String(n) + ' rows');
+    if (markChange) {
+      await tx.run(
+        'INSERT INTO app_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',
+        [changeKey(user.id), JSON.stringify({ since: now }), now]
+      );
+    }
+  });
+}
+
+// Resolves to { valid: false } or { valid: true, response }, where response
+// holds the extra login payload fields (empty for an ordinary sign-in). It
+// never rejects: a comparison that throws (a password that is not a string)
+// counts as a mismatch.
+async function verifyLocalLogin(options) {
+  const { user, password, newPassword, bcrypt, crypto, node, now, osiLib } = options;
+  const canChange = options.canChange !== false;
+  const warn = (message) => node.warn('local sign-in: ' + message);
+  const stored = user && user.password_hash;
+  const bcryptStored = isBcryptValue(stored);
+  let valid = false;
+  try {
+    valid = bcryptStored ? bcrypt.compareSync(password, stored) : storedValueMatches(stored, password, crypto);
+  } catch (error) {
+    warn('password comparison failed: ' + errorText(error));
+  }
+  if (!valid) return { valid: false };
+
+  const firstAccount = Number(user.id) === FIRST_ACCOUNT_ID;
+  if (bcryptStored && !firstAccount) return { valid: true, response: {} };
+
+  let db = null;
+  try {
+    db = openFarmingDb(osiLib);
+  } catch (error) {
+    warn('database unavailable: ' + errorText(error));
+  }
+  try {
+    let required = firstAccount && !bcryptStored;
+    if (firstAccount && bcryptStored && db) {
+      try {
+        required = await changeIsPending(db, user.id);
+      } catch (error) {
+        warn('pending password change could not be read: ' + errorText(error));
+      }
+    }
+    const response = {};
+    if (required && newPassword !== undefined && newPassword !== null && newPassword !== '') {
+      const problem = canChange ? newPasswordProblem(newPassword, password) : null;
+      if (problem) {
+        response.passwordChange = 'rejected';
+        response.passwordChangeError = problem.code;
+        response.passwordChangeMessage = problem.message;
+      } else if (canChange && db) {
+        try {
+          await storeNewPassword(db, { user, bcrypt, newPassword, now });
+          return { valid: true, response: { passwordChange: 'changed' } };
+        } catch (error) {
+          warn('new password could not be stored for user ' + String(user.id) + ': ' + errorText(error));
+          response.passwordChange = 'failed';
+        }
+      } else if (canChange) {
+        response.passwordChange = 'failed';
+      }
+    }
+    if (!bcryptStored) {
+      if (!db) {
+        warn('rehash skipped for user ' + String(user.id) + '; it is retried at the next sign-in');
+      } else {
+        try {
+          await rehashStoredValue(db, { user, bcrypt, password, now, markChange: firstAccount });
+        } catch (error) {
+          warn('rehash failed for user ' + String(user.id) + '; it is retried at the next sign-in: ' + errorText(error));
+        }
+      }
+    }
+    if (required) response.passwordChangeRequired = true;
+    return { valid: true, response };
+  } finally {
+    if (db) {
+      try {
+        await db.close();
+      } catch (error) {
+        warn('database close failed: ' + errorText(error));
+      }
+    }
+  }
+}
+
 module.exports = {
   signInType,
   resetLocalPassword,
+  isBcryptValue,
+  verifyLocalLogin,
+  LOCAL_HASH_COST,
+  CHANGE_KEY_PREFIX,
+  FARMING_DB,
 };
