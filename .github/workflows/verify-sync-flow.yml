@@ -93,6 +93,7 @@ jobs:
       - name: Standalone script inventory pass set
         run: |
           node scripts/test-account-link-legacy-cloud.js
+          node --test scripts/test-account-link-restart-obligation.js
           node scripts/test-audit-schema.js
           node scripts/test-command-ack-mark-delivered.js
           node scripts/test-delete-device-flow.js

@@ -1,31 +1,5 @@
 [
   {
-    "id": "al-link-handle-auth",
-    "field": "func",
-    "identifier": "URL",
-    "locations": [
-      [
-        101,
-        18
-      ]
-    ],
-    "sha256": "de2dbea88ae235e8c11ecb6fc00fdf1f4e696dfc6e3b10a9d41034803e61e020",
-    "reason": "Guarded by typeof URL === function; the constructor branch cannot execute when URL is absent."
-  },
-  {
-    "id": "al-link-store-mqtt",
-    "field": "func",
-    "identifier": "URL",
-    "locations": [
-      [
-        21,
-        18
-      ]
-    ],
-    "sha256": "5cabb2f0c10d3e12ddef39d03f6805e47aed7856335945d3a1b7c11923946044",
-    "reason": "Guarded by typeof URL === function; the constructor branch cannot execute when URL is absent."
-  },
-  {
     "id": "settings-disable-schedules-fn",
     "field": "func",
     "identifier": "disabledSchedules",

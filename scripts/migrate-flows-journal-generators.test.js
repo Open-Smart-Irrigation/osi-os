@@ -172,6 +172,63 @@ for (const state of [
   }
 }
 
+// EB2 account guard in front of the cloud ACK MQTT node. With the guard node
+// present, a direct ACK wire bypasses it and is drift; a pre-EB2 flow has no
+// guard node and keeps its direct wire.
+const ACK_MQTT = '9d5e3035c3d069c4';
+const ACK_GUARD = 'account-cloud-guard-' + ACK_MQTT;
+const ACK_WIRED = ['command-dedupe-dispatch', 'command-ack-queue-rest'];
+
+function rewireAck(buffer, ids, from, to, { dropGuard = false } = {}) {
+  let flows = JSON.parse(buffer.toString('utf8'));
+  for (const id of ids) {
+    const node = flows.find((candidate) => candidate.id === id);
+    assert.ok(JSON.stringify(node.wires).includes(JSON.stringify(from)), `${id} is wired to ${from}`);
+    node.wires = node.wires.map((wire) => wire.map((target) => (target === from ? to : target)));
+  }
+  if (dropGuard) {
+    // A pre-EB2 flow: every ACK producer wires to the MQTT node directly.
+    flows = flows.filter((node) => node.id !== ACK_GUARD);
+    for (const node of flows) {
+      if (Array.isArray(node.wires)) node.wires = node.wires.map((wire) => wire.map((target) => (target === ACK_GUARD ? ACK_MQTT : target)));
+    }
+    assert.equal(JSON.stringify(flows).includes(JSON.stringify(ACK_GUARD)), false, 'no wire still names the dropped guard');
+  }
+  return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
+}
+
+for (const state of [
+  ['current', () => current],
+  ['prior-current', () => priorCurrentBuffer(helperLoading.PRIOR_CURRENT_HELPER_SURFACES)],
+  ['direct-helper', legacyHelperLoadingBuffer],
+]) {
+  for (const ids of [[ACK_WIRED[0]], [ACK_WIRED[1]], ACK_WIRED]) {
+    test(`helper-loading generator rejects a ${state[0]} guarded flow whose ${ids.join(' and ')} bypass the ACK guard`, () => {
+      assert.throws(
+        () => helperLoading.migrate(rewireAck(state[1](), ids, ACK_GUARD, ACK_MQTT)),
+        /Refusing drifted Task 9 helper-loading node/,
+      );
+    });
+  }
+}
+
+test('helper-loading generator keeps the direct ACK wire for a pre-EB2 flow without the guard node', () => {
+  const preEb2 = rewireAck(current, ACK_WIRED, ACK_GUARD, ACK_MQTT, { dropGuard: true });
+  assert.equal(helperLoading.migrate(preEb2).equals(preEb2), true, 'current pre-EB2 surface is a no-op');
+  const priorPreEb2 = rewireAck(priorCurrentBuffer(helperLoading.PRIOR_CURRENT_HELPER_SURFACES), ACK_WIRED, ACK_GUARD, ACK_MQTT, { dropGuard: true });
+  assert.equal(helperLoading.migrate(priorPreEb2).equals(preEb2), true, 'prior-current pre-EB2 surface upgrades');
+  const directPreEb2 = rewireAck(legacyHelperLoadingBuffer(), ACK_WIRED, ACK_GUARD, ACK_MQTT, { dropGuard: true });
+  assert.equal(helperLoading.migrate(directPreEb2).equals(preEb2), true, 'direct-helper pre-EB2 surface upgrades');
+});
+
+test('helper-loading generator rejects a guard id on the ACK wire when the guard node is missing', () => {
+  const flows = JSON.parse(current.toString('utf8')).filter((node) => node.id !== ACK_GUARD);
+  assert.throws(
+    () => helperLoading.migrate(Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8')),
+    /Refusing drifted Task 9 helper-loading node/,
+  );
+});
+
 test('helper-loading generator rejects a mixed current and prior-current source set', () => {
   const flows = JSON.parse(current.toString('utf8'));
   const prior = helperLoading.PRIOR_CURRENT_HELPER_SURFACES['command-dedupe-dispatch'];

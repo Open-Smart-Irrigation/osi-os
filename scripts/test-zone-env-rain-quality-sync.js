@@ -332,7 +332,7 @@ test('snapshots: bootstrap and force-sync zoneEnvironments carry the five fields
   const flowState = {};
   const flow = { get: (key) => flowState[key] || {}, set: (key, value) => { flowState[key] = value; } };
   const previousGet = global.get;
-  global.get = (key) => (key === 'fs' ? { existsSync: () => false } : undefined);
+  global.get = (key) => (key === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined);
   const env = { get: (key) => ({ DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active', FIRMWARE_VERSION: 'test-build', OSI_SCOPED_ACCESS: '0' }[key] || '') };
   const osiLib = { require(name) {
     if (name === 'installation') return { ok: true, value: installation };

@@ -33,6 +33,37 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
 
+const gatewayIo = new WeakMap();
+function fixtureIo(store) {
+  if (gatewayIo.has(store)) return gatewayIo.get(store);
+  const files = new Map(); const config = new Map(); const descriptors = new Map(); let nextFd=1;
+  const fakeFs = {
+    existsSync(p) { return p === '/data/db/osi-account-link-config.json' ? files.has(p) : fs.existsSync(p); },
+    readFileSync(p,enc) { return files.has(p) ? files.get(p) : fs.readFileSync(p,enc); },
+    readdirSync(p) { return [...files.keys()].filter(file=>path.dirname(file)===p).map(file=>path.basename(file)); },
+    openSync(p,flags) { const fd=nextFd++; descriptors.set(fd,p); if(flags==='wx') files.set(p,''); return fd; },
+    writeFileSync(p,data) { files.set(typeof p==='number'?descriptors.get(p):p,String(data)); },
+    closeSync(fd) { descriptors.delete(fd); }, fsyncSync() {},
+    renameSync(a,b) { files.set(b,files.get(a)); files.delete(a); },
+    unlinkSync(p) { if(!files.delete(p)) throw Object.assign(new Error('missing fixture file'),{code:'ENOENT'}); },
+    mkdirSync() {},
+  };
+  const cp = { execFileSync(command,args) {
+    assert.equal(command,'uci');
+    if(args.includes('get')) { const k=args.at(-1); if(!config.has(k)) throw Object.assign(new Error('missing'),{status:1}); return config.get(k); }
+    if(args[0]==='set') { const at=args[1].indexOf('='); config.set(args[1].slice(0,at),args[1].slice(at+1)); }
+    if(args.includes('delete')) config.delete(args.at(-1));
+    return '';
+  }};
+  const io={fs:fakeFs,cp,files,config}; gatewayIo.set(store,io); return io;
+}
+
+function completeFixtureRestart(io) {
+  // These legacy tests continue after a completed daemon-owned service restart.
+  // The paused-daemon handoff itself is covered by the restart-obligation suite.
+  for(const file of io.files.keys()) if(file.startsWith('/var/run/osi-node-red-restart-requests/')) io.files.delete(file);
+}
+
 const root = path.resolve(__dirname, '..');
 const flowsPath = path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const helperPath = path.join(
@@ -253,6 +284,9 @@ function freshSeededDb(seedFn, installationUuid) {
 // scripts/test-auth-credential-isolation.js. `warnings` (optional) captures
 // every node.warn(...) call so tests can assert on it.
 async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {}, warnings } = {}) {
+  // Match Node-RED: only declared libs enter the function sandbox. Otherwise
+  // a missing binding can pass here and fail on the gateway.
+  const boundScope = Object.fromEntries((node.libs || []).map(lib => [lib.var, scope[lib.var]]));
   const fn = new vm.Script(
     `(async function(msg,node,flow,env,context,global,get,set){${node.func}\n})`
   ).runInNewContext(
@@ -266,7 +300,7 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
         clearTimeout,
         URL,
       },
-      scope
+      boundScope
     )
   );
   const flowApi = {
@@ -291,19 +325,29 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
   };
   const globalApi = {
     get(key) {
-      if (key === 'fs') return fs;
+      if (key === 'fs') return fixtureIo(flowStore).fs;
+      if (key === 'cp') return fixtureIo(flowStore).cp;
       return undefined;
     },
     set() {},
   };
   const nodeApi = {
     error() {},
+    log() {},
     warn(message) {
       if (warnings) warnings.push(message);
     },
     status() {},
   };
   return fn(msg, nodeApi, flowApi, envApi, noopStore, globalApi, () => undefined, () => {});
+}
+
+// These older link fixtures model the complete success path. Normal commit
+// now retains its receipt until the separately wired restart stage publishes.
+async function executeLinkedFinalizer(node, msg, options) {
+  const result = await executeFunctionNode(node, msg, options);
+  if (!result[0]) return result;
+  return executeFunctionNode(findNode(readFlows(), 'al-link-restart-node-red'), result[0], options);
 }
 
 async function buildLinkAttempt(flows, flowStore, helper, expectedRoute = 'legacy') {
@@ -393,14 +437,14 @@ test('legacy cloud (no installationUuid) is tolerated: link succeeds, warns once
       'no remote installation identity must be persisted for a legacy cloud; the local uuid must be kept'
     );
     assert.equal(
-      flowStore.get('al_offline_verifier_version'),
+      continueMsg._alState.al_offline_verifier_version,
       1,
       'offlineVerifierVersion must be stored as returned by the cloud (1), not forced/rejected'
     );
 
     // --- 'Finalize linked account state' must also accept this v1 / no-remote-identity state ---
     const finalizeNode = findNode(flows, 'al-link-finalize');
-    const [finalizeContinue, finalizeReject] = await executeFunctionNode(finalizeNode, continueMsg, {
+    const [finalizeContinue, finalizeReject] = await executeLinkedFinalizer(finalizeNode, continueMsg, {
       flowStore,
       scope: { osiDb: helper, osiLib },
       env: { DEVICE_EUI: 'AABBCCDDEEFF0011' },
@@ -827,7 +871,7 @@ async function linkEndToEnd(profile, lib) {
   });
   const [handled, handleReject] = await executeFunctionNode(findNode(flows, 'al-link-handle-auth'), requestMsg, { flowStore, scope, warnings });
   assert.equal(handleReject, null, 'the auth response must be accepted: ' + JSON.stringify(handleReject && handleReject.payload));
-  const [finalized, finalizeReject] = await executeFunctionNode(findNode(flows, 'al-link-finalize'), handled, {
+  const [finalized, finalizeReject] = await executeLinkedFinalizer(findNode(flows, 'al-link-finalize'), handled, {
     flowStore, scope, env: { DEVICE_EUI: 'AABBCCDDEEFF0011' },
   });
   assert.equal(finalizeReject, null, 'finalize must succeed: ' + JSON.stringify(finalizeReject && finalizeReject.payload));
@@ -865,5 +909,334 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     assert.equal(out.link.gateway_device_eui, 'AABBCCDDEEFF0011');
   });
 }
+
+// #667: the remote commit can precede every local credential write. A retry
+// must accept the authenticated response account rather than pinning the old ID.
+for (const profile of ['bcm2712', 'bcm2709']) {
+  test(`${profile}: relink after remote commit accepts the new account and retry converges`, async () => {
+    const flows = readFlows(profile);
+    const installationUuid = installationHelper.newInstallationUuid();
+    const fixture = freshSeededDb((db) => {
+      db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,cloud_user_id,server_url) VALUES(1,'local','local-hash','now','local-uuid','server',11,'https://cloud.example.org')").run();
+      db.prepare("INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,'https://cloud.example.org','11','AABBCCDDEEFF0011',?,'now')").run(installationUuid);
+      db.prepare('UPDATE installation_identity SET current_gateway_device_eui=?').run('AABBCCDDEEFF0011');
+    }, installationUuid);
+    const flowStore = new Map([
+      ['al_local_username','local'], ['al_local_user_id',1],
+      ['al_server_url','https://cloud.example.org'], ['al_action','link'],
+      ['al_server_username','target'], ['al_server_password','fixture-password'],
+      ['al_gateway_device_eui','AABBCCDDEEFF0011'], ['al_gateway_device_eui_confidence','authoritative'],
+    ]);
+    try {
+      // First request reached the cloud and committed, but its reply was lost.
+      const lost = await buildLinkAttempt(flows, flowStore, fixture.helper);
+      await executeFunctionNode(findNode(flows,'al-link-clear-state'), lost, { flowStore, scope:{osiDb:fixture.helper,osiLib} });
+      for (let retry=0; retry<2; retry++) {
+        // Re-submit the same authenticated target. The server can reissue tokens.
+        flowStore.set('al_local_username','local'); flowStore.set('al_local_user_id',1);
+        flowStore.set('al_server_url','https://cloud.example.org'); flowStore.set('al_action','link');
+        flowStore.set('al_server_username','target'); flowStore.set('al_server_password','fixture-password');
+        flowStore.set('al_gateway_device_eui','AABBCCDDEEFF0011');
+        const msg = await buildLinkAttempt(flows, flowStore, fixture.helper);
+        msg.statusCode=200;
+        msg.payload={ username:'target', userId:77, token:'fixture-token-'+retry,
+          offlineVerifier:'fixture-verifier', offlineVerifierVersion:2, syncTokenExpiresAt:1900000000000,
+          mqttPassword:'fixture-mqtt', mqttBrokerUrl:'wss://cloud.example.org/mqtt', installationUuid };
+        const [accepted,rejected] = await executeFunctionNode(findNode(flows,'al-link-handle-auth'),msg,{flowStore,scope:{osiDb:fixture.helper,osiLib}});
+        assert.equal(rejected,null,'a remotely committed account must pass: '+JSON.stringify(rejected?.payload));
+        const [finalized,failed] = await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),accepted,{flowStore,scope:{osiDb:fixture.helper,osiLib}});
+        assert.equal(failed,null,'relink must finalize: '+JSON.stringify(failed?.payload));
+        assert.ok(finalized);
+        const native = new DatabaseSync(fixture.dbPath);
+        assert.equal(native.prepare('SELECT cloud_user_id FROM users WHERE id=1').get().cloud_user_id,77);
+        assert.equal(native.prepare("SELECT cloud_user_id FROM sync_link_state WHERE peer_node='cloud'").get().cloud_user_id,'77');
+        assert.equal(native.prepare('SELECT password_hash FROM users WHERE id=1').get().password_hash,'local-hash');
+        native.close();
+        await executeFunctionNode(findNode(flows,'al-link-clear-state'),finalized,{flowStore,scope:{osiDb:fixture.helper,osiLib}});
+        completeFixtureRestart(fixtureIo(flowStore));
+      }
+    } finally { fixture.cleanup(); }
+  });
+}
+
+
+function linkedConsistencyFixture() {
+  const installationUuid = installationHelper.newInstallationUuid();
+  const fixture = freshSeededDb(db => {
+    db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,cloud_user_id,server_url,server_sync_token) VALUES(1,'local','local-hash','now','local-uuid','server',11,'https://cloud.example.org','old-token')").run();
+    db.prepare("INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,'https://cloud.example.org','11','AABBCCDDEEFF0011',?,'now')").run(installationUuid);
+    db.prepare('UPDATE installation_identity SET current_gateway_device_eui=?').run('AABBCCDDEEFF0011');
+    db.exec("CREATE TABLE sync_history_dirty_keys(peer_node TEXT, row_key TEXT); INSERT INTO sync_history_dirty_keys VALUES('cloud','retained-history-key')");
+  }, installationUuid);
+  const flowStore = new Map([
+    ['al_local_username','local'],['al_local_user_id',1],['al_action','link'],
+    ['al_server_url','https://cloud.example.org'],['al_server_username','target'],
+    ['al_server_password','fixture-password'],['al_gateway_device_eui','AABBCCDDEEFF0011'],
+    ['al_gateway_device_eui_confidence','authoritative'],
+  ]);
+  const io = fixtureIo(flowStore);
+  for (const key of ['server_host','mqtt_password','mqtt_broker_url','link_gateway_device_eui']) io.config.set('osi-server.cloud.'+key,'old-'+key);
+  return {...fixture, installationUuid, flowStore, io, scope:{osiDb:fixture.helper,osiLib}};
+}
+function localSnapshot(f) {
+  const db = new DatabaseSync(f.dbPath);
+  try { return {
+    user: {...db.prepare('SELECT * FROM users WHERE id=1').get()},
+    peer: {...db.prepare("SELECT * FROM sync_link_state WHERE peer_node='cloud'").get()},
+    dirty: db.prepare('SELECT * FROM sync_history_dirty_keys').all().map(row=>({...row})),
+    config: Object.fromEntries(f.io.config),
+  }; } finally { db.close(); }
+}
+async function acceptTarget(f,flows,msg) {
+  msg.statusCode=200;
+  msg.payload={username:'target',userId:77,token:'new-token',offlineVerifier:'fixture-verifier',offlineVerifierVersion:2,
+    syncTokenExpiresAt:1900000000000,mqttPassword:'new-mqtt',mqttBrokerUrl:'wss://cloud.example.org/mqtt',installationUuid:f.installationUuid};
+  const [accepted,rejected]=await executeFunctionNode(findNode(flows,'al-link-handle-auth'),msg,f);
+  assert.equal(rejected,null,JSON.stringify(rejected?.payload));
+  return accepted;
+}
+
+for (const profile of ['bcm2712','bcm2709']) {
+  for(const kind of ['link','disconnect']) test(`${profile}: real ${kind} commit remains fenced through the daemon handoff`,async()=>{
+    const f=linkedConsistencyFixture(),flows=readFlows(profile);
+    try {
+      if(kind==='link') {
+        const msg=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+        const [done,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),msg,f);
+        assert.ok(done);assert.equal(error,null);
+      } else {
+        const [done,error]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+        assert.ok(done);assert.equal(error,null);
+        const [published,failed]=await executeFunctionNode(findNode(flows,'al-unlink-restart-node-red'),done,f);
+        assert.ok(published);assert.equal(failed,null);
+      }
+      const before=localSnapshot(f);
+      assert.equal(before.user.auth_mode,kind==='link'?'server':'local');
+      assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+      assert.equal([...f.io.files.keys()].filter(p=>p.startsWith('/var/run/osi-node-red-restart-requests/')&&p.endsWith('.json')).length,1);
+      const fsExists=f.io.fs.existsSync,fsRead=f.io.fs.readFileSync;
+      let sentinel=false;
+      f.io.fs.existsSync=p=>p==='/var/run/osi-identity-restart.json'?sentinel:fsExists(p);
+      f.io.fs.readFileSync=(p,enc)=>p==='/var/run/osi-identity-restart.json'?'{}':fsRead(p,enc);
+      for(const phase of ['queued','sentinel']) {
+        if(phase==='sentinel') {sentinel=true;completeFixtureRestart(f.io);}
+        for(const target of flows.filter(n=>n.type==='mqtt out'&&n.broker==='ec43625ea99685a6')) {
+          assert.equal(await executeFunctionNode(findNode(flows,'account-cloud-guard-'+target.id),{payload:{fixture:true}},f),null,phase+' blocks MQTT');
+        }
+        assert.equal(await executeFunctionNode(findNode(flows,'sync-refresh-build'),{},f),null,phase+' blocks credential refresh');
+        const [link,linkError]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+        assert.equal(link,null);assert.equal(linkError.statusCode,503);
+        const [disconnect,disconnectError]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+        assert.equal(disconnect,null);assert.equal(disconnectError.statusCode,503);
+        assert.deepEqual(localSnapshot(f),before,'refused operations leave committed state unchanged');
+      }
+    } finally {f.cleanup();}
+  });
+
+  test(`${profile}: disconnect SQL failure leaves user, peer, dirty keys and MQTT unchanged`, async()=>{
+    const f=linkedConsistencyFixture(); const flows=readFlows(profile);
+    const before=localSnapshot(f);
+    const db=new DatabaseSync(f.dbPath);
+    db.exec("CREATE TRIGGER injected_disconnect_failure BEFORE UPDATE OF linked ON sync_link_state WHEN NEW.linked=0 BEGIN SELECT RAISE(ABORT,'injected disconnect failure'); END"); db.close();
+    const msg={_unlinkAuth:{userId:1,username:'local'}};
+    try {
+      await executeFunctionNode(findNode(flows,'al-unlink-clear-mqtt'),msg,f);
+      const [success,failure]=await executeFunctionNode(findNode(flows,'al-unlink-db'),msg,f);
+      assert.equal(success,null); assert.ok(failure);
+      assert.deepEqual(localSnapshot(f),before,'disconnect must roll back all local effects');
+      assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+    } finally { f.cleanup(); }
+  });
+
+  test(`${profile}: partial UCI failure rolls back SQL, restores credentials and permits a retry`, async()=>{
+    const f=linkedConsistencyFixture(); const flows=readFlows(profile);
+    const before=localSnapshot(f);
+    const original=f.io.cp.execFileSync; let fail=true;
+    f.io.cp.execFileSync=(command,args)=>{
+      if(fail && args[0]==='commit') { fail=false; throw new Error('injected commit failure with secret argv'); }
+      return original(command,args);
+    };
+    try {
+      const msg=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+      const [success,failure]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),msg,f);
+      assert.equal(success,null); assert.ok(failure);
+      assert.doesNotMatch(JSON.stringify(failure.payload),/secret argv|new-mqtt/);
+      await executeFunctionNode(findNode(flows,'al-link-clear-state'),msg,f);
+      // Timestamp/attempt cleanup can change; account state and credentials cannot.
+      const after=localSnapshot(f);
+      assert.deepEqual(after.user,before.user); assert.deepEqual(after.config,before.config);
+      assert.equal(after.peer.cloud_user_id,before.peer.cloud_user_id);
+      assert.deepEqual(after.dirty,before.dirty);
+      assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+      const retry=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+      const [done,reject]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),retry,f);
+      assert.equal(reject,null); assert.ok(done);
+      assert.equal(localSnapshot(f).user.cloud_user_id,77);
+    } finally { f.cleanup(); }
+  });
+
+  test(`${profile}: an active link blocks disconnect and a late response cannot overwrite disconnect`, async()=>{
+    const f=linkedConsistencyFixture(); const flows=readFlows(profile);
+    try {
+      const msg=await buildLinkAttempt(flows,f.flowStore,f.helper);
+      const before=localSnapshot(f);
+      const [done,rejected]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+      assert.equal(done,null); assert.equal(rejected.statusCode,409);
+      assert.deepEqual(localSnapshot(f),before);
+      await executeFunctionNode(findNode(flows,'al-link-clear-state'),msg,f);
+      const [unlinked,error]=await executeFunctionNode(findNode(flows,'al-unlink-db'),{_unlinkAuth:{userId:1,username:'local'}},f);
+      assert.equal(error,null); assert.ok(unlinked);
+      // Even a successful remote response from the abandoned request is stale.
+      msg.statusCode=200; msg.payload={username:'target',userId:77};
+      const [late,lateError]=await executeFunctionNode(findNode(flows,'al-link-handle-auth'),msg,f);
+      assert.equal(late,null); assert.equal(lateError.payload.reason,'stale_link_attempt');
+      const after=localSnapshot(f);
+      assert.equal(after.user.auth_mode,'local'); assert.equal(after.peer.linked,0);
+      assert.equal(after.user.password_hash,'local-hash'); assert.equal(after.dirty.length,0);
+    } finally { f.cleanup(); }
+  });
+
+  test(`${profile}: request snapshots survive a second validation and shared-state cleanup`,async()=>{
+    const f=linkedConsistencyFixture(); const flows=readFlows(profile);
+    const crypto=require('node:crypto'); const secret='fixture-auth-secret';
+    const payload=Buffer.from(JSON.stringify({userId:1,username:'local',exp:Date.now()+60000})).toString('base64url');
+    const token=payload+'.'+crypto.createHmac('sha256',secret).update(payload).digest('base64url');
+    const request=username=>({req:{headers:{authorization:'Bearer '+token}},payload:{serverUrl:'https://cloud.example.org',action:'link',username,password:username+'-password'}});
+    const options={...f,env:{AUTH_TOKEN_SECRET:secret,DEVICE_EUI:'AABBCCDDEEFF0011',DEVICE_EUI_CONFIDENCE:'authoritative'},scope:{...f.scope,crypto,net:require('node:net'),urlLib:require('node:url')}};
+    try {
+      const [first]=await executeFunctionNode(findNode(flows,'al-link-validate'),request('first'),options);
+      const [second]=await executeFunctionNode(findNode(flows,'al-link-validate'),request('second'),options);
+      const [built,failed]=await executeFunctionNode(findNode(flows,'al-link-build-req'),first,options);
+      assert.equal(failed,null); assert.equal(built.payload.username,'first'); assert.equal(built.payload.password,'first-password');
+      assert.equal(second._alState.al_server_username,'second');
+      await executeFunctionNode(findNode(flows,'al-link-clear-state'),second,options);
+      assert.equal(built._alState.al_server_username,'first');
+      const accepted=await acceptTarget(f,flows,built);
+      f.flowStore.clear();
+      const [done,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),accepted,options);
+      assert.equal(error,null); assert.ok(done); assert.equal(localSnapshot(f).user.cloud_user_id,77);
+    } finally { f.cleanup(); }
+  });
+}
+
+test('interrupted config journals restore before commit and finish after commit; sync fails closed until recovery',async()=>{
+  for(const committed of [false,true]) {
+    const f=linkedConsistencyFixture(); const db=new f.helper.Database('/data/db/farming.db');
+    const before=Object.fromEntries([...f.io.config].map(([k,v])=>[k.split('.').at(-1),v]));
+    const after={server_host:'new-host',mqtt_password:'new-pass',mqtt_broker_url:'wss://cloud.example.org/mqtt',link_gateway_device_eui:'AABBCCDDEEFF0011'};
+    const context={server_url:'https://cloud.example.org',cloud_user_id:'77',gateway_device_eui:'AABBCCDDEEFF0011',installation_uuid:f.installationUuid};
+    const journal={version:1,before,after,marker:{kind:'link',username:'local',token:'new-token',context}};
+    f.io.files.set('/data/db/osi-account-link-config.json',JSON.stringify(journal));
+    // Simulate a power cut after UCI was committed and either side of DB COMMIT.
+    for(const [key,value] of Object.entries(after)) f.io.config.set('osi-server.cloud.'+key,value);
+    if(committed) await db.transaction(async tx=>{
+      await tx.run("UPDATE users SET cloud_user_id=77,server_sync_token='new-token' WHERE id=1");
+      await tx.run("UPDATE sync_link_state SET cloud_user_id='77' WHERE peer_node='cloud'");
+    });
+    try {
+      assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true);
+      const result=await installationHelper.recoverAccountConfig(db,f.io);
+      assert.equal(result.committed,committed);
+      assert.deepEqual(Object.fromEntries([...f.io.config].map(([k,v])=>[k.split('.').at(-1),v])),committed?after:before);
+      assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+      assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true,'published recovery still blocks until the daemon restart');
+      completeFixtureRestart(f.io);
+      assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),false);
+    } finally { await db.close(); f.cleanup(); }
+  }
+});
+
+test('failed config restoration retains the journal and blocks further remote work until recovery',async()=>{
+  const f=linkedConsistencyFixture(); const flows=readFlows(); const original=f.io.cp.execFileSync;
+  let failing=true;
+  f.io.cp.execFileSync=(command,args)=>{if(failing && args[0]==='commit')throw new Error('unavailable');return original(command,args);};
+  try {
+    const msg=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+    const [done,failed]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),msg,f);
+    assert.equal(done,null); assert.equal(failed.statusCode,503);
+    assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),true);
+    assert.equal(installationHelper.gatewayWorkBlocked({fs:f.io.fs,warn(){}}),true);
+    const [remote,blocked]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+    assert.equal(remote,null); assert.ok(blocked);
+    failing=false;
+    const [newRequest,pendingRestart]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+    assert.equal(newRequest,null);assert.equal(pendingRestart.statusCode,503);
+    assert.equal(pendingRestart.payload.reason,'account_restart_queued');
+    completeFixtureRestart(f.io);
+    const retry=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+    const [linked,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),retry,f);
+    assert.equal(error,null); assert.ok(linked);
+  } finally { f.cleanup(); }
+});
+
+test('identity sentinel appearing after the request blocks local finalization without adopting a candidate identity',async()=>{
+  const f=linkedConsistencyFixture(); const flows=readFlows();
+  try {
+    const msg=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+    const before=localSnapshot(f); const exists=f.io.fs.existsSync;
+    f.io.fs.existsSync=p=>p==='/var/run/osi-identity-restart.json'||exists(p);
+    const [done,blocked]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),msg,f);
+    assert.equal(done,null); assert.equal(blocked.statusCode,503);
+    assert.deepEqual(localSnapshot(f),before);
+    await executeFunctionNode(findNode(flows,'al-link-clear-state'),msg,f);
+  } finally { f.cleanup(); }
+});
+
+
+test('a token refresh response captured before relink cannot replace the new account token',async()=>{
+  const f=linkedConsistencyFixture(); const flows=readFlows();
+  try {
+    const [request]=[await executeFunctionNode(findNode(flows,'sync-refresh-build'),{},f)];
+    assert.ok(request,'an expired or unbounded fixture token needs refresh');
+    const link=await acceptTarget(f,flows,await buildLinkAttempt(flows,f.flowStore,f.helper));
+    const [done,error]=await executeLinkedFinalizer(findNode(flows,'al-link-finalize'),link,f);
+    assert.equal(error,null); assert.ok(done);
+    request.statusCode=200; request.payload={token:'late-old-account-token',syncTokenExpiresAt:1900000000000};
+    await executeFunctionNode(findNode(flows,'sync-refresh-mark'),request,f);
+    assert.equal(localSnapshot(f).user.server_sync_token,'new-token');
+  } finally {f.cleanup();}
+});
+
+
+test('a new process can replace an abandoned durable attempt and reject its old nonce',async()=>{
+  const f=linkedConsistencyFixture(); const flows=readFlows(); const db=new f.helper.Database('/data/db/farming.db');
+  try {
+    const old=await replicationHelper.beginLinkAttempt(db,{nonce:'abandoned-nonce',context:{server_url:'https://cloud.example.org',cloud_user_id:null,gateway_device_eui:'AABBCCDDEEFF0011',installation_uuid:f.installationUuid}});
+    const request=await buildLinkAttempt(flows,f.flowStore,f.helper);
+    assert.notEqual(request._alLinkAttemptNonce,old.nonce);
+    const stale=await replicationHelper.validateLinkAttempt(db,{nonce:old.nonce,context:{...old.context,cloud_user_id:'77'}});
+    assert.equal(stale.valid,false); assert.equal(stale.reason,'stale_link_attempt');
+    await executeFunctionNode(findNode(flows,'al-link-clear-state'),request,f);
+  } finally {await db.close();f.cleanup();}
+});
+
+test('configuration unavailable at preflight is refused before building a remote request',async()=>{
+  const f=linkedConsistencyFixture(); const flows=readFlows();
+  f.io.cp.execFileSync=()=>{throw Object.assign(new Error('missing configuration tool'),{code:'ENOENT'});};
+  try {
+    const [request,rejected]=await executeFunctionNode(findNode(flows,'al-link-build-req'),{authUserId:1,authUsername:'local'},f);
+    assert.equal(request,null); assert.ok(rejected);
+    assert.equal(localSnapshot(f).user.cloud_user_id,11);
+    assert.equal(localSnapshot(f).peer.link_attempt_json,null);
+  } finally {f.cleanup();}
+});
+
+test('boot recovery retains its journal when restart publication fails and retries it',async()=>{
+  const f=linkedConsistencyFixture();
+  const before=Object.fromEntries([...f.io.config].map(([k,v])=>[k.split('.').at(-1),v]));
+  f.io.files.set('/data/db/osi-account-link-config.json',JSON.stringify({version:1,before,after:before,marker:{kind:'link',username:'local',token:'uncommitted-token',context:{}}}));
+  const rename=f.io.fs.renameSync;let fail=true;const warnings=[];
+  f.io.fs.renameSync=(a,b)=>{if(fail && b.startsWith('/var/run/'))throw new Error('restart directory unavailable');rename(a,b);};
+  try {
+    await installationHelper.recoverAccountConfigOnStart({osiDb:f.helper,...f.io,warn:text=>warnings.push(text)});
+    assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),true);
+    assert.equal(warnings.length,1);
+    fail=false;
+    await installationHelper.recoverAccountConfigOnStart({osiDb:f.helper,...f.io,warn:text=>warnings.push(text)});
+    assert.equal(f.io.files.has('/data/db/osi-account-link-config.json'),false);
+    const request=JSON.parse(f.io.files.get('/var/run/osi-node-red-restart-requests/account_link-' + Buffer.from('recovery').toString('hex') + '.json'));
+    assert.equal(request.reason,'account_link');assert.equal(request.delaySeconds,10);
+  } finally {f.cleanup();}
+});
 
 console.log('account-link legacy-cloud tolerance behavioral tests defined; run with `node --test` to execute.');
