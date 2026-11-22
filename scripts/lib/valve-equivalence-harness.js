@@ -83,8 +83,16 @@ function releaseTree(tag) {
   return dir;
 }
 
-function systemDefinition(label, root) {
-  const flows = JSON.parse(fs.readFileSync(path.join(root, SHARE, 'flows.json'), 'utf8'));
+function systemDefinition(label, root, options = {}) {
+  const share = SHARE.replace("bcm2712", options.profile || "bcm2712");
+  const shippedFlows = JSON.parse(fs.readFileSync(path.join(root, share, 'flows.json'), 'utf8'));
+  let flows = process.env.OSI_VALVE_X2_ADAPTERS === '1' && root === REPO_ROOT
+    ? require('./valve-ingress-x2-adapters').adaptFlows(shippedFlows) : shippedFlows;
+  if (options.x2 === 'rendered') flows = require('./valve-ingress-x2-adapters').adaptFlows(shippedFlows);
+  if (options.x2 === 'legacy') {
+    const frozen = require('../fixtures/valve-ingress-x2/baseline.json').nodes;
+    flows = shippedFlows.map(node => { const old = frozen.find(n => n.id === node.id); return old ? {...node, func:old.func, libs:old.libs} : node; });
+  }
   const nodes = {};
   for (const [name, id] of Object.entries(NODE)) {
     const found = flows.find((entry) => entry.id === id);
@@ -98,10 +106,10 @@ function systemDefinition(label, root) {
   // From 0.8.2 on the encoder hands frames to ChirpStack itself (gRPC helper in its libs); before
   // that it returns an MQTT downlink message for the "MQTT to ChirpStack" node.
   const transport = (nodes.encoder.libs || []).some((lib) => lib.var === 'chirpstack') ? 'grpc' : 'mqtt';
-  return { label, root, nodes, transport, moduleDir: path.join(root, SHARE, 'node-red'), seedDb: path.join(root, SHARE, 'db/farming.db') };
+  return { label, root, nodes, transport, moduleDir: path.join(root, share, 'node-red'), seedDb: path.join(root, share, 'db/farming.db') };
 }
 
-const candidate = () => systemDefinition('candidate', REPO_ROOT);
+const candidate = (options) => systemDefinition('candidate', REPO_ROOT, options);
 const release = (tag) => systemDefinition(tag, releaseTree(tag));
 
 // ------------------------------------------------------------------ the simulated world
@@ -303,6 +311,8 @@ class Gateway {
     const prefix = this.definition.moduleDir + path.sep;
     for (const key of Object.keys(require.cache)) if (key.startsWith(prefix)) delete require.cache[key];
     this.valveControl = require(path.join(this.definition.moduleDir, 'osi-valve-control'));
+    this.commandIngress = fs.existsSync(path.join(this.definition.moduleDir, 'osi-command-ingress')) ? require(path.join(this.definition.moduleDir, 'osi-command-ingress')) : null;
+    this.scope = fs.existsSync(path.join(this.definition.moduleDir, 'osi-scope-helper')) ? require(path.join(this.definition.moduleDir, 'osi-scope-helper')) : null;
     this.commandLedger = require(path.join(this.definition.moduleDir, 'osi-command-ledger'));
     const policyDir = path.join(this.definition.moduleDir, 'osi-irrigation-policy');
     this.irrigationPolicy = fs.existsSync(policyDir) ? require(policyDir) : null;
@@ -326,13 +336,15 @@ class Gateway {
     const record = (level) => (value) => self.log.push([level, name, typeof value === 'string' ? value : JSON.stringify(value)]);
     const context = {
       msg, Buffer, Date, setTimeout, console, crypto: nodeCrypto,
-      env: { get(key) { return { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: GATEWAY_EUI, AUTH_TOKEN_SECRET: AUTH_SECRET }[key] || ''; } },
+      env: { get(key) { return { CHIRPSTACK_APP_ACTUATORS: 'actuators-app', DEVICE_EUI: GATEWAY_EUI, AUTH_TOKEN_SECRET: AUTH_SECRET, ...self.env }[key] || ''; } },
       flow: { get: (key) => self.flowContext.get(key), set: (key, value) => { self.flowContext.set(key, value); } },
       global: { get() { return undefined; }, set() {} },
       context: { get() { return undefined; }, set() {} },
       node: { warn: record('warn'), error: record('error'), log: record('log'), status() {}, send(value) { sent.push(value); } },
       osiDb: { Database },
       osiLib: { require(module) {
+        if (module === 'command-ingress' && self.commandIngress) return {ok:true,value:self.commandIngress};
+        if (module === 'scope' && self.scope) return {ok:true,value:self.scope};
         if (module === 'daily-scheduler') return { ok: true, value: require(path.join(self.definition.moduleDir, 'osi-daily-scheduler')) };
         if (module === 'osi-db-helper') return { ok: true, value: { Database } };
         if (module === 'osi-valve-control') return { ok: true, value: self.valveControl };

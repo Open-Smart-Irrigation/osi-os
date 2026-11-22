@@ -27,7 +27,9 @@ const { executeFunction, loadNode, makeAuthHeader } = require('./lib/scoped-acce
 const ROOT = path.resolve(__dirname, '..');
 const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const NODE_RED = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
-const flows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+const shippedFlows = JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
+const flows = process.env.OSI_VALVE_X2_ADAPTERS === '1'
+  ? require('./lib/valve-ingress-x2-adapters').adaptFlows(shippedFlows) : shippedFlows;
 const byId = Object.fromEntries(flows.map((node) => [node.id, node]));
 function idOf(name) {
   const matches = flows.filter((node) => node.name === name);

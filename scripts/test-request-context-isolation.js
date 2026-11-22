@@ -2339,7 +2339,7 @@ for (const scoped of [false, true]) {
 }
 
 test('valve ingress negative control: resumed A detects shared-key target overwrite before SQLite', async () => {
-  const original = flowNode(ID.valveAuth);
+  const original = require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(ID.valveAuth));
   let func = original.func;
   func = func.replace(
     "const deveui = String(msg.req.params.deveui || '').trim().toUpperCase();",
@@ -2381,7 +2381,7 @@ test('valve ingress negative control: resumed A detects shared-key target overwr
 });
 
 test('cloned ingress mutant: removing the shared-key read changes the discriminator to 202', async () => {
-  const original = flowNode(ID.valveAuth);
+  const original = require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(ID.valveAuth));
   const func = original.func.replace(
     "const deveui = String(msg.req.params.deveui || '').trim().toUpperCase();",
     "const deveui = String(msg.req.params.deveui || '').trim().toUpperCase();\nflow.set('valve_cmd_target', deveui);"
@@ -2418,8 +2418,8 @@ test('cloned ingress mutant: removing the shared-key read changes the discrimina
 // same interleaving the isolation tests use. The tests are only evidence if this
 // shape makes A lose its own target.
 function sharedContextMutant(writerId, writerAnchor, writeLine, readerId, readerAnchor, readLine) {
-  const writer = inlineForMutation(flowNode(writerId), MODULES);
-  const reader = inlineForMutation(flowNode(readerId), MODULES);
+  const writer = inlineForMutation(require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(writerId)), MODULES);
+  const reader = inlineForMutation(require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(readerId)), MODULES);
   assert.ok(writer.func.includes(writerAnchor), 'mutant anchor present in ' + writerId);
   assert.ok(reader.func.includes(readerAnchor), 'mutant anchor present in ' + readerId);
   return new Map([

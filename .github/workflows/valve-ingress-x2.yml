@@ -1,0 +1,93 @@
+name: Valve ingress extraction parity
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    # Keep preparation gates runnable while the PR awaits X1/base integration.
+    branches: [main, master, chore/valve-control-x2-entrypoints]
+
+permissions:
+  contents: read
+
+jobs:
+  characterization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+      - name: Install SQLite CLI for existing regression fixtures
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Compare frozen outputs and proposed adapters on both profiles
+        env:
+          X2_EVIDENCE: ${{ runner.temp }}/x2-differential.json
+        run: node scripts/test-valve-ingress-x2-parity.js
+      - name: Check generated loader fallback and squash-only history
+        run: |
+          node scripts/generate-valve-ingress-x2-fallback.js
+          node scripts/test-valve-ingress-x2-squash.js
+      - name: Staged flows, baseline recounts and existing integration gates
+        env:
+          X2_STATE_EVIDENCE: ${{ runner.temp }}/x2-stateful.json
+          X2_ADDITIVE_EVIDENCE: ${{ runner.temp }}/x2-additive.json
+        run: node scripts/test-valve-ingress-x2-staged.js --ci
+      - name: Additive branch capture and real-loader failures
+        run: >-
+          node --test --test-concurrency=1 scripts/test-valve-ingress-x2-failures.js
+          scripts/test-valve-ingress-x2-stateful.js scripts/test-valve-ingress-x2-handoff.js
+      - name: Compare additive frozen legacy branches
+        run: node scripts/test-valve-ingress-x2-additive.js
+      - name: Entry point contracts on both profiles
+        run: >-
+          node scripts/run-module-tests.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ingress-x2.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/ingress-x2.test.js
+      - name: Existing dispatch regressions with proposed adapters in memory
+        env:
+          OSI_VALVE_X2_ADAPTERS: '1'
+        run: >-
+          node --test --test-concurrency=1 scripts/test-valve-command-safety-path.js
+          scripts/test-valve-http-reply-once.js scripts/test-valve-v081-equivalence.js
+
+      - name: Preserve side-by-side output evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valve-ingress-x2-differential
+          path: |
+            ${{ runner.temp }}/x2-differential.json
+            ${{ runner.temp }}/x2-stateful.json
+            ${{ runner.temp }}/x2-additive.json
+
+  function-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        runtime: [release-smoke, release-smoke-stock]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.3'
+      - name: Install pinned Function runtime
+        run: npm ci --prefix scripts/fixtures/${{ matrix.runtime }} --no-audit --no-fund
+      - name: Compare both profiles in actual Function nodes
+        env:
+          X2_EVIDENCE: ${{ runner.temp }}/x2-runtime.json
+        run: X2_NODE_RED="$PWD/scripts/fixtures/${{ matrix.runtime }}/node_modules/node-red" node scripts/test-valve-ingress-x2-staged.js --runtime
+      - name: Preserve Function runtime output evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valve-ingress-x2-${{ matrix.runtime }}
+          path: ${{ runner.temp }}/x2-runtime.json

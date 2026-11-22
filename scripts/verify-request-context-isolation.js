@@ -86,7 +86,10 @@ function checkProfile(file, moduleRoot = path.join(path.dirname(file), 'node-red
   for (const node of flows) {
     if (!node || node.type !== 'function') continue;
     functionNodes += 1;
-    const sources = [node.func, functionSource(node, moduleRoot), node.initialize, node.finalize].filter(Boolean).join('\n');
+    let implementation=node;
+    try { implementation=require('./lib/valve-ingress-x2-source').resolvedNode(node); } catch(error) { failures.push(label+': '+error.message); }
+    const implementationSource = functionSource(implementation, moduleRoot);
+    const sources = [...new Set([node.func,implementation.func,implementationSource,node.initialize,node.finalize])].filter(Boolean).join('\n');
     const calls = contextCalls(sources);
     for (const call of calls) {
       if (call.key && REQUEST_SCRATCH_KEY.test(call.key)) {
@@ -103,7 +106,7 @@ function checkProfile(file, moduleRoot = path.join(path.dirname(file), 'node-red
         failures.push(label + ': ' + node.id + ' (' + node.name + ') touches shared context outside its allowlist: ' + call.text);
       }
     }
-    if (converted.kind && !functionSource(node, moduleRoot).includes("'" + converted.kind + "'")) {
+    if (converted.kind && !implementationSource.includes("'" + converted.kind + "'")) {
       failures.push(label + ': ' + node.id + ' (' + node.name + ") no longer handles the '" + converted.kind + "' request envelope");
     }
   }
