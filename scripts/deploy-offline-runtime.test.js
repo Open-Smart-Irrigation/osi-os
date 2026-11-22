@@ -161,3 +161,20 @@ test('a committed result reader syncs the acknowledgement directory before retur
   assert.equal(synced, true);
   assert.equal(readReceipt(receipt.file, 74).code, 74, 'the waiter cannot print success after observing publication failure');
 });
+
+test('a guard lookup that fails with anything but ENOENT leaves publication unconfirmed', t => {
+  const { readReceipt } = require('./deploy-offline-runtime');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'receipt-guard-io-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const receipt = new Receipts(path.join(root, 'result'));
+  receipt.prepare();
+  assert.equal(receipt.finish({ verdict: 'success', exit_code: 0, reason_code: 'verified' }), 0);
+  // existsSync reports false on an I/O error as well as on absence.
+  const io = Object.create(fs);
+  io.existsSync = () => false;
+  io.lstatSync = file => { if (file.endsWith('.publishing')) throw Object.assign(new Error('guard lookup failed'), { code: 'EIO' }); return fs.lstatSync(file); };
+  const result = readReceipt(receipt.file, undefined, io);
+  assert.equal(result.code, 74);
+  assert.doesNotMatch(result.text, /^verdict=success$/m);
+  assert.equal(readReceipt(receipt.file).code, 0, 'a real absence still acknowledges the committed result');
+});

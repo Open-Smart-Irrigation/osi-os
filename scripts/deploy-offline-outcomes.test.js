@@ -101,9 +101,19 @@ test('detached deploy publishes the final result after its launcher is gone', { 
   const result = await run(f, false);
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /launched/);
-  for (let n = 0; n < 100 && !/^state=complete$/m.test(fs.readFileSync(f.result, 'utf8')); n++) await pause(100);
-  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=auto-rollback$/m);
-  for (let n = 0; n < 100 && !fs.existsSync(path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture/.deploy.rc')); n++) await pause(100);
+  // Poll the acknowledged result, not the raw receipt: a raw state=complete
+  // is not an acknowledgement while publication is still guarded.
+  let read;
+  for (let n = 0; n < 100; n++) {
+    read = await exec('sh', [offline, '--result', f.result]).then(r => ({ code: 0, out: r.stdout }), e => ({ code: e.code, out: e.stdout }));
+    if (read.code !== 125) break;
+    await pause(100);
+  }
+  assert.equal(read.code, 1, read.out);
+  assert.match(read.out, /^verdict=auto-rollback$/m);
+  const marker = path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture/.deploy.rc');
+  for (let n = 0; n < 100 && !fs.existsSync(marker); n++) await pause(100);
+  assert.equal(fs.readFileSync(marker, 'utf8'), '1\n');
 });
 
 
@@ -267,7 +277,7 @@ test('a signal at the verified-before-start boundary cancels without a false ref
   Object.assign(cfg, { ts: 'fixture', logDir: f.env.DEPLOY_OFFLINE_LOG_DIR, tmpRoot: f.env.DEPLOY_OFFLINE_TMP_ROOT, extract: path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture'), private: path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, '.deploy-fixture'), log: path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, 'deploy-fixture.log'), result: f.result });
   fs.mkdirSync(cfg.logDir);
   const boundary = path.join(f.root, 'boundary');
-  const supervisor = spawn(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.supervise(${JSON.stringify(cfg)},{async beforeDeploy(){require('fs').writeFileSync(${JSON.stringify(boundary)},'ready');await new Promise(r=>setTimeout(r,250))}}).then(c=>process.exitCode=c)`], { env: f.env, stdio: 'ignore' });
+  const supervisor = spawn(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.supervise(${JSON.stringify(cfg)},{async beforeDeploy(){require('fs').writeFileSync(${JSON.stringify(boundary)},'ready');await new Promise(r=>process.once('SIGTERM',()=>setImmediate(r)))}}).then(c=>process.exitCode=c)`], { env: f.env, stdio: 'ignore' });
   const exited = new Promise(resolve => supervisor.once('exit', resolve));
   for (let n = 0; n < 100 && !fs.existsSync(boundary); n++) await pause(30);
   assert.equal(fs.existsSync(boundary), true);
@@ -380,6 +390,8 @@ test('any other exception inside the request handler answers 500 and keeps the s
   assert.deepEqual(fs.readFileSync(codes, 'utf8').trim().split('\n'), ['500', '200']);
   assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=success$/m, stdout + stderr);
   assert.match(stdout, /"500 handler_error"/);
+  // Only the request that succeeded is logged as 200.
+  assert.equal((stdout.match(/"200 GET /g) || []).length, 1, stdout);
   assert.match(stderr, /WARN: deploy server request failed: handler_error/);
   assert.doesNotMatch(stderr, /injected handler fault/, 'the error text stays out of the log');
 });
@@ -421,6 +433,65 @@ test('an exception before the deploy starts refuses with supervisor_failed and n
   assert.match(record, /^verdict=refused$/m);
   assert.match(record, /^reason_code=supervisor_failed$/m);
   assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+});
+
+// CodeRabbit review: deploy exit codes must not read as receipt-transport
+// states (74 unconfirmed publication, 125 no final result).
+for (const rawCode of [74, 125]) {
+  test(`a deploy exiting ${rawCode} reports its committed failure, not a transport state`, { timeout: 20000 }, async t => {
+    const f = await fixture(t, 'failed', rawCode);
+    const result = await run(f);
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /^verdict=failed$/m);
+    assert.doesNotMatch(result.output, /receipt_persistence_failed|^verdict=pending$/m);
+    const record = fs.readFileSync(f.result, 'utf8');
+    assert.match(record, /^exit_code=1$/m);
+    assert.match(record, new RegExp(`^deploy_exit_code=${rawCode}$`, 'm'));
+  });
+}
+
+test('the scratch-space preflight counts the extracted bytes, not the compressed bundle', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  // 32 MiB of zeros compresses to a few kilobytes.
+  fs.writeFileSync(path.join(f.stage, 'padding.bin'), Buffer.alloc(32 * 1024 * 1024));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  assert.ok(fs.statSync(f.bundle).size < 1024 * 1024);
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  const patch = `const fs=require('fs');fs.statfsSync=()=>({bavail:20*256,bsize:4096});`;
+  await exec(process.execPath, ['-e', `${patch}const r=require(${JSON.stringify(runtime)});r.supervise(r.config(${JSON.stringify(args)})).then(code=>{process.exitCode=code===1?0:9})`], { env: f.env, timeout: 20000 });
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^verdict=refused$/m);
+  assert.match(record, /^reason_code=disk_preflight_failed$/m);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+  assert.equal(fs.existsSync(path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture')), false);
+});
+
+test('a deploy shell that cannot be spawned is never announced as launched', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  // No --wait: before the fix the launcher returned 0 on the launch notice.
+  const out = await exec(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.launch(r.config(${JSON.stringify(args)})).then(c=>process.exitCode=c)`], { env: { ...f.env, PATH: path.join(f.root, 'no-such-bin') }, timeout: 15000 })
+    .then(r => ({ code: 0, out: r.stdout + r.stderr }), e => ({ code: e.code, out: e.stdout + e.stderr }));
+  assert.equal(out.code, 1, out.out);
+  assert.doesNotMatch(out.out, /Deploy launched/);
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^verdict=refused$/m);
+  assert.match(record, /^reason_code=supervisor_failed$/m);
+});
+
+test('a fault while the server closes still turns the final verdict into a failure', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  const patch = `const http=require('http');const close=http.Server.prototype.close;http.Server.prototype.close=function(cb){setImmediate(()=>{throw new Error('injected close fault')});setTimeout(()=>close.call(this,cb),50);return this};`;
+  await exec(process.execPath, ['-e', `${patch}const r=require(${JSON.stringify(runtime)});r.supervise(r.config(${JSON.stringify(args)})).then(code=>{process.exitCode=code===1?0:9})`], { env: f.env, timeout: 15000 });
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^verdict=incomplete-recovery$/m);
+  assert.match(record, /^reason_code=supervisor_failed$/m);
 });
 
 test('two concurrent pushes with one source label isolate GUI hashes, launchers and expected digests', { timeout: 30000 }, async t => {

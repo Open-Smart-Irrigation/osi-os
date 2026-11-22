@@ -92,6 +92,12 @@ class Receipts {
     }
   }
 }
+// Only ENOENT proves the publication guard absent; any other lookup error
+// leaves publication unconfirmed (existsSync would report it as absent).
+function guardPresent(file, io) {
+  try { io.lstatSync(`${file}.publishing`); return true; }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+}
 function readReceipt(file, observedCode, io = fs) {
   const recovery = () => {
     try { return { text: io.readFileSync(`${file}.recovery`, 'utf8'), code: 74 }; }
@@ -103,10 +109,10 @@ function readReceipt(file, observedCode, io = fs) {
     const text = io.readFileSync(file, 'utf8');
     if (!/^state=complete$/m.test(text)) return { text, code: 125 };
     if (!/^publication=guarded\/1$/m.test(text)) return recovery();
-    if (io.existsSync(`${file}.publishing`)) return recovery();
+    if (guardPresent(file, io)) return recovery();
     const dir = io.openSync(path.dirname(file), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
     try { io.fsyncSync(dir); } finally { io.closeSync(dir); }
-    if (io.existsSync(`${file}.publishing`)) return recovery();
+    if (guardPresent(file, io)) return recovery();
     const code = Number(/^exit_code=(\d+)$/m.exec(text)?.[1] ?? 125);
     if (observedCode !== undefined && observedCode !== code) return { text: encode({ state: 'pending', verdict: 'pending', exit_code: 125, reason_code: 'supervisor_failed' }), code: 125 };
     return { text, code };
@@ -119,7 +125,10 @@ function outcome(file, rc, bundleHash) {
   let verdict = valid ? fields.verdict : rc ? 'failed' : 'unverified';
   let reason = valid ? verdictReasons[verdict] : 'report_missing';
   if (rc && ['success', 'unverified'].includes(verdict)) { verdict = 'failed'; reason = 'process_failed'; }
-  return { ...fields, state: 'complete', verdict, reason_code: reason, exit_code: rc || (verdict === 'success' ? 0 : verdict === 'unverified' ? 3 : 1), deploy_exit_code: rc, bundle_sha256: bundleHash };
+  // 74 and 125 are reserved for receipt-transport states (unconfirmed
+  // publication, no final result); a deploy exiting with either reports 1.
+  const status = rc === 74 || rc === 125 ? 1 : rc;
+  return { ...fields, state: 'complete', verdict, reason_code: reason, exit_code: status || (verdict === 'success' ? 0 : verdict === 'unverified' ? 3 : 1), deploy_exit_code: rc, bundle_sha256: bundleHash };
 }
 function config(args) {
   const cfg = { port: 9876, wait: false };
@@ -191,9 +200,18 @@ async function supervise(cfg, hooks = {}) {
     // All archive entries (including its verifier) were checked by trusted
     // launcher code before extraction, execution or serving.
     phase = 'disk_preflight_failed';
+    // Check against the verified bytes that will be written, not the
+    // compressed bundle size.
+    let extracted = 0;
+    for (const file of tree.files.values()) extracted += file.length;
     const space = fs.statfsSync(cfg.tmpRoot);
-    if (space.bavail * space.bsize < bytes.length * 3 + 4 * 1024 * 1024) throw new Error('insufficient extraction space');
-    extract(tree, cfg.extract);
+    if (space.bavail * space.bsize < extracted + 4 * 1024 * 1024) throw new Error('insufficient extraction space');
+    try { extract(tree, cfg.extract); }
+    catch (error) {
+      // This run created the directory (launch refuses an existing one).
+      try { fs.rmSync(cfg.extract, { recursive: true, force: true }); } catch (cleanupError) { console.error('WARN: partial extraction cleanup:', cleanupError); }
+      throw error;
+    }
     console.log(`OK: extracted and verified ${cfg.extract}`);
     phase = 'server_bind_failed';
     const serverLog = fs.openSync(path.join(cfg.extract, '.local-server.log'), 'a', 0o600);
@@ -219,19 +237,27 @@ async function supervise(cfg, hooks = {}) {
       // Keep argv[0] as sh: BusyBox selects its applet from that name. The
       // second positional argument identifies this run in /proc for operators.
       child = spawn('sh', ['-s', '--', String(cfg.port), path.join(cfg.extract, 'deploy.sh')], { detached: true, stdio: ['pipe', process.stdout, process.stderr], env: { ...process.env, DEPLOY_OFFLINE_MODE: '1', DEPLOY_OUTCOME_FILE: outcomeFile, DEPLOY_LOGFILE: cfg.log, DEPLOY_BUNDLE_SHA256: bundleHash } });
+      const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve(code ?? signalStatus(signal))); });
+      exited.catch(() => {});
       child.stdin.on('error', e => { if (e.code !== 'EPIPE') console.error(e); });
+      // Announce the launch only once the shell exists: a failed spawn emits
+      // 'error' without 'spawn', and nothing has run.
+      try { await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); }
+      catch (error) { phase = 'spawn_failed'; throw error; }
       child.stdin.end(tree.files.get('deploy.sh'));
       launched = true;
       notify({ launched: true });
-      const rc = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve(code ?? signalStatus(signal))); });
+      const rc = await exited;
       child = undefined;
       record = outcome(outcomeFile, rc, bundleHash);
       if (interrupted && record.verdict === 'refused') record = { ...record, verdict: 'interrupted', reason_code: 'interrupted_deploy' };
     }
   } catch (error) {
     console.error('ERROR: offline supervisor:', error);
-    record = { verdict: interrupted ? 'interrupted' : phase === 'supervisor_failed' ? 'incomplete-recovery' : 'refused', exit_code: interrupted ? signalStatus(interrupted) : 1, reason_code: interrupted ? 'interrupted' : phase, bundle_sha256: bundleHash };
+    record = { verdict: interrupted ? 'interrupted' : phase === 'supervisor_failed' ? 'incomplete-recovery' : 'refused', exit_code: interrupted ? signalStatus(interrupted) : 1, reason_code: interrupted ? 'interrupted' : phase === 'spawn_failed' ? 'supervisor_failed' : phase, bundle_sha256: bundleHash };
   }
+  try { if (server?.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections?.(); }); }
+  catch (error) { console.error('WARN: deploy server close:', error); }
   if (fault) {
     // Fail closed: a supervisor that faulted cannot vouch for the result. A
     // proven hold keeps its DEPLOY-HELD pointer; before the deploy started,
@@ -239,8 +265,6 @@ async function supervise(cfg, hooks = {}) {
     if (!launched) record = { verdict: interrupted ? 'interrupted' : 'refused', exit_code: interrupted ? signalStatus(interrupted) : 1, reason_code: interrupted ? 'interrupted' : 'supervisor_failed', bundle_sha256: bundleHash };
     else if (record.verdict !== 'hold') record = { ...record, verdict: 'incomplete-recovery', exit_code: 1, reason_code: 'supervisor_failed' };
   }
-  try { if (server?.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections?.(); }); }
-  catch (error) { console.error('WARN: deploy server close:', error); }
   const code = receipt.finish(record);
   // Compatibility marker is best effort; --wait observes supervisor exit and
   // cannot be stranded by a full /tmp or a failed marker write.

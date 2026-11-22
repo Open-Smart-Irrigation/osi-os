@@ -191,6 +191,19 @@ write_deploy_outcome() {
 early_deploy_exit() {
     early_status="$1"
     trap - EXIT INT TERM HUP
+    # Stop a held health start before the receipt, so the receipt carries
+    # these proofs; cleanup then has nothing left to stop.
+    if [ "${HELD_HEALTH_STARTED:-0}" = 1 ]; then
+        hold_node_red_stopped || echo "ERROR: cannot prove held health writer stopped" >&2
+        DEPLOY_IDENTITYD_STATE=unknown
+        if quiesce_identityd_instance; then
+            DEPLOY_IDENTITYD_STATE=stopped
+        else
+            DEPLOY_RECOVERY_INCOMPLETE=1
+            echo "ERROR: cannot prove held identityd stopped" >&2
+        fi
+        HELD_HEALTH_STARTED=0
+    fi
     if ! write_deploy_outcome "$early_status"; then
         echo "ERROR: could not persist deploy outcome" >&2
         early_status=1
@@ -2080,6 +2093,9 @@ deploy_exit_handler() {
             DEPLOY_RECOVERY_INCOMPLETE=1
             echo "ERROR: could not prove identityd stopped under the recovery hold" >&2
         fi
+        # These are cleanup's held-writer proofs; the receipt below carries
+        # them, so cleanup must not repeat them after it.
+        HELD_HEALTH_STARTED=0
         identityd_deploy_state="fatal_hold"
         if [ -n "${DEPLOY_OUTCOME_FILE:-}" ] && ! write_deploy_outcome "$exit_status"; then
             echo "ERROR: could not persist deploy outcome" >&2

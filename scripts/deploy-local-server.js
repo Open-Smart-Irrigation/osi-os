@@ -87,12 +87,14 @@ function createVerifiedServer(input, options = {}) {
     if (!target) { fail(res, 400, 'bad_request'); return; }
     const bytes = files.get(path.relative('/bundle', target));
     const code = bytes ? 200 : 404;
-    log(`${code} ${req.method} ${req.url}`);
     res.writeHead(code, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(bytes ? bytes.length : 0),
       'X-Deploy-Instance': options.nonce || '',
     });
+    // Logged only once the response is set up; a failure above logs
+    // `500 handler_error` instead.
+    log(`${code} ${req.method} ${req.url}`);
     res.end(req.method === 'HEAD' ? undefined : bytes);
   };
   // Every exception inside the handler ends that one request. The server, and

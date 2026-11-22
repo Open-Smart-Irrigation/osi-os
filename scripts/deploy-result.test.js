@@ -270,3 +270,50 @@ exit 7
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+// CodeRabbit review: with a held health start, the stop proofs run before
+// the receipt is written, and cleanup does not repeat them afterwards.
+for (const exitPath of ['recovery-hold', 'early-exit']) for (const quiesceOk of [true, false]) {
+  test(`${exitPath} with a held health start publishes the receipt after its only stop proofs (identityd proof ${quiesceOk ? 'holds' : 'fails'})`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-held-proof-order-'));
+    try {
+      const result = path.join(dir, 'result');
+      const db = path.join(dir, 'farming.db');
+      if (exitPath === 'recovery-hold') fs.writeFileSync(`${db}.osi-recovery`, '');
+      const fn = name => { const m = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(deploy); assert.ok(m, name); return m[0]; };
+      const outcome = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+      const lifecycle = deploy.slice(deploy.indexOf('# identityd deploy lifecycle begin'), deploy.indexOf('# identityd deploy lifecycle end'));
+      const payload = deploy.slice(deploy.indexOf('# deploy payload lifecycle begin'), deploy.indexOf('# deploy payload lifecycle end'));
+      const proofs = path.join(dir, 'proofs');
+      const init = path.join(dir, 'init'); fs.writeFileSync(init, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const script = `set -eu
+DB_PATH='${db}'
+SWAP_ROOT='${dir}'
+NODE_RED_INIT='${init}'
+TMP_DIR='${path.join(dir, 'tmp')}'
+COMMAND_LEDGER_STAGE='${path.join(dir, 'stage')}'
+${outcome}
+${fn('recovery_hold_present')}
+${lifecycle}
+${payload}
+${fn('early_deploy_exit')}
+${fn('cleanup')}
+release_deploy_lock() { :; }
+swap_call() { :; }
+# The first proof of each service passes; a repeat would fail.
+wait_for_node_red_stop() { echo node-red >> '${proofs}'; [ "$(grep -c node-red '${proofs}')" = 1 ]; }
+quiesce_identityd_instance() { echo identityd >> '${proofs}'; [ ${quiesceOk ? 1 : 0} = 1 ] && [ "$(grep -c identityd '${proofs}')" = 1 ]; }
+HELD_HEALTH_STARTED=1
+DEPLOY_STAMP=candidate
+${exitPath === 'recovery-hold' ? 'deploy_exit_handler 1' : 'trap \'early_deploy_exit $?\' EXIT\nexit 7'}
+`;
+      const run = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, DEPLOY_OUTCOME_FILE: result } });
+      assert.equal(run.status, exitPath === 'recovery-hold' ? 1 : 7, run.stderr);
+      assert.deepEqual(fs.readFileSync(proofs, 'utf8').trim().split('\n'), ['node-red', 'identityd'], 'each proof runs once');
+      const record = fs.readFileSync(result, 'utf8');
+      const verdict = !quiesceOk ? 'incomplete-recovery' : exitPath === 'recovery-hold' ? 'hold' : 'refused';
+      assert.match(record, new RegExp(`^verdict=${verdict}$`, 'm'), run.stderr + record);
+      assert.match(record, new RegExp(`^identityd_state=${quiesceOk ? 'stopped' : 'unknown'}$`, 'm'));
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}

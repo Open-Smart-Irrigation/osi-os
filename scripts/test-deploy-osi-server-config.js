@@ -182,4 +182,9 @@ test('the bundle path carries the defaults script: deploy-offline.sh runs the bu
   const verified = supervisor.indexOf('const tree = verifiedBundle(bytes)');
   const execute = supervisor.indexOf("child.stdin.end(tree.files.get('deploy.sh'))");
   assert.ok(verified >= 0 && execute > verified, 'the bundled script executes from the verified byte snapshot');
+  // The shell reads its script from stdin (-s with a piped stdin); the
+  // extracted path is only a positional argument after --, never the script.
+  const spawnCall = /child = spawn\('sh', \['-s', '--', String\(cfg\.port\), path\.join\(cfg\.extract, 'deploy\.sh'\)\], \{[^\n]*stdio: \['pipe',/.exec(supervisor);
+  assert.ok(spawnCall, 'the deploy shell runs `sh -s -- <port> <extracted path>` with a piped stdin');
+  assert.equal((supervisor.match(/spawn\('sh'/g) || []).length, 1, 'there is no second shell spawn');
 });

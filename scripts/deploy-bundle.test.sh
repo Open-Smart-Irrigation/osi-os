@@ -140,7 +140,7 @@ assert.match(manifest.files['react_gui.tar.gz'], /^[a-f0-9]{64}$/);
 NODE
 
 echo "verify no-argument invocation fails clearly with missing default GUI..."
-REPO_ROOT="$work/noarg-repo" OUT_DIR="$work/noarg" bash "$builder" >"$work/noarg.log" 2>&1 && exit 1
+REACT_GUI_TARBALL= REPO_ROOT="$work/noarg-repo" OUT_DIR="$work/noarg" bash "$builder" >"$work/noarg.log" 2>&1 && exit 1
 grep -q 'react_gui.tar.gz not found' "$work/noarg.log"
 ! grep -q 'unbound variable' "$work/noarg.log"
 echo "deploy-bundle.test: OK"
