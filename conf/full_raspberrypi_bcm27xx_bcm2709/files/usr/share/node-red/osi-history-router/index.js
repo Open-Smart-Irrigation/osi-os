@@ -858,12 +858,38 @@ async function portableAssertEnabledAccount(db, scope, auth) {
   await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });
 }
 
-// One all-zones export at a time per Node-RED process: an export near its row
+// One history export at a time per Node-RED process: an export near its row
 // bound holds about 100-140 MB of heap and seconds of event-loop time, and
 // its queries queue on the shared database connection ahead of ingest. The
 // slot is released when the export finishes, whatever the outcome; a client
 // that disconnects early frees it when the build it started completes.
 let portableExportInFlight = false;
+
+async function withHistoryExportSlot(build) {
+  if (portableExportInFlight) {
+    const busy = new Error('export already running');
+    busy.statusCode = 429;
+    busy.code = historyHelper.EXPORT_REASON_CODES.BUSY;
+    busy.suggestion = 'try again when the current export finishes';
+    busy.headers = { 'Retry-After': '30' };
+    throw busy;
+  }
+  portableExportInFlight = true;
+  try {
+    return await build();
+  } finally {
+    portableExportInFlight = false;
+  }
+}
+
+// The per-zone flow calls this after its existing authentication/scope checks.
+// Keep serialization inside the slot, just like the all-zones response.
+async function buildZoneExportCsv(db, options = {}) {
+  return withHistoryExportSlot(async () => {
+    const result = await historyHelper.buildZoneExportCsv(db, options);
+    return { ...result, csv: historyHelper.toCsv(result.columns, result.rows, options) };
+  });
+}
 
 async function portableAllZonesExport(request, history, db, auth, scope) {
   const query = request.query || {};
@@ -873,19 +899,7 @@ async function portableAllZonesExport(request, history, db, auth, scope) {
     await portableAssertUserExists(db, auth);
   }
   if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
-  if (portableExportInFlight) {
-    const busy = new Error('export already running');
-    busy.statusCode = 429;
-    busy.suggestion = 'try again when the current export finishes';
-    busy.headers = { 'Retry-After': '30' };
-    throw busy;
-  }
-  portableExportInFlight = true;
-  try {
-    return await portableBuildAllZonesExport(request, history, db, auth, scope, query);
-  } finally {
-    portableExportInFlight = false;
-  }
+  return withHistoryExportSlot(() => portableBuildAllZonesExport(request, history, db, auth, scope, query));
 }
 
 async function portableBuildAllZonesExport(request, history, db, auth, scope, query) {
@@ -954,18 +968,28 @@ async function handlePortableHistoryRequest(request = {}) {
     }
     httpError(404, 'Endpoint not found');
   } catch (error) {
-    const payload = { error: error && error.message ? error.message : 'Unexpected error' };
-    if (error && error.detail !== undefined) payload.detail = error.detail;
-    if (error && error.suggestion) payload.suggestion = error.suggestion;
-    return {
-      statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
-      headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
-      payload: payload
-    };
+    return historyExportErrorResponse(error);
   }
 }
 
+// The reserved per-zone wiring uses this same whole-JSON response formatter.
+function historyExportErrorResponse(error) {
+  const payload = { error: error && error.message ? error.message : 'Unexpected error' };
+  if (error && error.detail !== undefined) payload.detail = error.detail;
+  if (error && error.suggestion) payload.suggestion = error.suggestion;
+  if (error && Object.values(historyHelper.EXPORT_REASON_CODES).includes(error.code)) payload.code = error.code;
+  return {
+    statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
+    headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
+    payload,
+  };
+}
+
 module.exports = {
+  historyExportErrorResponse,
+  EXPORT_REASON_CODES: historyHelper.EXPORT_REASON_CODES,
+  withHistoryExportSlot,
+  buildZoneExportCsv,
   handlePortableHistoryRequest,
   safeFilenamePart,
   httpError,

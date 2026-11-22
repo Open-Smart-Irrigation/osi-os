@@ -1,6 +1,111 @@
 'use strict';
 
 const crypto = require('crypto');
+const exportLimits = (() => {
+  const CSV_BOM = '\uFEFF';
+  const MAX_ROWS = 200000;
+  const MAX_INPUT_ROWS = 30000;
+  const MAX_INPUT_CELLS = 200000;
+  // Four five-minute sources across all 3,660 allowed daily dates consume
+  // 4,216,320 rows. Request work is distinct from any one read's live memory.
+  const MAX_WORK_ROWS = 5000000;
+  const MAX_WORK_CELLS = 40000000;
+  const MAX_CSV_BYTES = 8 * 1024 * 1024;
+  const REASON_CODES = Object.freeze({
+    RANGE: 'RANGE_TOO_LARGE',
+    ROWS: 'EXPORT_TOO_LARGE',
+    INPUT: 'EXPORT_INPUT_TOO_LARGE',
+    BYTES: 'EXPORT_BYTES_TOO_LARGE',
+    BUSY: 'EXPORT_BUSY',
+  });
+
+  function ceiling(value, max) {
+    return Number.isSafeInteger(value) && value > 0 ? Math.min(value, max) : max;
+  }
+
+  function refusal(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    error.statusCode = 413;
+    error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
+    return error;
+  }
+
+  function header(columns) {
+    return CSV_BOM + columns.join(',') + '\n';
+  }
+
+  function createBudget(options = {}, csvHeader = '') {
+    const budget = {
+      maxRows: ceiling(options.maxRows, MAX_ROWS),
+      maxBytes: ceiling(options.maxBytes, MAX_CSV_BYTES),
+      rows: 0,
+      bytes: Buffer.byteLength(csvHeader, 'utf8'),
+      inputRows: ceiling(options.maxInputRows, MAX_INPUT_ROWS),
+      inputCells: ceiling(options.maxInputCells, MAX_INPUT_CELLS),
+      workRows: ceiling(options.maxWorkRows, MAX_WORK_ROWS),
+      workCells: ceiling(options.maxWorkCells, MAX_WORK_CELLS),
+    };
+    if (budget.bytes > budget.maxBytes) throw refusal(REASON_CODES.BYTES, 'export exceeds the CSV byte budget');
+    return budget;
+  }
+
+  // Check the whole expansion (including derived pF) before retaining any of it.
+  function reserveOutput(rows, columns, budget, render) {
+    if (budget.rows + rows.length > budget.maxRows) throw refusal(REASON_CODES.ROWS, `export exceeds ${budget.maxRows} rows`);
+    let bytes = 0;
+    const lines = [];
+    for (const row of rows) {
+      const line = render(columns, row);
+      bytes += Buffer.byteLength(line, 'utf8');
+      if (budget.bytes + bytes > budget.maxBytes) throw refusal(REASON_CODES.BYTES, 'export exceeds the CSV byte budget');
+      lines.push(line);
+    }
+    budget.rows += rows.length;
+    budget.bytes += bytes;
+    return lines;
+  }
+
+  // Decode stream chunks as UTF-8, but keep record bytes/escaping unchanged.
+  // Quoting state and a split CRLF delimiter survive chunk boundaries.
+  async function* records(file) {
+    const fs = require('fs');
+    let pending = '';
+    let quoted = false;
+    let skipLF = false;
+    let first = true;
+    for await (let chunk of fs.createReadStream(file, { encoding: 'utf8', highWaterMark: 64 * 1024 })) {
+      if (first) { chunk = chunk.replace(/^\uFEFF/, ''); first = false; }
+      let start = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const ch = chunk[i];
+        if (skipLF) {
+          skipLF = false;
+          if (ch === '\n') { start = i + 1; continue; }
+        }
+        if (ch === '"') quoted = !quoted;
+        else if (!quoted && (ch === '\r' || ch === '\n')) {
+          const record = pending + chunk.slice(start, i);
+          if (record) yield record;
+          pending = '';
+          start = i + 1;
+          skipLF = ch === '\r';
+        }
+      }
+      pending += chunk.slice(start);
+    }
+    if (quoted) throw new Error('daily CSV contains an unterminated quoted field');
+    if (pending) yield pending;
+  }
+
+  function firstCell(record) {
+    const match = /^("(?:[^"]|"")*"|[^,]*)(?:,|$)/s.exec(record);
+    if (!match) throw new Error('daily CSV contains an invalid timestamp cell');
+    return match[1].startsWith('"') ? match[1].slice(1, -1).replace(/""/g, '"') : match[1];
+  }
+
+  return { MAX_ROWS, MAX_INPUT_ROWS, MAX_INPUT_CELLS, MAX_WORK_ROWS, MAX_WORK_CELLS, MAX_CSV_BYTES, REASON_CODES, ceiling, refusal, header, createBudget, reserveOutput, records, firstCell };
+})();
 const { createAnalysis } = require('./analysis');
 const { deviceSourceId, describeDeviceSource, isWatermarkSoilTemperatureSource } = require('./device-sources');
 const { kpaToPf } = require('../osi-matric-potential');
@@ -1336,7 +1441,7 @@ function aggregationBuckets(startMs, endMs, aggregation, bucketSeconds, timezone
       thresholdCrossingCount: 0,
     });
     bucketStartMs = bucketEndMs;
-    dateKey = nextDateKey;
+    dateKey = localDateKey(bucketStartMs, timezone) || nextDateKey;
   }
   return buckets;
 }
@@ -3272,12 +3377,19 @@ function csvCell(value) {
   return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
 }
 
-function toCsv(columns, rows) {
+function renderCsvRow(columns, row) {
+  return columns.map(column => csvRowCell(row, column)).join(',') + '\n';
+}
+
+function toCsv(columns, rows, options = {}) {
   const safeColumns = Array.isArray(columns) ? columns : [];
-  const safeRows = Array.isArray(rows) ? rows : [];
-  return [safeColumns.join(',')]
-    .concat(safeRows.map((row) => safeColumns.map((column) => csvRowCell(row, column)).join(',')))
-    .join('\n') + '\n';
+  const csvHeader = exportLimits.header(safeColumns);
+  const budget = exportLimits.createBudget(options, csvHeader);
+  const chunks = [csvHeader];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    chunks.push(...exportLimits.reserveOutput([row], safeColumns, budget, renderCsvRow));
+  }
+  return chunks.join('');
 }
 
 const TIDY_CSV_COLUMNS = ['timestamp', 'site', 'zone', 'series_label', 'card_type', 'source_key', 'channel_key', 'depth_cm', 'array_id', 'unit', 'value'];
@@ -3323,7 +3435,7 @@ function assertExportRangeAllowed(scope) {
   const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : DAILY_EXPORT_MAX_DAYS);
   if (days > maxDays) {
     const error = new Error('range too large for this granularity');
-    error.code = 'RANGE_TOO_LARGE';
+    error.code = exportLimits.REASON_CODES.RANGE;
     error.statusCode = 413;
     error.suggestion = scope.granularity === 'raw' || scope.granularity === 'hourly'
       ? 'choose a coarser granularity'
@@ -3334,13 +3446,16 @@ function assertExportRangeAllowed(scope) {
 
 function zoneDateStartIso(date, timezone) {
   let probeMs = Date.parse(`${date}T12:00:00.000Z`);
+  let nextBoundary = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const startMs = startOfLocalDayMs(probeMs, timezone);
     const key = localDateKey(startMs, timezone);
     if (key === date) return new Date(startMs).toISOString();
+    if (key > date && (nextBoundary === null || startMs < nextBoundary)) nextBoundary = startMs;
     probeMs += key && key < date ? 24 * 60 * 60 * 1000 : -24 * 60 * 60 * 1000;
   }
-  return new Date(startOfLocalDayMs(Date.parse(`${date}T00:00:00.000Z`), timezone)).toISOString();
+  if (nextBoundary !== null) return new Date(nextBoundary).toISOString();
+  throw new Error(`cannot resolve local date ${date} in ${timezone}`);
 }
 
 function normalizeExportGranularity(value) {
@@ -3471,81 +3586,167 @@ function exportChannelsForCard(card, scope) {
     : channels;
 }
 
-function exportChannelsForDevice(card, device, scope) {
-  const channels = channelsForCard(card, [device]);
+// The channels a device's type is known to report on this card, or null when
+// the device has no type or its type has no family for the card.
+function exportFamilyChannelKeys(card, device) {
+  return deviceTypeId(device) ? deviceFamilyChannelKeys(device, normalizeCardType(card.cardType)) : null;
+}
+
+// Same rule as the interactive grid (deviceFamilySupportsChannel): a device
+// without a type, or whose type has no family for the card (TEKTELIC_CLOVER on
+// the soil card), keeps the card-wide channel list. Rain tips stay LoRain-only,
+// as on main; swt_3 needs an eligible LSN50.
+// The card's channels this request can return for the device before the type
+// policy applies: the requested channel filter, LoRain-only rain tips and
+// swt_3 eligibility.
+function exportCandidateChannels(card, device, scope) {
   const type = deviceTypeId(device);
-  const deviceChannels = type === 'AQUASCOPE_LORAIN'
-    ? channels
-    : channels.filter((channel) => channel.id !== 'rain_tips_delta');
-  return scope && scope.requestedChannelKeys
-    ? deviceChannels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
-    : deviceChannels;
+  return channelsForCard(card, [device]).filter(channel =>
+    (channel.id !== 'rain_tips_delta' || type === 'AQUASCOPE_LORAIN')
+    && (channel.id !== 'swt_3' || isLsn50Swt3Eligible(device))
+    && (!scope || !scope.requestedChannelKeys || scope.requestedChannelKeys.has(channel.id)));
+}
+
+function exportChannelsForDevice(card, device, scope) {
+  const supported = exportFamilyChannelKeys(card, device);
+  const candidates = exportCandidateChannels(card, device, scope);
+  if (supported !== null) return candidates.filter(channel => supported.has(channel.id));
+  // Card-wide fallback: project only the candidate columns this device stored
+  // in the range (resolveExportFieldPresence), so the null columns of ~50 soil
+  // channels do not count against the per-read memory sentinel.
+  const byDevice = scope && scope.fieldPresence ? scope.fieldPresence.get(card) : null;
+  const present = byDevice ? byDevice.get(normalizeDeveui(device.deveui || device.device_eui)) : null;
+  return present ? candidates.filter(channel => channelFieldNames(channel).some(field => present.has(field))) : candidates;
+}
+
+// Candidate columns that hold at least one value in the export range, per
+// card and device, for devices that keep the card-wide channel list. Callers
+// run it after the range check, the budget and the output preflight. With a
+// request budget, each scan is bounded by LIMIT and its candidate rows are
+// charged to the shared work allowance; overflow refuses like a read. The
+// nightly writer (no budget) scans one local day.
+async function resolveExportFieldPresence(db, scope) {
+  const presence = new Map();
+  const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
+  const budget = scope.budget;
+  // An empty instant interval (Pacific/Apia's skipped 2011-12-30) has no
+  // samples: no scan, and every fallback device projects no channel.
+  const emptyInterval = !(scope.start < scope.end);
+  for (const card of scope.cards) {
+    for (const device of sourceDevicesForCard(card, scope.devices)) {
+      const deveui = normalizeDeveui(device.deveui || device.device_eui);
+      if (!deveui || exportFamilyChannelKeys(card, device) !== null) continue;
+      const fields = Array.from(new Set(exportCandidateChannels(card, device, scope).flatMap(channelFieldNames)));
+      let present = new Set();
+      if (fields.length && !emptyInterval) {
+        const remaining = budget ? Math.min(budget.workRows, Math.floor(budget.workCells / fields.length)) : null;
+        if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
+        const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
+        // The inner query caps and counts every lexical candidate of the index
+        // range, margin rows included; only the outer presence test applies
+        // the exact instant bounds, so margin rows cannot escape the charge.
+        const instant = `strftime('${SQLITE_UTC_MS_FORMAT}', recorded_at)`;
+        const exact = range.params.length > 2 ? `${instant} >= ? AND ${instant} <= ?` : '1';
+        const sql = `SELECT COUNT(*) AS candidate_rows, ${fields.map(field => `MAX(in_range AND ${field} IS NOT NULL) AS ${field}`).join(', ')}`
+          + ` FROM (SELECT (${exact}) AS in_range, ${fields.join(', ')}`
+          + ` FROM (SELECT recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ?${limit}))`;
+        const row = (await dbAll(db, sql, range.params.slice(2).concat([deveui], range.params.slice(0, 2))))[0] || {};
+        const candidates = Number(row.candidate_rows || 0);
+        if (remaining !== null && candidates > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
+        if (budget) {
+          budget.workRows -= candidates;
+          budget.workCells -= candidates * fields.length;
+        }
+        present = new Set(fields.filter(field => Number(row[field]) === 1));
+      }
+      if (!presence.has(card)) presence.set(card, new Map());
+      presence.get(card).set(deveui, present);
+    }
+  }
+  return presence;
+}
+
+function retainExportRows(rows, expanded, scope) {
+  // Only request-time callers install a response budget. Nightly files are
+  // persistent artifacts and retain main's unlimited output behavior.
+  if (scope.budget) exportLimits.reserveOutput(expanded, RAW_CSV_COLUMNS, scope.budget, renderCsvRow);
+  rows.push(...expanded);
+}
+
+// The memory sentinel applies to one source-window. A separate request-work
+// budget counts newly fetched rows/cells. Carry only the adjacent date margin
+// forward, so repeated month boundaries are neither fetched nor charged twice.
+async function readExportRows(db, scope, deveui, channels, start, end) {
+  const budget = scope.budget;
+  const fields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+  const width = Math.max(1, fields.length);
+  const range = recordedAtRangeSql('recorded_at', start, end);
+  const key = deveui + '|' + fields.join(',');
+  const cursor = scope.inputCursor;
+  const contiguous = cursor && cursor.key === key && cursor.nextStart === start;
+  const carried = contiguous ? cursor.rows : [];
+  const lower = contiguous ? cursor.upper : range.params[0];
+  const remaining = budget ? Math.min(
+    budget.inputRows - carried.length,
+    Math.floor(budget.inputCells / width) - carried.length,
+    budget.workRows,
+    Math.floor(budget.workCells / width)
+  ) : null;
+  if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the per-read memory budget');
+  const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
+  const sql = `SELECT id, deveui, recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC, id ASC${limit}`;
+  const fetched = await dbAll(db, sql, [deveui, lower, range.params[1]]);
+  if (remaining !== null && fetched.length > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work or per-read memory budget');
+  if (budget) {
+    budget.workRows -= fetched.length;
+    budget.workCells -= fetched.length * width;
+  }
+  const combined = carried.concat(fetched);
+  scope.inputCursor = end < scope.end ? {
+    key, nextStart: end, upper: range.params[1],
+    rows: combined.filter(row => row.recorded_at >= isoDate(Date.parse(end) - DAY_MS)),
+  } : null;
+  return combined.filter(recordedAtRangeFilter(start, end));
 }
 
 async function rawZoneExportRows(db, scope) {
+  if (scope.start >= scope.end) return [];
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const cardChannels = exportChannelsForCard(card, scope);
-    const sourceDevices = sourceDevicesForCard(card, scope.devices)
-      .slice()
-      .sort((left, right) =>
-        String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
-      );
-    const deveuis = uniqueDeveuis(sourceDevices);
-    if (!cardChannels.length || !deveuis.length) continue;
-
-    const selectedFields = Array.from(new Set(cardChannels.flatMap(channelFieldNames)));
-    const placeholders = deveuis.map(() => '?').join(',');
-    const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
-    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
-    // The rows are sorted by their ISO UTC timestamp at the end.
-    const dataRows = (await dbAll(db, sql, deveuis.concat(range.params)))
-      .filter(recordedAtRangeFilter(scope.start, scope.end));
-    const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
-    const rowsByDeveui = {};
-    for (const row of dataRows) {
-      const key = normalizeDeveui(row.deveui);
-      if (!key) continue;
-      if (!rowsByDeveui[key]) rowsByDeveui[key] = [];
-      rowsByDeveui[key].push(row);
-    }
-
-    sourceDevices.forEach((device, index) => {
+    if (!exportChannelsForCard(card, scope).length) continue;
+    const sourceDevices = sourceDevicesForCard(card, scope.devices).slice()
+      .sort((left, right) => String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || '')));
+    const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
+    let index = 0;
+    for (const device of sourceDevices) {
       const channels = exportChannelsForDevice(card, device, scope);
-      if (!channels.length) return;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
-      const sourceRows = rowsByDeveui[deveui] || [];
-      const sourceName = displayDeviceName(device, index);
-      const arrayId = arrayIdByDeveui[deveui] || null;
+      const sourceName = displayDeviceName(device, index++);
+      if (!channels.length || !deveui) continue;
+      const sourceRows = await readExportRows(db, scope, deveui, channels, scope.start, scope.end);
       for (const row of sourceRows) {
-        const timestamp = canonicalRecordedAt(row.recorded_at);
+        const expanded = [];
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
           const depthCm = soilDepthCm(device, channel.id);
           const csvRow = {
-            timestamp,
-            site: scope.site,
-            zone: zoneName,
-            series_label: rawSeriesLabel(sourceName, channel, depthCm),
-            card_type: card.cardType,
-            source_key: sourceKeyForCsv(card, device),
-            channel_key: channel.id,
-            depth_cm: depthCm,
-            array_id: arrayId,
-            unit: channel.unit || null,
+            timestamp: canonicalRecordedAt(row.recorded_at), site: scope.site, zone: zoneName,
+            series_label: rawSeriesLabel(sourceName, channel, depthCm), card_type: card.cardType,
+            source_key: sourceKeyForCsv(card, device), channel_key: channel.id, depth_cm: depthCm,
+            array_id: arrayIdByDeveui[deveui] || null, unit: channel.unit || null,
             value: isSwtKpaChannel(channel) ? value : roundTo(value),
           };
-          rows.push(csvRow);
+          expanded.push(csvRow);
           if (isSwtKpaChannel(channel)) {
             const pfRow = pfExportRow(csvRow, channel);
-            if (pfRow) rows.push(pfRow);
+            if (pfRow) expanded.push(pfRow);
           }
         }
-        assertExportRowBudget(rows, scope);
+        retainExportRows(rows, expanded, scope);
       }
-    });
+    }
   }
   rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
     || String(left.card_type).localeCompare(String(right.card_type))
@@ -3568,7 +3769,7 @@ function exportMonthWindows(scope) {
     const nextMonth = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)), 1)).toISOString().slice(0, 10);
     const endDay = nextMonth < lastDay ? nextMonth : lastDay;
     const endIso = endDay === lastDay ? scope.end : zoneDateStartIso(endDay, scope.timezone);
-    windows.push({ start: startIso, end: endIso });
+    if (startIso < endIso) windows.push({ start: startIso, end: endIso });
     day = endDay;
     startIso = endIso;
   }
@@ -3596,8 +3797,16 @@ async function aggregateZoneExportRows(db, scope) {
       index += 1;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       if (!deveui) continue;
-      for (const window of exportMonthWindows(scope)) {
-        const aggregate = await aggregateDeviceData(db, {
+      for (const window of scope.windows || exportMonthWindows(scope)) {
+        const input = await readExportRows(db, scope, deveui, channels, window.start, window.end);
+        // A daily blank row means "this device sent nothing that day". Any
+        // stored row counts, including rows that carry none of the requested
+        // channels, so a filtered export never fabricates blanks for a day the
+        // device reported other channels.
+        const reportedDays = scope.granularity === 'daily'
+          ? new Set(input.map(row => localDateKey(parseRecordedAtMs(row.recorded_at), scope.timezone)).filter(Boolean))
+          : null;
+        const aggregate = aggregateRows(input, {
           zoneId: scope.zone.id,
           cardType: card.cardType,
           logicalSourceKey: card.logicalSourceKey,
@@ -3609,18 +3818,16 @@ async function aggregateZoneExportRows(db, scope) {
           channels,
           timezone: scope.timezone,
           nowMs: scope.nowMs,
-          useRollups: deviceTypeId(device) === 'AQUASCOPE_LORAIN' ? false : undefined,
+          sourceDevices: [device],
         });
-        // csvRowsFromAggregate reads buckets only; an unavailable window
-        // would otherwise drop the month from the CSV without an error.
-        if (aggregate && aggregate.availability && aggregate.availability.available === false) {
-          throw exportWindowUnavailable(aggregate.availability.reasons);
-        }
-        for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
+        for (const expanded of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
           site: scope.site,
           zone: zoneName,
-        })) rows.push(csvRow);
-        assertExportRowBudget(rows, scope);
+          includeMissing: scope.granularity === 'daily',
+          reportedDays,
+          timezone: scope.timezone,
+          blankChannelKeys: exportFamilyChannelKeys(card, device),
+        })) retainExportRows(rows, expanded, scope);
       }
     }
   }
@@ -3634,43 +3841,48 @@ async function aggregateZoneExportRows(db, scope) {
 async function buildZoneExportCsv(db, options = {}) {
   const scope = await resolveZoneExportScope(db, options);
   assertExportRangeAllowed(scope);
+  scope.budget = exportLimits.createBudget(options, exportLimits.header(RAW_CSV_COLUMNS));
+  scope.maxRows = scope.budget.maxRows;
+  scope.windows = exportMonthWindows(scope);
+  assertExportBucketBudget(scope, scope.maxRows);
+  // Only after every refusal that needs no data: the presence scan reads device_data.
+  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   if (scope.granularity === 'raw') {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
   return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
 }
 
-// Upper bound on the rows of one all-zones CSV answer. Node-RED's http response
-// sends a whole string, so the answer is built in memory: at most this many
-// lines of text (about 130 bytes each, so about 26 MB) plus the CSV row
-// objects of the one zone being built, which the same budget caps. Past it the
-// export stops and answers 413 instead of growing without limit on the
-// gateway. The budget counts output rows only: the database rows one card
-// (raw) or one source (hourly, daily) fetches for the range are bounded by the
-// range limits of assertExportRangeAllowed, not by this budget.
-const ALL_ZONES_EXPORT_MAX_ROWS = 200000;
+// Output rows, encoded bytes and input work have independent hard ceilings.
+// Tests may lower any ceiling; no caller can raise one.
+const ALL_ZONES_EXPORT_MAX_ROWS = exportLimits.MAX_ROWS;
 
 function exportTooLarge(maxRows) {
-  const error = new Error(`export exceeds ${maxRows} rows`);
-  error.code = 'EXPORT_TOO_LARGE';
-  error.statusCode = 413;
-  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
-  return error;
+  return exportLimits.refusal(exportLimits.REASON_CODES.ROWS, `export exceeds ${maxRows} rows`);
 }
 
-function exportWindowUnavailable(reasons) {
-  const error = new Error('export window could not be aggregated');
-  error.code = 'EXPORT_TOO_LARGE';
-  error.statusCode = 413;
-  error.reasons = Array.isArray(reasons) ? reasons.slice() : [];
-  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
-  return error;
-}
-
-function assertExportRowBudget(rows, scope) {
-  if (scope && Number.isFinite(scope.rowBudget) && rows.length > scope.rowBudget) {
-    throw exportTooLarge(scope.maxRows);
+// A caller may lower the budget for a smaller gateway, but cannot raise the
+// process-wide ceiling. Empty aggregate cells and potential pF rows count too.
+function assertExportBucketBudget(scope, remaining) {
+  if (scope.granularity === 'raw') return 0;
+  const windows = scope.windows || exportMonthWindows(scope);
+  const buckets = windows.reduce((sum, window) => sum + (scope.granularity === 'daily'
+    ? aggregationBuckets(Date.parse(window.start), Date.parse(window.end), 'daily', BUCKET_SECONDS.daily, scope.timezone).length
+    : Math.ceil((Date.parse(window.end) - Date.parse(window.start)) / 3600000)), 0);
+  let cells = 0;
+  for (const card of scope.cards) {
+    for (const device of sourceDevicesForCard(card, scope.devices)) {
+      // A device on the card-wide fallback emits measured rows only (never
+      // blanks), so it reserves no empty cells here; its rows are charged to
+      // the output budget as they are produced.
+      if (exportFamilyChannelKeys(card, device) === null) continue;
+      for (const channel of exportChannelsForDevice(card, device, scope)) {
+        cells += buckets * (isSwtKpaChannel(channel) ? 2 : 1);
+        if (cells > remaining) throw exportTooLarge(scope.maxRows);
+      }
+    }
   }
+  return cells;
 }
 
 // One tidy CSV over several zones (the caller passes the zones it may read).
@@ -3681,9 +3893,8 @@ function assertExportRowBudget(rows, scope) {
 // are alive at any moment (see ALL_ZONES_EXPORT_MAX_ROWS for what bounds the
 // database fetch).
 async function buildAllZonesExportCsv(db, options = {}) {
-  const maxRows = Number.isSafeInteger(options.maxRows) && options.maxRows > 0
-    ? options.maxRows
-    : ALL_ZONES_EXPORT_MAX_ROWS;
+  const budget = exportLimits.createBudget(options, exportLimits.header(RAW_CSV_COLUMNS));
+  const maxRows = budget.maxRows;
   const granularity = normalizeExportGranularity(options.granularity || 'daily');
   const from = normalizeExportDate(options.from, 'from');
   const to = normalizeExportDate(options.to || options.from, 'to');
@@ -3714,24 +3925,48 @@ async function buildAllZonesExportCsv(db, options = {}) {
     throw error;
   }
 
-  const chunks = [RAW_CSV_COLUMNS.join(',') + '\n'];
-  let rowCount = 0;
+  // Resolve and preflight the entire request before reading the first sample.
+  const scopes = [];
+  let bucketCount = 0;
   for (const zone of zones) {
     const scope = await resolveZoneExportScope(db, {
       ...options, zoneId: zone.id, from, to, granularity, nowMs, allowFutureDays: true,
     });
     scope.maxRows = maxRows;
-    scope.rowBudget = maxRows - rowCount;
-    const rows = granularity === 'raw'
-      ? await rawZoneExportRows(db, scope)
-      : await aggregateZoneExportRows(db, scope);
-    assertExportRowBudget(rows, scope);
-    if (rows.length) {
-      chunks.push(rows.map((row) => RAW_CSV_COLUMNS.map((column) => csvRowCell(row, column)).join(',')).join('\n') + '\n');
-    }
-    rowCount += rows.length;
+    scope.budget = budget;
+    scope.windows = exportMonthWindows(scope);
+    bucketCount += assertExportBucketBudget(scope, maxRows - bucketCount);
+    scopes.push(scope);
   }
-  return { columns: RAW_CSV_COLUMNS, csv: chunks.join(''), rowCount, zoneCount: zones.length };
+  // Presence scans start only after every zone passed its preflight.
+  for (const scope of scopes) scope.fieldPresence = await resolveExportFieldPresence(db, scope);
+  const chunks = [exportLimits.header(RAW_CSV_COLUMNS)];
+  for (const scope of scopes) {
+    const rows = granularity === 'raw' ? await rawZoneExportRows(db, scope) : await aggregateZoneExportRows(db, scope);
+    // Retention already reserved every encoded byte in the shared budget.
+    for (const row of rows) chunks.push(renderCsvRow(RAW_CSV_COLUMNS, row));
+  }
+  return { columns: RAW_CSV_COLUMNS, csv: chunks.join(''), rowCount: budget.rows, zoneCount: zones.length };
+}
+
+// Daily rewrites stream the old file and yield between records, so two
+// writers for one zone (the scheduled rollup and a manual run) could each read
+// the same old file and rename over the other's result. Node-RED is one
+// process: an in-process queue per destination path serialises the whole
+// read-to-rename interval. A failed rewrite still rejects for its own caller;
+// the queue only waits for it to settle.
+const dailyRewriteTails = new Map();
+
+async function withDailyRewriteLock(file, task) {
+  const previous = dailyRewriteTails.get(file) || Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.then(() => undefined, () => undefined);
+  dailyRewriteTails.set(file, tail);
+  try {
+    return await run;
+  } finally {
+    if (dailyRewriteTails.get(file) === tail) dailyRewriteTails.delete(file);
+  }
 }
 
 async function writeZoneCsv(options = {}) {
@@ -3749,20 +3984,54 @@ async function writeZoneCsv(options = {}) {
 
   fs.mkdirSync(path.join(base, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(base, 'hourly'), { recursive: true });
-  fs.writeFileSync(path.join(base, 'raw', `${day}.csv`), toCsv(RAW_CSV_COLUMNS, (options.rawRows || []).map(stamp)));
-  fs.writeFileSync(path.join(base, 'hourly', `${day}.csv`), toCsv(AGG_CSV_COLUMNS, (options.hourlyRows || []).map(stamp)));
-
+  const temporary = file => file + '.tmp-' + process.pid + '-' + crypto.randomBytes(8).toString('hex');
+  const writeRows = (file, columns, rows) => {
+    const temp = temporary(file);
+    let fd = null;
+    try {
+      fd = fs.openSync(temp, 'wx');
+      fs.writeSync(fd, exportLimits.header(columns));
+      for (const row of rows) fs.writeSync(fd, renderCsvRow(columns, stamp(row)));
+      fs.closeSync(fd); fd = null;
+      fs.renameSync(temp, file);
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
+    }
+  };
+  // Raw/hourly updates succeed independently of a malformed old daily file.
+  writeRows(path.join(base, 'raw', `${day}.csv`), RAW_CSV_COLUMNS, options.rawRows || []);
+  writeRows(path.join(base, 'hourly', `${day}.csv`), AGG_CSV_COLUMNS, options.hourlyRows || []);
   const dailyPath = path.join(base, 'daily.csv');
-  const nextDailyRows = (options.dailyRows || []).map(stamp);
-  let keptLines = [];
-  if (fs.existsSync(dailyPath)) {
-    const lines = fs.readFileSync(dailyPath, 'utf8').split(/\r?\n/).filter((line) => line.length > 0);
-    keptLines = lines.slice(1).filter((line) => !line.startsWith(day));
-  }
-  const dailyBody = [AGG_CSV_COLUMNS.join(',')]
-    .concat(keptLines)
-    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvRowCell(row, column)).join(',')));
-  fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
+  await withDailyRewriteLock(path.resolve(dailyPath), async () => {
+    const temp = temporary(dailyPath);
+    let fd = null;
+    try {
+      fd = fs.openSync(temp, 'wx');
+      fs.writeSync(fd, exportLimits.header(AGG_CSV_COLUMNS));
+      if (fs.existsSync(dailyPath)) {
+        let header = true;
+        let previousTimestamp;
+        let previousDay;
+        const timezone = normalizeTimezone(zone.timezone);
+        for await (const record of exportLimits.records(dailyPath)) {
+          if (header) { header = false; continue; }
+          const timestamp = exportLimits.firstCell(record);
+          if (timestamp !== previousTimestamp) {
+            previousTimestamp = timestamp;
+            previousDay = localDateKey(parseRecordedAtMs(timestamp), timezone);
+          }
+          if (previousDay !== day) fs.writeSync(fd, record + '\n');
+        }
+      }
+      for (const row of options.dailyRows || []) fs.writeSync(fd, renderCsvRow(AGG_CSV_COLUMNS, stamp(row)));
+      fs.closeSync(fd); fd = null;
+      fs.renameSync(temp, dailyPath);
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
+    }
+  });
 }
 
 async function rotateZoneCsv(options = {}) {
@@ -3795,6 +4064,7 @@ async function buildZoneCsvRows(db, zone, day, nowMs) {
     to: day,
     nowMs,
   });
+  scope.fieldPresence = await resolveExportFieldPresence(db, scope);
   return {
     rawRows: await rawZoneExportRows(db, { ...scope, granularity: 'raw' }),
     hourlyRows: await aggregateZoneExportRows(db, { ...scope, granularity: 'hourly' }),
@@ -3972,8 +4242,7 @@ async function resolveDeviceArrayIds(db, deveuis, start, end) {
   return map;
 }
 
-function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
-  const rows = [];
+function* csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
   const isLoRain = deviceTypeId(device) === 'AQUASCOPE_LORAIN';
   const valueForChannel = (stats, channel) => {
     if (!isLoRain) return stats.mean;
@@ -3981,10 +4250,18 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
     if (channel.id === 'rain_mm_today') return stats.latest;
     return stats.mean;
   };
+  // Blank (null-value) rows are emitted only for a day on which the device
+  // stored no row at all, and only for channels its type's family lists. A
+  // device without a type or family keeps main's rule: measured rows only.
+  const emptyBucket = (bucket) => context.includeMissing
+    && !(context.reportedDays && context.reportedDays.has(localDateKey(bucket.bucketStart, context.timezone)))
+    && Number(bucket.sampleCount || 0) === 0;
   for (const bucket of aggregate.buckets || []) {
+    const blankAllowed = emptyBucket(bucket);
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
-      if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      const missing = !stats || Number(stats.sampleCount || 0) === 0;
+      if (missing && !(blankAllowed && context.blankChannelKeys && context.blankChannelKeys.has(channel.id))) continue;
       const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,
@@ -3996,17 +4273,17 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
         channel_key: channel.id,
         depth_cm: depthCm,
         array_id: arrayId == null ? null : arrayId,
-        unit: channel.unit || stats.unit || null,
-        value: valueForChannel(stats, channel),
+        unit: channel.unit || (stats && stats.unit) || null,
+        value: missing ? null : valueForChannel(stats, channel),
       };
-      rows.push(csvRow);
+      const expanded = [csvRow];
       if (isSwtKpaChannel(channel)) {
         const pfRow = pfExportRow(csvRow, channel);
-        if (pfRow) rows.push(pfRow);
+        if (pfRow) expanded.push(pfRow);
       }
+      yield expanded;
     }
   }
-  return rows;
 }
 
 function hoursBetween(start, end) {
@@ -4531,6 +4808,12 @@ module.exports = {
   buildZoneExportCsv,
   buildAllZonesExportCsv,
   ALL_ZONES_EXPORT_MAX_ROWS,
+  EXPORT_MAX_INPUT_ROWS: exportLimits.MAX_INPUT_ROWS,
+  EXPORT_MAX_INPUT_CELLS: exportLimits.MAX_INPUT_CELLS,
+  EXPORT_MAX_WORK_ROWS: exportLimits.MAX_WORK_ROWS,
+  EXPORT_MAX_WORK_CELLS: exportLimits.MAX_WORK_CELLS,
+  EXPORT_MAX_CSV_BYTES: exportLimits.MAX_CSV_BYTES,
+  EXPORT_REASON_CODES: exportLimits.REASON_CODES,
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,
   toCsv,

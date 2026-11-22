@@ -80,7 +80,7 @@ function addLoRainFixture(raw) {
 }
 
 function parseCsv(text) {
-  const lines = text.trimEnd().split('\n');
+  const lines = text.replace(/^\uFEFF/, '').trimEnd().split('\n');
   const header = lines.shift().split(',');
   return lines.map((line) => {
     const cells = [];
@@ -153,7 +153,7 @@ for (const profile of PROFILES) {
         assert.equal(value('rain_tips_delta'), 15, `${granularity} interval tips are summed from device_data`);
         assert.equal(value('rain_mm_today'), 6, `${granularity} running total uses latest observation`);
         assert.equal(value('ambient_temperature'), 22.067, `${granularity} temperature uses mean`);
-        assert.equal(value('rain_mm_per_hour'), 10, `${granularity} rate uses mean`);
+        assert.ok(!rows.some(row => /^rain_mm_per_(?:hour|10min)$/.test(row.channel_key)), `${granularity} omits rates LoRain cannot report`);
       }
     } finally {
       raw.close();
@@ -274,7 +274,7 @@ for (const profile of PROFILES) {
       for (const lead of ['=', '+', '-', '@', '\t', '\r']) {
         assert.equal(helper.toCsv(['a'], [{ a: `${lead}cmd` }]).split('\n')[1].replace(/^"|"$/g, '')[0], "'");
       }
-      assert.equal(helper.toCsv(['a'], [{ a: -5 }]), 'a\n-5\n', 'a negative number stays a number');
+      assert.equal(helper.toCsv(['a'], [{ a: -5 }]), '\uFEFFa\n-5\n', 'a negative number stays a number');
     } finally {
       raw.close();
     }
@@ -291,7 +291,7 @@ for (const profile of PROFILES) {
       await assert.rejects(helper.buildAllZonesExportCsv(db, { ...base, from: '2026-03-01', to: '2026-07-01', granularity: 'raw' }), { statusCode: 413, code: 'RANGE_TOO_LARGE' });
       await assert.rejects(helper.buildAllZonesExportCsv(db, { ...base, from: '2026-07-05', to: '2026-07-05' }), { statusCode: 400 });
       const empty = await helper.buildAllZonesExportCsv(db, { ...base, zoneIds: [], from: '2026-07-01', to: '2026-07-01' });
-      assert.equal(empty.csv, helper.RAW_CSV_COLUMNS.join(',') + '\n');
+      assert.equal(empty.csv, '\uFEFF' + helper.RAW_CSV_COLUMNS.join(',') + '\n');
       assert.equal(empty.rowCount, 0);
     } finally {
       raw.close();
@@ -314,7 +314,7 @@ for (const profile of PROFILES) {
       const spans = [];
       const recording = { ...facade, all(sql, params, callback) {
         if (/FROM device_data/.test(sql)) {
-          const bounds = params.filter((value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value));
+          const bounds = params.filter((value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value));
           spans.push((Date.parse(bounds[1]) - Date.parse(bounds[0])) / 86400000);
         }
         return facade.all(sql, params, callback);
@@ -326,9 +326,9 @@ for (const profile of PROFILES) {
           zoneId: 12, from: '2025-07-01', to: '2026-06-30', granularity, channels: 'swt_1', nowMs: NOW_MS,
         });
         assert.ok(spans.length >= 12, `${granularity}: one read per local month (${spans.length})`);
-        // The instant bounds are the month plus a millisecond on each side (SQLite
-        // rounds below the millisecond; the exact range is applied in JS).
-        assert.ok(Math.max(...spans) <= 31 + 1 / 24 + 2 / 86400000, `${granularity}: no read spans more than a month (${Math.max(...spans)} days)`);
+        // Indexed lexical bounds include whole-date margins for legacy offsets;
+        // candidate rows consume the input budget before exact JS filtering.
+        assert.ok(Math.max(...spans) <= 35, `${granularity}: month plus indexed date margins (${Math.max(...spans)} days)`);
         // The same buckets as one aggregation over the whole range.
         const whole = await helper.aggregateDeviceData(facade, {
           device_euis: ['A840410000000001'], sourceFilterActive: true, aggregation: granularity, channels: [channel],
@@ -337,7 +337,7 @@ for (const profile of PROFILES) {
         const expected = whole.buckets
           .filter((bucket) => bucket.series.swt_1.sampleCount > 0)
           .map((bucket) => [bucket.bucketStart, bucket.series.swt_1.mean]);
-        const exported = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => [row.timestamp, row.value]);
+        const exported = result.rows.filter((row) => row.channel_key === 'swt_1' && row.value !== null).map((row) => [row.timestamp, row.value]);
         assert.equal(exported.length, expected.length, `${granularity}: bucket count`);
         assert.deepEqual(exported, expected, `${granularity}: bucket values`);
       }
@@ -346,7 +346,7 @@ for (const profile of PROFILES) {
       await helper.buildAllZonesExportCsv(recording, {
         zoneIds: [12], from: '2025-07-01', to: '2026-06-30', granularity: 'daily', nowMs: NOW_MS,
       });
-      assert.ok(spans.length >= 12 && Math.max(...spans) <= 31 + 1 / 24 + 2 / 86400000);
+      assert.ok(spans.length >= 12 && Math.max(...spans) <= 35);
     } finally {
       raw.close();
     }
@@ -367,7 +367,7 @@ for (const profile of PROFILES) {
       assert.ok(!reads.some((sql) => /device_data/.test(sql)), 'the per-zone export reads no history either');
       // Ten years of daily rows still pass: 2016-07-02 .. 2026-07-01 is 3652 days.
       const tenYears = await helper.buildAllZonesExportCsv(facade, {
-        zoneIds: [13], from: '2016-07-02', to: '2026-07-01', granularity: 'daily', nowMs: NOW_MS,
+        zoneIds: [13], from: '2016-07-02', to: '2026-07-01', granularity: 'daily', channels: 'swt_1', nowMs: NOW_MS,
       });
       assert.ok(tenYears.rowCount > 0);
       await assert.rejects(helper.buildAllZonesExportCsv(facade, {
@@ -397,8 +397,8 @@ for (const profile of PROFILES) {
   test(`${label}: a large range stays within the row bound and refuses past it before building the rest`, async () => {
     const raw = seedDb();
     try {
-      // Three zones, one sensor each with three soil channels every 15 minutes
-      // for 92 days: 3 x 8832 uplinks x 6 rows (kPa + pF) = 158976 rows.
+      // Three zones retain 92 days of 15-minute reports. Export a 30-day,
+      // three-channel selection that fits the independent byte/work ceilings.
       raw.exec("DELETE FROM device_data; UPDATE devices SET irrigation_zone_id = 14, user_id = 1 WHERE deveui = 'A840410000000003';");
       for (const trigger of raw.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'device_data'").all()) {
         raw.exec(`DROP TRIGGER "${trigger.name}"`);
@@ -414,20 +414,20 @@ for (const profile of PROFILES) {
       }
       raw.exec('COMMIT');
       const options = {
-        zoneIds: [13, 14], from: '2026-04-01', to: '2026-07-01', granularity: 'raw', nowMs: NOW_MS,
+        zoneIds: [13, 14], from: '2026-06-01', to: '2026-06-30', granularity: 'raw', channels: 'swt_1,swt_2,swt_3', nowMs: NOW_MS,
       };
-      // Zurich is on UTC+2 in summer, so its 92 local days begin 2 h before
-      // the first uplink; the two UTC zones see every uplink of their days.
+      // The two UTC zones contain 30 complete local days of every source.
       const twoZones = await helper.buildAllZonesExportCsv(facadeDb(raw), options);
-      assert.equal(twoZones.rowCount, 2 * 92 * 96 * 6);
+      assert.equal(twoZones.rowCount, 2 * 30 * 96 * 6);
+      assert.ok(Buffer.byteLength(twoZones.csv) <= helper.EXPORT_MAX_CSV_BYTES);
       assert.ok(twoZones.rowCount <= helper.ALL_ZONES_EXPORT_MAX_ROWS);
       assert.equal(twoZones.csv.split('\n').length - 2, twoZones.rowCount);
 
       const facade = facadeDb(raw);
       const readParams = [];
-      const recording = { ...facade, all(sql, params, callback) { readParams.push(...(params || [])); return facade.all(sql, params, callback); } };
+      const recording = { ...facade, all(sql, params, callback) { if (/FROM device_data/.test(sql)) readParams.push(...(params || [])); return facade.all(sql, params, callback); } };
       const limited = helper.buildAllZonesExportCsv(recording, {
-        ...options, zoneIds: [12, 13, 14], maxRows: 100000,
+        ...options, zoneIds: [12, 13, 14], maxRows: 20000,
       });
       await assert.rejects(limited, (error) => {
         assert.equal(error.statusCode, 413);
@@ -435,7 +435,7 @@ for (const profile of PROFILES) {
         assert.match(error.suggestion, /granularity|shorter|channels/);
         return true;
       });
-      // Zone 12 fits (about 53k rows), zone 13 crosses the bound and stops
+      // Zone 12 fits (about 17k rows), zone 13 crosses the bound and stops
       // there; the sensor of zone 14 is never read.
       assert.ok(readParams.includes('A840410000000002'));
       assert.ok(!readParams.includes('A840410000000003'));
