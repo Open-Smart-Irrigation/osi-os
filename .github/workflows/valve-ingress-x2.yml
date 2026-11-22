@@ -4,8 +4,7 @@ on:
   pull_request:
     branches: [main, master]
   push:
-    # Keep preparation gates runnable while the PR awaits X1/base integration.
-    branches: [main, master, chore/valve-control-x2-entrypoints]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -18,7 +17,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22.23.1'
@@ -75,7 +73,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20.18.3'
