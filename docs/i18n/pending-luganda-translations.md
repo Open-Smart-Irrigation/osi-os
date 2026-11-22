@@ -530,3 +530,9 @@ in the same change.
 | `environment.compass.NW` | B6 adds "NW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
 | `environment.compass.NNW` | B6 adds "NNW" in `devices.json`. `lg` ships the English source until a human Luganda pass. |
 | `environment.forecast.relativeHumidityValue` | B6 Sol review restores the visible relative-humidity qualifier: "{{value}} RH" (with a nonbreaking space). `lg` ships the English source until a human Luganda pass. |
+
+## `auth.json` — new password at sign-in
+
+| Keys | Reason |
+|---|---|
+| `passwordChange.*` (11 keys in `auth.json`) | Added for the sign-in step that asks an account to set a new password before the session opens. de-CH, es, fr, it and pt were translated in the same change; no human Luganda pass yet, so `lg` ships the English source text. |
