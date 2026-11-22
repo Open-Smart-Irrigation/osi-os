@@ -513,7 +513,22 @@
       "noData": "No agronomic data available",
       "fromSource": "from {{source}}",
       "kcHelpLabel": "About the crop coefficient",
-      "kcHelp": "FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}."
+      "kcHelp": "FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}.",
+      "evapotranspiration": "Evapotranspiration",
+      "conditions": "Conditions",
+      "vpdStatus": {
+        "saturated": "Saturated",
+        "low": "Low",
+        "moderate": "Moderate",
+        "high": "High",
+        "stressRisk": "Stress risk"
+      },
+      "thiStatus": {
+        "normal": "Normal",
+        "alert": "Alert",
+        "danger": "Danger",
+        "emergency": "Emergency"
+      }
     },
     "forecast": {
       "dayToday": "Today",
@@ -531,7 +546,12 @@
       "noData": "No forecast available",
       "noLocation": "Set zone coordinates to enable forecast",
       "hourlyTitle": "Hourly rain (next 24 h)",
-      "unavailable": "Unavailable"
+      "unavailable": "Unavailable",
+      "rain": "Rain",
+      "probability": "Probability",
+      "hourlyHelpLabel": "About hourly rain",
+      "hourlyHelp": "Bars show rain in millimetres; the dashed line shows rain probability in percent.",
+      "relativeHumidityValue": "{{value}} RH"
     },
     "metrics": {
       "air_temperature_c": "Air Temp",
@@ -545,6 +565,24 @@
       "uv_index": "UV Index",
       "soil_temperature_c": "Soil Temp",
       "soil_moisture_pct": "Soil Moisture"
+    },
+    "compass": {
+      "N": "N",
+      "NNE": "NNE",
+      "NE": "NE",
+      "ENE": "ENE",
+      "E": "E",
+      "ESE": "ESE",
+      "SE": "SE",
+      "SSE": "SSE",
+      "S": "S",
+      "SSW": "SSW",
+      "SW": "SW",
+      "WSW": "WSW",
+      "W": "W",
+      "WNW": "WNW",
+      "NW": "NW",
+      "NNW": "NNW"
     }
   },
   "zoneConfig": {
@@ -1157,5 +1195,29 @@
     "rangeState": "Range state",
     "outsideRange": "This latest mechanical reading is outside the stored calibration range. Stem change on the main card is suppressed until the calibration range is reviewed.",
     "calibrationDetails": "Ratio and ADC calibration details are available in the LSN50 card’s Advanced device settings."
+  },
+  "weatherCard": {
+    "minuteInterval": "{{value}} min interval",
+    "secondInterval": "{{value}} s interval",
+    "perTenMinutes": "{{value}} {{unit}} per 10 min",
+    "rateOverInterval": "{{value}} mm/h over {{interval}}",
+    "thisInterval": "This interval",
+    "gust": "Gust {{value}} m/s",
+    "lastUplink": "Last uplink: {{value}} mm",
+    "manageZones": "Manage zone assignments",
+    "zoneAssignments": "Zone assignments",
+    "noZones": "No zones available",
+    "save": "Save",
+    "saving": "Saving…",
+    "saveFailed": "Failed to save",
+    "counterStatus": {
+      "first_sample": "Waiting for the next uplink to calculate a delta.",
+      "duplicate_timestamp": "Skipped duplicate uplink timestamp.",
+      "out_of_order": "Skipped out-of-order uplink.",
+      "counter_reset": "Counter reset detected; interval delta skipped.",
+      "invalid_interval": "Invalid uplink interval; delta skipped.",
+      "cumulative_baseline": "Rain counter baseline set; waiting for the next uplink to calculate a delta.",
+      "intensity_only": "Rain amount unknown for this interval; only the intensity was reported."
+    }
   }
 }

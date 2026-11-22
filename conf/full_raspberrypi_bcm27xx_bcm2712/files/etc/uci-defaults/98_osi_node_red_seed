@@ -7,6 +7,13 @@ FLOW_SEED=/usr/share/flows.json
 IMAGE_DB=/usr/share/db/farming.db
 LIVE_DB=/data/db/farming.db
 
+for recovery_suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+    if [ -e "$LIVE_DB$recovery_suffix" ] || [ -L "$LIVE_DB$recovery_suffix" ]; then
+        logger -t osi-node-red-seed "HELD: defer factory runtime seeding during database recovery"
+        exit 1
+    fi
+done
+
 mkdir -p "$DST" "$DST/node_modules"
 chown node-red:node-red "$DST" "$DST/node_modules" 2>/dev/null || true
 
@@ -29,7 +36,7 @@ function freshImageSeed() {
       hasEntry('/usr/lib/node-red/gui')?.isSymbolicLink() ||
       [dst, path.join(dst, 'node_modules')].some(dir =>
         fs.readdirSync(dir, { withFileTypes: true }).some(file => file.name.startsWith('osi-') && file.isSymbolicLink())) ||
-      ['-wal', '-shm', '-journal', '.osi-recovery'].some(suffix => hasEntry(liveDb + suffix))) return false;
+      ['-wal', '-shm', '-journal', '.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold'].some(suffix => hasEntry(liveDb + suffix))) return false;
   if (!hasEntry(flowSeed)?.isFile()) return false;
   const imageEntry = hasEntry(imageDb);
   const liveEntry = hasEntry(liveDb);
@@ -114,6 +121,9 @@ function publish(target, write) {
       fs.closeSync(fd);
     }
     try {
+      for (const suffix of ['.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold']) {
+        if (hasEntry(liveDb + suffix)) throw new Error('recovery hold appeared before runtime seed publication: ' + suffix);
+      }
       fs.linkSync(temporary, target);
     } catch (error) {
       if (error.code === 'EEXIST') return;

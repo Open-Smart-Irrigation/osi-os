@@ -5,6 +5,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { linkBuilderSource } = require('./lib/installation-osi-lib');
 
 const ROOT = path.join(__dirname, '..');
 const flowPath = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -46,7 +47,7 @@ for (const type of protectedTypes) {
 }
 assert.ok(helper, 'thin watermark-config-command-apply-fn exists');
 assert.equal(helper.type, 'function');
-assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']]);
+assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['account-cloud-guard-9d5e3035c3d069c4']]);
 assert.match(helper.func, /applyWatermarkCommand/);
 assert.match(helper.func, /_pendingCommandEnvelope/);
 assert.match(helper.func, /gateway_device_eui/);
@@ -73,12 +74,15 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   const profileApplier = profileById['watermark-config-command-apply-fn'];
   assert.ok(profileApplier, `${profile} protected applier is shipped`);
   assert.doesNotMatch(profileApplier.func, /\bcapabilities\s*:/, `${profile} protected applier supplies no runtime capability metadata`);
-  const bases = ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build'].map((id) => capabilityBaseFrom(profileById[id].func, `${profile}/${id}`));
+  // The link request is built by the installation helper's build stage.
+  const linkSource = linkBuilderSource(profileFlows, profile);
+  const bases = ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build'].map((id) => capabilityBaseFrom(id === 'al-link-build-req' ? linkSource : profileById[id].func, `${profile}/${id}`));
   assert.deepEqual(bases[0], bases[1], `${profile} bootstrap/link capability bases match`);
   assert.deepEqual(bases[0], bases[2], `${profile} bootstrap/force capability bases match`);
   assert.match(profileById['sync-bootstrap-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} bootstrap keeps journal conditional capability`);
   assert.match(profileById['sync-force-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} force keeps journal conditional capability`);
-  assert.doesNotMatch(profileById['al-link-build-req'].func, /field_journal_v1/, `${profile} link keeps journal capability distinction`);
+  assert.doesNotMatch(profileById['al-link-build-req'].func, /field_journal_v1/, `${profile} link node keeps journal capability distinction`);
+  assert.doesNotMatch(linkSource, /field_journal_v1/, `${profile} link keeps journal capability distinction`);
 }
 
 const buildSql = byId['4f4a765f36cee6f3'];

@@ -8,6 +8,12 @@ EXTRA_COMMANDS="ready"
 EXTRA_HELP="\tready\tCheck whether identityd owns a live consumer lock"
 
 start_service() {
+	for suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+		if [ -e "/data/db/farming.db$suffix" ] || [ -L "/data/db/farming.db$suffix" ]; then
+			logger -t osi-identityd "HELD: database recovery; identity supervisor remains stopped"
+			return 1
+		fi
+	done
 	procd_open_instance
 	procd_set_param command /usr/libexec/osi-identityd.sh start
 	procd_set_param respawn 3600 5 -1

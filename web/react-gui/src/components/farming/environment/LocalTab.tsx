@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatWeatherValue } from '../../../utils/forecastFormat';
 import type { LocalEnvironment, LocalMetric } from '../../../types/farming';
 
 interface Props {
@@ -22,39 +23,23 @@ const METRIC_ICON: Record<string, string> = {
   soil_moisture_pct:    '🌿',
 };
 
-const METRIC_COLOR: Record<string, string> = {
-  air_temperature_c:    '#f97316',
-  relative_humidity_pct:'#06b6d4',
-  probe_temperature_c:  '#fb923c',
-  pressure_hpa:         '#64748b',
-  wind_speed_mps:       '#6366f1',
-  wind_direction_deg:   '#8b5cf6',
-  rainfall_mm:          '#3b82f6',
-  light_lux:            '#f59e0b',
-  uv_index:             '#eab308',
-  soil_temperature_c:   '#22c55e',
-  soil_moisture_pct:    '#16a34a',
-};
-
-function fmtValue(value: number, unit: string): string {
+function fmtValue(value: number, unit: string, locale: string): string {
   const decimals = unit === 'lux' || unit === 'hPa' ? 0 : 1;
-  return `${value.toFixed(decimals)} ${unit}`;
+  return formatWeatherValue(value, locale, decimals, unit === 'UVI' ? '' : unit);
 }
 
-function fmtRelative(isoStr: string | null): string {
-  if (!isoStr) return '—';
-  const diffMin = Math.round((Date.now() - new Date(isoStr).getTime()) / 60000);
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin} min ago`;
-  return `${Math.floor(diffMin / 60)}h ago`;
+function fmtRelative(isoStr: string | null, locale: string): string {
+  if (!isoStr || !Number.isFinite(Date.parse(isoStr))) return '—';
+  const diffMin = Math.max(0, Math.round((Date.now() - new Date(isoStr).getTime()) / 60000));
+  const fmt = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  return diffMin < 60 ? fmt.format(-diffMin, 'minute') : fmt.format(-Math.floor(diffMin / 60), 'hour');
 }
 
 // ── MetricCard ────────────────────────────────────────────────────────────────
 
 const MetricCard: React.FC<{ metric: LocalMetric }> = ({ metric }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const icon  = METRIC_ICON[metric.key] ?? '📊';
-  const color = METRIC_COLOR[metric.key] ?? '#64748b';
   const label = t(`environment.metrics.${metric.key}`, { defaultValue: metric.label });
 
   return (
@@ -66,12 +51,12 @@ const MetricCard: React.FC<{ metric: LocalMetric }> = ({ metric }) => {
           <span className="ml-auto text-[var(--text-tertiary)]">×{metric.sampleCount}</span>
         )}
       </div>
-      <div className="text-2xl font-bold tabular-nums" style={{ color }}>
-        {fmtValue(metric.mean, metric.unit)}
+      <div className="text-2xl font-bold tabular-nums" style={{ color: 'var(--text)' }}>
+        {fmtValue(metric.mean, metric.unit, i18n.language)}
       </div>
       {metric.min !== metric.max && (
         <div className="text-xs text-[var(--text-tertiary)] tabular-nums">
-          {metric.min.toFixed(1)}–{metric.max.toFixed(1)} {metric.unit}
+          {formatWeatherValue(metric.min, i18n.language, 1)}–{formatWeatherValue(metric.max, i18n.language, 1, metric.unit === 'UVI' ? '' : metric.unit)}
         </div>
       )}
     </div>
@@ -80,18 +65,13 @@ const MetricCard: React.FC<{ metric: LocalMetric }> = ({ metric }) => {
 
 // ── Device breakdown ──────────────────────────────────────────────────────────
 
-const DEVICE_TYPE_BADGE: Record<string, string> = {
-  KIWI_SENSOR:     'bg-emerald-100 text-emerald-800',
-  TEKTELIC_CLOVER: 'bg-lime-100 text-lime-800',
-  DRAGINO_LSN50:   'bg-sky-100 text-sky-800',
-  STREGA_VALVE:    'bg-purple-100 text-purple-800',
-  SENSECAP_S2120:   'bg-cyan-100 text-cyan-800',
-  AQUASCOPE_LORAIN: 'bg-blue-100 text-blue-800',
-  MILESIGHT_UC512:  'bg-violet-100 text-violet-800',
-};
+const DEVICE_TYPE_BADGE: Record<string, string> = Object.fromEntries([
+  'KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50', 'STREGA_VALVE',
+  'SENSECAP_S2120', 'AQUASCOPE_LORAIN', 'MILESIGHT_UC512',
+].map(type => [type, 'bg-[var(--info-bg)] text-[var(--info-text)]']));
 
 const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
   const [open, setOpen] = useState(false);
 
   if (local.devices.length === 0) return null;
@@ -114,7 +94,7 @@ const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {
       {open && (
         <div className="mt-2 rounded-xl border border-[var(--border)] overflow-hidden">
           {local.devices.map((dev, i) => {
-            const badgeCls = DEVICE_TYPE_BADGE[dev.type] ?? 'bg-slate-100 text-slate-700';
+            const badgeCls = DEVICE_TYPE_BADGE[dev.type] ?? 'bg-[var(--card)] text-[var(--text)]';
             return (
               <div
                 key={dev.deviceEui}
@@ -125,17 +105,16 @@ const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeCls}`}>
                     {dev.type.replace('_', ' ')}
                   </span>
-                  <span className="ml-auto text-[var(--text-tertiary)]">{fmtRelative(dev.observedAt)}</span>
+                  <span className="ml-auto text-[var(--text-tertiary)]">{fmtRelative(dev.observedAt, i18n.language)}</span>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[var(--text-secondary)]">
                   {Object.entries(dev.metrics).map(([key, val]) => {
-                    const color = METRIC_COLOR[key] ?? '#64748b';
                     const label = t(`environment.metrics.${key}`, { defaultValue: key });
                     return (
                       <span key={key}>
                         {label}:{' '}
-                        <span className="font-semibold tabular-nums" style={{ color }}>
-                          {typeof val === 'number' ? val.toFixed(1) : val}
+                        <span className="font-semibold tabular-nums" style={{ color: 'var(--text)' }}>
+                          {typeof val === 'number' ? formatWeatherValue(val, i18n.language, 1) : val}
                         </span>
                       </span>
                     );
@@ -153,7 +132,7 @@ const DeviceBreakdown: React.FC<{ local: LocalEnvironment }> = ({ local }) => {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export const LocalTab: React.FC<Props> = ({ local }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
 
   if (!local.available || local.metrics.length === 0) {
     return (
@@ -163,8 +142,8 @@ export const LocalTab: React.FC<Props> = ({ local }) => {
     );
   }
 
-  const freshCls  = local.freshSensorCount > 0  ? 'bg-emerald-100 text-emerald-800' : '';
-  const staleCls  = local.staleSensorCount > 0   ? 'bg-amber-100 text-amber-800'   : '';
+  const freshCls  = local.freshSensorCount > 0  ? 'bg-[var(--success-bg)] text-[var(--success-text)]' : '';
+  const staleCls  = local.staleSensorCount > 0   ? 'bg-[var(--warn-bg)] text-[var(--warn-text)]'   : '';
 
   return (
     <div className="flex flex-col gap-3">
@@ -184,7 +163,7 @@ export const LocalTab: React.FC<Props> = ({ local }) => {
         )}
         {local.observedAt && (
           <span className="text-[var(--text-tertiary)] ml-auto">
-            {t('environment.local.observedAt', { time: fmtRelative(local.observedAt), defaultValue: `Observed ${fmtRelative(local.observedAt)}` })}
+            {t('environment.local.observedAt', { time: fmtRelative(local.observedAt, i18n.language), defaultValue: `Observed ${fmtRelative(local.observedAt, i18n.language)}` })}
           </span>
         )}
       </div>

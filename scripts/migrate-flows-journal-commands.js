@@ -494,6 +494,8 @@ function commandShapeDigest(node) {
   const shape = Object.assign({}, node);
   delete shape.func;
   delete shape.libs;
+  // P1 adds only the account-recovery guard in front of cloud ACK MQTT.
+  shape.wires = (shape.wires || []).map(w => w.map(id => id === 'account-cloud-guard-9d5e3035c3d069c4' ? '9d5e3035c3d069c4' : id));
   return digest(shape);
 }
 
@@ -574,6 +576,11 @@ function addCommandRows(source, marker, includeUc512) {
   return replaceOnce(source, marker, marker + '\n' + rows, 'command registry rows');
 }
 
+function mqttAckTarget(byId) {
+  const target = '9d5e3035c3d069c4';
+  return byId.has('account-cloud-guard-' + target) ? 'account-cloud-guard-' + target : target;
+}
+
 function migrate(buffer) {
   const flows = JSON.parse(buffer.toString('utf8'));
   assertUnique(flows);
@@ -636,7 +643,7 @@ function migrate(buffer) {
   const dedupe = byId.get('command-dedupe-dispatch');
   dedupe.func = dedupeSource;
   dedupe.libs = osiLibOnly;
-  dedupe.wires = [['journal-command-apply-fn'], ['9d5e3035c3d069c4']];
+  dedupe.wires = [['journal-command-apply-fn'], [mqttAckTarget(byId)]];
 
   const queue = byId.get('command-ack-queue-rest');
   queue.func = queueAckSource;
@@ -656,7 +663,7 @@ function migrate(buffer) {
     libs: osiLibOnly,
     x: 1470,
     y: 1060,
-    wires: [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']],
+    wires: [['934bf2bc19a8ce22'], [mqttAckTarget(byId)]],
   });
   assertUnique(flows);
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');

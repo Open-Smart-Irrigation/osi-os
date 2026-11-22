@@ -65,6 +65,13 @@ const STREGA_BUILDER = idOf('Build STREGA downlink + emit log ctx');
 const DOWNLINK_OUT = byId[STREGA_BUILDER].wires[0].find((id) => byId[id].type === 'mqtt out');
 const ACK_OUT = idOf('Command ACK → Cloud');
 const ENV = { DEVICE_EUI: GATEWAY, CHIRPSTACK_APP_ACTUATORS: 'app-actuators' };
+// EB2 puts an account-recovery guard in front of the ACK MQTT node. The harness
+// runs it with the real installation helper on a gateway with no account
+// journal, queued account request or identity sentinel, so it forwards.
+const ACK_GUARD = 'account-cloud-guard-' + ACK_OUT;
+assert.deepEqual(byId[ACK_GUARD] && byId[ACK_GUARD].wires, [[ACK_OUT]], 'the ACK guard forwards only to Command ACK → Cloud');
+const INSTALLATION = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper'));
+const CLEAN_GATEWAY_FS = { existsSync: () => false, readdirSync: () => [] };
 
 // Nodes this harness executes. Every other wire target is recorded as an
 // output. The appliers between the ledger and Route Command (journal, Terra,
@@ -86,6 +93,7 @@ const EXECUTED = new Set([
   'command-ack-queue-rest',
   idOf('Valve Cloud Command Bridge'),
   STATUS_ACK,
+  ACK_GUARD,
 ]);
 const PASS_THROUGH_TO_ROUTE = 'journal-command-apply-fn';
 
@@ -147,7 +155,8 @@ async function drive(db, startId, msg, options = {}) {
       env: ENV,
       db,
       flowState: options.flowState || {},
-      osiLibModules: { 'osi-valve-control': valveControl },
+      globals: { fs: CLEAN_GATEWAY_FS },
+      osiLibModules: { 'osi-valve-control': valveControl, installation: INSTALLATION },
       libOverrides: { chirpstack },
     });
     warnings.push(...run.warnings);

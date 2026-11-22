@@ -110,7 +110,9 @@ exit 1""", 600)
 
 
 def wait_for_api(vm):
-    checked(vm, """for i in $(seq 1 100); do
+    # Factory first boot took 232–246 s from console to the first 401 in QEMU.
+    # Allow the full 420 s command budget even when each curl returns immediately.
+    checked(vm, """for i in $(seq 1 210); do
     code=$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)
     [ "$code" = 401 ] && exit 0
     sleep 2

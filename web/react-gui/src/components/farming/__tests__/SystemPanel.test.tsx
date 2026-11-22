@@ -205,3 +205,17 @@ describe('SystemPanel role gating (F20)', () => {
     }
   });
 });
+
+// Text and bar fills have different contrast requirements on the actual card.
+describe('B6 system metric contrast', () => {
+  it.each([
+    [42.3, 0.12, 'success'],
+    [60.1, 2.8, 'warn'],
+    [75.2, 4.2, 'error'],
+  ])('uses readable text tokens for temperature %s and load %s', async (temperature, load, tone) => {
+    apiMocks.getStats.mockResolvedValue({ ...baseStats, cpu_temp_c: temperature, load_1: load });
+    await renderPanel();
+    expect(screen.getByText(`${temperature.toFixed(1)}°C`)).toHaveStyle({ color: `var(--${tone}-text)` });
+    expect(screen.getAllByText(load.toFixed(2)).some(el => el.style.color === `var(--${tone}-text)`)).toBe(true);
+  });
+});

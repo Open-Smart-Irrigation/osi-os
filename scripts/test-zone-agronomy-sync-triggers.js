@@ -156,7 +156,7 @@ async function bootstrapPayload(db) {
     env: { DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'fixture', DEVICE_EUI_CONFIDENCE: 'authoritative' },
     db,
     osiLibModules: { installation: require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper') },
-    globals: { fs: { existsSync: () => false, readFileSync: () => { const error = new Error('ENOENT'); error.code = 'ENOENT'; throw error; } } },
+    globals: { fs: { existsSync: () => false, readdirSync: () => [], readFileSync: () => { const error = new Error('ENOENT'); error.code = 'ENOENT'; throw error; } } },
   });
   assert.ok(run.result && run.result.payload, 'the bootstrap node must build a payload: ' + run.warnings.join('; '));
   return run.result.payload;

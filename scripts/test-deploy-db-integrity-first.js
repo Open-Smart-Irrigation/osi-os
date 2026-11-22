@@ -72,7 +72,7 @@ for (const [name, body] of [
       const before = [digest(db), digest(`${db}-wal`)];
       const r = run(db, body);
       assert.notEqual(r.status, 0, r.stdout + r.stderr);
-      assert.match(r.stderr, /Nothing was changed\. Copy the database with its -wal and -shm files before anything else, and follow docs\/operations\/damaged-farm-database\.md/);
+      assert.match(r.stderr, /This check applied no database repair or migration; SQLite may rebuild -shm\. Copy the database with its -wal and -shm files before anything else, and follow docs\/operations\/damaged-farm-database\.md/);
       assert.deepEqual([digest(db), digest(`${db}-wal`)], before, 'farming.db and farming.db-wal unchanged');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -106,7 +106,7 @@ test('the preflight check runs before the deploy\'s first change on the gateway'
 test('the hold consumers are installed before the recovery writer becomes callable', () => {
   const writer = DEPLOY.indexOf('fetch_required "Boot database integrity check"');
   assert.ok(writer > 0);
-  for (const name of ['Node-RED init script', 'Outstanding first-boot database seed guard',
+  for (const name of ['Database recovery hold policy', 'Node-RED init script', 'Outstanding first-boot database seed guard',
     'Outstanding first-boot runtime seed guard']) {
     const guard = DEPLOY.indexOf('fetch_required "' + name + '"');
     assert.ok(guard > 0 && guard < writer, name);

@@ -3,24 +3,33 @@
 # Run before Node-RED so filesystem growth happens before write-heavy services.
 START=08
 STOP=
-USE_PROCD=0
+# rc.common tests nonempty, not numeric truth: USE_PROCD=0 hides start().
+USE_PROCD=
 
 NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
 STAMP=/etc/osi-rootfs-grow.partitioned
 
 start() {
   [ -f "$NEEDS_RESIZE" ] || return 0
-  ROOT_SRC="$(findmnt -n -o SOURCE /overlay 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null)"
-  case "$ROOT_SRC" in
-    /dev/mmcblk0p2) : ;;
-    *) logger -t osi-rootfs-grow "unexpected root source $ROOT_SRC after partition grow; leaving marker"; return 0 ;;
-  esac
+  . /usr/libexec/osi-rootfs-grow.sh || return 1
+  if ! osi_rootfs_target || ! osi_rootfs_geometry || [ "$((PART_START + PART_SECTORS))" -ne "$DISK_SECTORS" ]; then
+    logger -t osi-rootfs-grow "unsupported writable filesystem or geometry ($ROOT_FSTYPE); growth skipped, leaving marker"
+    [ "$ROOT_FSTYPE" = f2fs ] && return 0
+    return 1
+  fi
 
+  # Online ext4 growth is also safe when first-boot provisioning has completed.
+  # Never repartition here, unmount the overlay, or open any application DB.
   if resize2fs "$ROOT_SRC"; then
-    rm -f "$NEEDS_RESIZE"
-    touch "$STAMP"
+    # Persist completion before deleting retry state. Every earlier failure can
+    # repeat resize2fs safely, including a cut after resize2fs itself completed.
+    touch "$STAMP" && sync && rm -f "$NEEDS_RESIZE" || {
+      logger -t osi-rootfs-grow "completion marker failed; will retry on next boot"
+      return 1
+    }
     logger -t osi-rootfs-grow "filesystem grown; partition stamp committed"
   else
     logger -t osi-rootfs-grow "resize2fs failed; will retry on next boot"
+    return 1
   fi
 }

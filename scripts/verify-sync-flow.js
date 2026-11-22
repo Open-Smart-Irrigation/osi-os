@@ -381,13 +381,34 @@ function findNodeById(id) {
   return flows.find((node) => node.id === id);
 }
 
+// EB2 keeps these handlers in the shipped installation module. Check both
+// the exact delegation and that handler's body; unrelated module code cannot
+// satisfy an account-link assertion.
+const accountLinkSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-installation-helper', 'index.js'), 'utf8');
+const accountLinkStages = { 'al-link-build-req':'build', 'al-link-handle-auth':'handle',
+  'sync-refresh-build':'refreshBuild', 'sync-refresh-mark':'refreshMark', 'al-link-finalize':'finalize', 'al-link-clear-state':'clear', 'al-unlink-db':'disconnect', 'al-link-success':'success' };
+function accountLinkGuardSource(node) {
+  const stage=accountLinkStages[node.id];
+  if (!stage) return String(node.func || '');
+  if (!node.func.includes("accountLinkStage('" + stage + "',")) {
+    fail(node.id + ' must delegate to the reviewed account-link stage');
+    return String(node.func || '');
+  }
+  const start=accountLinkSource.indexOf('async function accountLink_' + stage + '(');
+  const next=accountLinkSource.indexOf('async function accountLink_',start+1);
+  const marker=accountLinkSource.indexOf('const ACCOUNT_CONFIG_JOURNAL',start);
+  const end=next>=0?next:marker>=0?marker:accountLinkSource.length;
+  if(start<0 || end<start) { fail('missing account-link stage body: '+stage); return ''; }
+  return node.func + '\n' + accountLinkSource.slice(start,end);
+}
+
 function expectIncludes(nodeName, needle, description) {
   const node = findNodeByName(nodeName);
   if (!node) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = accountLinkGuardSource(node);
   if (!func.includes(needle)) {
     fail(`${nodeName} missing ${description}`);
   } else {
@@ -401,7 +422,7 @@ function expectExcludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = accountLinkGuardSource(node);
   if (func.includes(needle)) {
     fail(`${nodeName} still contains ${description}`);
   } else {
@@ -541,7 +562,10 @@ function expectWireById(nodeId, targetId, description) {
     return;
   }
   const wires = Array.isArray(node.wires) ? node.wires.flat() : [];
-  if (!wires.includes(targetId)) {
+  const guard = findNodeById('account-cloud-guard-' + targetId);
+  const guarded = guard && guard.type === 'function' && guard.func.includes('load.value.accountCloudMessage(')
+    && JSON.stringify(guard.wires) === JSON.stringify([[targetId]]) && wires.includes(guard.id);
+  if (!wires.includes(targetId) && !guarded) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -1483,8 +1507,8 @@ expectIncludes('Validate & decode token', 'ALLOW_INSECURE_SERVER_URL', 'accepts 
 expectIncludes('Validate & decode token', 'allow_private_target', 'accepts the persisted UCI private-target override flag');
 expectIncludes('Validate & decode token', "normalizeGatewayDeviceEui(env.get('DEVICE_EUI'))", 'uses the canonical runtime gateway identity');
 expectIncludes('Validate & decode token', "env.get('DEVICE_EUI_CONFIDENCE')", 'reads runtime gateway identity confidence');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
+expectIncludes('Validate & decode token', "state.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
+expectIncludes('Validate & decode token', "state.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
 expectIncludes('Validate & decode token', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'blocks account linking while gateway identity remains provisional');
 expectExcludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc ChirpStack log gateway probing');
 expectExcludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing');
@@ -2319,25 +2343,26 @@ expectWireById('al-unlink-clear-mqtt', 'al-unlink-db', 'clears linked account st
 expectWireById('al-unlink-db', 'al-unlink-restore-mqtt', 'restores MQTT credentials when unlink database cleanup fails');
 expectWireById('al-unlink-format', 'al-unlink-restart-node-red', 'schedules restart only after unlink state is cleared successfully');
 expectWireById('al-unlink-restart-node-red', 'al-link-clear-state', 'clears transient link state only after successful unlink restart scheduling');
-expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password=", 'writes the MQTT password into UCI after linking');
-expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=", 'persists the linked gateway identity into UCI after linking');
-expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
-expectIncludes('Persist MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before persisting linked credentials');
-expectIncludes('Persist MQTT Broker Config', "const match = text.match(new RegExp('^[a-z][a-z0-9+.-]*://([^/?#]+)', 'i'));", 'falls back to regex host extraction when URL is unavailable');
-expectExcludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while link persistence is still in flight');
-expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
-expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=' + shellQuote('')", 'clears the MQTT password from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=' + shellQuote('')", 'clears the linked gateway identity from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before unlink cleanup');
-expectExcludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while unlink cleanup is still in flight');
-expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'restores prior MQTT config when link finalization fails');
-expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
-expectIncludes('Schedule Link Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful link completion');
-expectIncludes('Schedule Link Restart', "reason: 'account_link', delaySeconds: 10", 'uses the account-link restart contract');
+for (const id of ['al-link-store-mqtt','al-unlink-clear-mqtt']) {
+  expectIncludesById(id, 'return [msg, null];', 'defers configuration writes to the transactional finalizer');
+}
+for (const id of ['al-link-rollback-mqtt','al-unlink-restore-mqtt']) {
+  expectIncludesById(id, 'return msg;', 'forwards errors after module-owned recovery');
+}
+expectIncludes('Finalize linked account state', 'await accountConfigTransaction(db,', 'coordinates link SQL and MQTT with durable recovery');
+expectIncludes('Clear linked account state', 'await accountConfigTransaction(db,', 'coordinates disconnect SQL and MQTT with durable recovery');
+expectWireById('al-link-handle-auth', 'al-link-clear-state', 'cleans up rejected remote responses');
+expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'cleans up wiring-stage failures');
+for (const marker of ['writeAccountJournal(options.fs', 'await mutate(tx)', 'writeMqttConfig(options.cp, options.desired)',
+  'configCommitMatches(tx, journal.marker)', 'fs.fsyncSync(fd)', 'link_recovery_required']) {
+  if (!accountLinkSource.includes(marker)) fail('account-link coordinator missing '+marker);
+}
+expectExcludes('Finalize linked account state', '/etc/init.d/node-red restart', 'direct service restart during link persistence');
+expectIncludes('Schedule Link Restart', "accountLinkStage('restartLink',", 'publishes the durable link restart obligation through the module');
+expectWireById('al-link-build-req', 'al-link-success', 'returns a recovered committed link without cloud authentication');
 expectExcludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
-expectIncludes('Schedule Unlink Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful unlink completion');
-expectIncludes('Schedule Unlink Restart', "reason: 'account_unlink', delaySeconds: 2", 'uses the account-unlink restart contract');
+expectIncludes('Schedule Unlink Restart', "accountLinkStage('restartDisconnect',", 'publishes the durable disconnect restart obligation through the module');
+if (!accountLinkSource.includes('journal.restart_pending = true')) fail('account finalization must retain a durable restart obligation');
 expectExcludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
 const cloudRestNodeIds = [
   'al-link-server-auth',
@@ -3973,9 +3998,9 @@ expectFileExists(rootfsResizeInit2709Path, 'bcm2709 ships rootfs resize init');
 if (fs.existsSync(rootfsGrowDefault2712Path) && fs.existsSync(rootfsResizeInit2712Path)) {
   const rootfsGrowDefault = fs.readFileSync(rootfsGrowDefault2712Path, 'utf8');
   const rootfsResizeInit = fs.readFileSync(rootfsResizeInit2712Path, 'utf8');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'parted -s "$DISK"', 'uses parted for in-place partition growth');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'LC_ALL=C parted "$DISK"', 'uses parted with an explicit mounted-partition confirmation for in-place growth');
   expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, '[ -f "$NEEDS_RESIZE" ] && exit 0', 'does not re-partition while filesystem resize is pending');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart $PART 100%', 'grows the root partition to the end of the disk');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart "$PART" 100%', 'grows the root partition to the end of the disk');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'START=08', 'runs filesystem resize before Node-RED startup');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'resize2fs "$ROOT_SRC"', 'grows the mounted filesystem after reboot');
 }

@@ -87,7 +87,7 @@ class Guest:
         self.receipts.mkdir(mode=0o700, exist_ok=True)
         self.private = private
         self.direct_io = direct_io
-        self.process = self.bridge = None
+        self.process = self.bridge = self.radio = None
         self.boots = 0
         prepare(image, self.work, self.qemu.with_name('dtmerge'), quiet=private,
                 load_boot=self.load_boot)
@@ -101,8 +101,7 @@ class Guest:
                 '-display', 'none', '-nic', f'socket,fd={wire_fd}', '-monitor', 'none',
                 '-serial', 'stdio', '-kernel', 'kernel_2712.img', '-dtb',
                 'bcm2712-rpi-5-b.dtb', '-drive', disk, '-bios',
-                self.qemu.with_name('rpi5-bl31.bin'), '-append', cmdline,
-                '-chardev', 'socket,id=wm1302-air,path=radio,server=on,wait=off']
+                self.qemu.with_name('rpi5-bl31.bin'), '-append', cmdline]
 
     def start(self, *, before_console=None, inspection=False, flow_cut=None):
         if self.process is not None or self.bridge is not None:
@@ -122,8 +121,12 @@ class Guest:
         if inspection:
             cmdline += f' init=/bin/sh loglevel=7 -- -c "{INSPECTION_INIT}"'
         a, b = socket.socketpair()
-        with a,b,self.stderr('bridge.stderr', 'ab') as err:
+        self.radio, air = socket.socketpair()
+        with a, b, air, self.stderr('bridge.stderr', 'ab') as err:
             args = self.qemu_args(b.fileno(), disk, cmdline, inspection)
+            # A fresh connected pair ties the radio to this QEMU boot and
+            # keeps the host out of the AF_UNIX pathname namespace.
+            args.extend(['-chardev', f'socket,id=wm1302-air,fd={air.fileno()},server=off'])
             self.bridge = subprocess.Popen(['qemu-system-x86_64','-machine','none','-nodefaults','-display','none','-monitor','none','-serial','none',
                 '-netdev',f'socket,id=wire,fd={a.fileno()}','-netdev',f'user,id=local,restrict=on,net=192.0.2.0/24,hostfwd=tcp:127.0.0.1:{self.port}-192.0.2.15:1880',
                 '-netdev','hubport,id=a,hubid=0,netdev=wire','-netdev','hubport,id=b,hubid=0,netdev=local'],pass_fds=(a.fileno(),),stdout=subprocess.DEVNULL,stderr=err)
@@ -131,7 +134,7 @@ class Guest:
                 media = str(self.upgrade).replace(',', ',,')
                 args.extend(['-drive',f'if=none,id=update,format=raw,readonly=on,file={media}','-device',self.usb_storage])
             with self.stderr(f'qemu-{self.boots}.stderr', 'wb') as stderr:
-                self.process=subprocess.Popen(args,cwd=d,pass_fds=(b.fileno(),),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr)
+                self.process=subprocess.Popen(args,cwd=d,pass_fds=(b.fileno(), air.fileno()),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr)
         if inspection:
             report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
             if report.group(1) != b'READY':
@@ -189,6 +192,13 @@ class Guest:
     def stop(self, cut=False):
         exits = {}
         errors = []
+        if self.radio is not None:
+            try:
+                self.radio.close()
+            except OSError as exc:
+                errors.append(exc)
+            finally:
+                self.radio = None
         for attr in ('process', 'bridge'):
             process = getattr(self, attr)
             if process is None:
