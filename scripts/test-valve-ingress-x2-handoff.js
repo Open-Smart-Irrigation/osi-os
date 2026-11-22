@@ -134,6 +134,8 @@ test('after a later handoff, X2 accepts only intact rendered adapters',()=>{
  const baseline=require('./fixtures/valve-ingress-x2/baseline.json');
  const files=canonicalHandoff(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'x2-superseded-'));
  const write=flows=>{for(const rel of FLOW_PATHS){fs.mkdirSync(path.dirname(path.join(dir,rel)),{recursive:true});fs.writeFileSync(path.join(dir,rel),JSON.stringify(flows,null,2)+'\n');}};
+ const router='934bf2bc19a8ce22',first=baseline.nodes[0];
+ const rejects=(flows,pattern,label)=>{write(flows);assert.throws(()=>verifyHandoff(dir),pattern,label);};
  try{
   const rendered=JSON.parse(files.find(f=>f.rel===FLOW_PATHS[0]).after);
   // A later handoff changes an unrelated node: X2 stays verified.
@@ -141,12 +143,16 @@ test('after a later handoff, X2 accepts only intact rendered adapters',()=>{
   assert.notDeepEqual(later,rendered);
   write(later);
   assert.equal(verifyHandoff(dir).state,'superseded');
-  // One X2 node back at its legacy body: refused.
-  const legacy=baseline.nodes[0];
-  write(later.map(n=>n.id===legacy.id?{...n,func:legacy.func,libs:legacy.libs}:n));
-  assert.throws(()=>verifyHandoff(dir),/unreviewed handoff source\/result bytes|partial X2/);
-  // A changed X2 wire: refused.
-  write(later.map(n=>n.id===legacy.id?{...n,wires:[[]]}:n));
-  assert.throws(()=>verifyHandoff(dir),/X2 node contract changed/);
+  // Editor layout is the only X2 field another change may move.
+  write(later.map(n=>n.id===router?{...n,x:n.x+20,y:n.y+20}:n));
+  assert.equal(verifyHandoff(dir).state,'superseded');
+  rejects(later.map(n=>n.id===first.id?{...n,func:first.func,libs:first.libs}:n),/X2 node changed after a later handoff/,'reverted adapter');
+  rejects(later.map(n=>n.id===first.id?{...n,wires:[[]]}:n),/X2 node contract changed/,'changed wire');
+  rejects(later.map(n=>n.id===router?{...n,d:true}:n),/X2 node changed after a later handoff: .*934bf2bc19a8ce22\/d/,'disabled router');
+  rejects(later.filter(n=>n.id!==router),/X2 node missing or duplicated/,'removed node');
+  rejects(later.map(n=>n.id===router?{...n,libs:[...n.libs,{var:'extra',module:'extra'}]}:n),/X2 bindings changed|X2 node changed/,'changed libs');
+  rejects(later.map(n=>n.id===router?{...n,name:'renamed'}:n),/X2 node changed after a later handoff: .*\/name/,'renamed node');
+  // A new node wired into an X2 input.
+  rejects([...later,{id:'x2-intruder',type:'function',z:later.find(n=>n.id===router).z,func:'return msg;',outputs:1,wires:[[router]]}],/references into X2 nodes changed/,'new inbound wire');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
