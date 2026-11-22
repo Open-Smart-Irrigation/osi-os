@@ -269,10 +269,10 @@ function runAdminUpgrade(initial, steps, assertProjection) {
         const insertionEvidence = Number.isInteger(state.users_sequence) && state.users_sequence >= 1
           && state.accounts.every(a => a.id <= state.users_sequence);
         const original = insertionEvidence ? state.accounts.find(a => a.id === 1) : null;
-        // Addendum 22 Nov: row 1 still holding the shipped default account with its
-        // non-bcrypt default credential is never promoted; the first enabled account
-        // inserted after it (lowest id above 1, not created_at) is promoted instead.
-        const shippedDefault = Boolean(original && original.shipped_default_credential);
+        // Addendum 22 Nov: row 1 that still has the shipped default password is never
+        // promoted (username irrelevant, enabled or not); the next enabled account by
+        // users.id (lowest id above 1, not created_at) is promoted instead.
+        const shippedDefault = Boolean(original && original.default_password_unchanged);
         const target = shippedDefault
           ? state.accounts.filter(a => a.id > 1 && a.enabled).sort((a, b) => a.id - b.id)[0] || null
           : (original && original.enabled ? original : null);

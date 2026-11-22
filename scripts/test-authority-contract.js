@@ -275,8 +275,8 @@ function verify() {
   assert.throws(() => selectedSurvivor.runAdminUpgrade(missingBootstrap.initial, missingBootstrap.steps,
     (actual, expected, op) => projection(actual, expected, op)), /decision/);
   // Addendum 22 Nov: a model that ignores the shipped default credential promotes row 1.
-  const promotedShippedDefault = mutantModel('Boolean(original && original.shipped_default_credential)', 'false');
-  for (const id of ['shipped-default-row1-promotes-first-enabled-later-account', 'shipped-default-row1-no-enabled-later-account-operator-fallback']) {
+  const promotedShippedDefault = mutantModel('Boolean(original && original.default_password_unchanged)', 'false');
+  for (const id of ['shipped-default-row1-promotes-first-enabled-later-account', 'shipped-default-row1-no-enabled-later-account-operator-fallback', 'renamed-row1-default-password-unchanged-not-promoted', 'disabled-shipped-default-row1-promotes-next-enabled-account']) {
     const c = upgrades.cases.find(x => x.id === id);
     assert.ok(c, id);
     assert.throws(() => promotedShippedDefault.runAdminUpgrade(c.initial, c.steps,
@@ -286,8 +286,18 @@ function verify() {
   const byCreatedAt = mutantModel('.sort((a, b) => a.id - b.id)', '.sort((a, b) => a.created_at.localeCompare(b.created_at))');
   const laterAccount = upgrades.cases.find(x => x.id === 'shipped-default-row1-promotes-first-enabled-later-account');
   assert.throws(() => byCreatedAt.runAdminUpgrade(laterAccount.initial, laterAccount.steps,
-    (actual, expected, op) => projection(actual, expected, op)), /./);
+    (actual, expected, op) => projection(actual, expected, op)), /decision|accounts|role|receipt/);
   assert.ok(upgrades.cases.some(c => c.id === 'changed-default-password-row1-promoted-as-original'));
+  // The default-password test ignores the username: a renamed row 1 is still never promoted.
+  const usernameCriterion = mutantModel('Boolean(original && original.default_password_unchanged)', 'Boolean(original && original.default_password_unchanged && !original.renamed)');
+  const renamedRow1 = upgrades.cases.find(x => x.id === 'renamed-row1-default-password-unchanged-not-promoted');
+  assert.throws(() => usernameCriterion.runAdminUpgrade(renamedRow1.initial, renamedRow1.steps,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|accounts|role|receipt/);
+  // A disabled shipped default account still hands promotion to the next enabled account.
+  const disabledDefaultToRecovery = mutantModel('const target = shippedDefault\n', 'const target = shippedDefault && original.enabled\n');
+  const disabledDefault = upgrades.cases.find(x => x.id === 'disabled-shipped-default-row1-promotes-next-enabled-account');
+  assert.throws(() => disabledDefaultToRecovery.runAdminUpgrade(disabledDefault.initial, disabledDefault.steps,
+    (actual, expected, op) => projection(actual, expected, op)), /decision|accounts|role|receipt/);
   const freshLogin = revocation.cases.find(c => c.id === 'offline-boot-at-build-time-fresh-login-succeeds');
   const refusedFreshLogin = mutantModel("case 'login': result = loginValid(step)", "case 'login': if (s.now_ms < s.high_water_ms) { result = deny('session_expired'); break; } result = loginValid(step)");
   assert.throws(() => refusedFreshLogin.runLifecycle(freshLogin.initial, freshLogin.steps, authority.valid_defaults,

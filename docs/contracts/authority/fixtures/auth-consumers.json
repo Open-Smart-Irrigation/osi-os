@@ -8054,7 +8054,7 @@
       "id": "prediction_owner_shortcut",
       "file": "backend/src/main/java/org/osi/server/prediction/PredictionController.java",
       "function": "writableZone",
-      "admission_today": "Owner short-circuit before GatewayScope; Every writableZone caller uses it, currently five write endpoints: PUT prediction-config, POST prediction-recompute, POST soil-profile/refresh, PUT field-geometry and PUT sensor-anchors.",
+      "admission_today": "Owner short-circuit before GatewayScope; every writableZone caller uses it, currently five write endpoints: PUT prediction-config, POST prediction-recompute, POST soil-profile/refresh, PUT field-geometry and PUT sensor-anchors.",
       "capability_source_today": "Cloud read membership path and caller role; owner bypasses member gate.",
       "legacy_fallback_today": "Owner writes cloud-local prediction/config outputs for edge-backed zones.",
       "required_admission": "CTO R4: normal current enabled mapped writer and owned/granted zone, with no product exception or owner short-circuit; cloud-local prediction jobs do not directly mutate edge policy.",

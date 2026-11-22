@@ -351,8 +351,8 @@ R2 adds exactly one recorded, audited promotion of the original enabled bootstra
 account when an existing installation has no enabled admin. This is separate
 from fresh zero-user bootstrap, which stores admin in both flags. It selects a
 later account in one case only: under the 22 Nov addendum, a row 1 that is still
-the shipped default account with its non-bcrypt default credential is never
-promoted, and the first enabled account inserted after it is. Otherwise a missing
+account that still has the shipped default password is never promoted, and the
+next enabled account by account number is. Otherwise a missing
 or disabled original bootstrap, or no qualifying account, uses operator recovery, and the exact release-note line is in v1.md and the
 admin-upgrade fixture. Runtime migration/receipt work remains with EB5b/EB6.
 
