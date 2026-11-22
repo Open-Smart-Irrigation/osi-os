@@ -333,3 +333,24 @@ main as well. The plain `node` form that CI runs passes.
 - In the v2-replication proof, the guards move instead of being dropped, so
   every node is still compared.
 
+## Round-4 generator correction
+
+Sol's round 4 (`66958080a`) found one P2. The helper-loading generator mapped
+both the guarded ACK wire and a direct wire to the MQTT node onto the same
+hash input. A flow that kept the guard node, but rewired
+`command-dedupe-dispatch` or `command-ack-queue-rest` straight to MQTT, was
+accepted as current.
+
+The generator now checks for the guard node. When it is present, a guard wire
+compares as the pinned target, and a direct wire to the MQTT node compares as
+a bypass, so the hash fails. Without the guard node, which means a pre-EB2
+flow, wires compare exactly as pinned. The before/after invariant uses an
+exact shape digest with no wire mapping. Both `flows.json` files are
+unchanged.
+
+The generator suite adds 11 cases, for 120 in total. The 9 bypass cases cover
+each owned node alone and both together, in the current, prior-current and
+direct-helper states, and all are rejected. One case checks that a pre-EB2 flow
+is a no-op when current and upgrades from both older states. One rejects a
+guard id on the ACK wire when the guard node is missing. Against the round-3
+generator, 10 of these fail; the pre-EB2 case passes on both.
