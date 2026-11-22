@@ -32,7 +32,9 @@ the range. One aggregate scan finds them, after the range check, the budget and
 the output preflight. The scan probes only the columns the request can return
 (requested channels, SWT3 eligibility, the rain rule below), stops at the
 remaining work allowance (`LIMIT remaining+1`) and charges its candidate rows
-to that allowance; an overflow refuses with `EXPORT_INPUT_TOO_LARGE`. Such a
+to that allowance; an overflow refuses with `EXPORT_INPUT_TOO_LARGE`. The cap
+and the count cover every row of the lexical index range, including date-margin
+rows; only the outer presence test applies the exact instant bounds. Such a
 device emits measured rows only, so the output preflight reserves no empty
 cells for it; its rows are charged to the output budget as they are produced.
 Rain tips (`rain_tips_delta`) stay AQUASCOPE_LORAIN-only, as on main.

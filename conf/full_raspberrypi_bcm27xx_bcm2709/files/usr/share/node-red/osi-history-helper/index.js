@@ -3639,8 +3639,15 @@ async function resolveExportFieldPresence(db, scope) {
         const remaining = budget ? Math.min(budget.workRows, Math.floor(budget.workCells / fields.length)) : null;
         if (remaining !== null && remaining < 0) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
         const limit = remaining === null ? '' : ` LIMIT ${remaining + 1}`;
-        const sql = `SELECT COUNT(*) AS candidate_rows, ${fields.map(field => `MAX(${field} IS NOT NULL) AS ${field}`).join(', ')} FROM (SELECT ${fields.join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql}${limit})`;
-        const row = (await dbAll(db, sql, [deveui].concat(range.params)))[0] || {};
+        // The inner query caps and counts every lexical candidate of the index
+        // range, margin rows included; only the outer presence test applies
+        // the exact instant bounds, so margin rows cannot escape the charge.
+        const instant = `strftime('${SQLITE_UTC_MS_FORMAT}', recorded_at)`;
+        const exact = range.params.length > 2 ? `${instant} >= ? AND ${instant} <= ?` : '1';
+        const sql = `SELECT COUNT(*) AS candidate_rows, ${fields.map(field => `MAX(in_range AND ${field} IS NOT NULL) AS ${field}`).join(', ')}`
+          + ` FROM (SELECT (${exact}) AS in_range, ${fields.join(', ')}`
+          + ` FROM (SELECT recorded_at, ${fields.join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ?${limit}))`;
+        const row = (await dbAll(db, sql, range.params.slice(2).concat([deveui], range.params.slice(0, 2))))[0] || {};
         const candidates = Number(row.candidate_rows || 0);
         if (remaining !== null && candidates > remaining) throw exportLimits.refusal(exportLimits.REASON_CODES.INPUT, 'export exceeds the input work budget');
         if (budget) {

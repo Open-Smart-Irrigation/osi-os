@@ -9,6 +9,42 @@ Startup after updating from main: READY at `7725a09f2b`, based on `origin/main`
 Pi 4 acceptance, codec helpers and atomic Node-RED startup writes; the rebase
 was clean, with both existing patches unchanged in `git range-diff`.
 
+## Round-5 finding and fix (head `5a7723ca` → this revision)
+
+Round 5 (Sol): one P1. The discovery subquery applied the exact `strftime`
+instant predicate before `LIMIT`, so rows in the lexical date margin that the
+predicate rejects took no allowance. A dense margin could force a long indexed
+scan with `maxWorkRows: 1` and then succeed without a charge (300,000
+one-second CLOVER rows, daily export of 2025-01-05: 40,800 margin rows).
+
+Fix, as Sol suggested: the inner query selects `recorded_at` and the candidate
+columns by the lexical index range only (`deveui = ? AND recorded_at >= ? AND
+recorded_at < ?`) with `LIMIT remaining+1`, so `COUNT(*)` caps and charges
+every lexical candidate. A middle query computes `in_range` from the exact
+instant bounds, and the outer `MAX(in_range AND col IS NOT NULL)` decides
+presence. Measurement reads are unchanged: they keep the exact predicate and
+charge the rows they fetch. Nothing else changed.
+
+New test `discovery charges and caps lexical date-margin rows in both builders`
+(per-zone and all-zones; 1,000 CLOVER rows on 2025-01-04, export of
+2025-01-05):
+- `maxWorkRows: 1`: one query (`LIMIT 2`), `candidate_rows` 2, refused with
+  `EXPORT_INPUT_TOO_LARGE`;
+- `maxWorkRows: 2000`: succeeds with no rows, `candidate_rows` 1,000 charged,
+  `swt_1` presence 0;
+- the charge is exact: 999 refuses, 1,000 succeeds.
+It fails against the round-5 helper (0/1). The round-4 dense test's SQL pin now
+expects the three-level query.
+
+Round-5 checks (local, this revision): source guards 20/20; ordinary suite
+(`--max-old-space-size=192`) 34/34; source-v2 68/68; helper `index.test.js`
+45/45 and router 76/0 on each profile; export triad and recorded-at formats
+108/108; vectors 4/4; `test-history-helper.js` PASS; `verify-sync-flow.js`
+rc 0; test inventory, profile parity (helper byte-identical), silent-catch
+and doc hygiene OK; reviewer probes 1, 2, 4–9 unchanged (probe9 8/168/8).
+
+Round time: authoring and focused gates 14:19–14:22 UTC, serial `test-history-helper.js` and `verify-sync-flow.js` to 14:43 UTC (about 24 minutes before push). The CI wait is in a PR comment, so the head does not change after CI.
+
 ## Round-4 finding and fix (head `ffa7b612` → this revision)
 
 Round 4 (Sol): one P1. Column discovery for card-wide devices ran before the

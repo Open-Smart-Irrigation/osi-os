@@ -144,7 +144,7 @@ for(const profile of ['bcm2712','bcm2709']) {
         await assert.rejects(build(trace,{maxWorkRows:400}),e=>e.statusCode===413&&e.code==='EXPORT_INPUT_TOO_LARGE',name);
         assert.equal(trace.queries.length,1,`${name}: refused at discovery`);
         const [discovery]=trace.queries;
-        assert.match(discovery.sql,/^SELECT COUNT\(\*\) AS candidate_rows, MAX\(swt_1 IS NOT NULL\) AS swt_1, MAX\(swt_wm1 IS NOT NULL\) AS swt_wm1 FROM \(SELECT swt_1, swt_wm1 FROM device_data .* LIMIT 401\)$/);
+        assert.match(discovery.sql,/^SELECT COUNT\(\*\) AS candidate_rows, MAX\(in_range AND swt_1 IS NOT NULL\) AS swt_1, MAX\(in_range AND swt_wm1 IS NOT NULL\) AS swt_wm1 FROM \(SELECT \(.*\) AS in_range, swt_1, swt_wm1 FROM \(SELECT recorded_at, swt_1, swt_wm1 FROM device_data WHERE deveui = \? AND recorded_at >= \? AND recorded_at < \? LIMIT 401\)\)$/);
         assert.equal(discovery.rows[0].candidate_rows,401);
         assert.match(discovery.plan,/USING (?:COVERING )?INDEX idx_device_data_deveui_recorded_at/);
         // Discovery is charged: 1,000 candidates plus a 1,000-row read exceed 1,500.
@@ -153,6 +153,35 @@ for(const profile of ['bcm2712','bcm2709']) {
         assert.equal(trace.queries[0].rows[0].candidate_rows,1000);
         const result=await build(traced(db),{maxWorkRows:2000});
         assert.equal(result.rowCount??result.rows.length,2,`${name}: swt_1 and its pF`);
+      }
+    }finally{db.close();}
+  });
+  test(`${profile}: discovery charges and caps lexical date-margin rows in both builders`,async()=>{
+    // Round 5: dense rows in the lexical margin (the day before) that the exact
+    // instant bounds reject. Requested day 2025-01-05 holds no row.
+    const db=fixture(1,'TEKTELIC_CLOVER');
+    try {
+      populate(db,1,1,1.44,false,'2025-01-04');
+      const day={from:'2025-01-05',to:'2025-01-05',granularity:'daily',nowMs:Date.parse('2026-11-01'),channels:'swt_1'};
+      const builders=[
+        ['per-zone',(trace,extra)=>helper.buildZoneExportCsv(trace.db,{...day,zoneId:2,...extra})],
+        ['all-zones',(trace,extra)=>helper.buildAllZonesExportCsv(trace.db,{...day,zoneIds:[1,2],...extra})],
+      ];
+      for(const [name,build] of builders) {
+        let trace=traced(db);
+        await assert.rejects(build(trace,{maxWorkRows:1}),e=>e.statusCode===413&&e.code==='EXPORT_INPUT_TOO_LARGE',name);
+        assert.equal(trace.queries.length,1,`${name}: refused at discovery`);
+        assert.match(trace.queries[0].sql,/ LIMIT 2\)\)$/);
+        assert.equal(trace.queries[0].rows[0].candidate_rows,2);
+        trace=traced(db);
+        const result=await build(trace,{maxWorkRows:2000});
+        assert.equal(result.rowCount??result.rows.length,0,`${name}: no measured row on the requested day`);
+        assert.equal(trace.queries[0].rows[0].candidate_rows,1000,`${name}: all margin rows charged`);
+        assert.equal(trace.queries[0].rows[0].swt_1,0,`${name}: margin rows are not present in range`);
+        // The charge is exact: 999 refuses, 1,000 is enough.
+        await assert.rejects(build(traced(db),{maxWorkRows:999}),e=>e.code==='EXPORT_INPUT_TOO_LARGE',name);
+        const exact=await build(traced(db),{maxWorkRows:1000});
+        assert.equal(exact.rowCount??exact.rows.length,0);
       }
     }finally{db.close();}
   });
