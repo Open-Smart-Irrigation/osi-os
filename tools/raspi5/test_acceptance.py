@@ -843,6 +843,27 @@ class SlowBootBudgetTests(unittest.TestCase):
         self.assertIn(unittest.mock.call(later_boot), ready.call_args_list)
         self.assertIn(unittest.mock.call(upgrade_boot, budget=SLOW_BOOT_SECONDS), ready.call_args_list)
 
+    def test_customer_fixture_old_release_boots_get_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = SimpleNamespace(customer_image=root/'image', customer_source=root/'source',
+                                   release_revision='a'*40, qemu=root/'qemu', ram=8)
+            identity = {'rom_gui_sha256': 'f'*64}
+            ready = Mock()
+            stop = RuntimeError('stop after the 0.8.1 boot')
+            with (patch.object(customer_fixture, 'verified_inputs', return_value=(root/'factory', [], identity)),
+                  patch.object(customer_fixture, 'build_media'), patch.object(customer_fixture, 'Guest') as guest,
+                  patch.object(customer_fixture, 'checked', side_effect=['', 'f'*64]),
+                  patch.object(customer_fixture, 'sql', return_value='0'),
+                  patch.object(customer_fixture, 'track_install'),
+                  patch.object(customer_fixture, 'version', side_effect=[None, stop])):
+                with self.assertRaisesRegex(RuntimeError, 'stop after the 0.8.1 boot'):
+                    (root/'scratch').mkdir()
+                    (root/'receipts').mkdir()
+                    customer_fixture.run(args, root/'scratch', root/'receipts', root/'release', ready)
+        vm = guest.return_value
+        self.assertEqual(ready.call_args_list, [unittest.mock.call(vm, budget=SLOW_BOOT_SECONDS)] * 2)
+
     def guest(self, directory, *, private):
         vm = Guest.__new__(Guest)
         vm.work = vm.receipts = Path(directory)

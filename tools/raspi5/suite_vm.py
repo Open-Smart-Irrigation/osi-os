@@ -163,6 +163,8 @@ class Guest:
     def capture(self, chunk):
         # Every console byte of every boot, for diagnosis of a boot that never
         # reached its marker. The private customer fixture keeps no console.
+        # Non-private runs keep every guest command's hex-encoded output here;
+        # they boot synthetic fixtures only, so the file holds no field data.
         if self.private:
             return
         with (self.receipts/f'qemu-{self.boots}.serial').open('ab') as trace:
