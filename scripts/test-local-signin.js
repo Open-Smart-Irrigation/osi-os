@@ -260,7 +260,13 @@ for (const profile of PROFILES) {
     assert.match(g.user(1).password_hash, BCRYPT_COST_10, 'rehashed in the same request');
     assert.ok(g.pending(1), 'the pending change is recorded with the rehash');
 
-    // The value is bcrypt now; the recorded requirement keeps the flag.
+    // The value is bcrypt now; the recorded requirement keeps the flag, and
+    // it follows row 1, not its username (a cloud upsert can rename it).
+    g.native.prepare("UPDATE users SET username='renamed-owner' WHERE id=1").run();
+    const renamed = await g.login({ username: 'renamed-owner', password: 'synthetic-old-value-1' });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.payload.passwordChangeRequired, true);
+    g.native.prepare("UPDATE users SET username='first-owner' WHERE id=1").run();
     const second = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
     assert.equal(second.status, 200);
     assert.equal(second.payload.passwordChangeRequired, true);
