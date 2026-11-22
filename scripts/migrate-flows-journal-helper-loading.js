@@ -372,8 +372,24 @@ function digest(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function shapeDigest(node) {
+// The account-recovery guard (EB2) sits in front of the cloud ACK MQTT node.
+// It changes only that wire target, which this generator does not own, so the
+// pinned hashes compare against the unguarded target.
+const ACK_MQTT_TARGET = '9d5e3035c3d069c4';
+const ACK_MQTT_GUARD = 'account-cloud-guard-' + ACK_MQTT_TARGET;
+
+function withUnguardedAckWires(node) {
   const shape = Object.assign({}, node);
+  if (Array.isArray(shape.wires)) {
+    shape.wires = shape.wires.map((wire) => (Array.isArray(wire)
+      ? wire.map((id) => (id === ACK_MQTT_GUARD ? ACK_MQTT_TARGET : id))
+      : wire));
+  }
+  return shape;
+}
+
+function shapeDigest(node) {
+  const shape = withUnguardedAckWires(node);
   delete shape.func;
   delete shape.libs;
   return digest(shape);
@@ -433,7 +449,7 @@ function migrate(buffer) {
     matchesPriorCurrentNode(byId.get(id), id, spec));
   const exactDirectHelper = entries.every(([id, spec]) => {
     const node = byId.get(id);
-    return !!node && digest(node) === spec.beforeNodeHash;
+    return !!node && digest(withUnguardedAckWires(node)) === spec.beforeNodeHash;
   });
   if (!exactPriorCurrent && !exactDirectHelper) {
     throw new Error('Refusing drifted Task 9 helper-loading node set');

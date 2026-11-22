@@ -48,6 +48,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { installationOsiLib } = require('./lib/installation-osi-lib');
 const { DatabaseSync } = require('node:sqlite');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { bootstrapFresh } = require('../lib/osi-migrate');
@@ -159,9 +160,9 @@ function makeOsiDbShim(db) {
   return require('./lib/queued-db-fixture').osiDbFor(db);
 }
 
-async function runSyncOutboxBuildFunc(func, db, envValues) {
+async function runSyncOutboxBuildFunc(func, db, envValues, profile) {
   const flowState = new Map();
-  const sandbox = { Buffer, console, require, process, setTimeout, clearTimeout, osiDb: makeOsiDbShim(db) };
+  const sandbox = { Buffer, console, require, process, setTimeout, clearTimeout, osiDb: makeOsiDbShim(db), osiLib: installationOsiLib(profile) };
   const script = new vm.Script(`(async function(msg,node,flow,env,global){${func}\n})`);
   const fn = script.runInNewContext(sandbox);
   const msg = {};
@@ -231,7 +232,7 @@ for (const profile of PROFILES) {
         DEVICE_EUI_LAST_VERIFIED_AT: '2026-09-17T00:00:00.000Z',
         LINK_GATEWAY_DEVICE_EUI: '',
       };
-      const msg = await runSyncOutboxBuildFunc(func, db, envValues);
+      const msg = await runSyncOutboxBuildFunc(func, db, envValues, profile);
       db.close();
 
       assert.ok(msg, 'sync-outbox-build must return a message (a pending VALVE_SCHEDULE event exists)');
@@ -270,7 +271,7 @@ for (const profile of PROFILES) {
         DEVICE_EUI: GATEWAY_EUI, DEVICE_EUI_SOURCE: 'chirpstack', DEVICE_EUI_CONFIDENCE: 'high',
         DEVICE_EUI_LAST_VERIFIED_AT: '2026-09-17T00:00:00.000Z', LINK_GATEWAY_DEVICE_EUI: '',
       };
-      const msg = await runSyncOutboxBuildFunc(func, db, envValues);
+      const msg = await runSyncOutboxBuildFunc(func, db, envValues, profile);
       db.close();
 
       const event = msg.payload.events.find((e) => e.aggregateType === 'VALVE_SCHEDULE');

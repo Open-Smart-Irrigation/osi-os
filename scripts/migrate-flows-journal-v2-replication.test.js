@@ -60,6 +60,17 @@ const CONDITIONAL_IRRIGATION_OWNED_NODE_IDS = new Set([
   'conditional-due-fn',
 ]);
 
+// EB2 (atomic gateway relink) owns the account-recovery guards in front of the
+// cloud MQTT nodes. They were appended after this cluster, while the migration
+// appends the cluster last, so only their position differs. Every other node is
+// still compared byte for byte; test-account-link-restart-obligation.js and
+// test-flows-wiring.js assert the guards and their wiring.
+const ACCOUNT_GUARD_ID = /^account-cloud-guard-/;
+
+function withoutAccountGuards(nodes) {
+  return nodes.filter((node) => !ACCOUNT_GUARD_ID.test(String(node.id || '')));
+}
+
 function withoutWatermarkOwnedFields(buffer) {
   const nodes = JSON.parse(buffer.toString('utf8'))
     .filter((node) => !WATERMARK_OWNED_FIELDS[node.id]?.includes('__node'))
@@ -83,9 +94,16 @@ test('the shipped flows are exactly the guarded migration output from the node-f
   const withoutWorker = JSON.parse(current.toString('utf8')).filter(
     (node) => !ownedIds.has(node.id) && !CONDITIONAL_IRRIGATION_OWNED_NODE_IDS.has(node.id),
   );
-  const migratedBaseline = migrator.migrate(serialize(withoutWorker));
-  const currentWithoutOwnedNodes = JSON.parse(current.toString('utf8')).filter(
+  const migratedBaseline = serialize(withoutAccountGuards(
+    JSON.parse(migrator.migrate(serialize(withoutWorker)).toString('utf8')),
+  ));
+  const currentWithoutOwnedNodes = withoutAccountGuards(JSON.parse(current.toString('utf8')).filter(
     (node) => !CONDITIONAL_IRRIGATION_OWNED_NODE_IDS.has(node.id),
+  ));
+  assert.equal(
+    JSON.parse(current.toString('utf8')).filter((node) => ACCOUNT_GUARD_ID.test(String(node.id || ''))).length,
+    6,
+    'the six EB2 account guards are the only nodes excluded by position',
   );
   assert.equal(
     withoutWatermarkOwnedFields(migratedBaseline).equals(
