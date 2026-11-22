@@ -69,52 +69,71 @@ the cached binary lacks the matching receipt protocol. Radio evidence comes
 from the guest's persistent log, `/data/log/osi-system.log*`. The RAM ring
 (`logread`) appears only in failure text and diagnostics.
 
-Each join attempt writes a marker to syslog, records the guest clock, and
-sends on a recorded channel (902300000 Hz, 125000 Hz, SF7 for every uplink
-today). The attempt's window runs from its marker to the next marker. It
-counts as received only with three parts:
+Each join attempt reads ChirpStack's state, notes the size and inode of the
+active persistent log, writes a marker to syslog and sends on a recorded
+channel (902300000 Hz, 125000 Hz, SF7 for every uplink today). When the
+join-accept has arrived or its wait has run out, the runner writes an end
+marker and reads the log forward from the noted position, following that file
+into the active file if logd rotated it. A rotation during the read repeats
+the read, and the read waits up to 10 s for the end marker to reach the file.
+The window is the text between the two markers. The attempt counts as
+received only with three parts:
 
-1. A Concentratord `Frame received, uplink_id: N` line in the window, at the
-   channel the attempt recorded. Concentratord
-   4.4.8 logs this line at INFO only after its CRC filter, and the image sets
-   `disable_crc_filter=false`, so the line proves a CRC-valid frame. A frame
-   with a bad CRC is logged at debug and never reaches the INFO log.
-2. ChirpStack's state for that DevEUI in `/srv/chirpstack/chirpstack.sqlite`:
-   the attempt's DevNonce in `device_keys.dev_nonces`, `device_keys.updated_at`
-   at or after the marker's guest clock, and, once the join-accept has
-   verified, `device.dev_addr` and `device_keys.join_nonce` equal to the
-   join-accept's DevAddr and JoinNonce. ChirpStack writes no log line for a
-   join: the 0.8.3 candidate images do not route its output to syslog, and
-   main routes it at `warn` only. ChirpStack 4.12.1 stores the DevNonce and
-   increments the JoinNonce only after the MIC check, and writes the DevAddr
-   before it sends the join-accept.
+1. A Concentratord `Frame received, uplink_id: N` line in the window at the
+   recorded channel, and a downlink that Concentratord enqueued, sent or
+   dropped at that frame's `count_us` plus 5 s (RX1) or 6 s (RX2), modulo the
+   32-bit counter. A data frame's reply is due 1 s after it, so a data frame on
+   the same channel cannot supply this part. Concentratord 4.4.8 logs
+   `Frame received` at INFO only after its CRC filter, and the image sets
+   `disable_crc_filter=false`, so the line proves a CRC-valid frame.
+2. The change in ChirpStack's state for that DevEUI across the send, read from
+   `/srv/chirpstack/chirpstack.sqlite`: the attempt's DevNonce absent from
+   `device_keys.dev_nonces` before and present after, `device_keys.join_nonce`
+   advanced by one, and a new `device.dev_addr`. Once the join-accept has
+   verified, its DevAddr and JoinNonce must equal ChirpStack's. No timestamps
+   are compared. ChirpStack writes no log line for a join: the 0.8.3 candidate
+   images do not route its output to syslog, and main routes it at `warn`
+   only. ChirpStack 4.12.1 stores the DevNonce and increments the JoinNonce
+   only after the MIC check, and writes the DevAddr before it sends the
+   join-accept.
 3. The join-accept at the emulated device inside the 40 s join window, with
    its delay.
 
 The runner prints one line per attempt with the channel it sent on and all
-three parts, or `MISSING` and the reason for each absent part. When
-Concentratord dropped a downlink in the window (`Scheduled packet is too old,
-dropped` or `Too late to enqueue packet`), the join-accept reason starts with
-`join-accept dropped by concentratord: too old` (or `too late to enqueue`) and
-how late it was. One retained 0.8.3 run lost a join-accept this way, 6.5 ms
-late, with no counter wrap. A late or absent join-accept is retried with
-a fresh DevNonce, at most three attempts in total. A join-accept that arrives
-without part 1 or 2 fails the case at once. The valve case needs at least one
-matching `Frame received` line after its own marker.
+three parts, or `MISSING` and the reason for each absent part. When parts 1
+and 2 hold and only the join-accept is late or absent, the attempt is retried
+with a fresh DevNonce, at most three attempts in total. Any other missing part
+fails the case on that attempt, even if a later attempt could pass.
+
+A failed join-accept reason says what Concentratord did with this join's
+downlink, matched by its scheduled `count_us`:
+`join-accept dropped by concentratord: too old, 6.5 ms after its TX time`
+(the queue reached it after its time), `refused by concentratord at enqueue:
+too late` with the lead time it had or how far past its time it was, or
+`Concentratord scheduled the join-accept for TX`. One retained 0.8.3 run lost
+a join-accept to the first case, with no counter wrap. The valve case needs at
+least one matching `Frame received` line in its own window.
 
 `radio-diagnostics.log` counts selected log lines in both sinks (including
-`Scheduled packet is too old`), lists
-ChirpStack's DevNonce count and DevAddr state per device, and sums
-Concentratord's stats per process. Concentratord publishes stats every 30 s
-and resets its counters after each publish (`libconcentratord/src/stats.rs`).
-A single `Publishing stats event, rx_received: 0` line therefore covers one
-window, not the run, and can sit next to received frames. The persistent log
-also spans every guest boot on the disk. In the 22 Nov 2026 Pi 5 candidate
-evidence, the radio guest's only stats line in the active log file reads
-`rx_received: 3` for the three frames of its window. The guest stopped before
-the window holding its last two frames was published. The last stats line in
-the file, `rx_received: 0`, came from a later upgrade guest that carried no
-radio traffic.
+`Scheduled packet is too old`), lists ChirpStack's DevNonce count and DevAddr
+state per device, and sums Concentratord's stats per process. Concentratord
+publishes stats every 30 s and resets its counters after each publish
+(`libconcentratord/src/stats.rs`), so one `Publishing stats event` line covers
+one window, not the run. The persistent log also spans every guest boot on the
+disk.
+
+In the first 0.8.3 Pi 5 candidate run of 22 Nov 2026 (the radio guest's
+Concentratord had PID 10075), the rotated and active log files together hold
+six frames from that guest. Its publish at 16:45:27 (guest clock) reads
+`rx_received: 1` for the frame at 16:45:27, and its publish at 16:45:57 reads
+`rx_received: 3` for the frames at 16:45:33, 16:45:35 and 16:45:41. The frames
+at 16:46:00 and 16:46:01 were never published: the guest's last line is at
+16:46:09, before the next publish was due at 16:46:27. The last stats lines in
+the file, all `rx_received: 0`, come from later boots of the same disk with no
+radio traffic. The counts for the rotated file come from the gate's
+per-attempt evidence analysis. This repository's own read of that disk could
+not extract the rotated file, so it checked only the active file's window at
+16:45:57.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's
