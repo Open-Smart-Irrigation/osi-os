@@ -48,6 +48,14 @@ def reap(process, cut=False):
         return process.wait(timeout=5)
 
 
+# Budget for a boot that has to get far into its first start: the before_console
+# marker, and acceptance.ready() on the old-release (0.8.1) boot of the upgrade
+# cases. On a loaded host the 0.8.1 boot, which carries no candidate code, ran
+# about 6x slower and ran out of the old 300 s marker wait and 180-poll ready()
+# before the upgrade began; a passing rerun on the same image needed 348 s in
+# ready() and up to 204 s to the marker.
+SLOW_BOOT_SECONDS = 900
+
 # PID 1 runs only the shell and the setup needed by mount_root. OpenWrt
 # normally creates block nodes through procd, which must stay stopped here.
 INSPECTION_INIT = (
@@ -142,7 +150,7 @@ class Guest:
             self.send(b'stty -echo\n')
             return
         if before_console is not None:
-            return self.expect(before_console, 300).groups()
+            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
         self.expect(b'Please press Enter to activate this console',180)
         self.send(b'\n')
         self.expect(b':~#',40)
@@ -151,6 +159,14 @@ class Guest:
 
     def stderr(self, filename, mode):
         return open(os.devnull, mode) if self.private else (self.work/filename).open(mode)
+
+    def capture(self, chunk):
+        # Every console byte of every boot, for diagnosis of a boot that never
+        # reached its marker. The private customer fixture keeps no console.
+        if self.private:
+            return
+        with (self.receipts/f'qemu-{self.boots}.serial').open('ab') as trace:
+            trace.write(chunk)
 
     def send(self, data):
         self.process.stdin.write(data)
@@ -169,6 +185,7 @@ class Guest:
             chunk=os.read(self.process.stdout.fileno(),65536)
             if not chunk:
                 raise RuntimeError('guest serial closed')
+            self.capture(chunk)
             self.buf=(self.buf+chunk)[-2_000_000:]
 
     def command(self, shell, timeout=90, *, until=None):
@@ -208,6 +225,8 @@ class Guest:
                 setattr(self, attr, None)
             except Exception as exc:
                 errors.append(exc)
+            if attr == 'process':
+                self.drain(process)
             for pipe in (process.stdin, process.stdout):
                 if pipe is not None:
                     try:
@@ -222,6 +241,18 @@ class Guest:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup('guest cleanup or exit receipt failed', errors)
+
+    def drain(self, process):
+        # Best effort: keep the console output QEMU wrote after the last expect().
+        # Diagnostics only, so no failure here may mask the cleanup result.
+        try:
+            while process.stdout is not None and select.select([process.stdout], [], [], 0)[0]:
+                rest = os.read(process.stdout.fileno(), 65536)
+                if not rest:
+                    break
+                self.capture(rest)
+        except Exception:
+            pass
 
     def wait_for_reboot(self):
         self.process.wait(timeout=600)

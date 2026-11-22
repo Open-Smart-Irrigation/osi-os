@@ -15,7 +15,7 @@ from archives import verified_archive
 from minimal_flows import (
     CUT_RECEIPT, INIT, derive_probe_image, has_atomic_publish, prepare_probe_release, verify_disk,
 )
-from suite_vm import FLOWS_COMMITTED, Guest, external_path
+from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
 
@@ -132,15 +132,21 @@ def expected_cases(args, image_capability, customer_selected, *, historical=Fals
     return cases
 
 
-def ready(vm):
-    checked(vm, """for i in $(seq 1 180); do
+READY_POLL_SECONDS = 3
+READY_BUDGET_SECONDS = 540
+# Host-side slack over the poll budget: each poll can add two 2 s wget timeouts.
+READY_HOST_SLACK_SECONDS = 260
+
+
+def ready(vm, *, budget=READY_BUDGET_SECONDS, poll=READY_POLL_SECONDS):
+    checked(vm, f"""for i in $(seq 1 {budget // poll}); do
 if test -s /data/db/farming.db && wget -q -T 2 -O /tmp/gui http://127.0.0.1:1880/gui/ && grep -qi '<html' /tmp/gui && pidof chirpstack >/dev/null && wget -q -T 2 -O /dev/null http://127.0.0.1:8080/; then
 ip addr add 192.0.2.15/24 dev br-lan 2>/dev/null || ip -4 addr show | grep -q 192.0.2.15 || ip addr add 192.0.2.15/24 dev eth0
 exit $?
 fi
-sleep 3
+sleep {poll}
 done
-exit 1""", 800)
+exit 1""", budget + READY_HOST_SLACK_SECONDS)
     if sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('integrity check failed')
 
@@ -457,7 +463,9 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 guest.start(flow_cut='committed')
             else:
                 guest.start()
-            ready(guest)
+            # Old-release boot: same budget as the before_console marker wait
+            # (SLOW_BOOT_SECONDS explains the slow-host failure).
+            ready(guest, budget=SLOW_BOOT_SECONDS)
             previous = upgrade(guest, old, args.osi_version, cut_at=cut_at, transfer=transfer,
                                release=probe_release if minimal else release)
             if recovery == 'zero':

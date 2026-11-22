@@ -52,7 +52,11 @@ Record the command's exit code, `inputs.txt` and `results.log` from the printed
 run directory with the candidate SHA, image checksum, and tools revision. The run must exit zero. The final table lists each expected case, its observed
 result, and the reason and required replacements for every N/A. The run
 fails if any replacement or other required case lacks a recorded PASS. The runner removes guest disks and USB media after cleanup and
-keeps the compact receipts. Use `--keep-scratch` for an owner-only copy of
+keeps the compact receipts. Each case directory also holds the full guest
+console of every boot as `qemu-N.serial`, except for the private customer
+fixture. The first-start marker wait and the readiness wait on the 0.8.1 boot
+before an upgrade each allow 900 s, because a loaded host slowed that boot
+about sixfold. Use `--keep-scratch` for an owner-only copy of
 the scratch media when diagnosing a failure. Keep private receipts local.
 A missing or failed run holds the candidate. Physical SD power-cut, upgrade and
 valve checks still belong on the real-device sheet.

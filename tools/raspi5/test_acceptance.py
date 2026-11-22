@@ -24,7 +24,7 @@ import customer_fixture
 import minimal_flows
 import radio_suite
 import run
-from suite_vm import FLOWS_COMMITTED, Guest, external_path
+from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 import upgrade_suite
 
 
@@ -793,6 +793,100 @@ sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
     def test_migration_0073_resolves_both_pinned_triggers(self):
         _, triggers = boot_safety.migrated_triggers(Path(__file__).resolve().parents[2])
         self.assertEqual(set(triggers), {'trg_dp_zone_env_outbox_ai', 'trg_dp_zone_env_outbox_au'})
+
+
+class SlowBootBudgetTests(unittest.TestCase):
+    def ready_script(self, **budget):
+        vm = Mock()
+        with (patch.object(acceptance, 'checked') as checked,
+              patch.object(acceptance, 'sql', return_value='ok')):
+            acceptance.ready(vm, **budget)
+        (_, script, timeout), _ = checked.call_args
+        return script, timeout
+
+    def test_default_ready_keeps_180_polls_of_3_s(self):
+        script, timeout = self.ready_script()
+        self.assertIn('for i in $(seq 1 180); do', script)
+        self.assertIn('\nsleep 3\n', script)
+        self.assertEqual(timeout, 800)
+
+    def test_slow_boot_ready_polls_for_900_s(self):
+        self.assertEqual(SLOW_BOOT_SECONDS, 900)
+        script, timeout = self.ready_script(budget=SLOW_BOOT_SECONDS)
+        self.assertIn('for i in $(seq 1 300); do', script)
+        self.assertIn('\nsleep 3\n', script)
+        self.assertEqual(timeout, 900 + acceptance.READY_HOST_SLACK_SECONDS)
+
+    def test_old_release_upgrade_boot_gets_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root/'fixtures'/'v0.8.1'
+            folder.mkdir(parents=True)
+            image = folder/'rpi5.img.gz'
+            image.write_bytes(b'fixture')
+            (folder/'SHA256SUMS').write_text(hashlib.sha256(b'fixture').hexdigest() + '  rpi5.img.gz\n')
+            args = SimpleNamespace(fixtures=root/'fixtures', candidate=image, qemu=None, ram=8,
+                                   candidate_sha256=hashlib.sha256(b'fixture').hexdigest(),
+                                   release_revision='a'*40, osi_version='0.8.3',
+                                   flows_power_cut_only=True, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            guests = []
+            def make(*_args, **_options):
+                guests.append(Mock())
+                return guests[-1]
+            with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'Guest', side_effect=make),
+                  patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready') as ready,
+                  patch.object(acceptance, 'cut_after_flows_patch', return_value='ok'),
+                  patch.object(acceptance, 'upgrade', side_effect=RuntimeError('stop after ready'))):
+                acceptance.run_cases(args, root, root, root, 'recovery', False)
+        later_boot, upgrade_boot = guests[1], guests[2]
+        self.assertIn(unittest.mock.call(later_boot), ready.call_args_list)
+        self.assertIn(unittest.mock.call(upgrade_boot, budget=SLOW_BOOT_SECONDS), ready.call_args_list)
+
+    def guest(self, directory, *, private):
+        vm = Guest.__new__(Guest)
+        vm.work = vm.receipts = Path(directory)
+        vm.qemu = vm.work/'qemu'
+        vm.process = vm.bridge = vm.radio = None
+        vm.boots = 0
+        vm.port = 49152
+        vm.ram = 8
+        vm.private = private
+        vm.upgrade = None
+        vm.direct_io = True
+        (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
+        return vm
+
+    def test_before_console_marker_wait_is_the_slow_boot_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=True)
+            marker = re.search(rb'(x)', b'x')
+            with (patch('suite_vm.subprocess.Popen', return_value=Mock()),
+                  patch.object(vm, 'expect', return_value=marker) as expect):
+                self.assertEqual(vm.start(before_console=rb'(x)'), (b'x',))
+            expect.assert_called_once_with(rb'(x)', SLOW_BOOT_SECONDS)
+            vm.radio.close()
+
+    def test_console_is_kept_per_boot_except_for_private_guests(self):
+        for private in (False, True):
+            with self.subTest(private=private), tempfile.TemporaryDirectory() as directory:
+                vm = self.guest(directory, private=private)
+                vm.boots = 2
+                read, write = os.pipe()
+                vm.process = SimpleNamespace(stdout=os.fdopen(read, 'rb'), stdin=None)
+                vm.buf = b''
+                os.write(write, b'boot log\nmarker\nafter marker')
+                vm.expect(rb'marker\n', 5)
+                os.write(write, b' and shutdown')
+                os.close(write)
+                process, vm.process = vm.process, None
+                vm.drain(process)
+                process.stdout.close()
+                serial = vm.receipts/'qemu-2.serial'
+                if private:
+                    self.assertFalse(serial.exists())
+                else:
+                    self.assertEqual(serial.read_bytes(), b'boot log\nmarker\nafter marker and shutdown')
 
 
 class BoundaryTests(unittest.TestCase):
