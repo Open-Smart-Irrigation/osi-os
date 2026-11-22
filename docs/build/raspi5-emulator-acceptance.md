@@ -74,23 +74,32 @@ active persistent log, writes a marker to syslog and sends on a recorded
 channel (902300000 Hz, 125000 Hz, SF7 for every uplink today). When the
 join-accept has arrived or its wait has run out, the runner writes an end
 marker and reads the log forward from the noted position, following that file
-into the active file if logd rotated it. A rotation during the read repeats
-the read, and the read waits up to 10 s for the end marker to reach the file.
+into the active file if logd rotated it. A change in the log files' inodes
+during a read repeats the read, a failed file read fails the window, and a
+stable layout without the noted inode means the evidence rotated away. The
+read waits up to 10 s for the end marker to reach the file.
 The window is the text between the two markers. The attempt counts as
 received only with three parts:
 
 1. A Concentratord `Frame received, uplink_id: N` line in the window at the
-   recorded channel, and a downlink that Concentratord enqueued, sent or
-   dropped at that frame's `count_us` plus 5 s (RX1) or 6 s (RX2), modulo the
-   32-bit counter. A data frame's reply is due 1 s after it, so a data frame on
-   the same channel cannot supply this part. Concentratord 4.4.8 logs
+   recorded channel whose `count_us` comes from this request. The model's
+   delivery receipt carries the 32 MHz timestamp it stamped on the frame. The
+   HAL (sx1302_hal 2.1.0) turns that into `count_us` as timestamp / 32 in 27
+   bits, adds its wrap bits and subtracts a decoding delay of about 0.46 ms at
+   SF7 (15.4 ms at SF12). The line must sit within 20 ms below the stamp,
+   modulo 2^27. Harness uplinks are seconds apart, so no other frame
+   qualifies. A downlink that Concentratord enqueued, sent or dropped 5 s
+   (RX1) or 6 s (RX2) after the frame corroborates it and is reported, but is
+   not required. Concentratord 4.4.8 logs
    `Frame received` at INFO only after its CRC filter, and the image sets
    `disable_crc_filter=false`, so the line proves a CRC-valid frame.
 2. The change in ChirpStack's state for that DevEUI across the send, read from
    `/srv/chirpstack/chirpstack.sqlite`: the attempt's DevNonce absent from
    `device_keys.dev_nonces` before and present after, `device_keys.join_nonce`
    advanced by one, and a new `device.dev_addr`. Once the join-accept has
-   verified, its DevAddr and JoinNonce must equal ChirpStack's. No timestamps
+   verified, its DevAddr must equal ChirpStack's new DevAddr, and its JoinNonce
+   must equal ChirpStack's pre-send JoinNonce: ChirpStack 4.12.1 stores the
+   incremented counter and sends the stored value minus one. No timestamps
    are compared. ChirpStack writes no log line for a join: the 0.8.3 candidate
    images do not route its output to syslog, and main routes it at `warn`
    only. ChirpStack 4.12.1 stores the DevNonce and increments the JoinNonce

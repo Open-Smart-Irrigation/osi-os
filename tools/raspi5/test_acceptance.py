@@ -54,8 +54,9 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(len(payload), header[0])
         return request_id, payload
 
-    def receipt(self, request_id, count):
-        return bytes((len(request_id) + 1, 254, 0)) + request_id + bytes((count,))
+    def receipt(self, request_id, count, stamp=0):
+        return (bytes((len(request_id) + 5, 254, 0)) + request_id + bytes((count,))
+                + stamp.to_bytes(4, 'big'))
 
     def downlink(self, address, port=2):
         payload = b'\x60' + address.to_bytes(4, 'little') + b'\x00\x01\x00'
@@ -80,12 +81,13 @@ class RadioTests(unittest.TestCase):
                         with model.makefile('rb') as wire:
                             request_id, payload = self.request(wire)
                             self.assertEqual(payload, b'fixture')
-                            model.sendall(self.receipt(request_id, count))
+                            model.sendall(self.receipt(request_id, count, stamp=0xfedcba98))
 
                     waiting = worker.submit(reply)
                     air = radio_suite.Radio(host)
                     if count:
                         self.assertEqual(air.send(b'fixture'), count)
+                        self.assertEqual(air.last_stamp, 0xfedcba98)
                     else:
                         with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
                             air.send(b'fixture')
@@ -196,8 +198,10 @@ class RadioTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'WM1302 model delivered zero frames'):
             radio_suite.inject(vm, Mock(), {})
 
-    # The join frame's count_us and the join-accept scheduled 5 s later.
+    # The join frame's count_us, the model stamp it came from (the HAL
+    # subtracts about 460 us at SF7), and the join-accept scheduled 5 s later.
     FRAME = 'match 81 137293609\n'
+    STAMP = (137293609 + 460) % (1 << 27) * 32
     ACCEPT = 'dl enqueue 7 142293609 138000000\ndl tx 7 142293609 -\n'
     CLOSED = 'marked\nclosed\nram 1'
 
@@ -209,13 +213,15 @@ class RadioTests(unittest.TestCase):
         valve.join_request.side_effect = lambda: bytes([valve.devnonce])
         valve.uplink.return_value = b'data'
         # Attempt n gets DevAddr n and JoinNonce n, as the guest below reports.
+        # ChirpStack stores JoinNonce n and sends n - 1 on the wire.
         valve.accept_join.side_effect = lambda reply: {'devaddr': valve.devnonce,
-                                                       'appnonce': valve.devnonce.to_bytes(3, 'little')}
+                                                       'appnonce': (valve.devnonce - 1).to_bytes(3, 'little')}
         replies = iter(arrivals)
 
         def send(frame, channel=radio_suite.UPLINK):
             nonlocal deadline
             self.assertEqual(channel, radio_suite.UPLINK)
+            air.last_stamp = self.STAMP
             if frame != b'data':
                 delay = next(replies)
                 deadline = None if delay is None else now + delay
@@ -280,7 +286,7 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(output.strip(), (
             f'{radio_suite.VALVE} join attempt 1/3 (DevNonce 1, sent 902300000 Hz, 125000 Hz, SF7): received | '
             'frame: Concentratord uplink_id 81 (count_us 137293609) at 902300000 Hz, 125000 Hz, SF7, '
-            'join-accept scheduled +5 s; '
+            f'model stamp {self.STAMP}, join-accept scheduled +5 s; '
             'chirpstack: ChirpStack DevNonce 1 new, JoinNonce 0->1, DevAddr unset->00000001; '
             'join-accept: join-accept after 5.00 s'))
         # ChirpStack is read before the marker and after the window closes.
@@ -325,10 +331,47 @@ class RadioTests(unittest.TestCase):
                                        frames={1: f'other 81 {channel}\n' + self.ACCEPT + self.CLOSED})
 
     def test_unrelated_same_channel_frame_cannot_supply_the_join_frame(self):
-        # Only a data frame is retained: its reply is due 1 s later, not 5 s or 6 s.
-        self.assert_incomplete('frame', 'uplink_id 99 at 902300000 Hz, 125000 Hz, SF7, '
-                                        'but no downlink scheduled 5 s or 6 s after it',
+        # Only a data frame is retained, with its own reply 1 s later.
+        self.assert_incomplete('frame', f'no Concentratord frame carries the model stamp {self.STAMP}',
                                frames={1: 'match 99 200000000\ndl tx 8 201000000 -\n' + self.ACCEPT + self.CLOSED})
+
+    def test_cross_paired_frame_and_join_downlink_fail(self):
+        # The join's frame line (count_us 102000000) is lost. An unrelated
+        # same-channel frame at 101000000 is kept, and so is the real join's
+        # RX1 downlink at 107000000, which is 6 s after the unrelated frame.
+        air, valve, clock = self.join_fixture([5.0])
+        send = air.send.side_effect
+
+        def send_join(frame, channel):
+            delivered = send(frame, channel)
+            air.last_stamp = 102000000 * 32 % (1 << 32)
+            return delivered
+
+        air.send.side_effect = send_join
+        vm, _ = self.guest(frames={1: 'match 99 101000000\ndl enqueue 7 107000000 103000000\n'
+                                      'dl tx 7 107000000 -\n' + self.CLOSED})
+        output = io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(output),
+              self.assertRaisesRegex(RuntimeError, 'incomplete join receipt')):
+            radio_suite.inject(vm, air, {radio_suite.VALVE: valve})
+        # The real join-accept arrived, so only the frame is missing.
+        self.assertIn('missing frame |', output.getvalue())
+        self.assertIn('frames at 902300000 Hz, 125000 Hz, SF7: uplink_id 99 (count_us 101000000)', output.getvalue())
+
+    def test_frame_binding_tolerates_only_the_hal_correction(self):
+        stamp = 102000000 * 32 % (1 << 32)
+        base = stamp // 32
+        for delta, bound in ((0, True), (460, True), (20000, True), (20001, False), (-1, False), (1000000, False)):
+            with self.subTest(delta=delta):
+                self.assertEqual(radio_suite._bound_to_stamp(base - delta, stamp), bound)
+        # The HAL adds wrap bits above bit 26 that the stamp does not carry.
+        self.assertTrue(radio_suite._bound_to_stamp(base - 460 + 3 * (1 << 27), stamp))
+        # A stamp just past a 27-bit wrap binds a count just before it.
+        self.assertTrue(radio_suite._bound_to_stamp((1 << 27) - 100 + (5 << 27), 200 * 32))
+
+    def test_receipt_without_a_stamp_fails(self):
+        frames = radio_suite.Frames(matched=[('81', 137293609)], marked=True)
+        self.assertEqual(radio_suite._join_frame(frames, None)[1], 'the WM1302 model receipt carried no timestamp')
 
     def test_join_frame_without_attempt_marker_fails(self):
         self.assert_incomplete('frame', 'attempt marker absent from the persistent log',
@@ -367,8 +410,19 @@ class RadioTests(unittest.TestCase):
                                states={(1, 'after'): '[1] 01E1EE61 1'})
 
     def test_join_accept_with_another_join_nonce_fails(self):
-        self.assert_incomplete('chirpstack', 'ChirpStack JoinNonce 2 differs from join-accept JoinNonce 1',
+        # The wire carries 0 (DevNonce 1 - 1); ChirpStack's pre-send value is 1.
+        self.assert_incomplete('chirpstack', "join-accept JoinNonce 0 differs from ChirpStack's pre-send JoinNonce 1",
                                states={(1, 'before'): '[] - 1', (1, 'after'): '[1] 00000001 2'})
+
+    def test_join_accept_carries_the_pre_send_join_nonce(self):
+        # ChirpStack 4.12.1 stores 0 -> 1 and puts 0 on the wire.
+        before = radio_suite.ChirpStackState((), None, 0)
+        after = radio_suite.ChirpStackState((1,), '00000001', 1)
+        text, missing = radio_suite._chirpstack_part(before, after, radio_suite.VALVE, 1, ('00000001', 0))
+        self.assertIsNone(missing)
+        self.assertIn('JoinNonce 0->1', text)
+        _, missing = radio_suite._chirpstack_part(before, after, radio_suite.VALVE, 1, ('00000001', 1))
+        self.assertIn("join-accept JoinNonce 1 differs from ChirpStack's pre-send JoinNonce 0", missing)
 
     def test_unreadable_chirpstack_database_fails(self):
         self.assert_incomplete('chirpstack', 'ChirpStack database unreadable', states={(1, 'after'): ''})
@@ -457,7 +511,7 @@ class RadioTests(unittest.TestCase):
     def test_join_frame_correlation_handles_the_counter_wrap(self):
         frames = radio_suite.Frames(matched=[('81', 4293000000)], marked=True,
                                     downlinks=[radio_suite.Downlink('tx', '7', 4293000000 + 6000000 - (1 << 32), None)])
-        text, missing, scheduled = radio_suite._join_frame(frames)
+        text, missing, scheduled = radio_suite._join_frame(frames, (4293000000 + 460) % (1 << 27) * 32)
         self.assertIsNone(missing)
         self.assertEqual(scheduled, 4032704)
         self.assertIn('join-accept scheduled +6 s', text)
@@ -466,6 +520,7 @@ class RadioTests(unittest.TestCase):
         channel = radio_suite.Channel(902500000, 125000, 9)
         air, valve, clock = self.join_fixture([5.0])
         air.send.side_effect = lambda frame, sent: self.assertEqual(sent, channel) or 1
+        air.last_stamp = self.STAMP
         air.receive.side_effect = lambda timeout, matches: b'\x20'
         vm, scripts = self.guest()
         line = []
@@ -574,7 +629,7 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(frames.other, [('82', '902500000', '125000', 'SF7'), ('83', '902300000', '125000', 'SF8')])
         self.assertEqual(frames.downlinks, [radio_suite.Downlink('enqueue', '7', 142293609, 138000000),
                                             radio_suite.Downlink('tx', '7', 142293609, None)])
-        text, missing, scheduled = radio_suite._join_frame(frames)
+        text, missing, scheduled = radio_suite._join_frame(frames, self.STAMP)
         self.assertEqual((missing, scheduled), (None, 142293609))
 
     def test_window_starts_at_the_snapshot_offset(self):
@@ -615,6 +670,35 @@ class RadioTests(unittest.TestCase):
             frames = radio_suite._concentratord_frames(self.guest_logs(root, prelude=prelude), marker)
             self.assertTrue(flag.exists())
         self.assertEqual((frames.error, frames.marked, frames.matched), ('', True, [('81', 137293609)]))
+
+    def test_rotation_after_the_old_inode_lookup_repeats_the_read(self):
+        # logd rotates just after the scan looked up the old file's inode, so
+        # the scan sees neither file with the tracked inode. The end marker
+        # lands in the new active file. A changed layout must repeat the read
+        # instead of reporting the evidence as rotated away.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.log_root(directory, [self.marker_line('fixture'), self.frame_line(81)],
+                                 rotated=['older file'])
+            active, rotated, count = root/'osi-system.log', root/'osi-system.log.old', root/'old-lookups'
+            marker = self.snapshot(active, 0)
+            prelude = ('logger() { :; }\n'
+                       'ls() { command ls "$@"; case "$2" in *.old) '
+                       f'n=$(cat {quote(str(count))} 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > {quote(str(count))}; '
+                       f'if [ "$n" = 2 ]; then mv {quote(str(active))} {quote(str(rotated))}; '
+                       f"printf '%s\\n' {quote(self.marker_line('fixture-end'))} > {quote(str(active))}; fi;; esac; }}\n")
+            frames = radio_suite._concentratord_frames(self.guest_logs(root, prelude=prelude), marker)
+            self.assertGreaterEqual(int(count.read_text()), 2)
+        self.assertEqual((frames.error, frames.marked, frames.matched), ('', True, [('81', 137293609)]))
+
+    def test_failed_file_read_is_not_parsed(self):
+        # tail prints a complete-looking window and then fails.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.log_root(directory, [self.marker_line('fixture')])
+            window = [self.marker_line('fixture'), self.frame_line(81), self.marker_line('fixture-end')]
+            prelude = f"tail() {{ printf '%s\\n' {' '.join(quote(line) for line in window)}; return 1; }}\n"
+            frames = radio_suite._concentratord_frames(self.guest_logs(root, prelude=prelude),
+                                                       self.snapshot(root/'osi-system.log', 0))
+        self.assertEqual((frames.error, frames.matched), ('persistent log read failed', []))
 
     def test_window_rotated_away_is_reported(self):
         with tempfile.TemporaryDirectory() as directory:

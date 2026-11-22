@@ -49,8 +49,13 @@ CHIRPSTACK_DB = '/srv/chirpstack/chirpstack.sqlite'
 PERSISTENT_LOG = '/data/log/osi-system.log'
 # US915 join-accept delays after the join-request (RX1, RX2), in count_us.
 JOIN_ACCEPT_DELAYS = (5000000, 6000000)
-# The SX1302 count_us counter is 32 bits wide.
+# The SX1302 count_us counter is 32 bits wide; the HAL's packet counter has
+# 27 bits before it adds its wrap bits.
 COUNTER_WRAP = 1 << 32
+HAL_COUNTER_WRAP = 1 << 27
+# The HAL's legacy timestamp correction for a 125 kHz frame: about 0.46 ms at
+# SF7 and 15.4 ms at SF12.
+MAX_HAL_CORRECTION_US = 20000
 
 PERSISTENT_LOGS = '''persistent_logs() {
     # Read the rotated file before the active file so a marker can span rotation.
@@ -89,6 +94,7 @@ class Radio:
         self.sock = sock
         self.buffer = bytearray()
         self.downlinks = deque()
+        self.last_stamp = None   # 32 MHz timestamp of the last delivered frame
 
     def _packet(self, deadline=None):
         while True:
@@ -137,14 +143,18 @@ class Radio:
                 if channel != RF_RECEIPT_CHANNEL:
                     self.downlinks.append(payload)
                     continue
-                if sf != 0 or len(payload) != RF_REQUEST_ID_SIZE + 1:
+                # Request ID, delivered count, then the big-endian 32 MHz
+                # timestamp the model stamped on the frame.
+                if sf != 0 or len(payload) != RF_REQUEST_ID_SIZE + 5:
                     raise RuntimeError('invalid WM1302 model delivery receipt (check the QEMU build)')
-                if payload[:-1] != request_id:
+                if payload[:RF_REQUEST_ID_SIZE] != request_id:
                     continue
-                if payload[-1] == 0:
+                count = payload[RF_REQUEST_ID_SIZE]
+                if count == 0:
                     raise RuntimeError('WM1302 model delivered zero frames (uplink rejected by RX FIFO)')
-                if payload[-1] != 1:
+                if count != 1:
                     raise RuntimeError('invalid WM1302 model delivery count')
+                self.last_stamp = int.from_bytes(payload[RF_REQUEST_ID_SIZE + 1:], 'big')
                 return 1
         except OSError as exc:
             raise RuntimeError('no matching WM1302 model delivery receipt (radio socket timed out or disconnected)') from exc
@@ -223,19 +233,22 @@ window_logs() {{
     for file in {PERSISTENT_LOG}?* {PERSISTENT_LOG}; do
         [ -r "$file" ] || continue
         if [ "$started" = 1 ]; then
-            cat "$file"
+            cat "$file" || return 3
         elif [ "$(inode "$file")" = '{marker.inode}' ]; then
             started=1
-            tail -c +{marker.offset + 1} "$file"
+            tail -c +{marker.offset + 1} "$file" || return 3
         fi
     done
     [ "$started" = 1 ]
 }}
+layout() {{ echo "$(inode {PERSISTENT_LOG}.old) $(inode {PERSISTENT_LOG})"; }}
+# 0: complete read of a stable layout; 1: a stable layout lost the tracked
+# inode; 2: the layout changed during every read; 3: a file read failed.
 collect() {{
     for try in 1 2 3; do
-        before=$(inode {PERSISTENT_LOG})
-        logs=$(window_logs) || return 1
-        [ "$before" = "$(inode {PERSISTENT_LOG})" ] && return 0
+        before=$(layout)
+        logs=$(window_logs); rc=$?
+        [ "$before" = "$(layout)" ] && return $rc
     done
     return 2
 }}
@@ -269,6 +282,7 @@ logger -t osi-radio-suite {marker.id}-end
 for i in 1 2 3 4 5 6 7 8 9 10; do
     collect; rc=$?
     [ "$rc" = 1 ] && {{ echo rotated-away; exit 0; }}
+    [ "$rc" = 3 ] && {{ echo read-failed; exit 0; }}
     [ "$rc" = 0 ] && printf '%s\n' "$logs" | grep -q ' osi-radio-suite: {marker.id}-end$' && break
     sleep 1
 done
@@ -289,6 +303,8 @@ printf 'ram %s\n' "$(logread 2>/dev/null | frames | grep -c '^match ')"
             frames.error = 'persistent log rotated past the attempt marker before the evidence was read'
         elif words == ['rotating']:
             frames.error = 'persistent log rotated during every read'
+        elif words == ['read-failed']:
+            frames.error = 'persistent log read failed'
         elif words[:1] == ['match'] and len(words) == 3 and words[2].isdecimal():
             frames.matched.append((words[1], int(words[2])))
         elif words[:1] == ['other'] and len(words) >= 2:
@@ -316,28 +332,44 @@ def _window_part(frames):
     return None
 
 
-def _join_frame(frames, channel=UPLINK):
-    """Correlate a frame with this join's downlink for receipt part (a).
+def _bound_to_stamp(count, stamp):
+    """Whether a logged count_us comes from the frame the model stamped.
 
-    A join-accept goes out JOIN_ACCEPT_DELAYS after the join-request's
-    count_us (RX1, then RX2); a data frame's reply is due 1 s after it. The
-    receipt needs a frame at the sent channel and a downlink that Concentratord
-    enqueued, sent or dropped at one of those counts. Returns (text, missing
-    reason, scheduled count_us or None).
+    The HAL takes the model's 32 MHz timestamp / 32 as a 27-bit microsecond
+    count, adds its own wrap bits and subtracts a decoding delay
+    (sx1302_hal 2.1.0 loragw_sx1302.c, legacy_timestamp_correction).
+    """
+    return (stamp // 32 - count) % HAL_COUNTER_WRAP <= MAX_HAL_CORRECTION_US
+
+
+def _join_frame(frames, stamp, channel=UPLINK):
+    """Find the frame of this join-request for receipt part (a).
+
+    The frame must be at the sent channel and carry the count_us the HAL
+    derived from the model's timestamp for this request. A downlink that
+    Concentratord enqueued, sent or dropped JOIN_ACCEPT_DELAYS after it
+    (RX1, then RX2) corroborates it. Returns (text, missing reason, scheduled
+    count_us of the corroborating downlink or None).
     """
     missing = _window_part(frames)
     if missing:
         return None, missing, None
+    if stamp is None:
+        return None, 'the WM1302 model receipt carried no timestamp', None
     for uplink, count in frames.matched:
+        if not _bound_to_stamp(count, stamp):
+            continue
+        text = f'Concentratord uplink_id {uplink} (count_us {count}) at {channel}, model stamp {stamp}'
         for delay in JOIN_ACCEPT_DELAYS:
             scheduled = (count + delay) % COUNTER_WRAP
             if any(d.count == scheduled for d in frames.downlinks):
-                return (f'Concentratord uplink_id {uplink} (count_us {count}) at {channel}, '
-                        f'join-accept scheduled +{delay // 1000000} s'), None, scheduled
+                return f'{text}, join-accept scheduled +{delay // 1000000} s', None, scheduled
+        return f'{text}, no join-accept downlink logged', None, None
     if frames.matched:
-        uplinks = ', '.join(uplink for uplink, _ in frames.matched)
-        return None, (f'Concentratord uplink_id {uplinks} at {channel}, but no downlink scheduled '
-                      f'{" or ".join(f"{d // 1000000} s" for d in JOIN_ACCEPT_DELAYS)} after it'), None
+        uplinks = ', '.join(f'{uplink} (count_us {count})' for uplink, count in frames.matched)
+        return None, (f'no Concentratord frame carries the model stamp {stamp} '
+                      f'(count_us {stamp // 32 % HAL_COUNTER_WRAP} mod 2^27, less up to '
+                      f'{MAX_HAL_CORRECTION_US} us); frames at {channel}: uplink_id {uplinks}'), None
     if frames.other:
         uplink, *seen = frames.other[0]
         return None, f'Concentratord uplink_id {uplink} at freq/bw/dr {"/".join(seen)}, expected {channel}', None
@@ -431,8 +463,11 @@ def _chirpstack_part(before, after, dev_eui, devnonce, accept):
         dev_addr, join_nonce = accept
         if after.dev_addr != dev_addr:
             return None, f'ChirpStack DevAddr {after.dev_addr} differs from join-accept DevAddr {dev_addr}'
-        if after.join_nonce != join_nonce:
-            return None, f'ChirpStack JoinNonce {after.join_nonce} differs from join-accept JoinNonce {join_nonce}'
+        # ChirpStack 4.12.1 stores the incremented JoinNonce and sends the
+        # stored value minus one (src/uplink/join.rs), the pre-send value.
+        if join_nonce != before.join_nonce:
+            return None, (f'join-accept JoinNonce {join_nonce} differs from ChirpStack\'s pre-send '
+                          f'JoinNonce {before.join_nonce}')
     return (f'ChirpStack DevNonce {devnonce} new, JoinNonce {before.join_nonce}->{after.join_nonce}, '
             f'DevAddr {before.dev_addr or "unset"}->{after.dev_addr}'), None
 
@@ -553,10 +588,11 @@ def _join(vm, air, eui, session, log, channel=UPLINK):
 
     Every attempt needs its own receipt: (a) a Concentratord "Frame received"
     line in the attempt's closed window at the channel the model sent, with
-    this join's downlink scheduled 5 s (RX1) or 6 s (RX2) later; (b) the
-    change in ChirpStack's state across the send: the new DevNonce, the
-    JoinNonce advanced by one and a new DevAddr, both equal to the
-    join-accept's; (c) the join-accept at the emulated device inside the join
+    the count_us derived from the model's timestamp for this request, with
+    this join's downlink 5 s (RX1) or 6 s (RX2) later as corroboration; (b)
+    the change in ChirpStack's state across the send: the new DevNonce, the
+    stored JoinNonce advanced by one and a new DevAddr, with the join-accept
+    carrying that DevAddr and the pre-send JoinNonce; (c) the join-accept at the emulated device inside the join
     window. An attempt with (a) and (b) whose join-accept is late, absent or
     dropped by Concentratord is retried with a fresh DevNonce (#736). Any
     other missing part fails the case at once.
@@ -575,6 +611,7 @@ def _join(vm, air, eui, session, log, channel=UPLINK):
         frame = session.join_request()
         sent = time.monotonic()
         delivered += air.send(frame, channel)
+        stamp = air.last_stamp
         accept = accept_missing = accepted = None
         retryable = False
         try:
@@ -601,7 +638,7 @@ def _join(vm, air, eui, session, log, channel=UPLINK):
                     accept_missing = f'join-accept after {delay:.2f} s failed verification: {exc}'
 
         frames = _concentratord_frames(vm, marker, channel)
-        frame_text, frame_missing, scheduled = _join_frame(frames, channel)
+        frame_text, frame_missing, scheduled = _join_frame(frames, stamp, channel)
         if accept_missing and scheduled is not None:
             fate = _join_accept_fate(frames, scheduled)
             if fate:
