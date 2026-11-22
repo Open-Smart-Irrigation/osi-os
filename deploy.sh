@@ -692,6 +692,7 @@ hold_for_unloadable_command_ledger() {
         hold_note="NOT recorded: $NODE_RED_ROOT/.osi-command-ledger-hold could not be written"
     fi
     if [ "$node_red_restart_needed" = "1" ]; then
+        prove_hold_stops || echo "ERROR: a stop this hold relies on could not be proven again; inspect Node-RED and identityd before anything else" >&2
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
         echo "ERROR: the previous payload is held stopped (Node-RED and identityd stay stopped; nothing is disabled, so a reboot or a manual start runs the previous payload beside these files); the hold is $hold_note" >&2
@@ -2230,6 +2231,23 @@ hold_node_red_stopped() {
     return 1
 }
 
+# A hold declared on stops proven earlier in the deploy (the migration's stop
+# wait, the identityd quiesce) proves both again where it is declared. The
+# receipt then says `hold` from current evidence; a stop that cannot be
+# proven here leaves the recovery incomplete instead.
+prove_hold_stops() {
+    phs_rc=0
+    hold_node_red_stopped || phs_rc=1
+    DEPLOY_IDENTITYD_STATE=unknown
+    if quiesce_identityd_instance; then
+        DEPLOY_IDENTITYD_STATE=stopped
+    else
+        DEPLOY_RECOVERY_INCOMPLETE=1
+        phs_rc=1
+    fi
+    return "$phs_rc"
+}
+
 # Item 3 (#636): before migrate-cli runs, the candidate's directory records
 # the ledger the migration will produce and the one it starts from. A boot
 # after a cut decides from the database's actual ledger (node-red.init,
@@ -2985,6 +3003,7 @@ process.stdout.write(String(applied.length));
     if [ "$migration_rc" = "3" ]; then
         printf '%s\n' "HELD: Node-RED stopped. The migration failed and the restore of its pre-migration copy failed its integrity check. Check the database, and restore the pre-migration copy kept in ${backup_dir:-/data/backups/migrate} (see the deploy log)." > "${DEPLOY_HELD_FILE:-${SWAP_ROOT:-/srv/node-red}/DEPLOY-HELD}" 2>/dev/null || true
         swap_call writePayloadState "${PRE_STOP_ACTIVE:-}" held "the migration failed and the restore of its pre-migration copy failed its integrity check; the database needs an operator before anything starts: check it, and restore the pre-migration copy kept in ${backup_dir:-/data/backups/migrate} (see the deploy log)" deploy.sh >/dev/null 2>&1 || true
+        prove_hold_stops || echo "ERROR: a stop this hold relies on could not be proven again; inspect Node-RED and identityd before anything else" >&2
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
         echo "ERROR: migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped" >&2

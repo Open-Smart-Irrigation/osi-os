@@ -188,7 +188,7 @@ directory before reading the persistent receipt.
 | `auto-rollback` | Deploy failed; the compatible previous payload was restored and its readiness confirmed. | Nonzero deploy status |
 | `incomplete-recovery` | Recovery could not be confirmed; `service_state` says stopped or unknown. | Nonzero deploy status, or 74 for receipt persistence failure |
 | `interrupted` | A catchable signal interrupted the run; the reason distinguishes pre-start cancellation from an interrupted deploy. | 128 + signal number |
-| `hold` | Required Node-RED and identityd stops were positively established. | Nonzero deploy status |
+| `hold` | Required Node-RED and identityd stops were positively established. The hold is recorded in `DEPLOY-HELD`, or in `.osi-command-ledger-hold` for an unloadable command ledger. A hold declared on earlier stops (a failed migration whose restore also failed, an unloadable command ledger) proves both again before it reports `hold`. | Nonzero deploy status |
 | `refused` | Verification or a deploy prerequisite refused the run. | Nonzero deploy status |
 | `failed` | The deploy process failed without a confirmed rollback, including interruption after its lifecycle report. | Nonzero deploy status |
 | `unverified` | The new payload runs, but its startup could not be confirmed, or no final lifecycle report was received. | 3 |
@@ -264,4 +264,11 @@ supervisor persists a publication guard and preallocated `.result.recovery`
 receipt. The guard is removed only after final publication syncs succeed.
 Readers keep the recovery receipt authoritative while the guard remains, then
 sync the acknowledgement directory themselves. A failed access log cannot take
-down supervision; failed receipt acknowledgement returns 74.
+down supervision; failed receipt acknowledgement returns 74. A malformed request
+to the private server gets 400 and any other error inside its request handler
+gets 500; the access log records only `bad_request` or `handler_error`, and the
+server keeps serving. If an exception still escapes, the supervisor keeps
+running, waits for the deploy and publishes `incomplete-recovery` with
+`supervisor_failed` (`refused` if the deploy had not started). A proven `hold`
+keeps its verdict. The receipt never stays at `state=running` because of such
+an error.

@@ -341,6 +341,88 @@ test('ENOSPC on the first child GET cannot kill the real supervisor or prevent a
   assert.equal(fs.existsSync(path.join(f.root, 'started')), true);
 });
 
+// Round-three F3': a malformed absolute-form target made url.parse throw
+// inside the request callback, which killed the supervisor and left the
+// receipt at state=running while the deploy ran on unsupervised.
+test('a malformed request target during the deploy answers 400 and the supervisor publishes the final receipt', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  const answer = path.join(f.root, 'malformed-answer');
+  const after = path.join(f.root, 'after-status');
+  const poke = `const s=require('net').connect(+process.argv[1],'127.0.0.1',()=>s.write('GET http://[::1/deploy.sh HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n'));let b='';s.on('data',d=>{b+=d;if(/\\r\\n\\r\\n/.test(b)){require('fs').writeFileSync(process.argv[2],b.split('\\r\\n')[0]);s.destroy();process.exit(0)}});s.on('error',()=>{});setTimeout(()=>process.exit(0),3000)`;
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `${quote(process.execPath)} -e ${quote(poke)} "$1" ${quote(answer)}\ncurl -q --proxy "" --noproxy "*" -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/deploy.sh" > ${quote(after)}\ntouch `));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  const result = await run(f);
+  assert.equal(result.code, 0, result.output);
+  assert.match(fs.readFileSync(answer, 'utf8'), /^HTTP\/1\.1 400 /);
+  assert.equal(fs.readFileSync(after, 'utf8'), '200', 'the server keeps serving after the malformed request');
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^state=complete$/m);
+  assert.match(record, /^verdict=success$/m);
+  const log = fs.readFileSync(path.join(f.env.DEPLOY_OFFLINE_LOG_DIR, 'deploy-fixture.log'), 'utf8');
+  assert.doesNotMatch(log, /ERR_INVALID_URL|offline supervisor fault/, log);
+  assert.match(fs.readFileSync(path.join(f.env.DEPLOY_OFFLINE_TMP_ROOT, 'deploy-bundle-fixture', '.local-server.log'), 'utf8'), /^400 bad_request$/m);
+});
+
+test('any other exception inside the request handler answers 500 and keeps the server and supervisor running', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  const codes = path.join(f.root, 'codes');
+  const get = `curl -q --proxy "" --noproxy "*" -sS -o /dev/null -w '%{http_code}\\n' "http://127.0.0.1:$1/deploy.sh" >> ${quote(codes)}`;
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `${get}\n${get}\ntouch `));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  // The first GET from the deploy throws from inside the handler.
+  const inject = `const http=require('http');const w=http.ServerResponse.prototype.writeHead;let armed=true;http.ServerResponse.prototype.writeHead=function(code,...rest){if(armed&&code===200&&this.req&&this.req.method==='GET'){armed=false;throw new Error('injected handler fault')}return w.call(this,code,...rest)};`;
+  const { stdout, stderr } = await exec(process.execPath, ['-e', `${inject}const r=require(${JSON.stringify(runtime)});const lines=[];r.supervise(r.config(${JSON.stringify(args)}),{accessLog(line){lines.push(line)}}).then(code=>{if(armed)throw Error('handler fault not exercised');console.log('ACCESS '+JSON.stringify(lines));process.exitCode=code})`], { env: f.env, timeout: 15000 });
+  assert.deepEqual(fs.readFileSync(codes, 'utf8').trim().split('\n'), ['500', '200']);
+  assert.match(fs.readFileSync(f.result, 'utf8'), /^verdict=success$/m, stdout + stderr);
+  assert.match(stdout, /"500 handler_error"/);
+  assert.match(stderr, /WARN: deploy server request failed: handler_error/);
+  assert.doesNotMatch(stderr, /injected handler fault/, 'the error text stays out of the log');
+});
+
+test('an exception outside every handler cannot strand the receipt at running; it records a terminal failure', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  const script = path.join(f.stage, 'deploy.sh');
+  const finished = path.join(f.root, 'child-finished');
+  fs.writeFileSync(script, fs.readFileSync(script, 'utf8').replace('touch ', `touch ${quote(path.join(f.root, 'deploying'))}\nsleep 2\ntouch ${quote(finished)}\ntouch `));
+  await exec(process.execPath, [manifestTool, 'create', f.stage, 'fixture-commit']); await f.pack();
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  const deploying = path.join(f.root, 'deploying');
+  const thrower = `const fs=require('fs');const iv=setInterval(()=>{if(fs.existsSync(${JSON.stringify(deploying)})){clearInterval(iv);setImmediate(()=>{throw new Error('injected supervisor fault')})}},20);`;
+  const { stdout, stderr } = await exec(process.execPath, ['-e', `${thrower}const r=require(${JSON.stringify(runtime)});r.supervise(r.config(${JSON.stringify(args)})).then(code=>{console.log('CODE '+code);process.exitCode=code===1?0:9})`], { env: f.env, timeout: 15000 });
+  assert.match(stdout, /^CODE 1$/m, stdout + stderr);
+  assert.equal(fs.existsSync(finished), true, 'the supervisor waited for the deploy');
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^state=complete$/m);
+  assert.match(record, /^verdict=incomplete-recovery$/m);
+  assert.match(record, /^reason_code=supervisor_failed$/m);
+  assert.match(stderr, /ERROR: offline supervisor fault \(uncaught\)/);
+  assert.doesNotMatch(stderr, /injected supervisor fault/);
+  const read = await exec('sh', [offline, '--result', f.result]).then(r => ({ code: 0, out: r.stdout }), e => ({ code: e.code, out: e.stdout }));
+  assert.equal(read.code, 1);
+});
+
+test('an exception before the deploy starts refuses with supervisor_failed and never runs deploy.sh', { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  fs.mkdirSync(f.env.DEPLOY_OFFLINE_LOG_DIR);
+  const runtime = path.join(__dirname, 'deploy-offline-runtime.js');
+  const args = [f.bundle, '--port', String(await freePort())];
+  // The hook never settles; only the fault can end the wait.
+  const { stdout, stderr } = await exec(process.execPath, ['-e', `const r=require(${JSON.stringify(runtime)});r.supervise(r.config(${JSON.stringify(args)}),{beforeDeploy(){setImmediate(()=>{throw new Error('injected pre-start fault')});return new Promise(()=>{})}}).then(code=>{console.log('CODE '+code);process.exitCode=code===1?0:9})`], { env: f.env, timeout: 15000 });
+  assert.match(stdout, /^CODE 1$/m, stdout + stderr);
+  const record = fs.readFileSync(f.result, 'utf8');
+  assert.match(record, /^state=complete$/m);
+  assert.match(record, /^verdict=refused$/m);
+  assert.match(record, /^reason_code=supervisor_failed$/m);
+  assert.equal(fs.existsSync(path.join(f.root, 'started')), false);
+});
+
 test('two concurrent pushes with one source label isolate GUI hashes, launchers and expected digests', { timeout: 30000 }, async t => {
   const first = await fixture(t); const second = await fixture(t);
   fs.cpSync(first.stage, second.stage, { recursive: true });

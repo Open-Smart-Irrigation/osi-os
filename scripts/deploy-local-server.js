@@ -24,7 +24,14 @@ function safeResolve(rootDir, requestPath) {
   }
   if (decoded.indexOf('\0') !== -1) return null;
 
-  const parsed = url.parse(decoded);
+  // url.parse throws on malformed absolute-form targets such as
+  // `http://[::1/x`; that is a bad request, never a server failure.
+  let parsed;
+  try {
+    parsed = url.parse(decoded);
+  } catch {
+    return null;
+  }
   let pathname = parsed.pathname || '/';
   // Strip leading slashes so path.join treats it as relative to rootDir
   // (an absolute-looking segment must never override the root).
@@ -52,6 +59,7 @@ function createVerifiedServer(input, options = {}) {
   }
   const diagnostic = options.log || (() => {});
   let logFailed = false;
+  let handlerFailed = false;
   const log = line => {
     try { diagnostic(line); }
     catch (error) {
@@ -59,12 +67,24 @@ function createVerifiedServer(input, options = {}) {
       logFailed = true;
     }
   };
-  return http.createServer((req, res) => {
+  // Answers a request that failed inside the handler. Only fixed reason codes
+  // reach the logs; the request target is untrusted and is not repeated.
+  const fail = (res, status, reason) => {
+    log(`${status} ${reason}`);
+    try {
+      if (!res.headersSent) { res.writeHead(status, { 'Content-Type': 'text/plain' }); res.end(status === 400 ? 'Bad request\n' : 'Internal error\n'); }
+      else res.destroy();
+    } catch (error) {
+      log('500 response_failed');
+      try { res.destroy(); } catch (destroyError) { log('500 destroy_failed'); }
+    }
+  };
+  const handle = (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return;
     }
     const target = safeResolve('/bundle', req.url || '/');
-    if (!target) { res.writeHead(400); res.end('Bad request\n'); return; }
+    if (!target) { fail(res, 400, 'bad_request'); return; }
     const bytes = files.get(path.relative('/bundle', target));
     const code = bytes ? 200 : 404;
     log(`${code} ${req.method} ${req.url}`);
@@ -74,6 +94,17 @@ function createVerifiedServer(input, options = {}) {
       'X-Deploy-Instance': options.nonce || '',
     });
     res.end(req.method === 'HEAD' ? undefined : bytes);
+  };
+  // Every exception inside the handler ends that one request. The server, and
+  // the supervisor that hosts it, keep running.
+  return http.createServer((req, res) => {
+    try { handle(req, res); }
+    catch (error) {
+      // The error text may carry request bytes; stderr gets the fixed code.
+      if (!handlerFailed) console.error('WARN: deploy server request failed: handler_error');
+      handlerFailed = true;
+      fail(res, 500, 'handler_error');
+    }
   });
 }
 function createServer(rootDir, options = {}) {

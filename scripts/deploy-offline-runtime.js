@@ -162,6 +162,23 @@ async function supervise(cfg, hooks = {}) {
       try { process.kill(-child.pid, signal); } catch (e) { if (e.code !== 'ESRCH') console.error(e); }
     }
   });
+  // Backstop: an exception that escapes every local handler must neither kill
+  // this process (which owns the server, signal forwarding and the receipt)
+  // nor let the receipt stay at state=running. The supervisor keeps waiting
+  // for a running deploy and then publishes a non-success verdict.
+  let fault = false, launched = false, raiseFault;
+  const faulted = new Promise((resolve, reject) => { raiseFault = reject; });
+  faulted.catch(() => {});
+  const onFault = error => {
+    const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code || '') ? error.code : 'uncaught';
+    console.error(`ERROR: offline supervisor fault (${code}); the final receipt reports supervisor_failed`);
+    if (!fault) { fault = true; raiseFault(new Error('supervisor fault')); }
+  };
+  process.on('uncaughtException', onFault);
+  process.on('unhandledRejection', onFault);
+  // Steps before the deploy starts give up on a fault; the deploy itself is
+  // always waited for, because its own traps run the recovery.
+  const guarded = promise => Promise.race([promise, faulted]);
   let record;
   try {
     fs.mkdirSync(cfg.private, { mode: 0o700 });
@@ -182,18 +199,19 @@ async function supervise(cfg, hooks = {}) {
     const serverLog = fs.openSync(path.join(cfg.extract, '.local-server.log'), 'a', 0o600);
     const nonce = crypto.randomBytes(24).toString('hex');
     server = createVerifiedServer(tree.files, { hashes: tree.hashes, nonce, log: hooks.accessLog || (line => fs.writeSync(serverLog, `${line}\n`)) });
-    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(cfg.port, '127.0.0.1', resolve); });
+    await guarded(new Promise((resolve, reject) => { server.once('error', reject); server.listen(cfg.port, '127.0.0.1', resolve); }));
     fs.writeSync(serverLog, `READY http://127.0.0.1:${cfg.port} root=${cfg.extract}\n`);
     fs.writeFileSync(path.join(cfg.extract, '.local-server.pid'), String(process.pid), { mode: 0o600 });
     // Probe this instance, never a pre-existing listener on the same port.
-    await new Promise((resolve, reject) => {
+    await guarded(new Promise((resolve, reject) => {
       const req = http.request({ host: '127.0.0.1', port: cfg.port, path: '/deploy.sh', method: 'HEAD' }, res => {
         res.resume(); res.on('end', () => res.statusCode === 200 && res.headers['x-deploy-instance'] === nonce ? resolve() : reject(new Error('wrong server instance')));
       }); req.on('error', reject); req.end();
-    });
+    }));
     phase = 'supervisor_failed';
-    if (hooks.beforeDeploy) await hooks.beforeDeploy();
-    await new Promise(resolve => setImmediate(resolve));
+    if (hooks.beforeDeploy) await guarded(Promise.resolve(hooks.beforeDeploy()));
+    await guarded(new Promise(resolve => setImmediate(resolve)));
+    if (fault) throw new Error('supervisor fault before deploy start');
     if (interrupted) record = { verdict: 'interrupted', exit_code: signalStatus(interrupted), reason_code: 'interrupted' };
     else {
       durableWrite(cfg.result, encode({ state: 'running', verdict: 'pending', exit_code: 125, bundle_sha256: bundleHash, reason_code: 'pending' }));
@@ -203,6 +221,7 @@ async function supervise(cfg, hooks = {}) {
       child = spawn('sh', ['-s', '--', String(cfg.port), path.join(cfg.extract, 'deploy.sh')], { detached: true, stdio: ['pipe', process.stdout, process.stderr], env: { ...process.env, DEPLOY_OFFLINE_MODE: '1', DEPLOY_OUTCOME_FILE: outcomeFile, DEPLOY_LOGFILE: cfg.log, DEPLOY_BUNDLE_SHA256: bundleHash } });
       child.stdin.on('error', e => { if (e.code !== 'EPIPE') console.error(e); });
       child.stdin.end(tree.files.get('deploy.sh'));
+      launched = true;
       notify({ launched: true });
       const rc = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve(code ?? signalStatus(signal))); });
       child = undefined;
@@ -213,13 +232,23 @@ async function supervise(cfg, hooks = {}) {
     console.error('ERROR: offline supervisor:', error);
     record = { verdict: interrupted ? 'interrupted' : phase === 'supervisor_failed' ? 'incomplete-recovery' : 'refused', exit_code: interrupted ? signalStatus(interrupted) : 1, reason_code: interrupted ? 'interrupted' : phase, bundle_sha256: bundleHash };
   }
-  if (server?.listening) await new Promise(resolve => server.close(resolve));
+  if (fault) {
+    // Fail closed: a supervisor that faulted cannot vouch for the result. A
+    // proven hold keeps its DEPLOY-HELD pointer; before the deploy started,
+    // nothing ran.
+    if (!launched) record = { verdict: interrupted ? 'interrupted' : 'refused', exit_code: interrupted ? signalStatus(interrupted) : 1, reason_code: interrupted ? 'interrupted' : 'supervisor_failed', bundle_sha256: bundleHash };
+    else if (record.verdict !== 'hold') record = { ...record, verdict: 'incomplete-recovery', exit_code: 1, reason_code: 'supervisor_failed' };
+  }
+  try { if (server?.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections?.(); }); }
+  catch (error) { console.error('WARN: deploy server close:', error); }
   const code = receipt.finish(record);
   // Compatibility marker is best effort; --wait observes supervisor exit and
   // cannot be stranded by a full /tmp or a failed marker write.
   try { fs.writeFileSync(path.join(cfg.extract, '.deploy.rc'), `${code}\n`, { mode: 0o600 }); } catch (e) { console.error('WARN: completion marker:', e); }
   notify({ complete: true, code });
   if (process.connected) process.disconnect();
+  process.removeListener('uncaughtException', onFault);
+  process.removeListener('unhandledRejection', onFault);
   return code;
 }
 async function launch(cfg, hooks = {}) {

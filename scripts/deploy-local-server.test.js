@@ -208,3 +208,22 @@ test('directory server keeps the bytes read before a file is replaced', async t 
   t.after(() => close(server));
   assert.equal((await get(address.port, '/deploy.sh')).body.toString(), 'verified snapshot');
 });
+
+test('a malformed absolute-form target is a bad request and the server keeps serving', async t => {
+  const { createVerifiedServer, safeResolve } = require('./deploy-local-server');
+  assert.equal(safeResolve('/bundle', 'http://[::1/deploy.sh'), null);
+  const lines = [];
+  const server = createVerifiedServer(new Map([['deploy.sh', Buffer.from('verified')]]), { log: line => lines.push(line) });
+  const address = await listen(server);
+  t.after(() => close(server));
+  const status = await new Promise((resolve, reject) => {
+    const socket = require('node:net').connect(address.port, '127.0.0.1', () => socket.write('GET http://[::1/deploy.sh HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+    let data = '';
+    socket.on('data', chunk => { data += chunk; });
+    socket.on('end', () => resolve(data.split('\r\n')[0]));
+    socket.on('error', reject);
+  });
+  assert.match(status, /^HTTP\/1\.1 400 /);
+  assert.deepEqual(lines, ['400 bad_request']);
+  assert.equal((await get(address.port, '/deploy.sh')).body.toString(), 'verified');
+});
