@@ -77,13 +77,13 @@ RF_RECEIPT_CHANNEL = 254
 RF_REQUEST_ID_SIZE = 8
 
 
-def rf_frame(payload, frequency, bandwidth=0, *, request_id=None):
+def rf_frame(payload, frequency, bandwidth=0, *, sf=7, request_id=None):
     channel = 255
     if request_id is not None:
         if len(request_id) != RF_REQUEST_ID_SIZE:
             raise ValueError('invalid WM1302 request ID size')
         channel = RF_RECEIPT_CHANNEL
-    return (struct.pack('>BBBIB', len(payload), channel, 7, frequency, bandwidth)
+    return (struct.pack('>BBBIB', len(payload), channel, sf, frequency, bandwidth)
             + (request_id or b'') + payload)
 
 
