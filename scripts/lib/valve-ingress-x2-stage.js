@@ -22,12 +22,16 @@ function stagedTree({applyHandoff=true}={}){
   if(applyHandoff){
   const {state,files}=handoff.verifyHandoff(dir);
   const patch=path.join(handoff.ROOT,handoff.PATCH);
+  // A later handoff owns the current bytes; the raw patch controls run from
+  // the legacy source bytes in test-valve-ingress-x2-handoff.js instead.
+  if(state!=='superseded'){
   if(state==='legacy')handoff.writeHandoff(dir);
   for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.after,'actual applied content: '+file.rel);
   handoff.applyReceiptPatch(dir,files,{patch,reverse:true});
   for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.before,'actual reversed content: '+file.rel);
   handoff.writeHandoff(dir);
   for(const file of files)assert.equal(fs.readFileSync(path.join(dir,file.rel),'utf8'),file.after,'actual reapplied content: '+file.rel);
+  }
   }
   git(['add','-A'],dir);
   return {dir,close(){fs.rmSync(dir,{recursive:true,force:true});}};

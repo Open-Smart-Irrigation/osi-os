@@ -1,0 +1,884 @@
+[
+  {
+    "name": "environment/local-zero",
+    "node": "zone-env-fn",
+    "gauge": true,
+    "rain": 0,
+    "measured": 12
+  },
+  {
+    "name": "environment/local-no-samples",
+    "node": "zone-env-fn",
+    "noSamples": true,
+    "noRain": true
+  },
+  {
+    "name": "environment/rain-complete",
+    "node": "zone-env-fn",
+    "gauge": true,
+    "rain": 0,
+    "coverage": "complete"
+  },
+  {
+    "name": "environment/rain-complete_so_far",
+    "node": "zone-env-fn",
+    "gauge": true,
+    "rain": 0,
+    "coverage": "complete_so_far"
+  },
+  {
+    "name": "environment/rain-partial",
+    "node": "zone-env-fn",
+    "gauge": true,
+    "rain": 0,
+    "coverage": "partial"
+  },
+  {
+    "name": "environment/rain-unknown",
+    "node": "zone-env-fn",
+    "gauge": true,
+    "rain": 0,
+    "coverage": "unknown"
+  },
+  {
+    "name": "environment/no-location",
+    "node": "zone-env-fn",
+    "noLocation": true
+  },
+  {
+    "name": "environment/stale-local-sensor",
+    "node": "zone-env-fn",
+    "sampleAt": "2026-10-24T21:00:00Z"
+  },
+  {
+    "name": "environment/shared-station",
+    "node": "zone-env-fn",
+    "sharedStation": true
+  },
+  {
+    "name": "environment/server-preferred-unlinked",
+    "node": "zone-env-fn",
+    "serverPreferred": true
+  },
+  {
+    "name": "environment/linked-no-identity",
+    "node": "zone-env-fn",
+    "linked": true,
+    "noIdentity": true
+  },
+  {
+    "name": "environment/shared-fresh",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 5
+  },
+  {
+    "name": "environment/shared-fetch",
+    "node": "zone-env-fn",
+    "linked": true
+  },
+  {
+    "name": "environment/shared-stale",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 5.01,
+    "httpFailure": "timeout",
+    "failSharedOnly": true
+  },
+  {
+    "name": "environment/shared-180",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 180,
+    "httpFailure": "status",
+    "failSharedOnly": true
+  },
+  {
+    "name": "environment/shared-expired",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 180.01,
+    "httpFailure": "malformed",
+    "failSharedOnly": true
+  },
+  {
+    "name": "environment/shared-yesterday",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 1,
+    "yesterday": true
+  },
+  {
+    "name": "environment/shared-corrupt",
+    "node": "zone-env-fn",
+    "linked": true,
+    "sharedAge": 1,
+    "badShared": true
+  },
+  {
+    "name": "environment/shared-empty",
+    "node": "zone-env-fn",
+    "linked": true,
+    "emptyShared": true
+  },
+  {
+    "name": "environment/current-forecast-cache",
+    "node": "zone-env-fn",
+    "cached": true
+  },
+  {
+    "name": "environment/cache-expired-refresh",
+    "node": "zone-env-fn",
+    "cached": true,
+    "expired": true
+  },
+  {
+    "name": "environment/cache-expiry-equal-now",
+    "node": "zone-env-fn",
+    "cached": true,
+    "expiresNow": true
+  },
+  {
+    "name": "environment/cache-current-only",
+    "node": "zone-env-fn",
+    "cached": true,
+    "currentOnly": true
+  },
+  {
+    "name": "environment/cache-forecast-only",
+    "node": "zone-env-fn",
+    "cached": true,
+    "forecastOnly": true
+  },
+  {
+    "name": "environment/cache-no-location",
+    "node": "zone-env-fn",
+    "cached": true,
+    "noLocation": true
+  },
+  {
+    "name": "environment/shared-fresh-unlinked",
+    "node": "zone-env-fn",
+    "sharedAge": 1
+  },
+  {
+    "name": "environment/cache-ttl-clamp",
+    "node": "zone-env-fn",
+    "env": {
+      "OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES": "-1",
+      "OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES": "-1"
+    }
+  },
+  {
+    "name": "environment/cache-ttl-invalid",
+    "node": "zone-env-fn",
+    "env": {
+      "OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES": "bad",
+      "OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES": "bad"
+    }
+  },
+  {
+    "name": "environment/cache-expired-offline",
+    "node": "zone-env-fn",
+    "cached": true,
+    "expired": true,
+    "httpFailure": "timeout"
+  },
+  {
+    "name": "environment/cache-corrupt",
+    "node": "zone-env-fn",
+    "cached": true,
+    "badCache": true
+  },
+  {
+    "name": "environment/openagri-token",
+    "node": "zone-env-fn",
+    "openagri": true
+  },
+  {
+    "name": "environment/openagri-static",
+    "node": "zone-env-fn",
+    "openagri": true,
+    "staticToken": true
+  },
+  {
+    "name": "environment/openagri-no-token",
+    "node": "zone-env-fn",
+    "openagri": true,
+    "noToken": true
+  },
+  {
+    "name": "environment/openagri-supplemental-rain",
+    "node": "zone-env-fn",
+    "openagri": true,
+    "supplementalRain": true
+  },
+  {
+    "name": "environment/precipitation-boundaries",
+    "node": "zone-env-fn",
+    "boundaryRain": true,
+    "now": "2026-10-25T01:00:00Z"
+  },
+  {
+    "name": "environment/null-calibration",
+    "node": "zone-env-fn",
+    "nullCalibration": true
+  },
+  {
+    "name": "environment/missing-depth-alternatives",
+    "node": "zone-env-fn"
+  },
+  {
+    "name": "environment/spring-DST",
+    "node": "zone-env-fn",
+    "timezone": "Europe/Zurich",
+    "now": "2026-03-29T01:30:00Z"
+  },
+  {
+    "name": "environment/fall-DST",
+    "node": "zone-env-fn",
+    "timezone": "Europe/Zurich"
+  },
+  {
+    "name": "environment/not-found",
+    "node": "zone-env-fn",
+    "notFound": true
+  },
+  {
+    "name": "environment/invalid-id",
+    "node": "zone-env-fn",
+    "invalidId": true
+  },
+  {
+    "name": "environment/missing-auth",
+    "node": "zone-env-fn",
+    "auth": "missing"
+  },
+  {
+    "name": "environment/invalid-auth",
+    "node": "zone-env-fn",
+    "auth": "invalid"
+  },
+  {
+    "name": "environment/expired-auth",
+    "node": "zone-env-fn",
+    "expiredAuth": true
+  },
+  {
+    "name": "environment/no-auth-secret",
+    "node": "zone-env-fn",
+    "env": {
+      "AUTH_TOKEN_SECRET": ""
+    },
+    "noSecret": true
+  },
+  {
+    "name": "environment/auth-storage-existing",
+    "node": "zone-env-fn",
+    "env": {
+      "AUTH_TOKEN_SECRET": ""
+    },
+    "authStorage": "existing"
+  },
+  {
+    "name": "environment/auth-storage-read-error",
+    "node": "zone-env-fn",
+    "env": {
+      "AUTH_TOKEN_SECRET": ""
+    },
+    "authStorage": "read-error"
+  },
+  {
+    "name": "environment/auth-storage-write-error",
+    "node": "zone-env-fn",
+    "env": {
+      "AUTH_TOKEN_SECRET": ""
+    },
+    "authStorage": "write-error"
+  },
+  {
+    "name": "environment/auth-storage-generate",
+    "node": "zone-env-fn",
+    "env": {
+      "AUTH_TOKEN_SECRET": ""
+    },
+    "authStorage": "generate"
+  },
+  {
+    "name": "environment/scoped",
+    "node": "zone-env-fn",
+    "scoped": true
+  },
+  {
+    "name": "environment/scoped-no-zone",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "scopeMissingZone": true
+  },
+  {
+    "name": "environment/scoped-helper-missing",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "missingModule": "scope"
+  },
+  {
+    "name": "environment/scoped-disabled",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "disabled": true
+  },
+  {
+    "name": "environment/scoped-helper-after-auth",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "missingModule": "scope",
+    "missingModuleOn": 2
+  },
+  {
+    "name": "environment/scoped-user-missing",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "unknownUser": true
+  },
+  {
+    "name": "environment/scoped-user-read-error",
+    "node": "zone-env-fn",
+    "scoped": true,
+    "faultPattern": "SELECT user_uuid FROM users"
+  },
+  {
+    "name": "environment/shared-write-error",
+    "node": "zone-env-fn",
+    "linked": true,
+    "faultPattern": "INSERT INTO zone_shared_environment"
+  },
+  {
+    "name": "environment/shared-station-read-error",
+    "node": "zone-env-fn",
+    "sharedStation": true,
+    "faultPattern": "WHERE d.deveui IN ("
+  },
+  {
+    "name": "environment/zone-helper-missing",
+    "node": "zone-env-fn",
+    "missingModule": "zone-env"
+  },
+  {
+    "name": "environment/rain-helper-missing",
+    "node": "zone-env-fn",
+    "missingModule": "rain"
+  },
+  {
+    "name": "environment/valve-helper-missing",
+    "node": "zone-env-fn",
+    "missingModule": "osi-valve-control"
+  },
+  {
+    "name": "environment/provider-timeout",
+    "node": "zone-env-fn",
+    "httpFailure": "timeout"
+  },
+  {
+    "name": "environment/provider-malformed",
+    "node": "zone-env-fn",
+    "httpFailure": "malformed"
+  },
+  {
+    "name": "environment/provider-status",
+    "node": "zone-env-fn",
+    "httpFailure": "status"
+  },
+  {
+    "name": "environment/provider-network",
+    "node": "zone-env-fn",
+    "httpFailure": "network"
+  },
+  {
+    "name": "environment/provider-empty",
+    "node": "zone-env-fn",
+    "httpFailure": "empty"
+  },
+  {
+    "name": "environment/provider-shape",
+    "node": "zone-env-fn",
+    "httpFailure": "shape"
+  },
+  {
+    "name": "actuations/normal",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": false,
+    "disabled": false,
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/no-user",
+    "node": "get-actuations-query",
+    "noUser": true,
+    "scoped": false,
+    "disabled": false,
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/scoped",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": true,
+    "disabled": false,
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/disabled",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": true,
+    "disabled": true,
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/scope-missing",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": true,
+    "disabled": false,
+    "missingModule": "scope",
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/valve-missing",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": false,
+    "disabled": false,
+    "missingModule": "osi-valve-control",
+    "manyReports": false,
+    "closeError": false
+  },
+  {
+    "name": "actuations/reports",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": false,
+    "disabled": false,
+    "manyReports": true,
+    "closeError": false
+  },
+  {
+    "name": "actuations/close-error",
+    "node": "get-actuations-query",
+    "noUser": false,
+    "scoped": false,
+    "disabled": false,
+    "manyReports": false,
+    "closeError": true
+  },
+  {
+    "name": "liters/normal",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/missing-auth",
+    "node": "strega-today-liters-fn",
+    "auth": "missing",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/invalid-auth",
+    "node": "strega-today-liters-fn",
+    "auth": "invalid",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/expired-auth",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": true,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/invalid-id",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": true,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/scoped",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": true,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/scope-missing",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": true,
+    "missingModule": "scope",
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/valve-missing",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "missingModule": "osi-valve-control",
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/close-error",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": true,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "liters/midnight",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T00:00:00Z"
+  },
+  {
+    "name": "liters/spring-DST",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-03-29T01:30:00Z"
+  },
+  {
+    "name": "liters/fall-DST",
+    "node": "strega-today-liters-fn",
+    "expiredAuth": false,
+    "invalidId": false,
+    "scoped": false,
+    "closeError": false,
+    "now": "2026-10-25T01:30:00.000Z"
+  },
+  {
+    "name": "actuations/scoped-read-error",
+    "node": "get-actuations-query",
+    "scoped": true,
+    "faultPattern": "SELECT user_uuid FROM users"
+  },
+  {
+    "name": "actuations/scoped-user-missing",
+    "node": "get-actuations-query",
+    "scoped": true,
+    "unknownUser": true
+  },
+  {
+    "name": "liters/scoped-helper-after-auth",
+    "node": "strega-today-liters-fn",
+    "scoped": true,
+    "missingModule": "scope",
+    "missingModuleOn": 2
+  },
+  {
+    "name": "liters/scoped-read-error",
+    "node": "strega-today-liters-fn",
+    "scoped": true,
+    "faultPattern": "SELECT user_uuid FROM users"
+  },
+  {
+    "name": "liters/scoped-user-missing",
+    "node": "strega-today-liters-fn",
+    "scoped": true,
+    "unknownUser": true
+  },
+  {
+    "name": "liters/zero-only",
+    "node": "strega-today-liters-fn",
+    "zeroVolume": true
+  },
+  {
+    "name": "liters/null-only",
+    "node": "strega-today-liters-fn",
+    "nullVolume": true
+  },
+  {
+    "name": "liters/scoped-disabled",
+    "node": "strega-today-liters-fn",
+    "scoped": true,
+    "disabled": true
+  },
+  {
+    "name": "response/status-matrix",
+    "node": "get-actuations-response"
+  },
+  {
+    "name": "response/invalid-rows",
+    "node": "get-actuations-response",
+    "badRows": true,
+    "expectThrown": true
+  },
+  {
+    "name": "environment/open-error",
+    "node": "zone-env-fn",
+    "openError": true,
+    "expectThrown": true
+  },
+  {
+    "name": "environment/close-error",
+    "node": "zone-env-fn",
+    "closeError": true,
+    "expectedCloses": 2
+  },
+  {
+    "name": "environment/module-missing-close-error",
+    "node": "zone-env-fn",
+    "missingModule": "zone-env",
+    "closeError": true,
+    "expectThrown": true
+  },
+  {
+    "name": "actuations/open-error",
+    "node": "get-actuations-query",
+    "openError": true,
+    "expectThrown": true
+  },
+  {
+    "name": "liters/open-error",
+    "node": "strega-today-liters-fn",
+    "openError": true
+  },
+  {
+    "name": "zone-env-fn/sql-failure-1",
+    "node": "zone-env-fn",
+    "faultSql": 1
+  },
+  {
+    "name": "zone-env-fn/sql-failure-2",
+    "node": "zone-env-fn",
+    "faultSql": 2
+  },
+  {
+    "name": "zone-env-fn/sql-failure-3",
+    "node": "zone-env-fn",
+    "faultSql": 3
+  },
+  {
+    "name": "zone-env-fn/sql-failure-4",
+    "node": "zone-env-fn",
+    "faultSql": 4
+  },
+  {
+    "name": "zone-env-fn/sql-failure-5",
+    "node": "zone-env-fn",
+    "faultSql": 5
+  },
+  {
+    "name": "zone-env-fn/sql-failure-6",
+    "node": "zone-env-fn",
+    "faultSql": 6
+  },
+  {
+    "name": "zone-env-fn/sql-failure-7",
+    "node": "zone-env-fn",
+    "faultSql": 7
+  },
+  {
+    "name": "zone-env-fn/sql-failure-8",
+    "node": "zone-env-fn",
+    "faultSql": 8
+  },
+  {
+    "name": "zone-env-fn/sql-failure-9",
+    "node": "zone-env-fn",
+    "faultSql": 9
+  },
+  {
+    "name": "zone-env-fn/sql-failure-10",
+    "node": "zone-env-fn",
+    "faultSql": 10
+  },
+  {
+    "name": "zone-env-fn/sql-failure-11",
+    "node": "zone-env-fn",
+    "faultSql": 11
+  },
+  {
+    "name": "zone-env-fn/sql-failure-12",
+    "node": "zone-env-fn",
+    "faultSql": 12
+  },
+  {
+    "name": "zone-env-fn/sql-failure-13",
+    "node": "zone-env-fn",
+    "faultSql": 13
+  },
+  {
+    "name": "zone-env-fn/sql-failure-14",
+    "node": "zone-env-fn",
+    "faultSql": 14
+  },
+  {
+    "name": "zone-env-fn/sql-failure-15",
+    "node": "zone-env-fn",
+    "faultSql": 15
+  },
+  {
+    "name": "zone-env-fn/sql-failure-16",
+    "node": "zone-env-fn",
+    "faultSql": 16
+  },
+  {
+    "name": "zone-env-fn/sql-failure-17",
+    "node": "zone-env-fn",
+    "faultSql": 17
+  },
+  {
+    "name": "zone-env-fn/sql-failure-18",
+    "node": "zone-env-fn",
+    "faultSql": 18
+  },
+  {
+    "name": "zone-env-fn/sql-failure-19",
+    "node": "zone-env-fn",
+    "faultSql": 19
+  },
+  {
+    "name": "zone-env-fn/sql-failure-20",
+    "node": "zone-env-fn",
+    "faultSql": 20
+  },
+  {
+    "name": "zone-env-fn/sql-failure-21",
+    "node": "zone-env-fn",
+    "faultSql": 21
+  },
+  {
+    "name": "zone-env-fn/sql-failure-22",
+    "node": "zone-env-fn",
+    "faultSql": 22
+  },
+  {
+    "name": "zone-env-fn/sql-failure-23",
+    "node": "zone-env-fn",
+    "faultSql": 23
+  },
+  {
+    "name": "zone-env-fn/sql-failure-24",
+    "node": "zone-env-fn",
+    "faultSql": 24
+  },
+  {
+    "name": "zone-env-fn/sql-failure-25",
+    "node": "zone-env-fn",
+    "faultSql": 25
+  },
+  {
+    "name": "zone-env-fn/sql-failure-26",
+    "node": "zone-env-fn",
+    "faultSql": 26
+  },
+  {
+    "name": "zone-env-fn/sql-failure-27",
+    "node": "zone-env-fn",
+    "faultSql": 27
+  },
+  {
+    "name": "zone-env-fn/sql-failure-28",
+    "node": "zone-env-fn",
+    "faultSql": 28
+  },
+  {
+    "name": "zone-env-fn/sql-failure-29",
+    "node": "zone-env-fn",
+    "faultSql": 29
+  },
+  {
+    "name": "zone-env-fn/sql-failure-30",
+    "node": "zone-env-fn",
+    "faultSql": 30
+  },
+  {
+    "name": "zone-env-fn/sql-failure-31",
+    "node": "zone-env-fn",
+    "faultSql": 31
+  },
+  {
+    "name": "zone-env-fn/sql-failure-32",
+    "node": "zone-env-fn",
+    "faultSql": 32
+  },
+  {
+    "name": "zone-env-fn/sql-failure-33",
+    "node": "zone-env-fn",
+    "faultSql": 33
+  },
+  {
+    "name": "zone-env-fn/sql-failure-34",
+    "node": "zone-env-fn",
+    "faultSql": 34
+  },
+  {
+    "name": "zone-env-fn/sql-failure-35",
+    "node": "zone-env-fn",
+    "faultSql": 35
+  },
+  {
+    "name": "zone-env-fn/sql-failure-36",
+    "node": "zone-env-fn",
+    "faultSql": 36
+  },
+  {
+    "name": "zone-env-fn/sql-failure-37",
+    "node": "zone-env-fn",
+    "faultSql": 37
+  },
+  {
+    "name": "zone-env-fn/sql-failure-38",
+    "node": "zone-env-fn",
+    "faultSql": 38
+  },
+  {
+    "name": "strega-today-liters-fn/sql-failure-1",
+    "node": "strega-today-liters-fn",
+    "faultSql": 1
+  },
+  {
+    "name": "get-actuations-query/sql-failure-1",
+    "node": "get-actuations-query",
+    "faultSql": 1
+  },
+  {
+    "name": "get-actuations-query/sql-failure-2",
+    "node": "get-actuations-query",
+    "faultSql": 2
+  }
+]

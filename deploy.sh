@@ -3596,6 +3596,14 @@ fetch_required "osi-zone-env index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/index.js" \
     "$MODULE_STAGE/osi-zone-env/index.js"
 
+fetch_required "osi-zone-env http-facade.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/http-facade.js" \
+    "$MODULE_STAGE/osi-zone-env/http-facade.js"
+
+fetch_required "osi-zone-env run-projection.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env/run-projection.js" \
+    "$MODULE_STAGE/osi-zone-env/run-projection.js"
+
 fetch_required "osi-weather-provider package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/package.json" \
     "$MODULE_STAGE/osi-weather-provider/package.json"

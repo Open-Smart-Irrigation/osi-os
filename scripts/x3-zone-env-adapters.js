@@ -1,0 +1,143 @@
+'use strict';
+// Exact handoff, prepared without writing either reserved flows.json.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const legacy = require('./fixtures/x3-zone-env/legacy-nodes.json');
+const METHODS = { 'zone-env-fn': 'environmentSummary', 'strega-today-liters-fn': 'todayLiters', 'get-actuations-query': 'queryActuations', 'get-actuations-response': 'formatActuations' };
+function loader(id) {
+  return `let loaded = osiLib.require('zone-env');
+if (loaded.ok) {
+  try { void loaded.value.${METHODS[id]}; }
+  catch (error) { loaded = { ok: false, error: String(error && error.message ? error.message : error) }; }
+}`;
+}
+function body(id) {
+  if (id === 'strega-today-liters-fn') {
+    const source = legacy.find(n => n.id === id).func;
+    const start = source.indexOf("  const db = new osiDb.Database('/data/db/farming.db');");
+    const tail = source.indexOf('})().catch((error) =>');
+    return source.slice(0, start) + `  ${loader(id)}
+  if (!loaded.ok) {
+    node.error('strega-today-liters-fn: zone-env module unavailable: ' + loaded.error, msg);
+    msg.statusCode = 503;
+    msg.payload = { message: 'Internal error' };
+    return msg;
+  }
+  return loaded.value.todayLiters(msg, { auth, deveui, scopedOn, todayIso, osiDb, osiLib, env, node, Date });
+` + source.slice(tail) + '\n';
+  }
+
+  if (id === 'zone-env-fn') return `return (async () => {
+const db = new osiDb.Database('/data/db/farming.db');
+${loader(id)}
+if (!loaded.ok) {
+  msg.statusCode = 503;
+  msg.payload = { error: 'module_unavailable', module: 'zone-env', message: loaded.error };
+  node.error('Zone Env Summary: assembly module unavailable: ' + loaded.error, msg);
+  await new Promise(resolve => db.close(() => resolve()));
+  return msg;
+}
+return await loaded.value.environmentSummary(msg, { db, ZE: loaded.value, osiLib, crypto, httpLib, httpsLib, env, node, global, Date });
+})();\n`;
+  const parameters = id === 'strega-today-liters-fn' ? 'osiDb, osiLib, crypto, env, node, global, Date' : id === 'get-actuations-query' ? 'osiDb, osiLib, env, node, Date' : 'Date';
+  const early = id === 'get-actuations-query' ? `if (!msg.payload || msg.payload.length === 0) {\n  msg.statusCode = 401;\n  msg.payload = { message: 'User not found' };\n  return [null, msg];\n}\n` : '';
+  return `${early}${loader(id)}
+if (!loaded.ok) {
+  node.error('${id}: zone-env module unavailable: ' + loaded.error, msg);
+  msg.statusCode = 503;
+  msg.payload = { message: 'Internal error' };
+  return ${id === 'get-actuations-query' ? '[null, msg]' : 'msg'};
+}
+return loaded.value.${METHODS[id]}(msg, { ${parameters} });\n`;
+}
+function adaptNode(node) {
+  assert.ok(METHODS[node.id], 'not an X3 node');
+  const original = legacy.find(n => n.id === node.id);
+  // Do not silently overwrite intervening X1/X2 or package changes. The
+  // dispatcher must re-characterise and regenerate the handoff on conflict.
+  assert.ok(node.func === original.func || node.func === body(node.id), `${node.id}: source changed since characterization`);
+  const next = { ...node, func: body(node.id) };
+  if (!(node.libs || []).some(lib => lib.var === 'osiLib')) next.libs = [...(node.libs || []), { var: 'osiLib', module: 'osi-lib' }];
+  return next;
+}
+function applyTo(flows) { return flows.map(n => METHODS[n.id] ? adaptNode(n) : n); }
+const ROOT = fs.realpathSync(path.resolve(__dirname, '..'));
+const FLOW_PATHS = ['bcm2712', 'bcm2709'].map(p => `conf/full_raspberrypi_bcm27xx_${p}/files/usr/share/flows.json`);
+const BASELINES = ['scripts/fixtures/silent-catch-baseline.json', 'scripts/verify-no-stray-ddl-baseline.json'];
+const HANDOFF_FILES = [...FLOW_PATHS, ...BASELINES];
+const RECOUNT_NOTE = '; X3 moves six catches into visible module diagnostics; recount on the candidate, land this baseline only with its flows swap.';
+function handoffState(root = ROOT) {
+  const states = new Set();
+  const { countSilentCatchesInFlow } = require('./verify-no-new-silent-catch');
+  const { countMarkers, textSourcesFromContent } = require('./verify-no-stray-ddl');
+  const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
+  const flows = new Map(FLOW_PATHS.map(relative => [relative, JSON.parse(read(relative))]));
+  for (const [relative, nodes] of flows) for (const original of legacy) {
+    const matches = nodes.filter(n => n.id === original.id);
+    assert.equal(matches.length, 1, 'missing/duplicate X3 node: ' + original.id);
+    const node = matches[0];
+    const state = node.func === original.func ? 'legacy' : 'integrated';
+    assert.deepEqual(node, state === 'legacy' ? original : adaptNode(original), 'unreviewed X3 adapter/metadata: ' + relative + ' ' + original.id);
+    states.add(state);
+  }
+  assert.equal(states.size, 1, 'partial X3 handoff application');
+  const state = [...states][0];
+  const silent = JSON.parse(read(BASELINES[0]));
+  for (const entry of Object.values(silent.profiles)) {
+    assert.ok(flows.has(entry.path), 'unknown silent-catch profile');
+    assert.equal(entry.silentCatchCount, countSilentCatchesInFlow(flows.get(entry.path)).silentCatchCount, 'partial/stale silent-catch recount: ' + entry.path);
+  }
+  assert.equal(Object.keys(silent.profiles).length, 2, 'both silent-catch profiles required');
+  assert.equal(silent.generatedFrom.split(RECOUNT_NOTE).length - 1, state === 'integrated' ? 1 : 0, 'partial/stale X3 recount provenance');
+  const ddl = JSON.parse(read(BASELINES[1]));
+  assert.deepEqual(Object.keys(ddl.files).sort(), [...FLOW_PATHS, 'deploy.sh'].sort(), 'DDL recount scope');
+  let total = 0;
+  for (const relative of Object.keys(ddl.files)) {
+    const counts = countMarkers(textSourcesFromContent(relative, read(relative)));
+    assert.deepEqual(ddl.files[relative], counts, 'partial/stale DDL recount: ' + relative);
+    total += counts.total;
+  }
+  assert.equal(ddl.total, total, 'partial/stale DDL total');
+  return state;
+}
+function renderHandoff(requested) {
+  assert.ok(requested && path.isAbsolute(requested), 'pass an absolute scratch directory');
+  const normalized = path.resolve(requested);
+  assert.ok(normalized !== ROOT && !normalized.startsWith(ROOT + path.sep), 'scratch must be outside this checkout');
+  fs.mkdirSync(normalized, { recursive: true });
+  const scratch = fs.realpathSync(normalized);
+  assert.ok(scratch !== ROOT && !scratch.startsWith(ROOT + path.sep), 'scratch symlink must be outside this checkout');
+  for (const relative of FLOW_PATHS) {
+    const original = fs.readFileSync(path.join(ROOT, relative), 'utf8');
+    const flows = JSON.parse(original);
+    assert.equal(JSON.stringify(flows, null, 2) + '\n', original, relative + ' roundtrip');
+    const target = path.join(scratch, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(applyTo(flows), null, 2) + '\n');
+  }
+  const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, BASELINES[0])));
+  const { countSilentCatchesInFlow } = require('./verify-no-new-silent-catch');
+  for (const entry of Object.values(baseline.profiles)) entry.silentCatchCount = countSilentCatchesInFlow(JSON.parse(fs.readFileSync(path.join(scratch, entry.path)))).silentCatchCount;
+  if (!baseline.generatedFrom.includes(RECOUNT_NOTE)) baseline.generatedFrom += RECOUNT_NOTE;
+  const silentPath = path.join(scratch, BASELINES[0]);
+  fs.mkdirSync(path.dirname(silentPath), { recursive: true });
+  fs.writeFileSync(silentPath, JSON.stringify(baseline, null, 2) + '\n');
+  const env = { ...process.env, X3_REPO_ROOT: ROOT, X3_RENDER_ROOT: scratch,
+    NODE_OPTIONS: '--require=' + path.join(__dirname, 'lib/x3-flows-read-overlay.cjs') };
+  const { spawnSync } = require('node:child_process');
+  const result = spawnSync(process.execPath, ['scripts/verify-no-stray-ddl.js', '--write-baseline', '--baseline', path.join(scratch, BASELINES[1])], { cwd: ROOT, env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  return scratch;
+}
+function renderPatch(scratch) {
+  renderHandoff(scratch);
+  const { spawnSync } = require('node:child_process');
+  return HANDOFF_FILES.map(relative => {
+    const diff = spawnSync('diff', ['-u', '--label', 'a/' + relative, '--label', 'b/' + relative, path.join(ROOT, relative), path.join(scratch, relative)], { encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+    assert.ok(diff.status === 0 || diff.status === 1, diff.stderr);
+    return diff.stdout;
+  }).join('');
+}
+if (require.main === module) process.stdout.write(renderPatch(process.argv[2]));
+module.exports = { adaptNode, applyTo, body, METHODS, renderHandoff, renderPatch, HANDOFF_FILES, FLOW_PATHS, BASELINES, handoffState, RECOUNT_NOTE };

@@ -1155,3 +1155,21 @@ module.exports = {
   mergeDailyIrrigationSplit,
   overlayLocalWaterIrrigationSplit,
 };
+
+// Existing helpers must remain loadable when an extraction file is absent or
+// broken. Resolve a new entry point only when a caller actually requests it.
+function lazyEntry(name, load) {
+  Object.defineProperty(module.exports, name, {
+    enumerable: true, configurable: true,
+    get() {
+      const value = load();
+      Object.defineProperty(module.exports, name, { value, enumerable: true, configurable: true, writable: true });
+      return value;
+    },
+  });
+}
+lazyEntry('environmentSummary', () => require('./http-facade').environmentSummary);
+lazyEntry('todayLiters', () => require('./run-projection').todayLiters);
+lazyEntry('queryActuations', () => require('./run-projection').queryActuations);
+lazyEntry('formatActuations', () => require('./run-projection').formatActuations);
+lazyEntry('loadEstimatedIrrigationByLocalDate', () => require('./run-projection').loadEstimatedIrrigationByLocalDate);
