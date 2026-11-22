@@ -19,7 +19,7 @@ The snapshot contains 166 HTTP entry nodes per profile: 73 inline HMAC implement
 | G7 | Cloud command identity/current-role enforcement is incomplete: REGISTER_DEVICE, generic system commands, valve schedule helpers and scoped-user/grant mutations need EB5a audit. Cloud transport authority does not prove actor authority. |
 | G8 | No durable link incarnation/independent credential revision fences unlink/relink. v1 linked change repeats verifier version 1; edge can replace different verifier at equal version; unlink resets version. Delayed delivery can restore prior credentials/binding. Transport-subject disable can strand even an online revocation. |
 | G9 | Browser session epoch isolates client caches after observed logout/401; it is neither server revocation nor push notification. An idle tab can retain its stored token. |
-| G11 | Edge GET /api/users lacks grant assignments and flag-off account/grant administration returns 404. CTO R2 requires real admin on fresh bootstrap and one recorded original-bootstrap-only upgrade, plus audit/release note and operator fallback. |
+| G11 | Edge GET /api/users lacks grant assignments and flag-off account/grant administration returns 404. CTO R2 requires real admin on fresh bootstrap and one recorded upgrade of the original bootstrap account (or, under the 22 Nov addendum, the first enabled account after a shipped default account), plus audit/release note and operator fallback. |
 | G10 | Some verifiers allow absent/zero expiry or treat exp equality as valid. K1 requires bounded expiry and rejection at now >= exp. |
 | G12 | Public feature discovery, account-wide measurement export, ownerless legacy today-liters read and writer-only valve list have different admission paths; shared route groups cannot describe them as one bearer/scope gate. |
 
@@ -349,9 +349,11 @@ to add, and no legacy application path. No product question remains open.
 
 R2 adds exactly one recorded, audited promotion of the original enabled bootstrap
 account when an existing installation has no enabled admin. This is separate
-from fresh zero-user bootstrap, which stores admin in both flags. It never
-selects a later surviving account. Missing/disabled original bootstrap uses
-operator recovery, and the exact release-note line is in v1.md and the
+from fresh zero-user bootstrap, which stores admin in both flags. It selects a
+later account in one case only: under the 22 Nov addendum, a row 1 that is still
+the shipped default account with its non-bcrypt default credential is never
+promoted, and the first enabled account inserted after it is. Otherwise a missing
+or disabled original bootstrap, or no qualifying account, uses operator recovery, and the exact release-note line is in v1.md and the
 admin-upgrade fixture. Runtime migration/receipt work remains with EB5b/EB6.
 
 R8b uses the new authority_actor_v1 report for actor-bearing commands, with cloud
@@ -363,7 +365,8 @@ never attributed to an owner. The protected ACK/mirror fence remains unchanged.
 The round-two R2 proof is `users.id=1` plus SQLite's retained
 `sqlite_sequence(name='users').seq` insertion marker. The baseline writes no
 dedicated bootstrap flag. The original enabled row with that evidence must be
-promoted by the one-time upgrade; missing/disabled original or absent
+promoted by the one-time upgrade, unless it is the shipped default account
+(addendum above); missing/disabled original or absent
 insertion proof uses operator recovery only as the fallback. Do not infer a
 bootstrap identity from the lowest surviving row or a wall-clock timestamp.
 

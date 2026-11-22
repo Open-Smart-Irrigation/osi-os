@@ -269,15 +269,25 @@ function runAdminUpgrade(initial, steps, assertProjection) {
         const insertionEvidence = Number.isInteger(state.users_sequence) && state.users_sequence >= 1
           && state.accounts.every(a => a.id <= state.users_sequence);
         const original = insertionEvidence ? state.accounts.find(a => a.id === 1) : null;
-        const promote = !existingAdmin && original && original.enabled;
+        // Addendum 22 Nov: row 1 still holding the shipped default account with its
+        // non-bcrypt default credential is never promoted; the first enabled account
+        // inserted after it (lowest id above 1, not created_at) is promoted instead.
+        const shippedDefault = Boolean(original && original.shipped_default_credential);
+        const target = shippedDefault
+          ? state.accounts.filter(a => a.id > 1 && a.enabled).sort((a, b) => a.id - b.id)[0] || null
+          : (original && original.enabled ? original : null);
+        const promote = !existingAdmin && Boolean(target);
+        const outcome = existingAdmin ? 'admin_exists'
+          : !promote ? 'operator_recovery_required'
+          : shippedDefault ? 'promoted_first_account_after_shipped_default' : 'promoted_original_bootstrap';
         if (promote) {
-          original.role = 'admin';
-          original.generation++;
-          state.audit.push({ event: 'bootstrap_admin_upgrade', user_uuid: original.user_uuid, ruling_date: '2026-11-20' });
+          target.role = 'admin';
+          target.generation++;
+          state.audit.push({ event: 'bootstrap_admin_upgrade', user_uuid: target.user_uuid, ruling_date: shippedDefault ? '2026-11-22' : '2026-11-20' });
           state.release_notes.push(state.release_note_line);
         }
-        state.receipt = { step: 'bootstrap_admin_upgrade_v1', outcome: existingAdmin ? 'admin_exists' : promote ? 'promoted_original_bootstrap' : 'operator_recovery_required', target_uuid: promote ? original.user_uuid : null };
-        result = { decision: state.receipt.outcome, promotions: promote ? 1 : 0 };
+        state.receipt = { step: 'bootstrap_admin_upgrade_v1', outcome, target_uuid: promote ? target.user_uuid : null };
+        result = { decision: outcome, promotions: promote ? 1 : 0 };
       }
     } else if (step.op === 'disable_original') {
       const account = state.accounts.find(a => a.id === 1);

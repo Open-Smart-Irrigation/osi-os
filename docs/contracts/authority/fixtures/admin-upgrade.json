@@ -1,8 +1,8 @@
 {
   "contract_version": "authority-v1",
-  "ruling": "R2, 20 Nov 2026",
-  "representation": "Run one recorded upgrade transaction only when no enabled admin exists. Resolve original bootstrap from surviving users.id=1 and sqlite_sequence(users).seq evidence; never MIN(remaining users.id). The pinned registration flow writes no dedicated bootstrap marker. The AUTOINCREMENT row-id and sqlite_sequence entry are its durable insertion evidence. Operator recovery is only the fallback when original account is missing/disabled or this evidence is genuinely absent.",
-  "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+  "ruling": "R2, 20 Nov 2026; addendum 22 Nov 2026",
+  "representation": "Run one recorded upgrade transaction only when no enabled admin exists. Resolve original bootstrap from surviving users.id=1 and sqlite_sequence(users).seq evidence; never MIN(remaining users.id). The pinned registration flow writes no dedicated bootstrap marker. The AUTOINCREMENT row-id and sqlite_sequence entry are its durable insertion evidence. Operator recovery is only the fallback when original account is missing/disabled or this evidence is genuinely absent. Addendum 22 Nov 2026: if row 1 is still the shipped default account with its non-bcrypt default credential, it is never promoted; the first enabled account inserted after it (lowest users.id above 1, never created_at) is promoted instead, and operator recovery applies only if there is none. A default account whose password was changed to a bcrypt hash is a real account and is promoted as the original.",
+  "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
   "cases": [
     {
       "id": "bootstrap-row-and-sequence-proof-present-flag-0",
@@ -37,7 +37,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -86,7 +86,7 @@
               }
             ],
             "release_notes": [
-              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
             ],
             "receipt": {
               "step": "bootstrap_admin_upgrade_v1",
@@ -144,7 +144,7 @@
               }
             ],
             "release_notes": [
-              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
             ],
             "receipt": {
               "step": "bootstrap_admin_upgrade_v1",
@@ -188,7 +188,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -237,7 +237,7 @@
               }
             ],
             "release_notes": [
-              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
             ],
             "receipt": {
               "step": "bootstrap_admin_upgrade_v1",
@@ -295,7 +295,7 @@
               }
             ],
             "release_notes": [
-              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
             ],
             "receipt": {
               "step": "bootstrap_admin_upgrade_v1",
@@ -331,7 +331,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 3
       },
       "steps": [
@@ -408,7 +408,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -493,7 +493,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": null
       },
       "steps": [
@@ -578,7 +578,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -658,7 +658,7 @@
         "receipt": null,
         "audit": [],
         "release_notes": [],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -749,9 +749,9 @@
           }
         ],
         "release_notes": [
-          "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+          "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
         ],
-        "release_note_line": "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery.",
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
         "users_sequence": 4
       },
       "steps": [
@@ -803,8 +803,293 @@
               }
             ],
             "release_notes": [
-              "The 0.9 upgrade records a one-time promotion of the original enabled bootstrap account to Admin on gateways with no enabled admin. Other accounts are not promoted; a missing or disabled bootstrap account requires operator recovery."
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
             ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "shipped-default-row1-promotes-first-enabled-later-account",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2025-12-30T00:00:00Z",
+            "shipped_default_credential": true
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "researcher",
+            "enabled": false,
+            "generation": 2,
+            "id": 2,
+            "created_at": "2026-01-02T00:00:00Z"
+          },
+          {
+            "user_uuid": "33333333-3333-4333-8333-333333333333",
+            "role": "viewer",
+            "enabled": true,
+            "generation": 3,
+            "id": 3,
+            "created_at": "2026-01-03T00:00:00Z"
+          },
+          {
+            "user_uuid": "44444444-4444-4444-8444-444444444444",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 4,
+            "id": 4,
+            "created_at": "2025-06-01T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
+        "users_sequence": 4
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "promoted_first_account_after_shipped_default",
+            "promotions": 1
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2025-12-30T00:00:00Z",
+                "shipped_default_credential": true
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "researcher",
+                "enabled": false,
+                "generation": 2,
+                "id": 2,
+                "created_at": "2026-01-02T00:00:00Z"
+              },
+              {
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "role": "admin",
+                "enabled": true,
+                "generation": 4,
+                "id": 3,
+                "created_at": "2026-01-03T00:00:00Z"
+              },
+              {
+                "user_uuid": "44444444-4444-4444-8444-444444444444",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 4,
+                "id": 4,
+                "created_at": "2025-06-01T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "33333333-3333-4333-8333-333333333333",
+                "ruling_date": "2026-11-22"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_first_account_after_shipped_default",
+              "target_uuid": "33333333-3333-4333-8333-333333333333"
+            }
+          }
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "noop",
+            "reason": "already_recorded",
+            "promotions": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "shipped-default-row1-no-enabled-later-account-operator-fallback",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2025-12-30T00:00:00Z",
+            "shipped_default_credential": true
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "researcher",
+            "enabled": false,
+            "generation": 2,
+            "id": 2,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
+        "users_sequence": 2
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "operator_recovery_required",
+            "promotions": 0
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 7,
+                "id": 1,
+                "created_at": "2025-12-30T00:00:00Z",
+                "shipped_default_credential": true
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "researcher",
+                "enabled": false,
+                "generation": 2,
+                "id": 2,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [],
+            "release_notes": [],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "operator_recovery_required",
+              "target_uuid": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "changed-default-password-row1-promoted-as-original",
+      "initial": {
+        "scoped_access": false,
+        "accounts": [
+          {
+            "user_uuid": "11111111-1111-4111-8111-111111111111",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 7,
+            "id": 1,
+            "created_at": "2025-12-30T00:00:00Z",
+            "shipped_default_credential": false
+          },
+          {
+            "user_uuid": "22222222-2222-4222-8222-222222222222",
+            "role": "researcher",
+            "enabled": true,
+            "generation": 2,
+            "id": 2,
+            "created_at": "2026-01-02T00:00:00Z"
+          }
+        ],
+        "receipt": null,
+        "audit": [],
+        "release_notes": [],
+        "release_note_line": "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required.",
+        "users_sequence": 2
+      },
+      "steps": [
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "promoted_original_bootstrap",
+            "promotions": 1
+          }
+        },
+        {
+          "op": "assert_state",
+          "expected": {
+            "accounts": [
+              {
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "role": "admin",
+                "enabled": true,
+                "generation": 8,
+                "id": 1,
+                "created_at": "2025-12-30T00:00:00Z",
+                "shipped_default_credential": false
+              },
+              {
+                "user_uuid": "22222222-2222-4222-8222-222222222222",
+                "role": "researcher",
+                "enabled": true,
+                "generation": 2,
+                "id": 2,
+                "created_at": "2026-01-02T00:00:00Z"
+              }
+            ],
+            "audit": [
+              {
+                "event": "bootstrap_admin_upgrade",
+                "user_uuid": "11111111-1111-4111-8111-111111111111",
+                "ruling_date": "2026-11-20"
+              }
+            ],
+            "release_notes": [
+              "The 0.9 upgrade records a one-time promotion to Admin on gateways with no enabled admin. It promotes the original enabled bootstrap account or, if that account is still the shipped default account with its non-bcrypt default credential, the first enabled account created after it. Other accounts are not promoted; if no account qualifies, operator recovery is required."
+            ],
+            "receipt": {
+              "step": "bootstrap_admin_upgrade_v1",
+              "outcome": "promoted_original_bootstrap",
+              "target_uuid": "11111111-1111-4111-8111-111111111111"
+            }
+          }
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "upgrade",
+          "commit": true,
+          "expected": {
+            "decision": "noop",
+            "reason": "already_recorded",
+            "promotions": 0
           }
         }
       ]

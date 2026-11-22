@@ -1792,6 +1792,10 @@
                   "created_at": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "shipped_default_credential": {
+                    "type": "boolean",
+                    "description": "Row is the shipped default account with its non-bcrypt default credential (addendum, 22 Nov 2026). Absent or false: a real account, including a default account whose password was changed to a bcrypt hash."
                   }
                 },
                 "required": [
@@ -1843,7 +1847,10 @@
                     "type": "string"
                   },
                   "ruling_date": {
-                    "const": "2026-11-20"
+                    "enum": [
+                      "2026-11-20",
+                      "2026-11-22"
+                    ]
                   }
                 },
                 "required": [

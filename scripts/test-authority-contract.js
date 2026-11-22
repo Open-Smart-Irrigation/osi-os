@@ -274,6 +274,20 @@ function verify() {
   const selectedSurvivor = mutantModel('state.accounts.find(a => a.id === 1)', 'state.accounts.reduce((first, a) => !first || a.id < first.id ? a : first, null)');
   assert.throws(() => selectedSurvivor.runAdminUpgrade(missingBootstrap.initial, missingBootstrap.steps,
     (actual, expected, op) => projection(actual, expected, op)), /decision/);
+  // Addendum 22 Nov: a model that ignores the shipped default credential promotes row 1.
+  const promotedShippedDefault = mutantModel('Boolean(original && original.shipped_default_credential)', 'false');
+  for (const id of ['shipped-default-row1-promotes-first-enabled-later-account', 'shipped-default-row1-no-enabled-later-account-operator-fallback']) {
+    const c = upgrades.cases.find(x => x.id === id);
+    assert.ok(c, id);
+    assert.throws(() => promotedShippedDefault.runAdminUpgrade(c.initial, c.steps,
+      (actual, expected, op) => projection(actual, expected, op)), /decision|accounts|role|receipt/);
+  }
+  // Ordering after row 1 is insertion order (users.id), never created_at.
+  const byCreatedAt = mutantModel('.sort((a, b) => a.id - b.id)', '.sort((a, b) => a.created_at.localeCompare(b.created_at))');
+  const laterAccount = upgrades.cases.find(x => x.id === 'shipped-default-row1-promotes-first-enabled-later-account');
+  assert.throws(() => byCreatedAt.runAdminUpgrade(laterAccount.initial, laterAccount.steps,
+    (actual, expected, op) => projection(actual, expected, op)), /./);
+  assert.ok(upgrades.cases.some(c => c.id === 'changed-default-password-row1-promoted-as-original'));
   const freshLogin = revocation.cases.find(c => c.id === 'offline-boot-at-build-time-fresh-login-succeeds');
   const refusedFreshLogin = mutantModel("case 'login': result = loginValid(step)", "case 'login': if (s.now_ms < s.high_water_ms) { result = deny('session_expired'); break; } result = loginValid(step)");
   assert.throws(() => refusedFreshLogin.runLifecycle(freshLogin.initial, freshLogin.steps, authority.valid_defaults,
