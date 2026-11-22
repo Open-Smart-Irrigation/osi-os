@@ -133,3 +133,27 @@ The first applied run exhausted its 1 GiB scratch area: step 82 reported 264 ENO
 The fresh depth-one transport clone used the integrated candidate tree, a main-ancestry parent, no PR refs and no object alternates. Every PR-only commit object was absent. Original/additive parity, sequence traces, handoff, evidence/dependency boundaries and both native runtimes passed there. The merged seed images and calibration data match approved main individually; ordered schema files and the retired allowance file retain the approved bytes. Recounting the physically applied profiles confirms 65 silent catches and 347 DDL markers per profile, with zero empty catches in the moved module, matching the committed handoff receipt.
 
 The round's stopwatch records disjoint UTC intervals for authoring, local gates, waiting for `osi-heavy` and CI waiting in `/home/phil/builds/osi-v082-fix-20261112/reviews/705-r3/time.json`. The final head, exact-head CI observation, UTC interval table and four measured totals are recorded after push in that directory's `execution-report.md`; recording the post-push wait there avoids changing the validated head. The reservation cost is still zero. The earlier rounds' incomplete authoring split remains unmeasured.
+
+## Reservation window, 22 November
+
+The lead granted the flows.json reservation at 15:31Z, after EB2 #701 merged as `169df0f3`. Startup resume at `c5e38254`: WARN, stale base only (6 behind, 8 ahead of `origin/main` `169df0f32`), AGENTS revision `c63103827`. Another idle worktree held the branch name, so this work used local branch `x1-handoff` and pushes to `extract/x1-daily-scheduler`.
+
+- **Merge:** `origin/main` (`169df0f32`) merged without conflicts. Before the handoff, both flows.json files equalled main's. No seed DB, ordered SQL or `CHECKSUMS.json` changed in the merge.
+- **Patch check:** EB2 changed 47 nodes and removed none. None is an X1 node, none wires into an X1 node, and `preflight.js` is unchanged. A fresh render against the new main yields a patch byte-identical to the committed `flows-handoff.patch`, hunk offsets included. No regeneration was needed.
+- **Handoff:** applied by a one-shot JSON mutation that calls the repo renderer (`adaptFlows`) on both profiles. Round trips were byte-identical before and after the mutation, both profiles are equal, and both match the scratch render.
+- **Staged-baseline receipt:** the handoff check failed on the stale `staged-baselines.json`. EB2 brought main to 320 function nodes and 59 silent catches per profile, where the receipt recorded 314 and 65. The applied tree's counts equal main's exactly (X1 delta zero; DDL markers 347 on both sides). The receipt was regenerated with `stagedBaselines()`; it is not one of the pinned oracle files.
+- **osi-heavy:** not used, by CTO order (the machine is restarting). The native-runtime checks and release smokes rely on CI's release-runtime-smoke jobs on the exact head.
+
+### Slot timing (UTC, 22 Nov)
+
+| Event | Time |
+|---|---|
+| Reservation received | 15:31 |
+| Merge of `origin/main` done | 15:32:58 |
+| Patch verified (no re-render needed) | 15:33:30 |
+| Handoff applied, both profiles | 15:33:38 |
+| Handoff check green after receipt refresh | 15:44:35 |
+
+### Push log
+
+1. Push 1 (~15:45Z): merge, applied handoff and refreshed receipt. Green before push: parity (378), additional (42), sequences (50), handoff (integrated mode), boundaries, prepared-adapter tests. Still running or not yet run: prepared-adapter guards and the repo verifiers.

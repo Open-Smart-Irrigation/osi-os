@@ -2,8 +2,8 @@
   "profiles": {
     "full_raspberrypi_bcm27xx_bcm2712": {
       "silentCatch": {
-        "functionNodeCount": 314,
-        "silentCatchCount": 65
+        "functionNodeCount": 320,
+        "silentCatchCount": 59
       },
       "ddl": {
         "createTable": 33,
@@ -19,8 +19,8 @@
     },
     "full_raspberrypi_bcm27xx_bcm2709": {
       "silentCatch": {
-        "functionNodeCount": 314,
-        "silentCatchCount": 65
+        "functionNodeCount": 320,
+        "silentCatchCount": 59
       },
       "ddl": {
         "createTable": 33,
