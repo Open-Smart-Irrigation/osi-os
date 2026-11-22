@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+
+# Capture the overlay error cursor before S08/S10 initialization writes.
+START=07
+STOP=07
+USE_PROCD=
+SOCKET=/var/run/osi-rootfs-grow-flush.sock
+
+start() {
+  [ -f /etc/osi-rootfs-grow.partitioned ] && return 0
+  [ -f /etc/osi-rootfs-grow-needs-resize ] && return 0
+  . /usr/libexec/osi-rootfs-grow.sh || return 1
+  if ! osi_rootfs_target; then
+    [ "$ROOT_FSTYPE" = f2fs ] && return 0
+    return 1
+  fi
+  [ "$ROOT_MOUNT" = /overlay ] || return 0
+  osi_rootfs_provisioned && return 0
+  mkdir -p /var/run || return 1
+  /usr/libexec/osi-rootfs-flush arm /overlay "$SOCKET" || {
+    logger -t osi-rootfs-grow "cannot arm early overlay writeback monitor; automatic growth reboot disabled"
+    return 1
+  }
+}
+
+stop() {
+  [ -S "$SOCKET" ] || return 0
+  /usr/libexec/osi-rootfs-flush stop /overlay "$SOCKET"
+}
