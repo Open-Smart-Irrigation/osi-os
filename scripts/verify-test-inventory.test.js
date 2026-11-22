@@ -1247,3 +1247,13 @@ test('this repository passes', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /verify-test-inventory: OK/);
 });
+
+test('positive max-old-space-size keeps direct node tests collected', () => {
+  for (const size of [192, 512]) {
+    const run = `node --max-old-space-size=${size} --test scripts/a.test.js`;
+    assert.deepEqual(verify(gatedRepo({ run })).errors, [], run);
+  }
+  for (const value of ['nope', '-1', '0']) {
+    assert.match(errorsOf(gatedRepo({ run: `node --max-old-space-size=${value} --test scripts/a.test.js` })), /node option .* is not modelled/);
+  }
+});
