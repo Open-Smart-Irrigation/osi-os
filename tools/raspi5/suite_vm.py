@@ -231,8 +231,15 @@ class Guest:
             chunk=os.read(self.process.stdout.fileno(),65536)
             if not chunk:
                 raise RuntimeError('guest serial closed')
-            self.capture(chunk)
             self.buf=(self.buf+chunk)[-2_000_000:]
+            try:
+                self.capture(chunk)
+            except OSError as error:
+                # The receipt is diagnostics; the parser keeps every byte.
+                try:
+                    self.note(f'console receipt write failed: {error!r}')
+                except OSError:
+                    pass
 
     def command(self, shell, timeout=90, *, until=None):
         tag=secrets.token_hex(8)

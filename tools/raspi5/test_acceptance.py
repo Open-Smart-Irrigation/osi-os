@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 from shlex import quote
+import shutil
 import socket
 import subprocess
 import tarfile
@@ -844,9 +845,9 @@ exit 1"""
         self.assertEqual(acceptance.READY_PROBE.count('wget -q -T 2 '), 2)
         self.assertGreaterEqual(acceptance.READY_PROBE_SECONDS, 2 * 2 * 2)
 
-    SHELLS = [shell for shell in (['sh'], ['dash'], ['busybox', 'sh'])
-              if subprocess.run(['which', shell[0]], stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL).returncode == 0]
+    @staticmethod
+    def shells():
+        return [shell for shell in (['sh'], ['dash'], ['busybox', 'sh']) if shutil.which(shell[0])]
 
     def run_slow_script(self, shell, wget, budget, poll):
         # Runs the generated guest script on the host with stub commands; the
@@ -862,9 +863,10 @@ exit 1"""
             script, timeout = acceptance.ready_script(budget, poll)
             # Absolute stub paths: a busybox built with standalone applets runs its
             # own wget and pidof before searching PATH.
-            replacements = {'/data/db/farming.db': str(root/'farming.db'), '/tmp/gui': str(root/'gui'),
-                            'bounded wget ': f'bounded {stubs}/wget ', 'pidof chirpstack': f'{stubs}/pidof chirpstack',
-                            acceptance.READY_ADDRESS: f'{stubs}/ip'}
+            replacements = {'/data/db/farming.db': quote(str(root/'farming.db')), '/tmp/gui': quote(str(root/'gui')),
+                            'bounded wget ': f'bounded {quote(str(stubs/"wget"))} ',
+                            'pidof chirpstack': f'{quote(str(stubs/"pidof"))} chirpstack',
+                            acceptance.READY_ADDRESS: quote(str(stubs/'ip'))}
             for old, new in replacements.items():
                 self.assertIn(old, script)
                 script = script.replace(old, new)
@@ -880,7 +882,7 @@ exit 1"""
         # Mimics uclient-fetch rearming -T on every body chunk: never finishes.
         trickle = 'echo $$ >> "$STUB_ROOT/pids"\nwhile :; do echo chunk; sleep 1; done'
         budget, poll = 2, 1
-        for shell in self.SHELLS:
+        for shell in self.shells():
             with self.subTest(shell=shell):
                 code, elapsed, timeout, pids = self.run_slow_script(shell, trickle, budget, poll)
                 self.assertEqual(code, 1)
@@ -894,7 +896,7 @@ exit 1"""
     def test_slow_boot_script_succeeds_when_both_probes_answer(self):
         answer = ('while [ $# -gt 0 ]; do [ "$1" = -O ] && out=$2; shift; done\n'
                   'echo "<html>" > "$out"')
-        for shell in self.SHELLS:
+        for shell in self.shells():
             with self.subTest(shell=shell):
                 code, elapsed, _, _ = self.run_slow_script(shell, answer, 30, 1)
                 self.assertEqual(code, 0)
@@ -1001,6 +1003,21 @@ exit 1"""
                 else:
                     self.assertEqual(serial.read_bytes(), b'boot log\nmarker\nafter marker and shutdown')
 
+    def test_failed_receipt_write_keeps_the_chunk_for_the_parser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=False)
+            vm.boots = 1
+            read, write = os.pipe()
+            vm.process = SimpleNamespace(stdout=os.fdopen(read, 'rb'))
+            vm.buf = b''
+            os.write(write, b'marker\n')
+            with patch.object(vm, 'capture', side_effect=OSError('disk full')):
+                self.assertEqual(vm.expect(rb'marker\n', 5).group(0), b'marker\n')
+            os.close(write)
+            vm.process.stdout.close()
+            self.assertIn("console receipt write failed: OSError('disk full')",
+                          (vm.receipts/'harness-events.log').read_text())
+
     def test_serial_receipt_keeps_head_and_tail_with_a_marker(self):
         with tempfile.TemporaryDirectory() as directory:
             vm = self.guest(directory, private=False)
@@ -1023,6 +1040,9 @@ exit 1"""
             vm.DRAIN_SECONDS = 0.3
             vm.boots = 1
             read, write = os.pipe()
+            # Bytes already waiting when the drain starts: the receipt check does
+            # not depend on when the writer thread is first scheduled.
+            os.write(write, b'still talking\n')
             running = True
             def chatty():
                 while running:
