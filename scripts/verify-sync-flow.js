@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const { functionSource } = require('./flow-function-source');
 const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -466,7 +467,7 @@ function expectIncludesById(nodeId, needle, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (!String(node.func || '').includes(needle)) {
+  if (!functionSource(node, nodeRedRoot).includes(needle)) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -479,7 +480,7 @@ function expectPatternById(nodeId, pattern, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (!pattern.test(String(node.func || ''))) {
+  if (!pattern.test(functionSource(node, nodeRedRoot))) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -492,7 +493,7 @@ function expectExcludesById(nodeId, needle, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (String(node.func || '').includes(needle)) {
+  if (functionSource(node, nodeRedRoot).includes(needle)) {
     fail(`${nodeId} still contains ${description}`);
   } else {
     console.log(`OK ${nodeId} removed ${description}`);

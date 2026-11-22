@@ -18,6 +18,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { functionSource } = require('./flow-function-source');
 const { execFileSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { facadeDb, loadNode } = require('./lib/flow-node-harness');
@@ -216,7 +217,7 @@ function controlFixture(providerSetting, highVpd) {
 async function controlOutcome(db, profile) {
   const { row } = recommendation(db, '2026-10-08');
   const scheduler = loadNode('5f0d2b7e9b9b1b3a', path.join(ROOT, profile, 'flows.json'));
-  const multiplierSource = scheduler.func.match(/function applyDurationMultiplier\([^]*?\n\}/);
+  const multiplierSource = functionSource(scheduler, path.join(ROOT, profile, 'node-red')).match(/function applyDurationMultiplier\([^]*?\n\}/);
   assert.ok(multiplierSource, 'test executes the shipped scheduler multiplier');
   const scaled = vm.runInNewContext('(' + multiplierSource[0] + ')')(100, row.irrigation_action);
   const { readEvidence } = require(path.join(ROOT, profile, 'node-red/osi-irrigation-policy/observations'));

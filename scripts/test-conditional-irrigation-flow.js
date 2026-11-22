@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { functionSource } = require('./flow-function-source');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -48,8 +49,8 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   assert.match(dueFn.func, /createProvisioningClientFromEnv/);
   const legacyQuery = flow.find((node) => node.id === 'a0a61f4b7dca1c2e');
   assert.ok(legacyQuery, `${profile}: legacy schedule query is installed`);
-  assert.match(legacyQuery.func, /NOT EXISTS[\s\S]*irrigation_policies[\s\S]*p\.deleted_at IS NULL/);
-  assert.doesNotMatch(legacyQuery.func, /p\.enabled\s*=\s*1/);
+  assert.match(functionSource(legacyQuery, path.join(path.dirname(flowPath), 'node-red')), /NOT EXISTS[\s\S]*irrigation_policies[\s\S]*p\.deleted_at IS NULL/);
+  assert.doesNotMatch(functionSource(legacyQuery, path.join(path.dirname(flowPath), 'node-red')), /p\.enabled\s*=\s*1/);
   const lifecycleCommand = flow.find((node) => node.id === 'conditional-lifecycle-command-adapter');
   assert.ok(lifecycleCommand, `${profile}: cloud lifecycle adapter is installed`);
   assert.equal(lifecycleCommand.outputs, 3, `${profile}: lifecycle adapter has raw fallback, durable ACK and S2120 unclaim ACK outputs`);

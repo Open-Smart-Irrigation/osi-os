@@ -8,6 +8,7 @@ const os = require('node:os');
 const http = require('node:http');
 const https = require('node:https');
 const vm = require('node:vm');
+const { functionSource } = require('./flow-function-source');
 const assert = require('node:assert/strict');
 const { spawnSync, execFileSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
@@ -140,7 +141,7 @@ async function parent() {
       assert.equal(snapshots[0].length, 2);
       assert.deepEqual(snapshots[1], snapshots[0], 'a failed restart retains observations, action, freshness and sync_version');
       const scheduler = JSON.parse(fs.readFileSync(path.join(ROOT, profile, 'flows.json'), 'utf8')).find(n => n.id === '5f0d2b7e9b9b1b3a');
-      const multiply = vm.runInNewContext('(' + scheduler.func.match(/function applyDurationMultiplier\([^]*?\n\}/)[0] + ')');
+      const multiply = vm.runInNewContext('(' + functionSource(scheduler, path.join(ROOT, profile, 'node-red')).match(/function applyDurationMultiplier\([^]*?\n\}/)[0] + ')');
       assert.equal(multiply(20, snapshots[1][0].irrigation_action), gate === '1' ? 18 : 22);
       const processes = ['success', 'restart'].map(phase => JSON.parse(fs.readFileSync(path.join(directory, phase + '.json'))));
       assert.notEqual(processes[0].pid, processes[1].pid);

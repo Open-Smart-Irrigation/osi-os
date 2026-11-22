@@ -35,6 +35,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Install pinned runtime
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: X1 scheduler parity on the image runtime
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke/node_modules/node-red" node scripts/test-daily-scheduler-node-red.js
+      - name: X1 native duplicate-send and extra-port negative controls
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke/node_modules/node-red" node scripts/test-daily-scheduler-native-controls.js
       - name: Node file serializes the flows' SQLite connection (three package layouts)
         run: node --test scripts/test-sqlite-serialize-node-file.js
       - name: Deploy keeps a working node file when its fetch fails
@@ -100,6 +104,10 @@ jobs:
         run: npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
       - name: Install pinned packages for the node-file layouts and external lock holder
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: X1 scheduler parity on the stock runtime
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke-stock/node_modules/node-red" node scripts/test-daily-scheduler-node-red.js
+      - name: X1 native duplicate-send and extra-port negative controls
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke-stock/node_modules/node-red" node scripts/test-daily-scheduler-native-controls.js
       - name: Node file serializes the flows' SQLite connection on both runtimes
         run: node scripts/test-release-smoke-stock-node-file.js
       - name: Start stock runtime with the deploy-style user install
