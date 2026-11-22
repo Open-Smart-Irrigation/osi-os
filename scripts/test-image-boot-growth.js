@@ -195,7 +195,7 @@ exec ${q(fstoolsLifecycle())} done "$FIXTURE/overlay"`);
     assert.ok(!g.stamped()); ok(g.run('defaults')); ok(g.run('late')); ok(g.run()); assert.ok(g.stamped());
   });
   for (const name of ['farming.db', 'farming.db-wal', 'farming.db-shm', 'farming.db-journal']) test(`${path.basename(shell)} refuses partition changes on provisioned media: ${name}`, t => {
-    const g = fixture(t); g.put(`data/db/${name}`, 'history-canary'); ok(g.run('defaults'));
+    const g = fixture(t); g.put('sys/class/block/mmcblk0p2/size', '10000\n'); g.put(`data/db/${name}`, 'history-canary'); ok(g.run('defaults'));
     assert.doesNotMatch(g.calls(), /parted |reboot|resize2fs /); assert.equal(fs.readFileSync(g.p(`data/db/${name}`), 'utf8'), 'history-canary');
   });
   test(`${path.basename(shell)} pending online ext4 growth preserves provisioned database and sidecars`, t => {
