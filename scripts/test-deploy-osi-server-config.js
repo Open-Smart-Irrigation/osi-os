@@ -176,5 +176,15 @@ test('deploy.sh creates the configuration before it replaces settings.js and wri
 test('the bundle path carries the defaults script: deploy-offline.sh runs the bundled deploy.sh', () => {
   const { computeFetchList } = require('./deploy-fetch-list');
   assert.ok(computeFetchList(REPO).includes(DEFAULTS_REL));
-  assert.match(fs.readFileSync(path.join(REPO, 'scripts', 'deploy-offline.sh'), 'utf8'), /deploy\.sh/);
+  const launcher = fs.readFileSync(path.join(REPO, 'scripts', 'deploy-offline.sh'), 'utf8');
+  const supervisor = fs.readFileSync(path.join(REPO, 'scripts', 'deploy-offline-runtime.js'), 'utf8');
+  assert.ok(launcher.includes('exec node "$script_dir/deploy-offline-runtime.js" "$@"'), 'launcher delegates to the trusted supervisor');
+  const verified = supervisor.indexOf('const tree = verifiedBundle(bytes)');
+  const execute = supervisor.indexOf("child.stdin.end(tree.files.get('deploy.sh'))");
+  assert.ok(verified >= 0 && execute > verified, 'the bundled script executes from the verified byte snapshot');
+  // The shell reads its script from stdin (-s with a piped stdin); the
+  // extracted path is only a positional argument after --, never the script.
+  const spawnCall = /child = spawn\('sh', \['-s', '--', String\(cfg\.port\), path\.join\(cfg\.extract, 'deploy\.sh'\)\], \{[^\n]*stdio: \['pipe',/.exec(supervisor);
+  assert.ok(spawnCall, 'the deploy shell runs `sh -s -- <port> <extracted path>` with a piped stdin');
+  assert.equal((supervisor.match(/spawn\('sh'/g) || []).length, 1, 'there is no second shell spawn');
 });

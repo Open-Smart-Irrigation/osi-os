@@ -4,6 +4,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { accountStageSource } = require('./lib/installation-osi-lib');
 
 const root = path.resolve(__dirname, '..');
 const flows = JSON.parse(fs.readFileSync(
@@ -17,8 +18,22 @@ function node(name) {
   return found;
 }
 
+// The account-link stages moved into the installation helper (EB2); their
+// nodes only delegate. Read those stages where they now live.
+const ACCOUNT_STAGES = {
+  'Build server auth request': ['build', 'accountLink_build'],
+  'Handle server auth response': ['handle', 'accountLink_handle'],
+  'Finalize linked account state': ['finalize', 'accountLink_finalize'],
+};
+
+function source(name) {
+  const found = node(name);
+  const stage = ACCOUNT_STAGES[name];
+  return stage ? accountStageSource(flows, 'bcm2712', found.id, stage[0], stage[1]) : found.func || '';
+}
+
 function includes(name, text) {
-  assert.match(node(name).func || '', new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${name}: ${text}`);
+  assert.match(source(name), new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${name}: ${text}`);
 }
 
 includes('Build server auth request', 'installation_recovery_v1');

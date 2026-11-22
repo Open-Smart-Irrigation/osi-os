@@ -16,12 +16,13 @@
 #   REACT_GUI_TARBALL   path to a pre-built react_gui.tar.gz
 #   OUT_DIR             where to write the bundle (default: $REPO_ROOT/dist)
 #   BUNDLE_SHA          override the git-sha segment of the output filename
-#   BUNDLE_TS           override the timestamp segment of the output filename
+#   BUNDLE_TS           optional legacy filename suffix (never stored inside)
+#   SOURCE_DATE_EPOCH   fixed archive mtime (default: 0)
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$script_dir/.." && pwd)}"
-REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-$1}"
+REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-${1:-}}"
 REACT_GUI_TARBALL="${REACT_GUI_TARBALL:-$REPO_ROOT/react_gui.tar.gz}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/dist}"
 
@@ -35,7 +36,12 @@ if [ ! -f "$REACT_GUI_TARBALL" ]; then
 fi
 
 BUNDLE_SHA="${BUNDLE_SHA:-$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo nogit)}"
-BUNDLE_TS="${BUNDLE_TS:-$(date -u +%Y%m%dT%H%M%SZ)}"
+BUNDLE_TS="${BUNDLE_TS:-}"
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
+export LC_ALL=C
+unset TAR_OPTIONS GZIP
+case "$BUNDLE_TS" in *[!a-zA-Z0-9_-]*) echo "ERROR: invalid BUNDLE_TS" >&2; exit 2 ;; esac
+case "$SOURCE_DATE_EPOCH" in ''|*[!0-9]*) echo "ERROR: invalid SOURCE_DATE_EPOCH" >&2; exit 2 ;; esac
 
 mkdir -p "$OUT_DIR"
 
@@ -75,12 +81,12 @@ done < "$fetch_list_file"
 cp "$REPO_ROOT/deploy.sh" "$stage_dir/deploy.sh"
 
 # deploy-local-server.js: also not part of computeFetchList's output (it is
-# offline-deploy tooling, not something deploy.sh itself fetches), but
-# deploy-offline.sh execs it from inside the extracted bundle
-# ($EXTRACT_DIR/scripts/deploy-local-server.js), so it must travel with the
-# bundle too.
+# offline-deploy tooling, not something deploy.sh itself fetches). Keep a
+# manifest-covered copy for inventory compatibility; the trusted launcher uses
+# its separately supplied copy, never code from an unverified archive.
 mkdir -p "$stage_dir/scripts"
 cp "$REPO_ROOT/scripts/deploy-local-server.js" "$stage_dir/scripts/deploy-local-server.js"
+cp "$REPO_ROOT/scripts/deploy-bundle-manifest.js" "$stage_dir/scripts/deploy-bundle-manifest.js"
 
 # The built GUI bundle, served at the bundle root to match deploy.sh's
 # `fetch "react_gui.tar.gz" ...` request.
@@ -89,10 +95,24 @@ cp "$REACT_GUI_TARBALL" "$stage_dir/react_gui.tar.gz"
 node "$REPO_ROOT/scripts/deploy-fetch-list.js" "$stage_dir" --verify-corpus-identities "$stage_dir/.corpus-identities.json"
 rm -f "$fetch_list_file" "$stage_dir/.corpus-identities.json"
 
-bundle_name="deploy-bundle-${BUNDLE_SHA}-${BUNDLE_TS}.tar.gz"
+find "$stage_dir" -type d -exec chmod 755 {} +
+find "$stage_dir" -type f -exec chmod 644 {} +
+node "$REPO_ROOT/scripts/deploy-bundle-manifest.js" create "$stage_dir" "$BUNDLE_SHA"
+
+bundle_name="deploy-bundle-${BUNDLE_SHA}${BUNDLE_TS:+-$BUNDLE_TS}.tar.gz"
 bundle_path="$OUT_DIR/$bundle_name"
 
-tar czf "$bundle_path" -C "$stage_dir" .
+# Normalize directories and files as well as archive metadata: the staging
+# umask, source permissions, owner names and build directory never enter it.
+# GNU format avoids PAX atime/ctime and extended-header host metadata.
+# A temporary output prevents a failed build publishing a partial bundle.
+bundle_tmp="$bundle_path.tmp-$$"
+trap 'rm -f "$bundle_tmp"; cleanup' EXIT INT TERM
+node "$REPO_ROOT/scripts/deploy-bundle-manifest.js" list "$stage_dir" | \
+  tar -C "$stage_dir" --null --no-recursion --files-from=- --format=gnu --mtime="@$SOURCE_DATE_EPOCH" \
+    --owner=0 --group=0 --numeric-owner --mode='a=rX,u+w,a-s' \
+    -cf - | gzip -n > "$bundle_tmp"
+mv "$bundle_tmp" "$bundle_path"
 
 sha256sum "$bundle_path" > "$bundle_path.sha256"
 # sha256sum writes the staged tarball's absolute path; rewrite to the bundle

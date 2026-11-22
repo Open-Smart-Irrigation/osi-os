@@ -345,6 +345,7 @@ class Gateway {
       osiLib: { require(module) {
         if (module === 'command-ingress' && self.commandIngress) return {ok:true,value:self.commandIngress};
         if (module === 'scope' && self.scope) return {ok:true,value:self.scope};
+        if (module === 'daily-scheduler') return { ok: true, value: require(path.join(self.definition.moduleDir, 'osi-daily-scheduler')) };
         if (module === 'osi-db-helper') return { ok: true, value: { Database } };
         if (module === 'osi-valve-control') return { ok: true, value: self.valveControl };
         if (module === 'osi-command-ledger') return { ok: true, value: self.commandLedger };

@@ -426,11 +426,22 @@ payload_hold_check() {
 
 start_service() {
     mkdir -p /srv/$PACKAGE_NAME
-    if [ -e "$OSI_DB_PATH.osi-recovery" ] || [ -L "$OSI_DB_PATH.osi-recovery" ]; then
-        logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH.osi-recovery before starting Node-RED."
-        return 1
-    fi
+    for recovery_suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+        if [ -e "$OSI_DB_PATH$recovery_suffix" ] || [ -L "$OSI_DB_PATH$recovery_suffix" ]; then
+            if [ "$recovery_suffix" != .osi-recovery ] || [ "${OSI_LEGACY_REPAIR_HEALTH:-0}" != 1 ] ||
+               ! node /usr/share/node-red/osi-db-integrity/index.js --repair-health-check "$OSI_DB_PATH" "/srv/$PACKAGE_NAME/flows.json"; then
+                logger -t node-red.init "HELD: Database recovery is incomplete. Resolve $OSI_DB_PATH$recovery_suffix before starting Node-RED."
+                return 1
+            fi
+        fi
+    done
     payload_switch_repair
+    # A pending-switch repair can change the selected payload. Re-prove the
+    # retirement after that switch, before any writer enters it.
+    if [ "${OSI_LEGACY_REPAIR_HEALTH:-0}" = 1 ] &&
+       { [ -e "$OSI_DB_PATH.osi-recovery" ] || [ -L "$OSI_DB_PATH.osi-recovery" ]; }; then
+        node /usr/share/node-red/osi-db-integrity/index.js --repair-health-check "$OSI_DB_PATH" "/srv/$PACKAGE_NAME/flows.json" || return 1
+    fi
     payload_schema_check || return 0
     payload_hold_check || return 0
 

@@ -328,7 +328,8 @@ function writeBaseline(options) {
   return baseline;
 }
 
-if (require.main === module) try {
+function main() {
+try {
   const options = parseArgs(process.argv.slice(2));
 
   if (options.writeBaseline) {
@@ -363,4 +364,6 @@ if (require.main === module) try {
   process.exit(1);
 }
 
+}
+if (require.main === module) main();
 module.exports = { countMarkers, textSourcesFromContent };

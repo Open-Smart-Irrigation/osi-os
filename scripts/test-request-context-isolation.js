@@ -27,6 +27,7 @@
 // Run: node --test scripts/test-request-context-isolation.js
 
 const assert = require('node:assert/strict');
+const { inlineForMutation } = require('./flow-function-source');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -2417,8 +2418,8 @@ test('cloned ingress mutant: removing the shared-key read changes the discrimina
 // same interleaving the isolation tests use. The tests are only evidence if this
 // shape makes A lose its own target.
 function sharedContextMutant(writerId, writerAnchor, writeLine, readerId, readerAnchor, readLine) {
-  const writer = require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(writerId));
-  const reader = require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(readerId));
+  const writer = inlineForMutation(require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(writerId)), MODULES);
+  const reader = inlineForMutation(require('./lib/valve-ingress-x2-source').resolvedNode(flowNode(readerId)), MODULES);
   assert.ok(writer.func.includes(writerAnchor), 'mutant anchor present in ' + writerId);
   assert.ok(reader.func.includes(readerAnchor), 'mutant anchor present in ' + readerId);
   return new Map([
@@ -3536,12 +3537,13 @@ test('dotted guard mutant: maintained-profile checker rejects test-only mutation
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'request-context-maintained-guard-mutant-'));
   const profileFiles = ['bcm2712', 'bcm2709'].map((profile) => ({
     source: profilePaths(profile).flowsPath,
+    moduleRoot: profilePaths(profile).nodeRedModules,
     copy: path.join(tempRoot, profile + '-flows.json'),
   }));
   const pristine = new Map();
   const checker = path.join(ROOT, 'scripts/verify-request-context-isolation.js');
   const runChecker = () => spawnSync(process.execPath,
-    [checker, ...profileFiles.flatMap(({ copy }) => ['--flows', copy])], { encoding: 'utf8' });
+    [checker, ...profileFiles.flatMap(({ copy, moduleRoot }) => ['--flows', copy, '--module-root', moduleRoot])], { encoding: 'utf8' });
   try {
     for (const { source, copy } of profileFiles) {
       const text = fs.readFileSync(source, 'utf8');

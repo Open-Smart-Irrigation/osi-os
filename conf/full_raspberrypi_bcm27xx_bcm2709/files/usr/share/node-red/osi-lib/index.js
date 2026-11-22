@@ -49,6 +49,7 @@ const NAME_TO_PATH = {
   // #356: the SWT query of the legacy threshold scheduler, called only by
   // "Build mean query (last hour, all datapoints)".
   'scheduler-mean-query': 'osi-scheduler-mean-query',
+  'daily-scheduler': 'osi-daily-scheduler',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',
   'weather-provider': 'osi-weather-provider',

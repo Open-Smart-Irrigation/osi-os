@@ -49,6 +49,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { functionSource } = require('./flow-function-source');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = [
@@ -67,9 +68,9 @@ const MIN_EXPECTED_NODES = 60;
 
 const SCOPE_CALL_RE = /osiLib\.require\(\s*['"]scope['"]\s*\)/;
 
-function findAuthGatedNodes(flows) {
+function findAuthGatedNodes(flows, modulesRoot = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red')) {
   return flows.filter(
-    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(require('./lib/valve-ingress-x2-source').resolvedNode(n).func)
+    (n) => n && n.type === 'function' && typeof n.func === 'string' && SCOPE_CALL_RE.test(functionSource(require('./lib/valve-ingress-x2-source').resolvedNode(n), modulesRoot))
   );
 }
 
@@ -140,13 +141,14 @@ class ScopeHelperTouchedError extends Error {}
 // present. Every other module name resolves to a benign
 // { ok: true, value: <auto-stub> }, matching osiLib.require's real
 // { ok, value | error } contract shape.
-function makeOsiLibStub(ingressOverride) {
+function makeOsiLibStub(modulesRoot = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'), ingressOverride) {
   let scopeTouched=false, entryInvoked=false;
   return {
     get scopeTouched(){return scopeTouched;},
     get entryInvoked(){return entryInvoked;},
     require(name) {
-      if (name === 'command-ingress') { entryInvoked=true; return {ok:true,value:ingressOverride || require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress')}; }
+      if (name === 'daily-scheduler') return { ok: true, value: require(path.join(modulesRoot, 'osi-daily-scheduler')) };
+      if (name === 'command-ingress') { entryInvoked=true; return {ok:true,value:ingressOverride || require(path.join(modulesRoot, 'osi-command-ingress'))}; }
       if (name === 'scope') {
         scopeTouched=true;
         throw new ScopeHelperTouchedError(
@@ -239,12 +241,12 @@ function makeNodeStub() {
 // (never via `libs`).
 const RESERVED_PARAM_NAMES = new Set(['msg', 'node', 'env', 'global', 'context', 'flow', 'RED']);
 
-function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub, ingressOverride) {
+function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub, modulesRoot, ingressOverride) {
   const paramNames = ['msg', 'node', 'env', 'global', 'context', 'flow', 'RED', 'osiLib'];
   const paramValues = [
     msgStub, nodeStub, envStub, globalStub,
     makeAutoStub('context'), makeAutoStub('flow'), makeAutoStub('RED'),
-    makeOsiLibStub(ingressOverride), // bound (not omitted): see makeOsiLibStub for why
+    makeOsiLibStub(modulesRoot, ingressOverride), // bound (not omitted): see makeOsiLibStub for why
   ];
   for (const lib of libs || []) {
     if (!lib || typeof lib.var !== 'string') continue;
@@ -259,10 +261,10 @@ function buildSandboxParams(libs, envStub, globalStub, msgStub, nodeStub, ingres
 
 // Runs one (node, env/global variant) combination. Returns
 // { outcome: 'pass' | 'scope-helper-touched' | 'unscannable', detail }.
-async function runOnce(node, envStub, globalStub, ingressOverride) {
+async function runOnce(node, envStub, globalStub, modulesRoot, ingressOverride) {
   const msgStub = makeMsg();
   const nodeStub = makeNodeStub();
-  const { paramNames, paramValues } = buildSandboxParams(node.libs, envStub, globalStub, msgStub, nodeStub, ingressOverride);
+  const { paramNames, paramValues } = buildSandboxParams(node.libs, envStub, globalStub, msgStub, nodeStub, modulesRoot, ingressOverride);
   const loader=paramValues[paramNames.indexOf('osiLib')];
 
   let fn;
@@ -317,21 +319,31 @@ async function runOnce(node, envStub, globalStub, ingressOverride) {
   }
 }
 
-async function checkNode(node, ingressOverride) {
-  const secretVariant = await runOnce(node, makeEnv(HERMETIC_TEST_SECRET), makeGlobalStub('fs-configured'), ingressOverride);
+async function checkNode(node, modulesRoot, ingressOverride) {
+  const secretVariant = await runOnce(node, makeEnv(HERMETIC_TEST_SECRET), makeGlobalStub('fs-configured'), modulesRoot, ingressOverride);
   if (secretVariant.outcome !== 'pass') {
     return { id: node.id, name: node.name, ...secretVariant, variant: 'AUTH_TOKEN_SECRET configured' };
   }
-  const fsFallbackVariant = await runOnce(node, makeEnv(''), makeGlobalStub('fs-fallback'), ingressOverride);
+  const fsFallbackVariant = await runOnce(node, makeEnv(''), makeGlobalStub('fs-fallback'), modulesRoot, ingressOverride);
   if (fsFallbackVariant.outcome !== 'pass') {
     return { id: node.id, name: node.name, ...fsFallbackVariant, variant: 'AUTH_TOKEN_SECRET unset (fs fallback)' };
+  }
+  if (node.func.includes("osiLib.require('daily-scheduler')")) {
+    // Preflight may reject this probe before loading the module. Exercise the
+    // real exported auth entry too, with the same sentinel and both secrets.
+    const delegated = { ...node, func: "const loaded = osiLib.require('daily-scheduler'); return loaded.value.decodeToken(msg, { env, node, osiLib, crypto, osiDb, global });" };
+    for (const configured of [HERMETIC_TEST_SECRET, '']) {
+      const result = await runOnce(delegated, makeEnv(configured), makeGlobalStub(configured ? 'fs-configured' : 'fs-fallback'), modulesRoot);
+      if (result.outcome !== 'pass') return { id: node.id, name: node.name, ...result, variant: 'delegated ' + (configured ? 'configured' : 'fs fallback') };
+    }
   }
   return { id: node.id, name: node.name, outcome: 'pass', detail: 'both env variants hermetic', variant: 'both' };
 }
 
 async function verifyProfile(relativePath) {
   const flows = JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8'));
-  const targets = findAuthGatedNodes(flows);
+  const modulesRoot = path.join(path.dirname(path.join(ROOT, relativePath)), 'node-red');
+  const targets = findAuthGatedNodes(flows, modulesRoot);
   const failures = [];
 
   if (targets.length < MIN_EXPECTED_NODES) {
@@ -342,8 +354,7 @@ async function verifyProfile(relativePath) {
   }
 
   for (const node of targets) {
-    const ingress = require(path.join(ROOT, path.dirname(relativePath), 'node-red/osi-command-ingress'));
-    const result = await checkNode(node, ingress);
+    const result = await checkNode(node, modulesRoot);
     if (result.outcome !== 'pass') {
       failures.push(
         `${relativePath}: ${node.id} (${node.name || 'unnamed'}) [${result.variant}] -- ${result.outcome}: ${result.detail}`

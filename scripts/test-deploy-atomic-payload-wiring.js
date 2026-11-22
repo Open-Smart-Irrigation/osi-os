@@ -214,13 +214,14 @@ test('deploy.sh stages flows before migration and flips only after migration suc
 
 test('deploy.sh stages the GUI into the same payload before migration and activates the pair', () => {
   const guiFetchIdx = indexOf('fetch "react_gui.tar.gz" "$TMP_DIR/react_gui.tar.gz"');
-  const guiExtractIdx = indexOf('tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"');
+  const guiExtractIdx = indexOf('node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"');
   const stageIdx = indexOf('swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"');
   const migrationIdx = indexOf('run_schema_migration || exit 1');
   const migrateIdx = indexOf('if node "$TMP_DIR/scripts/migrate-cli.js" "$DB_PATH"');
   const pairFlipIdx = indexOf('swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT"');
   const restartIdx = deploy.indexOf('if ! restart_node_red; then', migrateIdx);
 
+  assert.ok(guiFetchIdx < guiExtractIdx, 'GUI must be fetched before validation and extraction');
   assert.ok(guiFetchIdx < stageIdx, 'GUI must be fetched before payload staging');
   assert.ok(guiExtractIdx < stageIdx, 'GUI must be unpacked into staging before payload staging');
   assert.ok(stageIdx < migrationIdx, 'both payload halves must be staged before schema migration');
@@ -239,7 +240,7 @@ test('deploy.sh captures the previous payload before flip and rolls back to it o
   const flipIdx = deploy.indexOf('swap_call flipTo "$DEPLOY_STAMP"', migrationIdx);
   const rollbackStart = indexOf('# payload rollback begin');
   const rollbackIdx = deploy.indexOf('swap_call flipTo "$PREV_STAMP"', rollbackStart);
-  const restartIdx = deploy.indexOf('"$NODE_RED_INIT" restart', rollbackIdx);
+  const restartIdx = deploy.indexOf('repair_health_start restart', rollbackIdx);
   const discardIdx = deploy.indexOf('discardPayload "$DEPLOY_STAMP"', rollbackStart);
 
   assert.ok(prevIdx < flipIdx, 'previous payload must be captured before the new flip');
@@ -355,12 +356,14 @@ test('deploy.sh fetches every helper module into the staged payload, never into 
   assert.match(deploy, /^MODULE_STAGE="\$PAYLOADS_ROOT\/\$DEPLOY_STAMP\/modules"$/m);
   const fetches = moduleFetches(deploy);
   // This CLI runs at S90, before the payload is loaded. Its own boot-file
-  // install is durable and it is never loaded as a flow helper.
+  // install and hold-policy dependency are durable boot files, never flow helpers.
   const bootCli = ({ name, file, destination }) =>
-    name === 'osi-db-integrity' && file === 'index.js' && destination === '/usr/share/node-red/osi-db-integrity/index.js';
+    name === 'osi-db-integrity' && ['index.js', 'recovery-hold.js'].includes(file) &&
+    destination === `/usr/share/node-red/osi-db-integrity/${file}`;
   const stagedModule = (entry) => !LIVE_MODULES.includes(entry.name) && !bootCli(entry);
-  assert.equal(fetches.filter(bootCli).length, 1);
+  assert.deepEqual(fetches.filter(bootCli).map(({ file }) => file).sort(), ['index.js', 'recovery-hold.js']);
   assert.match(deploy, /"\/usr\/share\/node-red\/osi-db-integrity\/index\.js" 644 \|\| exit 1/);
+  assert.match(deploy, /"\/usr\/share\/node-red\/osi-db-integrity\/recovery-hold\.js" 644 \|\| exit 1/);
   const staged = fetches.filter(stagedModule);
   assert.ok(staged.length > 100, `expected the full module block, parsed ${staged.length}`);
   const wrong = staged.filter(({ name, file, destination }) => destination !== `$MODULE_STAGE/${name}/${file}`);

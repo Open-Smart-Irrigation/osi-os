@@ -24,7 +24,7 @@ assert.match(dedupe.func, /_pendingCommandEnvelope/);
 assert.match(dedupe.func, /gateway_device_eui/);
 assert.match(dedupe.func, /protectedTypes/);
 assert.match(dedupe.func, /return \[null, null, msg\]/);
-assert.deepEqual(dedupe.wires, [['journal-command-apply-fn'], ['9d5e3035c3d069c4'], ['watermark-config-command-apply-fn']]);
+assert.deepEqual(dedupe.wires, [['journal-command-apply-fn'], ['account-cloud-guard-9d5e3035c3d069c4'], ['watermark-config-command-apply-fn']]);
 
 // Execute the real function-node body for a protected command. This must
 // take the semantic-helper output before attempting generic replay; static
@@ -201,7 +201,7 @@ assert.match(ack.func, /queueCommandAck/);
 
 // The generic replay node must stay upstream of the semantic helper's pass
 // through, while the helper's ACK output is durable rather than downlink-only.
-assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['9d5e3035c3d069c4']]);
+assert.deepEqual(helper.wires, [['934bf2bc19a8ce22'], ['account-cloud-guard-9d5e3035c3d069c4']]);
 assert.doesNotMatch(helper.func, /UPDATE devices SET soil_moisture_probe_depths_json/);
 assert.doesNotMatch(helper.func, /INSERT OR REPLACE INTO watermark_readings/);
 

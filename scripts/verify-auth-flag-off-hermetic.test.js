@@ -159,6 +159,7 @@ for (const profile of ['bcm2712', 'bcm2709']) test(profile + ': verified adapter
   assert.notEqual(changed, original);
   const mutant = {...ingress, authenticateValveCommand: new Function('return (' + changed + ')')()};
   const node = rendered.find(n => n.id === '83bb4a452dd9ae37');
-  assert.equal((await checkNode(node, ingress)).outcome, 'pass');
-  assert.equal((await checkNode(node, mutant)).outcome, 'scope-helper-touched');
+  const modulesRoot = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red`);
+  assert.equal((await checkNode(node, modulesRoot, ingress)).outcome, 'pass');
+  assert.equal((await checkNode(node, modulesRoot, mutant)).outcome, 'scope-helper-touched');
 });

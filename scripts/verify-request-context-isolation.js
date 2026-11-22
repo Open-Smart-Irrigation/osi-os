@@ -20,6 +20,7 @@
 // Usage: node scripts/verify-request-context-isolation.js [--flows <path>]...
 
 const fs = require('node:fs');
+const { functionSource } = require('./flow-function-source');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -57,6 +58,7 @@ const STRING_LITERAL = /^(['"`])([^'"`]*)\1$/;
 function parseArgs(argv) {
   const files = [];
   for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--module-root' && argv[i + 1]) { i += 1; continue; }
     if (argv[i] === '--flows' && argv[i + 1]) files.push(path.resolve(argv[++i]));
     else throw new Error('unknown argument: ' + argv[i]);
   }
@@ -76,7 +78,7 @@ function contextCalls(source) {
   return calls;
 }
 
-function checkProfile(file) {
+function checkProfile(file, moduleRoot = path.join(path.dirname(file), 'node-red')) {
   const label = path.relative(ROOT, file) || file;
   const flows = JSON.parse(fs.readFileSync(file, 'utf8'));
   const failures = [];
@@ -86,7 +88,8 @@ function checkProfile(file) {
     functionNodes += 1;
     let implementation=node;
     try { implementation=require('./lib/valve-ingress-x2-source').resolvedNode(node); } catch(error) { failures.push(label+': '+error.message); }
-    const sources = [...new Set([node.func,implementation.func,node.initialize,node.finalize])].filter(Boolean).join('\n');
+    const implementationSource = functionSource(implementation, moduleRoot);
+    const sources = [...new Set([node.func,implementation.func,implementationSource,node.initialize,node.finalize])].filter(Boolean).join('\n');
     const calls = contextCalls(sources);
     for (const call of calls) {
       if (call.key && REQUEST_SCRATCH_KEY.test(call.key)) {
@@ -103,7 +106,7 @@ function checkProfile(file) {
         failures.push(label + ': ' + node.id + ' (' + node.name + ') touches shared context outside its allowlist: ' + call.text);
       }
     }
-    if (converted.kind && !implementation.func.includes("'" + converted.kind + "'")) {
+    if (converted.kind && !implementationSource.includes("'" + converted.kind + "'")) {
       failures.push(label + ': ' + node.id + ' (' + node.name + ") no longer handles the '" + converted.kind + "' request envelope");
     }
   }
@@ -116,8 +119,10 @@ function checkProfile(file) {
 function main() {
   const files = parseArgs(process.argv.slice(2));
   const failures = [];
-  for (const file of files) {
-    const result = checkProfile(file);
+  const roots = process.argv.slice(2).flatMap((v, i, a) => v === '--module-root' ? [path.resolve(a[i + 1])] : []);
+  if (roots.length && roots.length !== files.length) throw new Error('one --module-root per --flows is required');
+  for (const [index, file] of files.entries()) {
+    const result = checkProfile(file, roots[index]);
     failures.push(...result.failures);
     if (!result.failures.length) {
       console.log('OK ' + result.label + ' (' + result.functionNodes + ' function nodes, ' + Object.keys(CONVERTED).length + ' converted)');

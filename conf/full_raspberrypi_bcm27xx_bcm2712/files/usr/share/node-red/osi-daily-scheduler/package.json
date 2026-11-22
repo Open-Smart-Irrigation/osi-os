@@ -1,0 +1,7 @@
+{
+  "name": "osi-daily-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "description": "Legacy daily scheduler and schedule-save entry points"
+}

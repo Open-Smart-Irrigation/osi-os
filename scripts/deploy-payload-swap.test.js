@@ -1416,3 +1416,21 @@ test('the schema record and the capture marker are published with fsync', (t) =>
   fs.writeFileSync(path.join(root, 'payloads', 'cap', 'compatibility.json'), '');
   assert.equal(swap.compatibilityExists(root, 'cap'), false, 'an empty record counts as missing');
 });
+
+test('candidate GUI refuses symlinks and hardlinks without changing the active pair', () => {
+  for (const type of ['symlink', 'hardlink']) {
+    const root = fakeRoot();
+    const guiRoot = path.join(root, 'gui-root'); fs.mkdirSync(guiRoot);
+    const oldFlows = fakeFlowsSrc(root, 'old');
+    const oldGui = fakeGuiSrc(root, 'old');
+    stagePayload(root, 'old', oldFlows, oldGui);
+    flipTo(root, 'old', guiRoot);
+    const candidate = path.join(root, 'candidate-gui'); fs.mkdirSync(candidate);
+    const external = path.join(root, 'outside-secret'); fs.writeFileSync(external, 'must not copy');
+    if (type === 'symlink') fs.symlinkSync(external, path.join(candidate, 'escape'));
+    else fs.linkSync(external, path.join(candidate, 'escape'));
+    assert.throws(() => stagePayload(root, 'new', oldFlows, candidate, 'staged'));
+    assert.deepEqual(currentPair(root, guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    assert.equal(fs.existsSync(path.join(root, 'payloads/new/gui/escape')), false);
+  }
+});

@@ -1158,3 +1158,6 @@ module.exports = {
   normalizeCloudServerUrl,
   normalizeGatewayDeviceEui
 };
+
+// Account-link and disconnect suspend history transport until local recovery settles.
+module.exports.accountWorkBlocked = (fs, node) => require('../osi-installation-helper').gatewayWorkBlocked({fs, warn: text => node.warn(text)});
