@@ -3324,18 +3324,22 @@ elif [ -n "$owed_plan" ]; then
         swap_call markFailed "$owed_payload" "owed health check failed" >/dev/null || true
         echo "WARN: payloads/$owed_payload failed its owed health check; returning to payloads/$owed_fallback, which fits the database" >&2
         # The owed check started Node-RED on the failed payload: stop it
-        # before the links change under it.
+        # before the links change under it. From the stop until the fallback
+        # restarts, an exit is an incomplete recovery, not a refusal.
+        DEPLOY_RECOVERY_INCOMPLETE=1
         if ! hold_node_red_stopped; then
             echo "ERROR: could not prove Node-RED stopped before returning to payloads/$owed_fallback; leaving payload links unchanged" >&2
             exit 1
         fi
         swap_call writePayloadState "$owed_fallback" healthy "payloads/$owed_payload failed its owed health check; returned to this payload" deploy.sh >/dev/null || true
+        DEPLOY_SERVICE_STATE=unknown
         if ! swap_call flipTo "$owed_fallback" "$GUI_ROOT" >/dev/null || \
            ! swap_call verifyPair "$owed_fallback" "$GUI_ROOT" >/dev/null || \
            ! repair_health_start restart; then
             echo "ERROR: could not return to payloads/$owed_fallback; refusing the deploy" >&2
             exit 1
         fi
+        DEPLOY_RECOVERY_INCOMPLETE=0
         swap_call writePayloadState "$owed_fallback" healthy "payloads/$owed_payload failed its owed health check; returned to this payload" deploy.sh >/dev/null || true
     fi
 fi

@@ -219,3 +219,54 @@ deploy_exit_handler ${status}
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+// PR #706 review (owed health check): a failed return to the retained
+// fallback after the owed check stopped Node-RED or switched the payload is
+// an incomplete recovery, never a refusal before activation.
+for (const [failure, verdict] of [['flip', 'incomplete-recovery'], ['verify', 'incomplete-recovery'], ['restart', 'incomplete-recovery'], ['stop', 'incomplete-recovery'], ['none', 'refused']]) {
+  test(`owed health check fallback with ${failure} failure reports ${verdict}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-owed-fallback-'));
+    try {
+      const result = path.join(dir, 'result');
+      const fn = name => { const m = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, 'm').exec(deploy); assert.ok(m, name); return m[0]; };
+      const outcome = deploy.slice(deploy.indexOf('# deploy outcome begin'), deploy.indexOf('# deploy outcome end'));
+      const payload = deploy.slice(deploy.indexOf('# deploy payload lifecycle begin'), deploy.indexOf('# deploy payload lifecycle end'));
+      const owed = deploy.slice(deploy.indexOf('# owed health check begin'), deploy.indexOf('# owed health check end'));
+      assert.match(owed, /run_owed_health_check/);
+      const init = path.join(dir, 'init'); fs.writeFileSync(init, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const script = `set -eu
+DB_PATH='${path.join(dir, 'farming.db')}'
+SWAP_ROOT='${dir}'
+GUI_ROOT='${path.join(dir, 'gui')}'
+NODE_RED_INIT='${init}'
+${outcome}
+${fn('early_deploy_exit')}
+${payload}
+cleanup() { :; }
+recovery_hold_present() { return 1; }
+schema_compatibility_metadata() { echo '83|main'; }
+run_owed_health_check() { NODE_RED_START_VERDICT=failed; NODE_RED_START_REASON=fixture; return 1; }
+wait_for_node_red_stop() { [ '${failure}' != stop ]; }
+swap_call() {
+    case "$1" in
+        owedCheckPlan) echo 'owed|0|fallback|restore' ;;
+        flipTo) [ '${failure}' != flip ] ;;
+        verifyPair) [ '${failure}' != verify ] ;;
+        *) : ;;
+    esac
+}
+repair_health_start() { [ '${failure}' != restart ]; }
+DEPLOY_STAMP=candidate
+trap 'early_deploy_exit $?' EXIT
+${owed}
+# A later refusal, before anything else changes.
+exit 7
+`;
+      const run = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, DEPLOY_OUTCOME_FILE: result } });
+      assert.equal(run.status, failure === 'none' ? 7 : 1, run.stderr);
+      const record = fs.readFileSync(result, 'utf8');
+      assert.match(record, new RegExp(`^verdict=${verdict}$`, 'm'), run.stderr + record);
+      if (verdict !== 'refused') assert.match(record, /^reason_code=recovery_incomplete$/m);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
