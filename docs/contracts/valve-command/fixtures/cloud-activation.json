@@ -382,8 +382,8 @@
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "owner",
-          "zone_permission": "manage",
+          "gateway_role": "researcher",
+          "zone_relation": "owned",
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -405,8 +405,8 @@
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "admin",
-          "zone_permission": "manage",
+          "gateway_role": "admin",
+          "zone_relation": "granted",
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -423,13 +423,13 @@
       "decision": "S7"
     },
     {
-      "id": "authority-member-manage",
+      "id": "authority-researcher-manage",
       "basis": "proposed",
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "member",
-          "zone_permission": "manage",
+          "gateway_role": "researcher",
+          "zone_relation": "granted",
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -451,8 +451,8 @@
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "viewer",
-          "zone_permission": "read",
+          "gateway_role": "viewer",
+          "zone_relation": "granted",
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -469,13 +469,13 @@
       "decision": "S7"
     },
     {
-      "id": "authority-member-other-zone",
+      "id": "authority-researcher-other-zone",
       "basis": "proposed",
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "member",
-          "zone_permission": "other_zone",
+          "gateway_role": "researcher",
+          "zone_relation": "none",
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -497,8 +497,9 @@
       "check": "scenario",
       "input": {
         "context": {
-          "actor": "disabled",
-          "zone_permission": "manage",
+          "gateway_role": "researcher",
+          "zone_relation": "granted",
+          "disabled": true,
           "command_type": "UPSERT_IRRIGATION_POLICY"
         },
         "events": [
@@ -602,6 +603,15 @@
           },
           {
             "type": "edge_apply"
+          },
+          {
+            "type": "edge_ack_applied"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "mirror_match"
           }
         ]
       },
@@ -611,7 +621,16 @@
         "revocation_noted": "grant_lost",
         "open_enqueues": 0,
         "physical_closed": null,
-        "confirmed_enabled": false
+        "confirmed_enabled": false,
+        "ack": "APPLIED",
+        "after_first_signal": {
+          "pending": true,
+          "ui": "stop_pending_mirror"
+        },
+        "after_both": {
+          "pending": false,
+          "ui": "stop_applied"
+        }
       },
       "decision": "S7"
     },
@@ -633,6 +652,15 @@
           },
           {
             "type": "edge_apply"
+          },
+          {
+            "type": "edge_ack_applied"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "mirror_match"
           }
         ]
       },
@@ -641,7 +669,16 @@
         "attributed_actor": "original_requester",
         "revocation_noted": "disabled",
         "open_enqueues": 0,
-        "physical_closed": null
+        "physical_closed": null,
+        "ack": "APPLIED",
+        "after_first_signal": {
+          "pending": true,
+          "ui": "stop_pending_mirror"
+        },
+        "after_both": {
+          "pending": false,
+          "ui": "stop_applied"
+        }
       },
       "decision": "S7"
     },
@@ -665,6 +702,15 @@
           },
           {
             "type": "edge_apply"
+          },
+          {
+            "type": "edge_ack_applied"
+          },
+          {
+            "type": "assert_pending"
+          },
+          {
+            "type": "mirror_match"
           }
         ]
       },
@@ -673,7 +719,16 @@
         "attributed_actor": "original_requester",
         "revocation_noted": "deleted",
         "open_enqueues": 0,
-        "physical_closed": null
+        "physical_closed": null,
+        "ack": "APPLIED",
+        "after_first_signal": {
+          "pending": true,
+          "ui": "stop_pending_mirror"
+        },
+        "after_both": {
+          "pending": false,
+          "ui": "stop_applied"
+        }
       },
       "decision": "S7"
     },
@@ -700,6 +755,36 @@
         ]
       },
       "expected": {
+        "edge_admission": "refused",
+        "physical_enqueues": 0
+      },
+      "decision": "S7"
+    },
+    {
+      "id": "new-close-after-revoke-refused",
+      "basis": "requirement",
+      "check": "scenario",
+      "input": {
+        "context": {
+          "authorized_at_queue": false,
+          "command_type": "CLOSE",
+          "confirmed_override": true,
+          "effect": "CLOSE_ONLY"
+        },
+        "events": [
+          {
+            "type": "revoke_zone_grant"
+          },
+          {
+            "type": "close_requested"
+          },
+          {
+            "type": "edge_apply"
+          }
+        ]
+      },
+      "expected": {
+        "admission": "refused",
         "edge_admission": "refused",
         "physical_enqueues": 0
       },
