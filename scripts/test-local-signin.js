@@ -17,6 +17,8 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const Module = require('node:module');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
@@ -57,9 +59,64 @@ function nodeBody(profile) {
 
 // One gateway: a node:sqlite database plus the hooks a test uses to make one
 // statement fail.
-function gateway(profile) {
-  const native = new DatabaseSync(':memory:');
+// sqlite3 stand-in for the real osi-db-helper: every open goes to dbPath.
+function sqlite3Driver(dbPath) {
+  return class Driver {
+    constructor(_file, mode, callback) {
+      if (typeof mode === 'function') { callback = mode; mode = undefined; }
+      this.native = new DatabaseSync(dbPath);
+      setImmediate(() => callback && callback.call(this, null));
+    }
+    all(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      setImmediate(() => {
+        try { callback.call(this, null, this.native.prepare(sql).all(...(params || []))); } catch (error) { callback.call(this, error); }
+      });
+    }
+    run(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      setImmediate(() => {
+        try {
+          const out = this.native.prepare(sql).run(...(params || []));
+          callback.call({ changes: Number(out.changes), lastID: Number(out.lastInsertRowid) }, null);
+        } catch (error) { callback.call(this, error); }
+      });
+    }
+    exec(sql, callback) {
+      setImmediate(() => {
+        try { this.native.exec(sql); callback.call(this, null); } catch (error) { callback.call(this, error); }
+      });
+    }
+    close(callback) { setImmediate(() => callback && callback.call(this, null)); }
+  };
+}
+
+function loadRealHelper(profile, dbPath) {
+  const helperPath = path.join(profile.modules, 'osi-db-helper', 'index.js');
+  const original = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === 'sqlite3' && parent && parent.filename === helperPath) {
+      return { Database: sqlite3Driver(dbPath), OPEN_READONLY: 1, OPEN_READWRITE: 2, OPEN_CREATE: 4 };
+    }
+    return original.call(this, request, parent, isMain);
+  };
+  try {
+    delete require.cache[require.resolve(helperPath)];
+    return require(helperPath);
+  } finally {
+    Module._load = original;
+    delete require.cache[require.resolve(helperPath)];
+  }
+}
+
+// realHelper: the node opens the farming database through the profile's real
+// osi-db-helper (temp file) instead of the in-memory facade.
+function gateway(profile, { realHelper = false } = {}) {
+  const dir = realHelper ? fs.mkdtempSync(path.join(os.tmpdir(), 'osi-local-signin-')) : null;
+  const native = new DatabaseSync(realHelper ? path.join(dir, 'farming.db') : ':memory:');
+  if (realHelper) native.exec('PRAGMA journal_mode=WAL;');
   native.exec(USERS_SQL);
+  const realDb = realHelper ? loadRealHelper(profile, path.join(dir, 'farming.db')) : null;
   const hooks = [];
   const statements = [];
   let opens = 0;
@@ -106,7 +163,7 @@ function gateway(profile) {
       requested.push(name);
       if (name === 'installation') return { ok: true, value: installation };
       if (name === 'local-password-reset' && available[name]) return { ok: true, value: local };
-      if (name === 'osi-db-helper' && available[name]) return { ok: true, value: { Database } };
+      if (name === 'osi-db-helper' && available[name]) return { ok: true, value: realDb || { Database } };
       return { ok: false, error: 'not available: ' + name };
     },
   };
@@ -141,8 +198,9 @@ function gateway(profile) {
     assert.equal(out[0], null, 'login never continues to the insert node');
     return { status: out[1].statusCode, payload: JSON.parse(JSON.stringify(out[1].payload)), warnings, errors };
   }
+  const cleanup = () => { native.close(); if (dir) fs.rmSync(dir, { recursive: true, force: true }); };
   return {
-    native, hooks, statements, addUser, user, pending, writes, login, bcrypt, available, requested,
+    native, hooks, statements, addUser, user, pending, writes, login, bcrypt, available, requested, cleanup,
     get opens() { return opens; },
   };
 }
@@ -333,6 +391,35 @@ for (const profile of PROFILES) {
     assert.equal(res.status, 403);
     assert.equal(res.payload.token, undefined);
     assert.ok(!h.bcrypt.compareSync('chosen-pass-42', h.user(1).password_hash));
+  });
+
+  t('through the real osi-db-helper: rehash, pending record and new password all land', async () => {
+    const g = gateway(profile, { realHelper: true });
+    try {
+      g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1', sync_version: 5 });
+      const u = g.addUser({ username: 'grower', password_hash: 'synthetic-old-value-2' });
+      const grower = await g.login({ username: 'grower', password: 'synthetic-old-value-2' });
+      assert.equal(grower.status, 200);
+      assert.deepEqual(grower.warnings, []);
+      assert.match(g.user(u.id).password_hash, BCRYPT_COST_10);
+
+      const first = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+      assert.equal(first.payload.passwordChangeRequired, true);
+      assert.deepEqual(first.warnings, []);
+      assert.match(g.user(1).password_hash, BCRYPT_COST_10);
+      assert.ok(g.pending(1));
+      const again = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+      assert.equal(again.payload.passwordChangeRequired, true);
+
+      const changed = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'chosen-pass-42' });
+      assert.equal(changed.payload.passwordChange, 'changed');
+      assert.deepEqual(changed.warnings, []);
+      assert.equal(g.pending(1), undefined);
+      assert.equal(g.user(1).sync_version, 6);
+      assert.ok(g.bcrypt.compareSync('chosen-pass-42', g.user(1).password_hash));
+    } finally {
+      g.cleanup();
+    }
   });
 
   t('a missing local helper answers 503 for local accounts only', async () => {
