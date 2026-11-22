@@ -30,7 +30,7 @@
       "product_default": false,
       "phil_may_override": false,
       "override_owner": null,
-      "rule": "Fresh bootstrap stores admin in both flags. One recorded upgrade promotes only the original enabled bootstrap account if no enabled admin exists, with atomic audit/receipt/revocation and a release-note line. Addendum 22 Nov 2026: a row 1 (users.id=1) that still has the shipped default password is never promoted, whatever its username; the next enabled account by account number is promoted instead. Missing/disabled original, or no qualifying account, uses operator recovery; never promote any other account."
+      "rule": "Fresh bootstrap stores admin in both flags. One recorded upgrade promotes only the original enabled bootstrap account if no enabled admin exists, with atomic audit/receipt/revocation and a release-note line. Addendum 22 Nov 2026, applied first: a row 1 (users.id=1) that still has the shipped default password is never promoted, whether enabled or disabled and whatever its username; the next enabled account by account number is promoted instead, and operator recovery applies only if there is none. Otherwise a missing or disabled original uses operator recovery; never promote any other account."
     },
     {
       "id": "R3",

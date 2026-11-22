@@ -276,6 +276,13 @@ function verify() {
   const uncheckedFinalize = mutantModel("if (captured !== linkTuple()) { result = deny('stale_link_finalize'); break; }", '');
   assert.throws(() => uncheckedFinalize.runLifecycle(overlapping.initial, overlapping.steps, authority.valid_defaults,
     (actual, expected, op) => projection(actual, expected, op)), /decision|reason/);
+  // Inventory revocation paths must match v1.md (login race, read release, cloud apply-time actor).
+  assert.match(inventory.check_groups.login.revocation_path, /unchanged at issuance/);
+  for (const g of ['sensor_download', 'today_liters', 'valve_list']) assert.match(inventory.check_groups[g].revocation_path, /before buffered response release/, g);
+  for (const r of inventory.flow_state_consumers.filter(x => ['Route Command', 'Replay Pending Commands', 'Run Force Sync'].includes(x.name))) {
+    assert.doesNotMatch(r.revocation_path, /shared guard/, r.name);
+    assert.match(r.revocation_path, /at apply/, r.name);
+  }
   // Review-thread regressions: each fix must be load-bearing.
   const lifecycleMutant = (before, after, id, pattern) => {
     const c = revocation.cases.find(x => x.id === id);

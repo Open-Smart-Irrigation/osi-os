@@ -50,7 +50,7 @@
         "flag_on": "Request-local credentials; bcrypt/local legacy password or linked offline verifier; disabled check before seven-day HMAC token issuance.",
         "flag_off": "Same credential checks; disabled issuance check is skipped."
       },
-      "revocation_path": "Block disabled accounts in both modes; read session generation atomically after credential verification so a concurrent reset cannot issue a current-generation session from an old password.",
+      "revocation_path": "Block disabled accounts in both modes. Capture the credential binding and session generation in the same read that loads the verifier; issue only if both are unchanged at issuance, otherwise refuse (login_superseded) and verify again against the current credential. Verifying an old password and minting at the new generation is forbidden.",
       "gaps": [
         "G1",
         "G2",
@@ -562,7 +562,7 @@
         }
       },
       "required_admission": "Current valid enabled-account session in both modes. Retain this measurement export as account-wide in both flags; filter installer-only radio content out. No silent owner narrowing.",
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "Validate session in the shared guard at entry and again immediately before buffered response release; a session revoked while the query runs gets no result. Downstream owner filters marked per route must be replaced with scoped resource selection.",
       "gaps": [
         "G1",
         "G2",
@@ -589,7 +589,7 @@
         }
       },
       "required_admission": "Valid enabled-account session in both flags. Scoped read remains account-wide; legacy flag-off requires target ownership (explicit correction of missing owner gate).",
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "Validate session in the shared guard at entry and again immediately before buffered response release; a session revoked while the query runs gets no result. Downstream owner filters marked per route must be replaced with scoped resource selection.",
       "gaps": [
         "G1",
         "G2",
@@ -616,7 +616,7 @@
         }
       },
       "required_admission": "Separate operational list from account-wide data reads: enabled writer list of owned/granted assigned valves when scoped; legacy owner list when off. Viewer data comes through read APIs; this operational endpoint may refuse viewer.",
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "Validate session in the shared guard at entry and again immediately before buffered response release; a session revoked while the query runs gets no result. Downstream owner filters marked per route must be replaced with scoped resource selection.",
       "gaps": [
         "G1",
         "G2",
@@ -6370,7 +6370,7 @@
       "checks_today": [
         "msg._actorUserUuid = String(cmd.actor_user_uuid || cmd.actorUserUuid || '').trim() || null;"
       ],
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "REST pending command with no browser session: at apply, inside the apply transaction, authorize the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted); a missing actor is refused. Browser session generation checks apply only to local browser work.",
       "gaps": [
         "G1",
         "G4"
@@ -6516,7 +6516,7 @@
       "checks_today": [
         "actorUserUuid: cmd.actorUserUuid || cmd.actor_user_uuid || null,"
       ],
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "REST pending command with no browser session: at apply, inside the apply transaction, authorize the recorded gateway-local actor as a current mapped enabled writer with current target scope (R1 bounded stop continuation excepted); a missing actor is refused. Browser session generation checks apply only to local browser work.",
       "gaps": [
         "G1",
         "G4"
@@ -6543,7 +6543,7 @@
       "checks_today": [
         "actorUserUuid: cmd.actorUserUuid || cmd.actor_user_uuid || null,"
       ],
-      "revocation_path": "Validate session in shared guard and in downstream write/dispatch transaction. Downstream owner filters marked per route must be replaced with scoped resource selection.",
+      "revocation_path": "System command with no human actor or browser session: require the system actor bound to the gateway's own transport credential and the current link incarnation (R8b), checked at apply. Browser session generation checks apply only to local browser work.",
       "gaps": [
         "G1",
         "G4"
