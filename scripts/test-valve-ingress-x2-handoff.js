@@ -15,7 +15,7 @@ function legacyHandoffTree(){
 }
 test('checked-in patch equals independent renderer bytes, including staged catch/DDL receipt',()=>{
  assert.equal(canonicalPatch(canonicalHandoff()),fs.readFileSync(path.join(ROOT,PATCH),'utf8'));
- assert.ok(['legacy','rendered'].includes(verifyHandoff().state));
+ assert.ok(['legacy','rendered','superseded'].includes(verifyHandoff().state));
 });
 test('manifest forbids undeclared mutations, and exactly five libs append one named loader',()=>{
  const manifest=require('./fixtures/valve-ingress-x2/adapters.json'),baseline=require('./fixtures/valve-ingress-x2/baseline.json');let changed=0;
@@ -128,4 +128,25 @@ test('strict patch application rejects a truncated or omitted baseline hunk with
    }
   }
  }finally{tree.close();fs.rmSync(tmp,{recursive:true,force:true});}
+});
+test('after a later handoff, X2 accepts only intact rendered adapters',()=>{
+ const os=require('node:os'),{FLOW_PATHS}=require('./lib/valve-ingress-x2-handoff');
+ const baseline=require('./fixtures/valve-ingress-x2/baseline.json');
+ const files=canonicalHandoff(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'x2-superseded-'));
+ const write=flows=>{for(const rel of FLOW_PATHS){fs.mkdirSync(path.dirname(path.join(dir,rel)),{recursive:true});fs.writeFileSync(path.join(dir,rel),JSON.stringify(flows,null,2)+'\n');}};
+ try{
+  const rendered=JSON.parse(files.find(f=>f.rel===FLOW_PATHS[0]).after);
+  // A later handoff changes an unrelated node: X2 stays verified.
+  const later=rendered.map(n=>n.id==='auth-tab'?{...n,info:String(n.info||'')+' (later handoff)'}:n);
+  assert.notDeepEqual(later,rendered);
+  write(later);
+  assert.equal(verifyHandoff(dir).state,'superseded');
+  // One X2 node back at its legacy body: refused.
+  const legacy=baseline.nodes[0];
+  write(later.map(n=>n.id===legacy.id?{...n,func:legacy.func,libs:legacy.libs}:n));
+  assert.throws(()=>verifyHandoff(dir),/unreviewed handoff source\/result bytes|partial X2/);
+  // A changed X2 wire: refused.
+  write(later.map(n=>n.id===legacy.id?{...n,wires:[[]]}:n));
+  assert.throws(()=>verifyHandoff(dir),/X2 node contract changed/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

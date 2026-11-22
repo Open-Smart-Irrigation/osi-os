@@ -335,3 +335,49 @@ Node 20 module tests and both native runtimes serially, and records its starting
 head to reject a changing checkout. Scratch is retained for that queued job.
 No other job was cancelled or changed. The final publication commit records
 this checkpoint only; exact-head CI and renewed review remain merge gates.
+
+## Reservation window, 22 November
+
+The flows.json reservation passed to X3 at 19:13Z, after X2 (#707) merged as
+`c1bdea56`. Work started from the round-3 head `5de05ff8`.
+
+- Merge of origin/main `c1bdea56` (EB2, X1, IM3, X2): five conflicts, all
+  resolved by keeping both sides. `release-smoke.yml` runs X1's and X3's native
+  steps. In `verify-sync-flow.js` the guards read EB2's account-link stage,
+  X1's scheduler entry point or X3's zone-env entry point (`guardSource`). The
+  hermetic auth verifier and its test keep X2's `modulesRoot`/`ingressOverride`
+  plus X3's zone-env resolver, now per profile instead of always bcm2712.
+  `verify-no-stray-ddl.js` keeps main's `main()` wrapper. Both flows.json
+  files equalled main's after the merge. Merge-allowance preservation on the
+  clean merge commit: OK, 0 dispositions.
+- Handoff against the new main: no X3 node, wire or libs changed (the
+  committed `handoffState()` still reported `legacy`). A fresh render differed
+  from the committed patch only in hunk offsets and the silent-catch recount,
+  because main had moved 59 to 53 per profile. The patch was refreshed with
+  `node scripts/x3-zone-env-adapters.js <scratch>`; no oracle file changed.
+- Application: `git apply` of the refreshed patch. Both profiles are
+  byte-identical, round-trip true, equal to the scratch render, and
+  `handoffState()` reports `integrated`. Silent catches 53 to 47 and DDL
+  markers 347 to 330 per profile; 320 function nodes. X1's
+  `staged-baselines.json` was regenerated with `stagedBaselines()` to the same
+  counts.
+- X2's staged gate pinned whole-file flow bytes, so any later flows handoff
+  failed it ("unreviewed handoff source/result bytes"). It now has a third
+  state, `superseded`: the bytes differ from both X2 receipts, but every X2
+  node is still exactly its rendered adapter with its original contract. In
+  that state the staged tree skips the byte-level apply/reverse checks; those
+  still run from the legacy source bytes in `test-valve-ingress-x2-handoff.js`.
+  A new test there rejects a reverted X2 node and a changed X2 wire.
+- Outside X3's suite, the 13 tests and verifiers that mention X3 nodes all pass
+  on the integrated tree. They execute the adapters through the real module.
+
+Local gates on the applied tree (no osi-heavy): X3 handoff verifier
+`--affected` in integrated mode (parity, additive, bare-require, profile
+parity, helper registration, module deploy coverage, fn-parse, silent-catch,
+DDL, size ratchet, wiring, projections, db-caller binding, hermetic auth,
+revision, packaging, round 2); X3 parity `--verify` and additive under TZ=UTC
+and TZ=Europe/Zurich (286 traces, 134 additive cases); runtime schema parity;
+deploy-fetch-list test; doc hygiene; MQTT topics; agents size; test inventory;
+request-context isolation; X1 handoff; X2 staged `--focused` (7150 + 16) and
+X2 handoff tests. CI only: verify-sync-flow, X3 integration and squash proof,
+both native runtimes with negative controls, X2 `--ci` and `--runtime`.

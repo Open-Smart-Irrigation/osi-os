@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {execFileSync,spawnSync}=require('node:child_process');
 const {createHash}=require('node:crypto');
-const {adaptFlows}=require('./valve-ingress-x2-renderer');
+const {adaptFlows,stateOf}=require('./valve-ingress-x2-renderer');
 const {countSilentCatchesInFlow}=require('../verify-no-new-silent-catch');
 const {countMarkers,textSourcesFromContent}=require('../verify-no-stray-ddl');
 const ROOT=path.resolve(__dirname,'../..');
@@ -56,6 +56,20 @@ function verifyHandoff(root=ROOT){
  const files=canonicalHandoff();
  assert.equal(fs.readFileSync(path.join(ROOT,PATCH),'utf8'),canonicalPatch(files),'checked-in patch differs from canonical renderer');
  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ROOT,RECEIPT))),receipt(files),'handoff recount receipt differs');
+ // After merge, a later reserved handoff (X3 onwards) changes other nodes and
+ // the recounts. The whole-file receipt then no longer describes the tree;
+ // X2 is still intact if every X2 node is exactly its rendered adapter with
+ // its original contract (stateOf checks wires, outputs and libs). Baseline
+ // recounts are then owned by the silent-catch and DDL gates.
+ if(FLOW_PATHS.some(rel=>{const actual=fs.readFileSync(path.join(root,rel),'utf8');return actual!==files.find(f=>f.rel===rel).before&&actual!==files.find(f=>f.rel===rel).after;})){
+  for(const rel of FLOW_PATHS){
+   const flows=JSON.parse(fs.readFileSync(path.join(root,rel),'utf8'));
+   const x2=flows.filter(node=>stateOf(node));
+   assert.ok(x2.length>0&&x2.every(node=>stateOf(node)==='rendered'),'unreviewed handoff source/result bytes: '+rel);
+   assert.deepEqual(adaptFlows(flows),flows,'X2 adapters not intact after a later handoff: '+rel);
+  }
+  return {files,state:'superseded'};
+ }
  const states=new Set();
  for(const f of files){
   const actual=fs.readFileSync(path.join(root,f.rel),'utf8');
@@ -67,5 +81,5 @@ function verifyHandoff(root=ROOT){
  return {files,state:[...states][0]};
 }
 const {applyReceiptPatch}=require('./valve-ingress-x2-apply');
-function writeHandoff(root){const {files,state}=verifyHandoff(root);if(state==='rendered')return;applyReceiptPatch(root,files,{patch:path.join(ROOT,PATCH)});}
+function writeHandoff(root){const {files,state}=verifyHandoff(root);if(state==='rendered'||state==='superseded')return;applyReceiptPatch(root,files,{patch:path.join(ROOT,PATCH)});}
 module.exports={applyReceiptPatch,SOURCE,ROOT,PATCH,RECEIPT,FLOW_PATHS,canonicalHandoff,canonicalPatch,receipt,verifyHandoff,writeHandoff};
