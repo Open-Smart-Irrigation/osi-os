@@ -1102,6 +1102,34 @@ ${rollback}
   }
 });
 
+test('failed retained-payload readiness reports incomplete recovery with Node-RED stopped', () => {
+  const rollback = fragment('    # payload rollback begin\n', '    # payload rollback end');
+  const outcome = fragment('# deploy outcome begin\n', '# deploy outcome end');
+  const run = runModuleDeploy(`
+${outcome}
+stage_new_deploy new
+stop_for_migration
+flip_new
+restart_node_red
+DB_MIGRATION_COMMITTED=0
+MIGRATION_RUNNER_AVAILABLE=1
+DEPLOY_OUTCOME_FILE="$SWAP_ROOT/outcome"
+wait_for_node_red_health() { return 1; }
+trap 'deploy_exit_handler $?' EXIT
+${rollback}
+`);
+  try {
+    assert.equal(run.result.status, 1, run.result.stderr);
+    assert.match(run.result.stderr, /Node-RED was not ready after rollback/);
+    assert.equal(run.state('node-red.state'), '0');
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'old', gui: 'old', compatible: true });
+    const receipt = fs.readFileSync(path.join(run.root, 'outcome'), 'utf8');
+    assert.match(receipt, /^verdict=incomplete-recovery$/m);
+    assert.match(receipt, /^reason_code=recovery_incomplete$/m);
+    assert.match(receipt, /^service_state=stopped$/m);
+  } finally { run.cleanup(); }
+});
+
 test('reruns after an early failure reuse the capture, repair stale links and refuse changed modules', () => {
   const run = runModuleDeploy(`
 stage_new_deploy first

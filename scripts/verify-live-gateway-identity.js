@@ -240,7 +240,7 @@ const activationPrerequisites = [
   ['"/usr/libexec/osi-identityd.sh" 755 || exit 1', 'identity daemon installation'],
   ['swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI" staged >/dev/null', 'paired flows+GUI payload staging'],
   ['swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" "${SERVED_STAMP:-}" >/dev/null', 'paired flows+GUI payload activation'],
-  ['tar xzf "$TMP_DIR/react_gui.tar.gz" -C "$STAGED_GUI"', 'GUI staging extraction'],
+  ['node "$TMP_DIR/deploy-archive.js" extract-gui "$STAGED_GUI_ARCHIVE" "$STAGED_GUI"', 'verified GUI staging extraction'],
 ];
 for (const [needle, description] of activationPrerequisites) {
   const prerequisiteAt = deploySource.indexOf(needle);
