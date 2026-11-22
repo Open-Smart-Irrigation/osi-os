@@ -1678,6 +1678,15 @@
           }
         },
         {
+          "op": "assert_session",
+          "token": "offline",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
           "op": "login",
           "token": "bad",
           "credential": "credential-a",
@@ -1983,6 +1992,15 @@
         {
           "op": "assert_session",
           "token": "old",
+          "expected": {
+            "decision": "deny",
+            "reason": "session_revoked",
+            "effects": 0
+          }
+        },
+        {
+          "op": "assert_session",
+          "token": "offline",
           "expected": {
             "decision": "deny",
             "reason": "session_revoked",
