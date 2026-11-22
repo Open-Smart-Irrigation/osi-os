@@ -297,6 +297,34 @@ Red runs on an extracted copy, reverted afterwards:
   11/13.
 - `test-gateway-eui-attribution.js` on `27b8772d1` gives 3/9.
 
+Once those landed, CI got past `verify-sync-flow.js` and exposed four more
+files with the same causes. Each passes on main.
+
+| File | Cause and change |
+|---|---|
+| `scripts/test-installation-recovery-flow.js` | Read the build, handle and finalize nodes for content; it now reads those stages in the helper. |
+| `scripts/test-radio-history-flow-integration.js` | The history builder's account check had no `global`; the harness now gives it a clean gateway `fs`. |
+| `scripts/test-valve-command-safety-path.js` | The ACK landed at the guard, not at `Command ACK → Cloud`. The harness now runs the guard with the real helper, and asserts the guard forwards only to that node. |
+| `scripts/test-issue-233-weather-detach.js` | The traversal expected the ACK MQTT node directly, and the disconnect case had no gateway IO. 89/89 now. |
+
+The issue-233 suite only looked hung locally. SQLite fsync on this host's btrfs
+scratch disk blocks in writeback. On tmpfs (`TMPDIR=/dev/shm/...`) it runs in
+25 s, so the local timeout the round-3 review reported is environmental.
+`test-protected-config-command-dispatch.js` fails under `node --test` here on
+main as well. The plain `node` form that CI runs passes.
+
+### Local gates and round time
+
+- Before the first push: both valve wire checks passed (60/60, 32/32), as did
+  `node scripts/verify-sync-flow.js` (1,081 s) and every touched test.
+- After the first push: the rest of `verify-sync-flow.yml` ran in the local
+  runner; `migrations.yml` after issue-233 ran on tmpfs, 27 of 27 steps green.
+- Round time: authoring and local gates 12:25 to 13:37 UTC, including three
+  pushes. The CI wait is recorded in the PR thread.
+- Deviation from the brief: the first push went out before the full local
+  suite finished. `verify-sync-flow.js` had passed and the remaining steps
+  needed over an hour locally, so GitHub CI ran alongside the local runner.
+
 ### Assumptions to confirm
 
 - The helper-loading pin normalizes the guard id instead of re-pinning hashes,
