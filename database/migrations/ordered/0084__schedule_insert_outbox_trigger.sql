@@ -1,14 +1,16 @@
 -- risk: additive
--- 0084: Report newly created schedules to the cloud at once (E5).
+-- Report newly created schedules to the cloud at once (E5).
 --
 -- irrigation_schedules had an outbox trigger for UPDATE only. Every real
--- insert path (osi-daily-scheduler/schedule-save.js for the gateway GUI,
--- osi-irrigation-policy/lifecycle.js for cloud commands) supplies
--- sync_version >= 1 and a non-null response_mode, so
--- trg_sync_schedules_defaults_ai's normalizing UPDATE changed nothing and
--- trg_sync_schedules_outbox_au's column-change guard never fired: a newly
--- created schedule reached the cloud at the next 6-hourly bootstrap at the
--- earliest, and a cloud "disable all schedules" could miss it for up to 6 h.
+-- insert path supplies sync_version >= 1 and a non-null response_mode:
+-- osi-daily-scheduler/schedule-save.js for the gateway GUI, and for cloud
+-- commands osi-irrigation-policy/lifecycle.js plus the envelope-less
+-- legacy "Build UPDATE SQL" UPSERT_SCHEDULE upsert in flows.json.
+-- trg_sync_schedules_defaults_ai's normalizing UPDATE therefore changed
+-- nothing and trg_sync_schedules_outbox_au's column-change guard never
+-- fired: a newly created schedule reached the cloud at the next 6-hourly
+-- bootstrap at the earliest, and a cloud "disable all schedules" could
+-- miss it for up to 6 h.
 -- The trigger below closes that gap with the same event shape, aggregate key
 -- and payload as the update trigger.
 --

@@ -27,6 +27,7 @@ const ZONE1_UUID = '11111111-1111-4111-8111-111111111111';
 const ZONE2_UUID = '22222222-2222-4222-8222-222222222222';
 const ZONE3_UUID = '33333333-3333-4333-8333-333333333333';
 const ZONE4_UUID = '44444444-4444-4444-8444-444444444444';
+const ZONE5_UUID = '55555555-5555-4555-8555-555555555555';
 
 let failures = 0;
 function ok(cond, label) {
@@ -72,7 +73,8 @@ async function main() {
       VALUES(1, 'Zone 1', 1, '${ZONE1_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 3),
             (2, 'Zone 2', 1, '${ZONE2_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 7),
             (3, 'Zone 3', 1, '${ZONE3_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 1),
-            (4, 'Zone 4', 1, '${ZONE4_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 1);
+            (4, 'Zone 4', 1, '${ZONE4_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 1),
+            (5, 'Zone 5', 1, '${ZONE5_UUID}', '${GATEWAY_EUI}', '2026-11-23T00:00:00.000Z', '2026-11-23T00:00:00.000Z', 1);
   `);
 
   // --- Case 1: UNLINKED gateway emits nothing ------------------------------
@@ -176,6 +178,68 @@ async function main() {
     ok(payload.response_mode === 'proportional',
       'the single event reports the normalized row (response_mode proportional)');
   }
+
+  // --- Case 8: the real osi-daily-scheduler/schedule-save.js upsert
+  // (INSERT ... ON CONFLICT(irrigation_zone_id) DO UPDATE), fresh zone:
+  // the insert branch enqueues one event via _ai --------------------------
+  await runner.exec('DELETE FROM sync_outbox;');
+  await runner.exec(
+    `INSERT INTO irrigation_schedules
+  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)
+VALUES
+  (5, 'SWT_WM1', 40, 30, 1, 'proportional', 1, NULL, '2026-11-23T00:05:00.000Z', '2026-11-23T00:05:00.000Z')
+ON CONFLICT(irrigation_zone_id) DO UPDATE SET
+  trigger_metric = excluded.trigger_metric,
+  threshold_kpa = excluded.threshold_kpa,
+  duration_minutes = excluded.duration_minutes,
+  enabled = excluded.enabled,
+  response_mode = excluded.response_mode,
+  deleted_at = NULL,
+  sync_version = 1,
+  updated_at = excluded.updated_at;`
+  );
+  const rows8 = await runner.all("SELECT op, sync_version FROM sync_outbox WHERE aggregate_type='SCHEDULE' AND aggregate_key='" + ZONE5_UUID + "';");
+  ok(rows8.length === 1 && rows8[0].op === 'SCHEDULE_UPSERTED' && Number(rows8[0].sync_version) === 1,
+    'real schedule-save upsert, insert branch: exactly 1 event at v1');
+
+  // --- Case 9: the same upsert on the existing row (the edit path): the
+  // conflict branch is an UPDATE, so exactly one event via _au, none from
+  // _ai (AFTER INSERT triggers do not fire on the DO UPDATE path) -------
+  await runner.exec('DELETE FROM sync_outbox;');
+  await runner.exec(
+    `INSERT INTO irrigation_schedules
+  (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at, created_at, updated_at)
+VALUES
+  (5, 'SWT_WM1', 50, 30, 1, 'proportional', 2, NULL, '2026-11-23T00:06:00.000Z', '2026-11-23T00:06:00.000Z')
+ON CONFLICT(irrigation_zone_id) DO UPDATE SET
+  trigger_metric = excluded.trigger_metric,
+  threshold_kpa = excluded.threshold_kpa,
+  duration_minutes = excluded.duration_minutes,
+  enabled = excluded.enabled,
+  response_mode = excluded.response_mode,
+  deleted_at = NULL,
+  sync_version = 2,
+  updated_at = excluded.updated_at;`
+  );
+  const rows9 = await runner.all("SELECT op, sync_version FROM sync_outbox WHERE aggregate_type='SCHEDULE' AND aggregate_key='" + ZONE5_UUID + "';");
+  ok(rows9.length === 1 && Number(rows9[0].sync_version) === 2,
+    'real schedule-save upsert, conflict branch (edit): exactly 1 event at v2 via _au only');
+  ok((await scalar(runner, 'SELECT threshold_kpa v FROM irrigation_schedules WHERE irrigation_zone_id=5')) === 50,
+    'conflict branch really updated the row (threshold 50)');
+
+  // --- Case 10: the legacy Build UPDATE SQL cloud upsert is guarded with
+  // WHERE excluded.sync_version >= irrigation_schedules.sync_version; a
+  // stale command writes nothing and emits nothing ---------------------
+  await runner.exec('DELETE FROM sync_outbox;');
+  await runner.exec(
+    `INSERT INTO irrigation_schedules (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, created_at, updated_at, last_applied_at)
+SELECT id, 'SWT_1', 60, 30, 1, 'aggressive', 1, '2026-11-23T00:07:00.000Z', '2026-11-23T00:07:00.000Z', '2026-11-23T00:07:00.000Z' FROM irrigation_zones WHERE id = 5
+ON CONFLICT(irrigation_zone_id) DO UPDATE SET trigger_metric=excluded.trigger_metric, threshold_kpa=excluded.threshold_kpa, duration_minutes=excluded.duration_minutes, enabled=excluded.enabled, response_mode=excluded.response_mode, sync_version=excluded.sync_version, updated_at=excluded.updated_at, last_applied_at=excluded.last_applied_at WHERE excluded.sync_version >= irrigation_schedules.sync_version;`
+  );
+  const staleEvents = await scalar(runner, "SELECT COUNT(*) n FROM sync_outbox WHERE aggregate_type='SCHEDULE';");
+  const staleRow = await scalar(runner, 'SELECT threshold_kpa v FROM irrigation_schedules WHERE irrigation_zone_id=5');
+  ok(staleEvents === 0 && staleRow === 50,
+    'legacy Build UPDATE SQL stale upsert (v1 <= v2): writes nothing, emits 0 events');
 
   await runner.close();
   fs.rmSync(dir, { recursive: true, force: true });
