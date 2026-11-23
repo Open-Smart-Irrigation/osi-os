@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {runInNewContext} from 'node:vm';
+import {createRequire} from 'node:module';
 import type {AxiosAdapter, AxiosResponse} from 'axios';
 import {AxiosError} from 'axios';
 import {api, irrigationZonesAPI} from '../../src/services/api';
@@ -293,6 +294,16 @@ test('DENDRO model dispatch matches the current flow decision node for action bo
   const flowNodes = JSON.parse(readFileSync(flowPath, 'utf8')) as Array<{name: string; func?: string}>;
   const flowFunction = flowNodes.find(node => node.name === 'Decide + build actuator cmd + build DB logs')?.func;
   assert.ok(flowFunction, 'current canonical flow decision function exists');
+  // The node delegates to helper modules through osiLib.require(name); resolve
+  // names with osi-lib's own registry against the canonical profile's modules.
+  const nodeRedDir = resolve(process.cwd(), '../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
+  const requireFromNodeRed = createRequire(resolve(nodeRedDir, 'package.json'));
+  const {NAME_TO_PATH} = requireFromNodeRed('./osi-lib') as {NAME_TO_PATH: Record<string, string>};
+  const osiLib = {require: (name: string) => {
+    const rel = NAME_TO_PATH[name];
+    if (!rel) return {ok: false, error: `unknown osi-lib module: ${name}`};
+    return {ok: true, value: requireFromNodeRed(`./${rel}`)};
+  }};
   const now = Date.parse('2026-10-10T03:00:00.000Z');
   const runMainDecision = (action: string, sharedAgeMs: number | null = null, localAgeMs = 1000) => {
     const sharedReceivedAt = sharedAgeMs === null ? null : new Date(now - sharedAgeMs).toISOString();
@@ -309,7 +320,7 @@ test('DENDRO model dispatch matches the current flow decision node for action bo
       shared_environment_json: sharedBundle, shared_environment_received_at: sharedReceivedAt, last_triggered_at: null},
       payload: [{irrigation_action: action, zone_stress_summary: 'moderate', action_reasoning: 'synthetic',
         analytics_date: '2026-10-10', analytics_computed_at: new Date(now - localAgeMs).toISOString()}]},
-      Date: FakeDate, env: {get: () => ''}, node: {warn: () => {}}, isFinite, Number, String, JSON, Math};
+      Date: FakeDate, env: {get: () => ''}, node: {warn: () => {}, error: (message: unknown) => {throw new Error(String(message));}}, osiLib, isFinite, Number, String, JSON, Math};
     const result = runInNewContext(`(function(){${flowFunction}\n})()`, context) as Array<{payload: {data: {duration_minutes: number; recommendation_action: string; recommendation_source: string}}} | null>;
     return result?.[0]?.payload?.data ?? null;
   };
