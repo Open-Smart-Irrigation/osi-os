@@ -261,6 +261,6 @@ test('the module requires nothing; callers inject every dependency', () => {
   // The only loader it calls is the caller's injected osiLib (local sign-in
   // opens the farming database through osiLib.require('osi-db-helper')).
   const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
-  assert.doesNotMatch(source, /(?<!osiLib\.)\brequire\(/);
-  assert.deepEqual(source.match(/osiLib\.require\([^)]*\)/g), ["osiLib.require('osi-db-helper')"]);
+  assert.doesNotMatch(source, /(?<!osiLib\.)\brequire\s*\(/);
+  assert.deepEqual(source.match(/osiLib\.require\s*\([^)]*\)/g), ["osiLib.require('osi-db-helper')"]);
 });

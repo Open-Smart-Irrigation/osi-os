@@ -399,6 +399,24 @@ db.exec('BEGIN IMMEDIATE',e=>{if(e){console.error(e.message);process.exit(3);}pr
     });
     check('caught-errors',e.unexpected.length===0,e.unexpected);
   });
+  await test('sign-in-step-gate',async(check,e)=>{
+    // Row 1 on a value not yet in bcrypt form signs in with a token marked for
+    // the password step. settings.js (httpNodeMiddleware) refuses that token on
+    // every route except GET /api/me and POST /auth/login until the step is done.
+    const legacy='synthetic-legacy-value-7',chosen='Synthetic-new-pass-8';
+    check('first-account',user.id===1,user.id);
+    await h.sql('UPDATE users SET password_hash=? WHERE id=?',legacy,user.id);
+    const first=await h.http('POST','/auth/login',{username:'smoke',password:legacy});httpCheck(check,first,200,'login');
+    check('required',first.json?.passwordChangeRequired===true,first.json);
+    const pending=first.json?.token;
+    const refused=await h.http('GET','/api/devices',undefined,pending);e.refused=refused.json;
+    check('refused',refused.status===403&&refused.json?.code==='password_change_required',refused);
+    const me=await h.http('GET','/api/me',undefined,pending);httpCheck(check,me,200,'me');
+    const changed=await h.http('POST','/auth/login',{username:'smoke',password:legacy,newPassword:chosen},pending);
+    check('changed',changed.status===200&&changed.json?.passwordChange==='changed',changed);
+    const allowed=await h.http('GET','/api/devices',undefined,changed.json?.token);httpCheck(check,allowed,200,'allowed');
+    const ordinary=await h.http('GET','/api/devices',undefined,token);httpCheck(check,ordinary,200,'ordinary-token');
+  });
   await test('network-contained',async check=>check('network',!h.state.logs.some(l=>l.level==='NET_REFUSED'),h.state.logs.filter(l=>l.level==='NET_REFUSED')));
   const source=path.join(__dirname,'../../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
   await test('flows-unchanged',async check=>check('bytes',fs.readFileSync(source).equals(fs.readFileSync(path.join(h.RUN,'flows.json'))),'Node-RED rewrote the flow file'));

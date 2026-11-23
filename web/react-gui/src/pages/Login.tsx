@@ -15,7 +15,6 @@ export const Login: React.FC = () => {
   const [changeStep, setChangeStep] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [changeStoreFailed, setChangeStoreFailed] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
   const { t } = useTranslation('auth');
@@ -75,7 +74,6 @@ export const Login: React.FC = () => {
         finish();
         return;
       }
-      setChangeStoreFailed(outcome.response.passwordChange === 'failed');
       setError(changeError(outcome.response));
     } catch (err: any) {
       setError(err.response?.data?.message || t('login.failed'));
@@ -84,19 +82,15 @@ export const Login: React.FC = () => {
     }
   };
 
-  // Only offered when the gateway could not store the new password: access
-  // stays available offline, and the next sign-in asks again.
-  const continueWithoutChange = async () => {
+  // Leaves the step and clears every password field, for example when the new
+  // password was saved but its response was lost: the user signs in again
+  // with the new password.
+  const backToSignIn = () => {
+    setChangeStep(false);
+    setPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
     setError('');
-    setLoading(true);
-    try {
-      await login({ username, password }, { acceptPendingPasswordChange: true });
-      finish();
-    } catch (err: any) {
-      setError(err.response?.data?.message || t('login.failed'));
-    } finally {
-      setLoading(false);
-    }
   };
 
   const inputClass = 'w-full px-4 py-3 touch-target bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] text-lg placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]';
@@ -156,16 +150,14 @@ export const Login: React.FC = () => {
             <button type="submit" disabled={loading} className={buttonClass}>
               {loading ? t('passwordChange.saving') : t('passwordChange.submit')}
             </button>
-            {changeStoreFailed && (
-              <button
-                type="button"
-                onClick={continueWithoutChange}
-                disabled={loading}
-                className="w-full text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline py-2 touch-target"
-              >
-                {t('passwordChange.continueForNow')}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={backToSignIn}
+              disabled={loading}
+              className="w-full text-[var(--primary)] hover:text-[var(--primary-hover)] text-lg font-semibold underline py-2 touch-target"
+            >
+              {t('passwordChange.backToSignIn')}
+            </button>
           </form>
         ) : (
         <form onSubmit={handleSubmit} className="space-y-4">

@@ -3,7 +3,7 @@
 // the new password with the next sign-in request, and offers "Continue for
 // now" only when the gateway could not store it.
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import en from '../../../public/locales/en/auth.json';
@@ -75,7 +75,6 @@ describe('Login with a required password change', () => {
     enterNewPassword('chosen-pass-42');
     expect(await screen.findByText('dashboard page')).toBeInTheDocument();
     expect(mocks.login).toHaveBeenLastCalledWith({ username: 'grower', password: 'current-pass', newPassword: 'chosen-pass-42' });
-    expect(screen.queryByText(en.passwordChange.continueForNow)).not.toBeInTheDocument();
   });
 
   it('refuses a new password over 72 bytes before sending it, and maps the gateway refusal', async () => {
@@ -109,28 +108,43 @@ describe('Login with a required password change', () => {
     await screen.findByText(en.passwordChange.title);
     enterNewPassword('current-pass');
     expect(await screen.findByText(en.passwordChange.unchanged)).toBeInTheDocument();
-    expect(screen.queryByText(en.passwordChange.continueForNow)).not.toBeInTheDocument();
     expect(screen.queryByText('dashboard page')).not.toBeInTheDocument();
   });
 
-  it('offers to continue for now when the gateway could not store the new password', async () => {
+  it('stays on the step when the gateway could not store the new password, with no way past it', async () => {
     mocks.login
       .mockResolvedValueOnce(required)
       .mockResolvedValueOnce({
         status: 'password-change-required',
         response: { token: TOKEN, passwordChangeRequired: true, passwordChange: 'failed' },
-      })
-      .mockResolvedValueOnce({ status: 'signed-in', response: { token: TOKEN, passwordChangeRequired: true } });
+      });
     renderLogin();
     signIn();
     await screen.findByText(en.passwordChange.title);
     enterNewPassword('chosen-pass-42');
     expect(await screen.findByText(en.passwordChange.storeFailed)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: en.passwordChange.continueForNow }));
-    await waitFor(() => expect(screen.getByText('dashboard page')).toBeInTheDocument());
-    expect(mocks.login).toHaveBeenLastCalledWith(
-      { username: 'grower', password: 'current-pass' },
-      { acceptPendingPasswordChange: true }
-    );
+    expect(screen.queryByText('dashboard page')).not.toBeInTheDocument();
+    expect(mocks.login).toHaveBeenCalledTimes(2);
+  });
+
+  it('goes back to sign-in with every password field cleared', async () => {
+    mocks.login
+      .mockResolvedValueOnce(required)
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValueOnce({ status: 'signed-in', response: { token: TOKEN } });
+    renderLogin();
+    signIn();
+    await screen.findByText(en.passwordChange.title);
+    enterNewPassword('chosen-pass-42');
+    expect(await screen.findByText(en.login.failed)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: en.passwordChange.backToSignIn }));
+    expect(screen.queryByText(en.passwordChange.title)).not.toBeInTheDocument();
+    expect(screen.queryByText(en.login.failed)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(en.login.password)).toHaveValue('');
+    expect(screen.getByLabelText(en.login.username)).toHaveValue('grower');
+    fireEvent.change(screen.getByLabelText(en.login.password), { target: { value: 'chosen-pass-42' } });
+    fireEvent.click(screen.getByRole('button', { name: en.login.signIn }));
+    expect(await screen.findByText('dashboard page')).toBeInTheDocument();
+    expect(mocks.login).toHaveBeenLastCalledWith({ username: 'grower', password: 'chosen-pass-42' });
   });
 });

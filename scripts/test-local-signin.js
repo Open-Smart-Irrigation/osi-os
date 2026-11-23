@@ -87,7 +87,13 @@ function sqlite3Driver(dbPath) {
         try { this.native.exec(sql); callback.call(this, null); } catch (error) { callback.call(this, error); }
       });
     }
-    close(callback) { setImmediate(() => callback && callback.call(this, null)); }
+    close(callback) {
+      setImmediate(() => {
+        let error = null;
+        try { this.native.close(); } catch (closeError) { error = closeError; }
+        if (callback) callback.call(this, error);
+      });
+    }
   };
 }
 
@@ -217,6 +223,28 @@ function tokenClaims(token) {
 }
 
 const BCRYPT_COST_10 = /^\$2[aby]\$10\$/;
+const ORDINARY_CLAIMS = ['userId', 'username', 'iat', 'exp'];
+
+// The sign-in step gate from the shipped settings.js (httpNodeMiddleware).
+const SETTINGS_PATH = path.join(ROOT, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js');
+function signInGate() {
+  const original = console.error;
+  console.error = (line, ...rest) => { if (!String(line).startsWith('[osi-db-startup]')) original(line, ...rest); };
+  try {
+    delete require.cache[SETTINGS_PATH];
+    return require(SETTINGS_PATH).httpNodeMiddleware;
+  } finally {
+    console.error = original;
+  }
+}
+// Answers 'allowed' or the refusal code for a request with this token.
+function gateDecision(token, method, reqPath) {
+  let decision = null;
+  const res = { status(code) { decision = String(code); return this; }, json(body) { decision += ' ' + body.code; return this; } };
+  signInGate()({ method, path: reqPath, headers: { authorization: 'Bearer ' + token } }, res, () => { decision = 'allowed'; });
+  return decision;
+}
+const REFUSED = '403 password_change_required';
 
 for (const profile of PROFILES) {
   const t = (name, fn) => test(`[${profile.name}] ${name}`, fn);
@@ -293,6 +321,7 @@ for (const profile of PROFILES) {
     const res = await g.login({ username: 'grower', password: 'synthetic-old-value-9' });
     assert.equal(res.status, 200);
     assert.equal(res.payload.passwordChangeRequired, true, 'id 1 on a value not yet in bcrypt form');
+    assert.equal(tokenClaims(res.payload.token).mustChangePassword, true, 'detected at sign-in, so the token is restricted');
     assert.equal(g.user(u.id).password_hash, 'synthetic-old-value-9');
     assert.ok(res.warnings.some((w) => /database unavailable/.test(w)));
     assert.ok(res.warnings.some((w) => /rehash skipped/.test(w)));
@@ -455,7 +484,7 @@ for (const profile of PROFILES) {
     assert.equal(exact.payload.passwordChange, 'changed');
   });
 
-  t('a new password does not overwrite a value changed by another writer since the read', async () => {
+  t('a new password racing another writer is not stored and the sign-in answers 401', async () => {
     const g = gateway(profile);
     g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
     await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
@@ -467,12 +496,122 @@ for (const profile of PROFILES) {
       before: (native) => native.prepare('UPDATE users SET password_hash=? WHERE id=1').run(concurrent),
     });
     const res = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'chosen-pass-42' });
-    assert.equal(res.status, 200);
-    assert.equal(res.payload.passwordChange, 'failed');
-    assert.equal(res.payload.passwordChangeRequired, true);
+    assert.equal(res.status, 401, 'the password this request verified is no longer current');
+    assert.deepEqual(res.payload, { message: 'Invalid username or password' });
     assert.equal(g.user(1).password_hash, concurrent);
     assert.ok(g.pending(1));
     assert.ok(res.warnings.some((w) => /new password could not be stored for user 1: password change matched 0 rows/.test(w)));
+  });
+
+  t('the sign-in step token is refused on protected routes until the new password is set (first sign-in)', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    const first = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    const pending = first.payload.token;
+    assert.deepEqual(Object.keys(tokenClaims(pending)), [...ORDINARY_CLAIMS, 'mustChangePassword']);
+    assert.equal(gateDecision(pending, 'GET', '/api/devices'), REFUSED);
+    assert.equal(gateDecision(pending, 'POST', '/api/valve/A840410000000001'), REFUSED);
+    assert.equal(gateDecision(pending, 'GET', '/api/me'), 'allowed');
+    assert.equal(gateDecision(pending, 'POST', '/auth/login'), 'allowed');
+    const changed = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'chosen-pass-42' });
+    assert.equal(changed.payload.passwordChange, 'changed');
+    assert.deepEqual(Object.keys(tokenClaims(changed.payload.token)), ORDINARY_CLAIMS);
+    assert.equal(gateDecision(changed.payload.token, 'GET', '/api/devices'), 'allowed');
+    assert.equal(gateDecision(pending, 'GET', '/api/devices'), REFUSED, 'the earlier step token stays restricted');
+    const later = await g.login({ username: 'first-owner', password: 'chosen-pass-42' });
+    assert.deepEqual(Object.keys(tokenClaims(later.payload.token)), ORDINARY_CLAIMS);
+  });
+
+  t('the sign-in step token is refused while the recorded requirement is pending (bcrypt value)', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.match(g.user(1).password_hash, BCRYPT_COST_10);
+    const again = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.equal(again.payload.passwordChangeRequired, true);
+    assert.equal(tokenClaims(again.payload.token).mustChangePassword, true);
+    assert.equal(gateDecision(again.payload.token, 'GET', '/api/irrigation-zones'), REFUSED);
+    assert.equal(gateDecision(again.payload.token, 'GET', '/api/me'), 'allowed');
+    const changed = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1', newPassword: 'chosen-pass-42' });
+    assert.equal(gateDecision(changed.payload.token, 'GET', '/api/irrigation-zones'), 'allowed');
+  });
+
+  t('other local accounts and linked accounts get ordinary tokens the gate lets through', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync('owner-pass-1', 10) });
+    g.addUser({ username: 'grower', password_hash: 'synthetic-old-value-2' });
+    g.addUser({
+      username: 'edge-linked', server_username: 'cloud-linked', auth_mode: 'server',
+      server_password_hash: g.bcrypt.hashSync('linked-pass-1', 10), password_hash: 'synthetic-old-value-3',
+    });
+    for (const [body, env] of [
+      [{ username: 'first-owner', password: 'owner-pass-1' }, {}],
+      [{ username: 'grower', password: 'synthetic-old-value-2' }, {}],
+      [{ username: 'cloud-linked', password: 'linked-pass-1' }, { DEVICE_EUI: '0016C001F1000001' }],
+    ]) {
+      const res = await g.login(body, env);
+      assert.equal(res.status, 200, body.username);
+      assert.deepEqual(Object.keys(res.payload), ['token']);
+      assert.deepEqual(Object.keys(tokenClaims(res.payload.token)), ORDINARY_CLAIMS, body.username);
+      assert.equal(gateDecision(res.payload.token, 'GET', '/api/devices'), 'allowed', body.username);
+    }
+  });
+
+  t('a new password that bcrypt cannot tell apart from the current one is refused', async () => {
+    const g = gateway(profile);
+    const current = 'a'.repeat(72);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync(current, 10) });
+    g.native.prepare("INSERT INTO app_settings(key,value) VALUES('local_password_change_required:1','{}')").run();
+    const res = await g.login({ username: 'first-owner', password: current + 'x', newPassword: current });
+    assert.equal(res.status, 200);
+    assert.equal(res.payload.passwordChange, 'rejected');
+    assert.equal(res.payload.passwordChangeError, 'password_unchanged');
+    assert.equal(res.payload.passwordChangeRequired, true);
+    assert.ok(g.pending(1), 'the requirement stays recorded');
+    assert.ok(g.bcrypt.compareSync(current, g.user(1).password_hash));
+  });
+
+  t('a stored value longer than 72 bytes is kept, not rehashed, and its prefix does not sign in', async () => {
+    const g = gateway(profile);
+    const long = 'a'.repeat(72) + 'secret';
+    g.addUser({ username: 'first-owner', password_hash: long });
+    const u = g.addUser({ username: 'grower', password_hash: long + '-2' });
+    const grower = await g.login({ username: 'grower', password: long + '-2' });
+    assert.equal(grower.status, 200);
+    assert.equal(g.user(u.id).password_hash, long + '-2');
+    assert.ok(grower.warnings.some((w) => /rehash skipped for user \d+: password longer than 72 bytes/.test(w)));
+    assert.equal((await g.login({ username: 'grower', password: 'a'.repeat(72) })).status, 401);
+
+    const first = await g.login({ username: 'first-owner', password: long });
+    assert.equal(first.status, 200);
+    assert.equal(first.payload.passwordChangeRequired, true);
+    assert.equal(gateDecision(first.payload.token, 'GET', '/api/devices'), REFUSED);
+    assert.equal(g.user(1).password_hash, long);
+    assert.equal(g.pending(1), undefined);
+    assert.equal((await g.login({ username: 'first-owner', password: 'a'.repeat(72) })).status, 401);
+    const changed = await g.login({ username: 'first-owner', password: long, newPassword: 'chosen-pass-42' });
+    assert.equal(changed.payload.passwordChange, 'changed');
+    assert.equal(gateDecision(changed.payload.token, 'GET', '/api/devices'), 'allowed');
+  });
+
+  t('a pending record that cannot be read still asks for a new password and leaves the token ordinary', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: 'synthetic-old-value-1' });
+    await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    g.hooks.push({ match: /^SELECT 1 AS pending FROM app_settings/, message: 'no such table: app_settings' });
+    const res = await g.login({ username: 'first-owner', password: 'synthetic-old-value-1' });
+    assert.equal(res.status, 200);
+    assert.equal(res.payload.passwordChangeRequired, true);
+    assert.deepEqual(Object.keys(tokenClaims(res.payload.token)), ORDINARY_CLAIMS);
+    assert.ok(res.warnings.some((w) => /pending password change could not be read; asking for a new password: no such table: app_settings/.test(w)));
+
+    const h = gateway(profile);
+    h.addUser({ username: 'first-owner', password_hash: h.bcrypt.hashSync('owner-pass-1', 10) });
+    h.available['osi-db-helper'] = false;
+    const noDb = await h.login({ username: 'first-owner', password: 'owner-pass-1' });
+    assert.equal(noDb.payload.passwordChangeRequired, true);
+    assert.deepEqual(Object.keys(tokenClaims(noDb.payload.token)), ORDINARY_CLAIMS);
+    assert.ok(noDb.warnings.some((w) => /pending password change could not be read; asking for a new password$/.test(w)));
   });
 
   t('a correct password on a disabled account answers 403 and writes nothing', async () => {
@@ -576,9 +715,10 @@ for (const profile of PROFILES) {
   });
 }
 
-test('the staged body is the same in both profiles and the module copies are identical', () => {
-  const [a, b] = PROFILES.map((p) => nodeBody(p).func);
-  assert.equal(a, b);
+test('both profiles ship the staged body and identical module copies', () => {
+  const shipped = PROFILES.map((p) => handoff.readProfile(ROOT, p.rel).find((n) => n.id === 'auth-process-result').func);
+  assert.equal(shipped[0], shipped[1]);
+  assert.equal(shipped[0], handoff.loadPatch().func, 'run node scripts/local-signin-handoff.js --apply');
   const [m1, m2] = PROFILES.map((p) => fs.readFileSync(path.join(p.modules, 'osi-local-password-reset/index.js'), 'utf8'));
   assert.equal(m1, m2);
 });

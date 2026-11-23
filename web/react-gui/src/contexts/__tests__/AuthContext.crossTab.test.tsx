@@ -196,18 +196,6 @@ describe('cross-tab session changes (#378)', () => {
     expect(await required).toMatchObject({ status: 'password-change-required' });
     expect(auth().token).toBeNull();
     expect(localStorage.getItem('auth_token')).toBeNull();
-
-    let accepted: Promise<unknown> = Promise.resolve();
-    act(() => {
-      accepted = auth().login({ username: 'alice', password: 'synthetic-password' }, { acceptPendingPasswordChange: true });
-    });
-    await waitFor(() => expect(logins).toHaveLength(2));
-    await act(async () => {
-      logins[1].respond({ token: 'token-alice-pending', passwordChangeRequired: true });
-      await accepted;
-    });
-    expect(await accepted).toMatchObject({ status: 'signed-in' });
-    expect(auth().token).toBe('token-alice-pending');
   });
 
   it('does not resurrect a session when logout happens while login is pending', async () => {

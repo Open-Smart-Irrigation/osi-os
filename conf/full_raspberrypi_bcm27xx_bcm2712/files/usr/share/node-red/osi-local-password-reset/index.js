@@ -128,6 +128,10 @@ const MAX_PASSWORD_BYTES = 72;
 const FIRST_ACCOUNT_ID = 1;
 const CHANGE_KEY_PREFIX = 'local_password_change_required:';
 const FARMING_DB = '/data/db/farming.db';
+// Token claim for a session that must set a new password first. settings.js
+// (httpNodeMiddleware) refuses every HTTP route for such a token except
+// GET /api/me and POST /auth/login, answering 403 password_change_required.
+const TOKEN_CLAIM = 'mustChangePassword';
 
 function openFarmingDb(osiLib) {
   const load = osiLib.require('osi-db-helper');
@@ -163,14 +167,16 @@ async function changedRows(tx) {
   return counted ? Number(counted.n) : NaN;
 }
 
-function newPasswordProblem(newPassword, password) {
+function newPasswordProblem(newPassword, password, stored, bcrypt) {
   if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
     return { code: 'password_too_short', message: 'Password must be at least 6 characters' };
   }
   if (Buffer.byteLength(newPassword, 'utf8') > MAX_PASSWORD_BYTES) {
     return { code: 'password_too_long', message: 'Password must be at most 72 bytes' };
   }
-  if (newPassword === password) {
+  // bcrypt reads only the first 72 bytes, so a bcrypt value is also compared
+  // with the candidate itself, not only with the submitted current password.
+  if (newPassword === password || (isBcryptValue(stored) && bcrypt.compareSync(newPassword, stored))) {
     return { code: 'password_unchanged', message: 'Choose a password that differs from the current one' };
   }
   return null;
@@ -185,6 +191,11 @@ async function storeNewPassword(db, options) {
       [passwordHash, now, user.id, user.password_hash]
     );
     const n = await changedRows(tx);
+    if (n === 0) {
+      // The stored value changed after this request read it: the password
+      // this request verified is no longer current.
+      throw Object.assign(new Error('password change matched 0 rows'), { staleCredential: true });
+    }
     if (n !== 1) throw new Error('password change matched ' + String(n) + ' rows');
     await tx.run('DELETE FROM app_settings WHERE key=?', [changeKey(user.id)]);
   });
@@ -240,16 +251,28 @@ async function verifyLocalLogin(options) {
   }
   try {
     let required = firstAccount && !bcryptStored;
-    if (firstAccount && bcryptStored && db) {
-      try {
-        required = await changeIsPending(db, user.id);
-      } catch (error) {
-        warn('pending password change could not be read: ' + errorText(error));
+    // known: the requirement was detected at this sign-in or read from its
+    // record. Only a known requirement restricts the token (TOKEN_CLAIM).
+    let known = required;
+    if (firstAccount && bcryptStored) {
+      // A record that cannot be read counts as pending for the response, so
+      // the GUI asks again; the token stays unrestricted, because a gateway
+      // that cannot read the record may not be able to store a new password.
+      required = true;
+      if (db) {
+        try {
+          required = await changeIsPending(db, user.id);
+          known = required;
+        } catch (error) {
+          warn('pending password change could not be read; asking for a new password: ' + errorText(error));
+        }
+      } else {
+        warn('pending password change could not be read; asking for a new password');
       }
     }
     const response = {};
     if (required && newPassword !== undefined && newPassword !== null && newPassword !== '') {
-      const problem = newPasswordProblem(newPassword, password);
+      const problem = newPasswordProblem(newPassword, password, stored, bcrypt);
       if (problem) {
         response.passwordChange = 'rejected';
         response.passwordChangeError = problem.code;
@@ -260,6 +283,7 @@ async function verifyLocalLogin(options) {
           return { valid: true, response: { passwordChange: 'changed' } };
         } catch (error) {
           warn('new password could not be stored for user ' + String(user.id) + ': ' + errorText(error));
+          if (error && error.staleCredential) return { valid: false };
           response.passwordChange = 'failed';
         }
       } else {
@@ -267,7 +291,11 @@ async function verifyLocalLogin(options) {
       }
     }
     if (!bcryptStored) {
-      if (!db) {
+      if (Buffer.byteLength(String(password), 'utf8') > MAX_PASSWORD_BYTES) {
+        // bcrypt would keep only the first 72 bytes of this password; the
+        // stored value stays as it is until the password is replaced.
+        warn('rehash skipped for user ' + String(user.id) + ': password longer than ' + MAX_PASSWORD_BYTES + ' bytes');
+      } else if (!db) {
         warn('rehash skipped for user ' + String(user.id) + '; it is retried at the next sign-in');
       } else {
         try {
@@ -278,7 +306,7 @@ async function verifyLocalLogin(options) {
       }
     }
     if (required) response.passwordChangeRequired = true;
-    return { valid: true, response };
+    return known ? { valid: true, response, claims: { [TOKEN_CLAIM]: true } } : { valid: true, response };
   } finally {
     if (db) {
       try {
@@ -299,4 +327,5 @@ module.exports = {
   CHANGE_KEY_PREFIX,
   FARMING_DB,
   MAX_PASSWORD_BYTES,
+  TOKEN_CLAIM,
 };

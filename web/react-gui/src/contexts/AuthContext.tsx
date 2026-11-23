@@ -41,19 +41,11 @@ export type LoginOutcome =
   | { status: 'signed-in'; response: LoginResponse }
   | { status: 'password-change-required'; response: LoginResponse };
 
-export interface LoginOptions {
-  /**
-   * Open the session even though a new password is still required. Used only
-   * when the gateway could not store the new password, so nobody is locked out.
-   */
-  acceptPendingPasswordChange?: boolean;
-}
-
 interface AuthContextType {
   isAuthenticated: boolean;
   token: string | null;
   username: string | null;
-  login: (credentials: LoginRequest, options?: LoginOptions) => Promise<LoginOutcome>;
+  login: (credentials: LoginRequest) => Promise<LoginOutcome>;
   register: (credentials: RegisterRequest) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -110,11 +102,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const login = useCallback(async (credentials: LoginRequest, options: LoginOptions = {}): Promise<LoginOutcome> => {
+  const login = useCallback(async (credentials: LoginRequest): Promise<LoginOutcome> => {
     const operation = beginAuthOperation();
     const response = await authAPI.login(credentials);
     if (!isLatestAuthOperation(operation)) throw new AuthOperationSupersededError();
-    if (response.passwordChangeRequired === true && !options.acceptPendingPasswordChange) {
+    if (response.passwordChangeRequired === true) {
       return { status: 'password-change-required', response };
     }
     beginAuthSession(response.token, credentials.username);
