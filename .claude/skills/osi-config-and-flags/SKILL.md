@@ -93,7 +93,8 @@ From `references/runtime-and-flags.md`, "5. Node-RED `settings.js`": `functionGl
 
 - Assuming the MQTT telemetry broker is fixed. It follows
   `mqtt_broker_url`, then `server_host`, then the default (section 9), and
-  only after a Node-RED restart.
+  only after a Node-RED restart. An unlinked gateway gets no cloud broker
+  at all.
 - Assuming `.chirpstack.env` is dead weight that's safe to delete blindly.
   It's still the fallback path for every `CHIRPSTACK_*` key that isn't yet in
   UCI (fresh bootstrap before first successful UCI write, or the
