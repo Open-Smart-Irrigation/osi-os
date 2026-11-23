@@ -159,9 +159,19 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
-# An unlinked gateway, or one linked to the default host, gets byte-identical
-# behaviour to the old literal.
+# A gateway linked to the default host gets byte-identical behaviour to the
+# old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
+# An unlinked gateway (no osi-server.cloud.mqtt_password; linking always
+# stores one) reports to no cloud (#766). It gets this name, which never
+# resolves (RFC 6761 .invalid), instead of the default cloud. An empty URL
+# would not do: Node-RED 3.1 turns an empty broker into mqtt://localhost:1883,
+# the gateway's own broker. start_service() also removes the broker's
+# credentials and exports OSI_CLOUD_BROKER_AUTOCONNECT=false, which the
+# "OSI Cloud Broker" node reads as "${OSI_CLOUD_BROKER_AUTOCONNECT}". Link and
+# unlink never rewrite flows.json: its bytes stay equal to the payload's
+# recorded flows_sha256, so a deploy still trusts it as a rollback target.
+OSI_UNLINKED_CLOUD_BROKER_URL="wss://unlinked.invalid/mqtt"
 
 # Describes why a configured value was rejected without printing it: the
 # value may be mistyped credentials or a private host name.
@@ -462,14 +472,27 @@ start_service() {
     link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
+    # Same rule as osi-cloud-http's gatewayLinked(): blank counts as unlinked.
+    case "$mqtt_password" in *[![:space:]]*) ;; *) mqtt_password="" ;; esac
+    local cloud_broker_autoconnect="false"
     local mqtt_broker_url=$(uci -q get osi-server.cloud.mqtt_broker_url 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
-    resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
+    if [ -n "$mqtt_password" ]; then
+        cloud_broker_autoconnect="true"
+        resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
+    else
+        CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
+        CLOUD_BROKER_URL_SOURCE="unlinked"
+    fi
     logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
     # Only a URL that came from UCI may replace a literal in an older
-    # flows.json; with nothing usable configured that literal stays.
+    # flows.json (a rollback payload); with nothing usable configured, or
+    # when unlinked, that literal stays and flows.json is not rewritten.
     local cloud_broker_patch_url=""
-    [ "$CLOUD_BROKER_URL_SOURCE" = "default" ] || cloud_broker_patch_url="$CLOUD_BROKER_URL"
+    case "$CLOUD_BROKER_URL_SOURCE" in
+        default|unlinked) ;;
+        *) cloud_broker_patch_url="$CLOUD_BROKER_URL" ;;
+    esac
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
     local journal_photo_cache_bytes=$(uci -q get osi-server.cloud.journal_photo_cache_bytes 2>/dev/null || echo "4294967296")
     local journal_min_free_bytes=$(uci -q get osi-server.cloud.journal_min_free_bytes 2>/dev/null || echo "4294967296")
@@ -908,6 +931,10 @@ try {
       creds[cloudBrokerNodeId] = nextCloudCreds;
       credsChanged = true;
     }
+  } else if (!deviceMqttPassword && Object.prototype.hasOwnProperty.call(creds, cloudBrokerNodeId)) {
+    // Unlinked (#766): the account's broker credentials go; other entries stay.
+    delete creds[cloudBrokerNodeId];
+    credsChanged = true;
   }
 
   if (agroscopeUsername && agroscopePassword) {
@@ -1007,6 +1034,7 @@ NODE
         DEVICE_MQTT_PASSWORD="$mqtt_password" \
         OSI_SERVER_HOST="$server_host" \
         OSI_CLOUD_BROKER_URL="$CLOUD_BROKER_URL" \
+        OSI_CLOUD_BROKER_AUTOCONNECT="$cloud_broker_autoconnect" \
         ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls" \
         JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes" \
         JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes" \

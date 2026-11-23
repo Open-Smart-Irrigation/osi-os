@@ -54,6 +54,19 @@ This is the standard way to push a new build to a live gateway without exposing 
 Pi to the internet or needing a registry. Numbered, copy-pasteable, run from your
 dev workstation unless noted.
 
+**Mandatory before a release that carries the #766 change, on a gateway that
+is linked:** check on the gateway that the MQTT password is present. From that
+release on, a gateway without it is treated as unlinked and stops reporting
+to the cloud. The check prints only `present` or `MISSING`, never the value,
+and treats a blank value as missing, as the gateway does:
+
+```sh
+case "$(uci -q get osi-server.cloud.mqtt_password)" in *[![:space:]]*) echo present ;; *) echo MISSING ;; esac
+```
+
+On `MISSING`, do not deploy: stop and escalate. The same check applies to the
+bundle path ([deploying over a flaky link](../../../../docs/operations/deploying-over-a-flaky-link.md)).
+
 1. **Build the GUI.**
    ```bash
    cd web/react-gui && npm run build

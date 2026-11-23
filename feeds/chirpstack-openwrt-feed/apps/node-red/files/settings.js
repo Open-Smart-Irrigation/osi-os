@@ -14,7 +14,10 @@ const protectedKeys = new Set([
     'DEVICE_EUI_SOURCE',
     'DEVICE_EUI_CONFIDENCE',
     'DEVICE_EUI_LAST_VERIFIED_AT',
-    'LINK_GATEWAY_DEVICE_EUI'
+    'LINK_GATEWAY_DEVICE_EUI',
+    // node-red.init exports it empty on an unlinked gateway (#766); the env
+    // file must never refill it and bring cloud reporting back.
+    'DEVICE_MQTT_PASSWORD'
 ]);
 
 function loadChirpstackEnvFile(filePath) {

@@ -25,6 +25,9 @@ export const AccountLink: React.FC = () => {
 
   const [unlinking, setUnlinking] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  // Set by a successful unlink on this page. The gateway stopped reporting
+  // locally; the cloud still lists it until the farmer unlinks it there (#766).
+  const [unlinkedHere, setUnlinkedHere] = useState(false);
   const [forcingSync, setForcingSync] = useState(false);
   const [forceSyncResult, setForceSyncResult] = useState<ForceSyncResult | null>(null);
   const [showReauth, setShowReauth] = useState(false);
@@ -38,6 +41,16 @@ export const AccountLink: React.FC = () => {
   const refreshSyncState = () => accountLinkAPI.getSyncState()
     .then(setSyncState)
     .catch(() => setSyncState(null));
+
+  // The gateway decides who may unlink (canUnlink), and a link changes the
+  // answer: read the status again after linking instead of guessing it.
+  const refreshStatus = async () => {
+    try {
+      setStatus(await accountLinkAPI.getStatus());
+    } catch {
+      // Keep the status built from the link response; the next page load reads it again.
+    }
+  };
 
   useEffect(() => {
     accountLinkAPI.getStatus()
@@ -66,12 +79,16 @@ export const AccountLink: React.FC = () => {
         password,
       });
       setResult(res);
-      setStatus({
+      setUnlinkedHere(false);
+      setStatus((previous) => ({
         linked: true,
         serverUsername: res.serverUsername,
         linkedAt: new Date().toISOString(),
         serverUrl,
-      });
+        gatewayLinked: true,
+        canUnlink: previous?.canUnlink,
+      }));
+      await refreshStatus();
     } catch (err: any) {
       const status = err.response?.status;
       if (status === 401) {
@@ -91,7 +108,8 @@ export const AccountLink: React.FC = () => {
     setUnlinking(true);
     try {
       await accountLinkAPI.unlink();
-      setStatus({ linked: false, serverUsername: null, linkedAt: null });
+      setStatus((previous) => ({ linked: false, serverUsername: null, linkedAt: null, gatewayLinked: false, canUnlink: previous?.canUnlink }));
+      setUnlinkedHere(true);
       setResult(null);
       setForceSyncResult(null);
     } catch {
@@ -139,7 +157,10 @@ export const AccountLink: React.FC = () => {
         serverUsername: res.serverUsername,
         linkedAt: new Date().toISOString(),
         serverUrl: status.serverUrl,
+        gatewayLinked: true,
+        canUnlink: status.canUnlink,
       });
+      await refreshStatus();
       await refreshSyncState();
     } catch (err: any) {
       const code = err.response?.status;
@@ -185,6 +206,40 @@ export const AccountLink: React.FC = () => {
       </div>
     );
   }
+
+  // The disconnect control acts on the gateway, so it appears whenever the
+  // gateway is linked, also for an account whose own row is local.
+  const unlinkControl = (
+    status?.canUnlink !== true ? (
+      <p className="text-[var(--text-secondary)] text-sm">{t('unlink.adminOnly')}</p>
+    ) : showUnlinkConfirm ? (
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <p className="text-yellow-800 font-semibold mb-3">{t('unlink.confirm')}</p>
+        <div className="flex gap-3">
+          <button
+            onClick={handleUnlink}
+            disabled={unlinking}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {t('unlink.button')}
+          </button>
+          <button
+            onClick={() => setShowUnlinkConfirm(false)}
+            className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors"
+          >
+            {t('form.cancel')}
+          </button>
+        </div>
+      </div>
+    ) : (
+      <button
+        onClick={() => setShowUnlinkConfirm(true)}
+        className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 rounded-lg transition-colors"
+      >
+        {t('unlink.button')}
+      </button>
+    )
+  );
 
   return (
     <div className="min-h-screen bg-[var(--bg)] px-4 py-8">
@@ -420,39 +475,25 @@ export const AccountLink: React.FC = () => {
                 </div>
               )}
 
-              {showUnlinkConfirm ? (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <p className="text-yellow-800 font-semibold mb-3">{t('unlink.confirm')}</p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleUnlink}
-                      disabled={unlinking}
-                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      {t('unlink.button')}
-                    </button>
-                    <button
-                      onClick={() => setShowUnlinkConfirm(false)}
-                      className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors"
-                    >
-                      {t('form.cancel')}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowUnlinkConfirm(true)}
-                  className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold text-lg px-6 py-3 rounded-lg transition-colors"
-                >
-                  {t('unlink.button')}
-                </button>
-              )}
+              {unlinkControl}
             </div>
           ) : (
             <div>
-              <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6">
-                <p className="text-[var(--text-secondary)]">{t('status.notLinked')}</p>
-              </div>
+              {unlinkedHere && (
+                <div role="status" className="bg-[var(--secondary-bg)] border border-[var(--border)] rounded-lg p-4 mb-4">
+                  <p className="text-[var(--text)]">{t('unlink.stoppedReporting')}</p>
+                </div>
+              )}
+              {status?.gatewayLinked ? (
+                <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6 space-y-3">
+                  <p className="text-[var(--text-secondary)]">{t('status.gatewayLinkedOtherAccount')}</p>
+                  {unlinkControl}
+                </div>
+              ) : (
+                <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6">
+                  <p className="text-[var(--text-secondary)]">{t('status.notLinked')}</p>
+                </div>
+              )}
 
               {showWarning ? (
                 <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-6 mb-6">

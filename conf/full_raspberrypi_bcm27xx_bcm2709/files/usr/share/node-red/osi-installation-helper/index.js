@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const cloudHttp = require('../osi-cloud-http');
 
 function normalizeInstallationUuid(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -669,15 +670,31 @@ try {
     await close();
     return [msg, null];
   }
+  // Who may unlink: see unlinkPermitted(). With OSI_SCOPED_ACCESS on, the
+  // route's admin guard decides through the scope helper. With it off, this
+  // check reads the caller's row and the admin count, so no flag-off path
+  // needs the scope helper, and it fails closed.
+  const scoped = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+  const caller = scoped ? null : await db.get(UNLINK_CALLER_SQL, [Number(auth.userId), String(auth.username).trim()]);
+  if (!scoped && !unlinkPermitted(caller)) {
+    releaseAccountOperation(msg);
+    await close();
+    msg.statusCode = 403;
+    msg.payload = { message: 'Forbidden', code: 'forbidden' };
+    return [null, msg];
+  }
   await accountConfigTransaction(db, {
     fs: global.get('fs'), cp: global.get('cp'), desired: emptyMqttConfig(),
     marker: { kind: 'disconnect', username: auth.username },
   }, async (tx) => {
   const local = await tx.get('SELECT id FROM users WHERE id=? AND username=?', [Number(auth.userId), auth.username]);
   if (!local) throw new Error('Local account no longer exists');
+  // The link belongs to the gateway, not to one local account (#766): the REST
+  // sync nodes send for any account row that still holds a cloud address, so
+  // every row gives up its link. Each keeps its own local password.
   await tx.run(
-    'UPDATE users SET auth_mode = ?, server_username = NULL, server_password_hash = NULL, server_offline_verifier = NULL, server_offline_verifier_version = 0, server_linked_at = NULL, server_url = NULL, server_sync_token = NULL, server_sync_token_expires_at = NULL, cloud_user_id = NULL, last_auth_sync_at = NULL, last_auth_sync_status = NULL, last_auth_sync_error = NULL WHERE id = ? AND username = ?',
-    ['local', Number(auth.userId), String(auth.username || '').trim()]
+    "UPDATE users SET auth_mode = 'local', server_username = NULL, server_password_hash = NULL, server_offline_verifier = NULL, server_offline_verifier_version = 0, server_linked_at = NULL, server_url = NULL, server_sync_token = NULL, server_sync_token_expires_at = NULL, cloud_user_id = NULL, last_auth_sync_at = NULL, last_auth_sync_status = NULL, last_auth_sync_error = NULL WHERE auth_mode <> 'local' OR server_url IS NOT NULL OR server_sync_token IS NOT NULL OR server_username IS NOT NULL OR server_linked_at IS NOT NULL OR cloud_user_id IS NOT NULL OR server_offline_verifier IS NOT NULL",
+    []
   );
   await tx.run("UPDATE sync_link_state SET linked=0, server_url=NULL, cloud_user_id=NULL, gateway_device_eui=NULL, peer_capabilities_json=NULL, peer_capabilities_context_json=NULL, peer_capabilities_request_id=NULL, link_attempt_json=NULL, updated_at=? WHERE peer_node='cloud'", [new Date().toISOString()]);
   await tx.run("DELETE FROM sync_history_dirty_keys WHERE peer_node='cloud'", []);
@@ -1026,11 +1043,35 @@ module.exports.recoverAccountConfig = recoverAccountConfig;
 
 // Both normal finalization and startup use the same receipt/publication rule.
 async function recoverAccountConfigOnStart({osiDb, fs, cp, warn}) {
-  if (!fs || !fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) return;
-  const db = new osiDb.Database('/data/db/farming.db');
-  try { await recoverAccountConfig(db, {fs, cp, warn}); }
-  catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
-  finally { await db.close(); }
+  if (fs && fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) {
+    const db = new osiDb.Database('/data/db/farming.db');
+    try { await recoverAccountConfig(db, {fs, cp, warn}); }
+    catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
+    finally { await db.close(); }
+  }
+  await warnLinkWithoutPassword({osiDb, fs, warn});
+}
+
+// #766: a process without an MQTT password reports nothing to the cloud. If
+// the database still records the cloud peer as linked, say so once at start:
+// the account page would show a link that no longer reports. Stale users rows
+// left by an older unlink do not trigger this; only the peer record does.
+async function warnLinkWithoutPassword({osiDb, fs, warn}) {
+  if (cloudHttp.gatewayLinked() || (fs && fs.existsSync(ACCOUNT_CONFIG_JOURNAL))) return;
+  let db = null;
+  try {
+    db = new osiDb.Database('/data/db/farming.db');
+    const peer = await db.get("SELECT linked FROM sync_link_state WHERE peer_node='cloud' LIMIT 1", []);
+    if (peer && Number(peer.linked) === 1) {
+      warn('The database records a cloud link, but no MQTT password is in UCI; cloud reporting stays off until the gateway is linked again');
+    }
+  } catch (error) {
+    warn('Cloud link check at start failed: ' + String(error && error.message ? error.message : error));
+  } finally {
+    if (db) {
+      try { await db.close(); } catch (error) { warn('Cloud link check DB close failed: ' + String(error && error.message ? error.message : error)); }
+    }
+  }
 }
 module.exports.publishAccountRestart = publishAccountRestart;
 module.exports.recoverAccountConfigOnStart = recoverAccountConfigOnStart;
@@ -1205,8 +1246,81 @@ try {
 }
 
 // The MQTT connection keeps boot-time credentials until identityd restarts it.
-// Stop new cloud publications while an account operation/receipt is unresolved.
+// Stop new cloud publications while an account operation/receipt is unresolved,
+// and in a process that started unlinked (#766).
+let unlinkedDropReported = false;
 function accountCloudMessage({msg, node, global}) {
+  if (!cloudHttp.gatewayLinked()) {
+    if (!unlinkedDropReported) {
+      unlinkedDropReported = true;
+      node.warn('No MQTT password in UCI: the gateway is not linked, so cloud MQTT messages are dropped');
+    }
+    return null;
+  }
   return gatewayWorkBlocked({fs: global.get('fs'), warn: text => node.warn(text)}) ? null : msg;
 }
 module.exports.accountCloudMessage = accountCloudMessage;
+
+// Unlinking stops the whole gateway's cloud reporting, a gateway system
+// command (#766). The edge holds no proof of the cloud gateway owner
+// (authority contract K1, "Gateway owner"), so an enabled admin may unlink;
+// on a gateway with no enabled admin, the enabled, currently linked account
+// stands in for the owner, unless it is a viewer. A disabled account never
+// may. row: role, disabled_at, auth_mode, server_url, enabled_admins.
+function unlinkPermitted(row) {
+  if (!row || row.disabled_at) return false;
+  if (row.role === 'admin') return true;
+  const linked = row.auth_mode === 'server' && String(row.server_url || '').trim() !== '';
+  return Number(row.enabled_admins) === 0 && linked && row.role !== 'viewer';
+}
+const ENABLED_ADMINS_SQL = "(SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled_at IS NULL) AS enabled_admins";
+// Whether the gateway itself is linked (the cloud peer record), whichever
+// account linked it: an admin whose own row is local may still unlink it.
+const GATEWAY_LINKED_SQL = "COALESCE((SELECT MAX(linked) FROM sync_link_state WHERE peer_node = 'cloud'), 0) AS gateway_linked";
+const UNLINK_CALLER_SQL = 'SELECT role, disabled_at, auth_mode, server_url, ' + ENABLED_ADMINS_SQL +
+  ' FROM users WHERE id = ? AND username = ? LIMIT 1';
+// The account-link status query (al-status-decode): named columns only, no
+// password hash, verifier or token; the verifier is reported as present or not.
+const ACCOUNT_LINK_STATUS_SQL = 'SELECT server_username, server_linked_at, server_url, auth_mode, ' +
+  "CASE WHEN TRIM(COALESCE(server_offline_verifier, '')) <> '' THEN 1 ELSE 0 END AS has_offline_verifier, " +
+  'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, ' +
+  'last_auth_sync_at, last_auth_sync_status, last_auth_sync_error, role, disabled_at, ' +
+  ENABLED_ADMINS_SQL + ', ' + GATEWAY_LINKED_SQL + ' FROM users WHERE id = ? AND username = ?';
+module.exports.unlinkPermitted = unlinkPermitted;
+module.exports.ACCOUNT_LINK_STATUS_SQL = ACCOUNT_LINK_STATUS_SQL;
+
+// GET /api/account-link/status response from the row ACCOUNT_LINK_STATUS_SQL
+// selects. canUnlink follows the unlink rule: the route guard's admin check
+// with scoped access on, unlinkPermitted() with it off.
+function accountLinkStatusResponse({msg, env}) {
+  const result = msg.payload;
+  if (!Array.isArray(result) || result.length === 0) {
+    msg.statusCode = 401;
+    msg.payload = { message: 'User not found' };
+    return msg;
+  }
+  const user = result[0];
+  const scoped = String((env && env.get('OSI_SCOPED_ACCESS')) || '') === '1';
+  const linked = user.auth_mode === 'server';
+  const hasOfflineVerifier = Number(user.has_offline_verifier) === 1;
+  const offlineVerifierVersion = Number(user.server_offline_verifier_version || 0) || 0;
+  const linkedAuthPackageValid = linked && hasOfflineVerifier && offlineVerifierVersion >= 1;
+  const linkedAuthRepairRequired = linked && !linkedAuthPackageValid;
+  msg.statusCode = 200;
+  msg.payload = {
+    linked: linked,
+    serverUsername: user.server_username || null,
+    linkedAt: user.server_linked_at || null,
+    serverUrl: user.server_url || null,
+    linkedAuthPackageValid: linkedAuthPackageValid,
+    linkedAuthRepairRequired: linkedAuthRepairRequired,
+    linkedAuthSyncStatus: linkedAuthRepairRequired ? 'repair_required' : (user.last_auth_sync_status || null),
+    offlineVerifierVersion: linked ? offlineVerifierVersion : 0,
+    lastAuthSyncAt: user.last_auth_sync_at || null,
+    lastAuthSyncError: user.last_auth_sync_error || null,
+    gatewayLinked: Number(user.gateway_linked) === 1,
+    canUnlink: scoped ? (user.role === 'admin' && !user.disabled_at) : unlinkPermitted(user),
+  };
+  return msg;
+}
+module.exports.accountLinkStatusResponse = accountLinkStatusResponse;

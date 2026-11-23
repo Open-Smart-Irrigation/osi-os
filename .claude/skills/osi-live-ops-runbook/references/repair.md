@@ -611,6 +611,106 @@ not a credential shortcut: `al-unlink-db` returns the account to local mode and
 clears the stored verifier, its version and the sync token, so it needs the
 operator's consent.
 
+### Stop an unlinked gateway reporting to the cloud
+
+Use this on a gateway whose firmware predates the #766 fix (0.8.4 and
+earlier, and 0.9 builds without it). On those gateways an unlink
+(`DELETE /api/account-link`, the GUI's disconnect button) clears UCI
+`osi-server.cloud.mqtt_password`, but the gateway keeps reporting:
+
+- MQTT: `node-red.init` writes the "OSI Cloud Broker" credentials into
+  `/srv/node-red/flows_cred.json` when a password is set and never removes
+  them. With the broker settings empty it falls back to the default cloud
+  broker, and the node connects with the old credentials. A restart or a
+  reboot changes nothing.
+- REST: unlink clears only the calling account's row in `users`. If a second
+  local account was linked, the sync nodes keep posting to the cloud with
+  that row's token.
+
+From the fix on, unlink clears every account row, the gateway refuses cloud
+sync requests and MQTT messages while unlinked, and `node-red.init` removes
+the credentials and exports the broker's auto-connect as off. Updating the
+gateway is the lasting repair; this procedure is the manual fallback.
+
+**Check first** (read-only; prints no secret):
+
+```sh
+uci -q get osi-server.cloud.mqtt_password >/dev/null && echo "STOP: mqtt_password is set (still linked?)" || echo "mqtt_password absent"
+node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync("/srv/node-red/flows_cred.json","utf8")); if (Object.prototype.hasOwnProperty.call(c,"$")) { console.log("STOP: flows_cred.json is encrypted; this procedure cannot read it"); process.exit(1); } const id=JSON.parse(fs.readFileSync("/srv/node-red/flows.json","utf8")).find(n=>n.name==="OSI Cloud Broker").id; console.log("cloud broker entry:", c[id] ? "present" : "absent", "| other entries:", Object.keys(c).filter(k=>k!==id).length)'
+sqlite3 -readonly /data/db/farming.db "SELECT username FROM users WHERE server_url IS NOT NULL OR server_sync_token IS NOT NULL OR auth_mode <> 'local'"
+logread | grep "OSI Cloud Broker" | tail -2
+```
+
+Go on only if the account page (or `GET /api/account-link/status`) shows the
+gateway unlinked and `mqtt_password` is absent. Step 2 applies when the
+cloud broker entry is present. Step 3 applies when the `users` query lists an
+account. Other credential entries (another broker's) stay as they are.
+
+A `STOP: flows_cred.json is encrypted` line means Node-RED saved the file
+with a credential key, which happens only after a deploy from the Node-RED
+editor (field repair). This procedure does not handle that file; escalate.
+
+1. Take the pre-repair backup (script above). It copies `flows_cred.json`,
+   which holds the old device password: delete the backup once step 5 has
+   passed.
+
+2. Remove only the cloud broker entry. The script refuses an encrypted file,
+   then writes a temporary file in the same directory with mode 0600, flushes
+   it and renames it over the original, so a power cut leaves the old or the
+   new file, never a partial one:
+
+   ```sh
+   node -e '
+     const fs = require("fs"), path = require("path");
+     const file = fs.realpathSync("/srv/node-red/flows_cred.json");
+     const creds = JSON.parse(fs.readFileSync(file, "utf8"));
+     if (Object.prototype.hasOwnProperty.call(creds, "$")) { console.log("STOP: flows_cred.json is encrypted; nothing changed"); process.exit(1); }
+     const id = JSON.parse(fs.readFileSync("/srv/node-red/flows.json", "utf8")).find(n => n.name === "OSI Cloud Broker").id;
+     if (!creds[id]) { console.log("no cloud broker entry; nothing to do"); process.exit(0); }
+     delete creds[id];
+     const tmp = file + ".unlink-" + process.pid;
+     const fd = fs.openSync(tmp, "wx", 0o600);
+     fs.writeSync(fd, JSON.stringify(creds)); fs.fsyncSync(fd); fs.closeSync(fd);
+     fs.renameSync(tmp, file);
+     const dir = fs.openSync(path.dirname(file), "r"); fs.fsyncSync(dir); fs.closeSync(dir);
+     console.log("cloud broker entry removed; remaining entries:", Object.keys(creds).length);
+   '
+   ```
+
+3. For each account the `users` query listed, the farmer signs in as that
+   account on the gateway's account page and presses the disconnect button.
+   That is the shipped unlink: it clears the account's link and its
+   linked-login data through the supported writer. This runbook has no
+   manual procedure for the offline verifier (rule 4), so do not clear these
+   rows by hand. The account then signs in with its local password.
+
+4. Restart Node-RED so it drops the connection: `/etc/init.d/node-red restart`.
+
+5. Verify:
+   - On the gateway: `ls -l /srv/node-red/flows_cred.json` shows
+     `-rw-------` root. The "Check first" listing shows the cloud broker
+     entry absent, and the `users` query lists no account.
+     `logread | grep "OSI Cloud Broker" | tail -3` shows no new
+     `Connected to broker` after the restart.
+   - In the cloud, as the account the gateway was linked to: the gateway's
+     "last seen" stops advancing within two minutes of the restart. Watch it
+     for 10 minutes.
+
+Expected after the restart: the broker node keeps trying about every 15 s and
+logs `Connection failed to broker` each time (about 40 lines in 10 minutes)
+until the gateway is linked again or updated to firmware with the fix.
+
+Undo: restore `flows_cred.json` from the backup, then restart Node-RED.
+Linking the gateway again from the account page writes fresh credentials and
+link fields either way.
+
+The cloud still lists the gateway under the account after this procedure.
+To remove it there, unlink it in the cloud as well.
+
+Tested so far: steps 1, 2, 4 and 5 on a 0.8.4 test board (23 Nov 2026), where
+"last seen" stayed put for the 10 minutes after the restart and a reboot
+before step 2 had not stopped the reporting. Step 3 uses the shipped unlink.
+
 ### ChirpStack v4 has no plain REST API
 
 ChirpStack v4.x is gRPC-web only; `curl http://127.0.0.1:8080/api/...` 404s

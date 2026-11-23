@@ -917,7 +917,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const flows = readFlows(profile);
     const installationUuid = installationHelper.newInstallationUuid();
     const fixture = freshSeededDb((db) => {
-      db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,cloud_user_id,server_url) VALUES(1,'local','local-hash','now','local-uuid','server',11,'https://cloud.example.org')").run();
+      db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,cloud_user_id,server_url) VALUES(1,'local','local-hash','now','local-uuid','admin','server',11,'https://cloud.example.org')").run();
       db.prepare("INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,'https://cloud.example.org','11','AABBCCDDEEFF0011',?,'now')").run(installationUuid);
       db.prepare('UPDATE installation_identity SET current_gateway_device_eui=?').run('AABBCCDDEEFF0011');
     }, installationUuid);
@@ -963,7 +963,8 @@ for (const profile of ['bcm2712', 'bcm2709']) {
 function linkedConsistencyFixture() {
   const installationUuid = installationHelper.newInstallationUuid();
   const fixture = freshSeededDb(db => {
-    db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,cloud_user_id,server_url,server_sync_token) VALUES(1,'local','local-hash','now','local-uuid','server',11,'https://cloud.example.org','old-token')").run();
+    // The gateway's only account, an enabled admin.
+    db.prepare("INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,cloud_user_id,server_url,server_sync_token) VALUES(1,'local','local-hash','now','local-uuid','admin','server',11,'https://cloud.example.org','old-token')").run();
     db.prepare("INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,'https://cloud.example.org','11','AABBCCDDEEFF0011',?,'now')").run(installationUuid);
     db.prepare('UPDATE installation_identity SET current_gateway_device_eui=?').run('AABBCCDDEEFF0011');
     db.exec("CREATE TABLE sync_history_dirty_keys(peer_node TEXT, row_key TEXT); INSERT INTO sync_history_dirty_keys VALUES('cloud','retained-history-key')");

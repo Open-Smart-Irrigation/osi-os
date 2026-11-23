@@ -6,7 +6,8 @@
     "linked": "Konto mit OSI Server verknüpft",
     "notLinked": "Nicht mit OSI Server verbunden",
     "linkedAs": "Verknüpft als: {{username}}",
-    "linkedSince": "Seit: {{date}}"
+    "linkedSince": "Seit: {{date}}",
+    "gatewayLinkedOtherAccount": "Dieses Gateway ist über ein anderes Konto mit dem OSI Server verbunden."
   },
   "form": {
     "serverUrl": "OSI Server URL",
@@ -34,7 +35,9 @@
   "unlink": {
     "button": "Verbindung zum OSI Server trennen",
     "confirm": "Sind Sie sicher? Nach dem Trennen müssen Sie Ihr lokales Originalpasswort verwenden.",
-    "success": "Verbindung zum OSI Server getrennt"
+    "success": "Verbindung zum OSI Server getrennt",
+    "stoppedReporting": "Dieses Gateway sendet keine Daten mehr. Um es auch aus Ihrem Cloud-Konto zu entfernen, trennen Sie es in der Cloud.",
+    "adminOnly": "Dieses Konto kann das Gateway nicht vom OSI Server trennen."
   },
   "errors": {
     "networkError": "OSI Server nicht erreichbar. Prüfen Sie die URL und Ihre Internetverbindung.",

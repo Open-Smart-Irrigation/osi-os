@@ -6,7 +6,8 @@
     "linked": "Conta vinculada ao OSI Server",
     "notLinked": "Não conectado ao OSI Server",
     "linkedAs": "Vinculado como: {{username}}",
-    "linkedSince": "Desde: {{date}}"
+    "linkedSince": "Desde: {{date}}",
+    "gatewayLinkedOtherAccount": "Este gateway está ligado ao OSI Server através de outra conta."
   },
   "form": {
     "serverUrl": "URL do servidor OSI",
@@ -34,7 +35,9 @@
   "unlink": {
     "button": "Desligar do OSI Server",
     "confirm": "Tem a certeza? Após desligar, deve usar a sua palavra-passe local original.",
-    "success": "Desligado do OSI Server"
+    "success": "Desligado do OSI Server",
+    "stoppedReporting": "Este gateway deixou de enviar dados. Para o remover também da sua conta na nuvem, desassocie-o na nuvem.",
+    "adminOnly": "Esta conta não pode desligar o gateway do OSI Server."
   },
   "errors": {
     "networkError": "Não foi possível alcançar o OSI Server. Verifique o URL e a sua ligação à Internet.",

@@ -1,4 +1,9 @@
 'use strict';
+// The flows this harness runs model a linked gateway. node-red.init exports
+// the UCI MQTT password to every Node-RED process, and the cloud guards drop
+// all cloud traffic in a process that started without one (#766). A test
+// that models an unlinked gateway sets the variable itself.
+if (process.env.DEVICE_MQTT_PASSWORD === undefined) process.env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');

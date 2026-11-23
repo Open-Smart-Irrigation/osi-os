@@ -1731,6 +1731,10 @@ export interface AccountLinkStatus {
   serverUsername: string | null;
   linkedAt: string | null;
   serverUrl?: string | null;
+  /** True when the gateway itself is linked, whichever account linked it. */
+  gatewayLinked?: boolean;
+  /** True when the gateway would accept this account's unlink (an enabled admin, or the linked account on a gateway without one). */
+  canUnlink?: boolean;
 }
 
 export interface AccountLinkResult {

@@ -2,8 +2,97 @@
 
 const http = require('http');
 const https = require('https');
+const path = require('path');
 
 const DEFAULT_TIMEOUT_MS = 30000;
+
+// Issue #766: an unlinked gateway reports nothing to the cloud. Linking always
+// stores an MQTT password (the link is refused without one, since v0.7.0), and
+// node-red.init exports it to the process as DEVICE_MQTT_PASSWORD, empty when
+// unlinked. Link and unlink both restart Node-RED, so the value holds for the
+// life of the process.
+function gatewayLinked(env = process.env) {
+  return String((env && env.DEVICE_MQTT_PASSWORD) || '').trim() !== '';
+}
+
+// Requests that carry gateway data or keep a gateway session alive. Matched
+// as a path segment anywhere in the request path, so a cloud reached under a
+// base path (https://host/osi/api/v1/sync/...) is gated the same way.
+// Two routes stay open to an unlinked gateway: linking (/auth/local-sync),
+// and support work requests (/api/v1/support/edge/work-requests), which the
+// farmer starts and which carry only the support request itself. Support is
+// the one deliberate exception to "an unlinked gateway sends nothing".
+const LINKED_ONLY_PATHS = [/(?:^|\/)api\/v1\/sync\//, /(?:^|\/)api\/v2\/journal\//, /(?:^|\/)auth\/refresh-sync(?:\/|$)/];
+
+function linkedOnlyPath(pathname) {
+  return LINKED_ONLY_PATHS.some((pattern) => pattern.test(String(pathname || '')));
+}
+
+function unlinkedRefusal(parsed, env = process.env) {
+  if (!linkedOnlyPath(parsed.pathname)) return null;
+  if (!gatewayLinked(env)) {
+    const error = new Error('Gateway is not linked to a cloud account; cloud sync request not sent');
+    error.code = 'gateway_unlinked';
+    return error;
+  }
+  // A link, an unlink or an identity change is committed or in progress and
+  // Node-RED has not restarted yet: the process still holds the old
+  // environment, and a request built before the change may carry the old
+  // token. Read at send time, as the cloud MQTT guards do (#766).
+  const pending = accountWorkPending();
+  if (pending === 'unavailable') {
+    const error = new Error('Gateway account-work gate is unavailable; cloud sync request not sent');
+    error.code = 'account_gate_unavailable';
+    return error;
+  }
+  if (pending) {
+    const error = new Error('Gateway account or identity change is pending a restart; cloud sync request not sent');
+    error.code = 'account_restart_pending';
+    return error;
+  }
+  return null;
+}
+
+// The account-work gate lives in osi-installation-helper, which itself loads
+// this module, so it is required at call time. It is loaded the way osi-lib
+// loads it for the flows (by path under OSI_LIB_BASE), so the gate sees the
+// flows' instance and its in-progress account operation, on a fresh image
+// (where node_modules holds separate copies) as after a deploy. The sibling
+// path is the fallback where that base does not exist (test harnesses); it
+// still sees the account journal, the restart requests and the sentinel.
+let accountWorkFs = require('fs');
+function defaultAccountGateLoader() {
+  const base = process.env.OSI_LIB_BASE || '/srv/node-red';
+  try {
+    return require(path.join(base, 'osi-installation-helper'));
+  } catch (primaryError) {
+    return require('../osi-installation-helper');
+  }
+}
+let loadAccountGate = defaultAccountGateLoader;
+
+function warnGate(text) {
+  console.warn('osi-cloud-http: ' + text);
+}
+
+// true, false, or 'unavailable' when the gate cannot be loaded or run; the
+// caller refuses in both the true and the 'unavailable' case.
+function accountWorkPending() {
+  let helper;
+  try {
+    helper = loadAccountGate();
+    if (!helper || typeof helper.gatewayWorkBlocked !== 'function') throw new Error('gatewayWorkBlocked is not exported');
+  } catch (error) {
+    warnGate('account-work gate could not be loaded; refusing cloud sync requests: ' + String(error && error.message ? error.message : error));
+    return 'unavailable';
+  }
+  try {
+    return helper.gatewayWorkBlocked({ fs: accountWorkFs, warn: warnGate }) ? true : false;
+  } catch (error) {
+    warnGate('account-work gate failed; refusing cloud sync requests: ' + String(error && error.message ? error.message : error));
+    return 'unavailable';
+  }
+}
 
 function hasHeader(headers, wanted) {
   const needle = String(wanted || '').toLowerCase();
@@ -47,6 +136,8 @@ function normalizeRequest(input) {
 
 function requestJsonIpv4(input) {
   const request = normalizeRequest(input);
+  const refusal = unlinkedRefusal(request.parsed);
+  if (refusal) return Promise.reject(refusal);
   const transport = request.parsed.protocol === 'https:' ? https : http;
   const diagnostics = {
     family: 4,
@@ -118,5 +209,12 @@ function requestJsonIpv4(input) {
 }
 
 module.exports = {
-  requestJsonIpv4
+  requestJsonIpv4,
+  gatewayLinked,
+  linkedOnlyPath
 };
+
+// Tests read the account files from an in-memory gateway instead of the disk,
+// and can replace the gate loader to simulate a missing helper.
+module.exports.useAccountWorkFsForTests = (fsImpl) => { accountWorkFs = fsImpl || require('fs'); };
+module.exports.useAccountGateLoaderForTests = (loader) => { loadAccountGate = loader || defaultAccountGateLoader; };

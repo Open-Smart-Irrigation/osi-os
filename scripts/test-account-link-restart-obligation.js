@@ -11,6 +11,9 @@ const root = path.resolve(__dirname, '..');
 const journalPath = '/data/db/osi-account-link-config.json';
 const requestDir = '/var/run/osi-node-red-restart-requests';
 const testRef = process.env.OSI_ACCOUNT_LINK_TEST_REF;
+// These fixtures model a linked gateway; node-red.init exports its MQTT
+// password to Node-RED (#766). Tests of the unlinked case set it themselves.
+if (process.env.DEVICE_MQTT_PASSWORD === undefined) process.env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
 
 function source(file) {
   return testRef ? cp.execFileSync('git', ['show', testRef + ':' + file], {cwd:root, encoding:'utf8', maxBuffer:20*1024*1024}) : fs.readFileSync(path.join(root,file),'utf8');
@@ -61,6 +64,8 @@ function fixture(profile, kind) {
       run:async()=>{writes++;},
     }),
     all() {throw new Error('a recovery retry must not prepare another cloud authentication');},
+    // The unlinking caller is the gateway's enabled admin (#766 admin check).
+    get:async sql=>sql.includes('FROM users')?{role:'admin',disabled_at:null}:undefined,
     close:async callback=>{if(callback)callback();},
   };
   const osiDb={Database:class{constructor(){return db;}}};
@@ -263,7 +268,7 @@ for(const profile of ['bcm2712','bcm2709']) test(`${profile}: every cloud MQTT p
   // commit in a shallow CI checkout. The new function guards are excluded.
   const immutableTypes = new Set(['mqtt in','mqtt out','mqtt-broker']);
   const configuration = f.flows.filter(n=>immutableTypes.has(n.type));
-  assert.equal(require('node:crypto').createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),'599dc6a8837663abdef706512a6302959924956a6df0d5ba2a391f637060322c','MQTT endpoint and broker configuration stays unchanged');
+  assert.equal(require('node:crypto').createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),'7857edae0f73eacc882fc24682c7d313bf0dd8f2c19fb216f839ee51436c8e96','MQTT endpoint and broker configuration stays unchanged (reviewed #766: cloud broker autoConnect reads ${OSI_CLOUD_BROKER_AUTOCONNECT})');
   for(const target of cloudOutputs) {
     const guard=f.flows.find(n=>n.id==='account-cloud-guard-'+target.id);
     assert.ok(guard,'cloud MQTT output must have an account recovery guard');
@@ -273,9 +278,14 @@ for(const profile of ['bcm2712','bcm2709']) test(`${profile}: every cloud MQTT p
     const fn=new vm.Script('(function(msg,node,global,osiLib){'+guard.func+'\n})').runInNewContext();
     const msg={topic:'devices/0016C001F1000001/telemetry',payload:{fixture:true}};
     const node={warn(){}};const globals={get:key=>f.io[key]};const lib={require:()=>({ok:true,value:f.helper})};
+    // A linked gateway: node-red.init exported its MQTT password (#766).
+    process.env.DEVICE_MQTT_PASSWORD='fixture-mqtt';
     assert.equal(fn(msg,node,globals,lib),null,'pending receipt blocks MQTT with boot-time credentials');
     f.files.delete(journalPath);
     assert.equal(fn(msg,node,globals,lib),msg,'settled account passes MQTT unchanged');
+    process.env.DEVICE_MQTT_PASSWORD='';
+    assert.equal(fn(msg,node,globals,lib),null,'a process that started unlinked drops cloud MQTT');
+    process.env.DEVICE_MQTT_PASSWORD='fixture-mqtt';
     f.files.set('/var/run/osi-identity-restart.json','{}');
     assert.equal(fn(msg,node,globals,lib),null,'identity sentinel also blocks cloud publication');
     f.files.delete('/var/run/osi-identity-restart.json');
