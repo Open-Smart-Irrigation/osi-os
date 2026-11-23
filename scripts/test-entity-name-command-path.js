@@ -547,7 +547,7 @@ test('all three capability builders advertise entity_name_commands_v1 and both z
       `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
     ));
     assert.deepEqual(
-      helper.reportedSyncCapabilities((name) => (name === 'osi-irrigation-policy' ? { ok: true, value: {} } : { ok: false })),
+      helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} } }),
       CAPABILITY_BASE,
       profile + ' shared builder advertises the canonical base'
     );
@@ -557,8 +557,8 @@ test('all three capability builders advertise entity_name_commands_v1 and both z
       assert.match(
         source,
         id === 'al-link-build-req'
-          ? /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/
-          : /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/,
+          ? /const syncCapabilities = reportedSyncCapabilities\(\{ conditionalIrrigation: replicationLoad, zoneCommands: osiLib\.require\('zone-commands'\) \}\);/
+          : /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/,
         profile + ' ' + id + ' builds the list through the shared builder'
       );
     }

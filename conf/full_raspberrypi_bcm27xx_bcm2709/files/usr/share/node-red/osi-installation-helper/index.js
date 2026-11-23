@@ -73,7 +73,9 @@ function canonicalWritesAllowed(recoveryState) {
 // force sync) sends the cloud. Conditional capabilities are dropped when the
 // module backing them cannot load: conditional_irrigation_v1 (owner decision
 // 2026-10-22) and zone_apply_versioned_v1, which needs osi-zone-commands to
-// expose the version-checked applyLegacyZoneCommand.
+// expose the version-checked applyLegacyZoneCommand. Callers pass the osi-lib
+// load RESULTS of literal osiLib.require(...) probes, so the caller-name
+// audit in verify-helper-registration sees and validates every probe name.
 const SYNC_CAPABILITY_BASE = [
   'linked_auth_sync_v1',
   'force_edge_sync_v1',
@@ -87,14 +89,13 @@ const SYNC_CAPABILITY_BASE = [
   'device_soil_depth_commands_v1',
 ];
 
-function reportedSyncCapabilities(load) {
+function reportedSyncCapabilities(loads) {
   const capabilities = SYNC_CAPABILITY_BASE.concat(['conditional_irrigation_v1', 'zone_apply_versioned_v1']);
   const drop = (name) => { const at = capabilities.indexOf(name); if (at >= 0) capabilities.splice(at, 1); };
-  const loader = typeof load === 'function' ? load : () => ({ ok: false });
-  const conditional = loader('osi-irrigation-policy');
-  if (!conditional.ok) drop('conditional_irrigation_v1');
-  const zoneCommands = loader('zone-commands');
-  if (!zoneCommands.ok || typeof zoneCommands.value.applyLegacyZoneCommand !== 'function') drop('zone_apply_versioned_v1');
+  const conditional = loads && loads.conditionalIrrigation;
+  if (!conditional || !conditional.ok) drop('conditional_irrigation_v1');
+  const zoneCommands = loads && loads.zoneCommands;
+  if (!zoneCommands || !zoneCommands.ok || typeof zoneCommands.value.applyLegacyZoneCommand !== 'function') drop('zone_apply_versioned_v1');
   return capabilities;
 }
 
@@ -135,7 +136,7 @@ const gatewayDeviceEuiConfidence = String(flow.get('al_gateway_device_eui_confid
 const localUserId = Number(msg.authUserId || flow.get('al_local_user_id') || 0);
 const localUsername = String(msg.authUsername || flow.get('al_local_username') || '').trim();
 const edgeBuildVersion = String(env.get('FIRMWARE_VERSION') || env.get('IMAGE_VERSION') || '').trim() || null;
-const syncCapabilities = reportedSyncCapabilities((name) => osiLib.require(name));
+const syncCapabilities = reportedSyncCapabilities({ conditionalIrrigation: replicationLoad, zoneCommands: osiLib.require('zone-commands') });
 if (!serverUrl) {
   msg.statusCode = 400;
   msg.payload = { message: 'Server URL is not configured' };

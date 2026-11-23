@@ -45,7 +45,7 @@ includes('Build server auth request', 'reportedSyncCapabilities');
     'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
   ));
   assert.ok(
-    helper.reportedSyncCapabilities(() => ({ ok: false })).includes('installation_recovery_v1'),
+    helper.reportedSyncCapabilities().includes('installation_recovery_v1'),
     'Build server auth request: the shared capability list advertises installation_recovery_v1'
   );
 }

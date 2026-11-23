@@ -23,7 +23,7 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
   assert.match(node.func, /NULLIF\(trim\(\(SELECT gateway_device_eui FROM sync_link_state/);
   assert.ok(node.func.indexOf('devices') < node.func.indexOf('watermark_calibrations'), `${id} emits calibration after devices`);
   assert.doesNotMatch(node.func, /watermark_readings/, `${id} does not ship raw watermark readings`);
-  assert.match(node.func, /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/, `${id} builds the capability list through the shared builder`);
+  assert.match(node.func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, `${id} builds the capability list through the shared builder`);
 }
 
 // The link request is built by the installation helper's build stage, which
@@ -31,9 +31,9 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
 // list comes from the helper's shared reportedSyncCapabilities builder, so the
 // tokens are pinned behaviourally against that output.
 const linkSource = linkBuilderSource(flows, 'bcm27xx_bcm2712');
-assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, 'link builds the list through the shared builder');
+assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\{ conditionalIrrigation: replicationLoad, zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, 'link builds the list through the shared builder');
 const installation = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'));
-const linkCapabilities = installation.reportedSyncCapabilities(() => ({ ok: false }));
+const linkCapabilities = installation.reportedSyncCapabilities();
 for (const cap of expectedCaps) assert.ok(linkCapabilities.includes(cap), `link advertises ${cap}`);
 assert.deepEqual(linkCapabilities.filter((v) => expectedCaps.includes(v)), expectedCaps, 'link capability order is stable');
 

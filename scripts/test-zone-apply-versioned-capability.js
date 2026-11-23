@@ -49,12 +49,6 @@ function profileShare(profile) {
   };
 }
 
-function loader(modules) {
-  return (name) => (Object.prototype.hasOwnProperty.call(modules, name)
-    ? { ok: true, value: modules[name] }
-    : { ok: false, error: 'module not installed: ' + name });
-}
-
 // --- Real osi-db-helper over a redirected sqlite3, as in
 // scripts/test-account-link-legacy-cloud.js, so beginLinkAttempt gets the
 // transaction API the shared driver provides.
@@ -228,29 +222,39 @@ for (const profile of PROFILES) {
   test(`${profile}: reportedSyncCapabilities includes zone_apply_versioned_v1 only while the version-checked zone apply is loadable`, () => {
     const { installation, zoneCommands } = profileShare(profile);
     assert.deepEqual(
-      installation.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {}, 'zone-commands': zoneCommands })),
+      installation.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} }, zoneCommands: { ok: true, value: zoneCommands } }),
       CAPABILITY_BASE.concat(['conditional_irrigation_v1', 'zone_apply_versioned_v1']),
       'every module loadable: full list'
     );
     assert.deepEqual(
-      installation.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {} })),
+      installation.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} } }),
       CAPABILITY_BASE.concat(['conditional_irrigation_v1']),
-      'zone-commands missing: the capability is dropped'
+      'zone-commands result missing: the capability is dropped'
     );
     assert.deepEqual(
-      installation.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {}, 'zone-commands': { other: true } })),
+      installation.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} }, zoneCommands: { ok: false, error: 'module not installed: zone-commands' } }),
+      CAPABILITY_BASE.concat(['conditional_irrigation_v1']),
+      'a failed zone-commands load result drops the capability'
+    );
+    assert.deepEqual(
+      installation.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} }, zoneCommands: { ok: true, value: { other: true } } }),
       CAPABILITY_BASE.concat(['conditional_irrigation_v1']),
       'a zone-commands module without applyLegacyZoneCommand is not enough'
     );
     assert.deepEqual(
-      installation.reportedSyncCapabilities(loader({ 'zone-commands': zoneCommands })),
+      installation.reportedSyncCapabilities({ zoneCommands: { ok: true, value: zoneCommands } }),
       CAPABILITY_BASE.concat(['zone_apply_versioned_v1']),
       'conditional irrigation keeps its own drop rule'
     );
     assert.deepEqual(
-      installation.reportedSyncCapabilities(loader({})),
+      installation.reportedSyncCapabilities({ conditionalIrrigation: { ok: false, error: 'module not installed' }, zoneCommands: { ok: true, value: zoneCommands } }),
+      CAPABILITY_BASE.concat(['zone_apply_versioned_v1']),
+      'a failed conditional irrigation load result drops only its own token'
+    );
+    assert.deepEqual(
+      installation.reportedSyncCapabilities(),
       CAPABILITY_BASE,
-      'no conditional module loadable: the unconditional base remains'
+      'no load results at all: the unconditional base remains'
     );
   });
 
@@ -281,7 +285,7 @@ for (const profile of PROFILES) {
       assert.ok(node, `${profile}: ${id} exists`);
       assert.match(
         node.func,
-        /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/,
+        /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/,
         `${profile}: ${id} delegates to reportedSyncCapabilities`
       );
       assert.match(node.func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile}: ${id} keeps the journal-only capability push`);

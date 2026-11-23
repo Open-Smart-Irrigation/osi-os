@@ -1546,7 +1546,7 @@ expectIncludes('Build server auth request', 'localUserUuid', 'sends the local us
 expectIncludes('Build server auth request', 'localUsernameSnapshot', 'sends the local username snapshot for linked-auth targeting');
 expectIncludes('Build server auth request', 'edgeBuildVersion', 'sends the edge build version during local-sync');
 expectIncludes('Build server auth request', 'syncCapabilities', 'advertises linked-auth sync capabilities during local-sync');
-expectIncludes('Build server auth request', 'const syncCapabilities = reportedSyncCapabilities((name) => osiLib.require(name));', 'builds the advertised list through the shared capability builder');
+expectIncludes('Build server auth request', "const syncCapabilities = reportedSyncCapabilities({ conditionalIrrigation: replicationLoad, zoneCommands: osiLib.require('zone-commands') });", 'builds the advertised list through the shared capability builder from literal module probes');
 // The capability tokens live in the helper's SYNC_CAPABILITY_BASE (shared by
 // the link request and, via their wiring, the bootstrap and force builders).
 for (const capability of [
@@ -2240,8 +2240,8 @@ expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command 
 // tokens themselves are pinned in SYNC_CAPABILITY_BASE above.
 expectIncludesForEach(
   ['Build Cloud Bootstrap', 'Run Force Sync'],
-  'const syncCapabilities = installation.reportedSyncCapabilities(osiLib.require);',
-  'builds the advertised list through the shared capability builder'
+  "const syncCapabilities = installation.reportedSyncCapabilities({ conditionalIrrigation: osiLib.require('osi-irrigation-policy'), zoneCommands: osiLib.require('zone-commands') });",
+  'builds the advertised list through the shared capability builder from literal module probes'
 );
 expectIncludesById('sync-bootstrap-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in bootstrap');
 expectIncludesById('sync-force-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in force sync');

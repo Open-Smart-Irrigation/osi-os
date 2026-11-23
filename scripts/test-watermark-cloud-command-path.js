@@ -67,13 +67,10 @@ function sharedCapabilityBaseFrom(profile) {
     ROOT,
     `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
   ));
-  const loader = (modules) => (name) => (Object.prototype.hasOwnProperty.call(modules, name)
-    ? { ok: true, value: modules[name] }
-    : { ok: false, error: 'module not installed: ' + name });
-  const base = helper.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {} }));
+  const base = helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} } });
   assert.deepEqual(base, capabilityBase, `${profile} shared builder advertises the canonical capability base`);
   assert.deepEqual(
-    helper.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {}, 'zone-commands': { applyLegacyZoneCommand() {} } })),
+    helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} }, zoneCommands: { ok: true, value: { applyLegacyZoneCommand() {} } } }),
     capabilityBase.concat(['zone_apply_versioned_v1']),
     `${profile} shared builder appends zone_apply_versioned_v1 only while the zone apply is loadable`
   );
@@ -90,9 +87,9 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   // The link request is built by the installation helper's build stage; the
   // flows builders delegate to the same shared list.
   const linkSource = linkBuilderSource(profileFlows, profile);
-  assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${profile} link request builds the list through the shared builder`);
+  assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\{ conditionalIrrigation: replicationLoad, zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, `${profile} link request builds the list through the shared builder`);
   for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
-    assert.match(profileById[id].func, /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/, `${profile} ${id} builds the list through the shared builder`);
+    assert.match(profileById[id].func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, `${profile} ${id} builds the list through the shared builder`);
   }
   const base = sharedCapabilityBaseFrom(profile);
   assert.ok(Array.isArray(base) && base.includes('watermark_v1'), `${profile} canonical capability base carries the WATERMARK tokens`);
