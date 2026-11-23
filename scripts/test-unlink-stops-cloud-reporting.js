@@ -256,11 +256,15 @@ function linkedFlowStore() {
   return new Map([['account_linked', true], ['sync_state', {}]]);
 }
 
-async function unlinkAs(f, flowStore, userId, username) {
+// beforeRestart runs while the account_unlink restart request is queued and
+// the process still holds the linked environment.
+async function unlinkAs(f, flowStore, userId, username, beforeRestart) {
   const { result } = await runNode(f, 'al-unlink-db', { _unlinkAuth: { userId, username } }, flowStore);
   assert.ok(result[0], 'unlink must succeed: ' + JSON.stringify(result[1] && result[1].payload));
   const published = await runNode(f, 'al-unlink-restart-node-red', result[0], flowStore);
   assert.ok(published.result[0], 'unlink must publish its restart request');
+  assert.ok([...f.io.files.keys()].some((file) => file.startsWith(RESTART_DIR) && /account_unlink-/.test(file)), 'the account_unlink restart request is queued');
+  if (beforeRestart) await beforeRestart();
   // The daemon restarts Node-RED and removes the request.
   for (const file of [...f.io.files.keys()]) if (file.startsWith(RESTART_DIR)) f.io.files.delete(file);
 }
@@ -295,7 +299,12 @@ for (const profile of PROFILES) {
       processStarted(true);
       seedTwoLinkedUsers(f);
       const flowStore = linkedFlowStore();
-      await unlinkAs(f, flowStore, 902, 'second');
+      await unlinkAs(f, flowStore, 902, 'second', async () => {
+        // The restart request is queued and the process is still linked: the
+        // cloud MQTT guards already drop every message.
+        const mqtt = await cloudGuards(f, flowStore);
+        assert.deepEqual(mqtt.passed, [], 'pre-restart: cloud MQTT dropped while the unlink restart is queued');
+      });
       // Before the restart the process still holds the linked environment.
       const live = await restRequests(f, flowStore);
       // A Node-RED restart starts unlinked with empty flow context.
@@ -749,6 +758,61 @@ for (const profile of PROFILES) {
       assert.deepEqual(sql(f, "SELECT id FROM users WHERE server_url IS NOT NULL OR server_sync_token IS NOT NULL OR auth_mode <> 'local'"), [], 'every account row gives up its link');
       assert.equal((await statusFor(f, 941, 'admin')).gatewayLinked, false, 'after the unlink the gateway reads as unlinked');
     } finally { f.cleanup(); }
+  });
+}
+
+// A request built before an unlink commits can still reach the http node
+// afterwards (the builder and the send are separate steps, and one journal
+// replication tick sends several requests with one token). Until Node-RED
+// restarts, the process holds the linked environment, so osi-cloud-http reads
+// the account-work gate at send time and refuses restricted paths.
+for (const profile of PROFILES) {
+  test(`${profile}: a request built before the unlink commits is refused at send time until the restart`, async () => {
+    const f = fixture(profile);
+    f.osiCloudHttp.useAccountWorkFsForTests(f.io.fs);
+    try {
+      processStarted(true);
+      seedTwoLinkedUsers(f);
+      const flowStore = linkedFlowStore();
+      // Built while linked, with the old token, and not sent yet.
+      const { result } = await runNode(f, 'sync-pending-build', { payload: Date.now() }, flowStore);
+      const prebuilt = Array.isArray(result) ? result.find(Boolean) : result;
+      assert.ok(prebuilt && /\/api\/v1\/sync\/gateways\//.test(prebuilt.url) && /Bearer /.test(prebuilt.headers.Authorization), 'a pending-command request was built');
+      const before = cloud.sent.length;
+      await unlinkAs(f, flowStore, 902, 'second', async () => {
+        const sent = await runNode(f, 'sync-pending-http', prebuilt, flowStore);
+        const out = Array.isArray(sent.result) ? sent.result.find(Boolean) : sent.result;
+        assert.equal(out.statusCode, 0, 'the http node reports a transport refusal');
+        assert.equal(out.error && out.error.code, 'account_restart_pending');
+        await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/sync/edge/events', headers: { Authorization: 'Bearer token-first' }, payload: {} }), { code: 'account_restart_pending' });
+        await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v2/journal/gateways/X/entries' }), { code: 'account_restart_pending' });
+      });
+      assert.deepEqual(cloud.sent.slice(before), [], 'nothing reached the cloud between the unlink and the restart');
+    } finally {
+      f.osiCloudHttp.useAccountWorkFsForTests(null);
+      f.cleanup();
+    }
+  });
+
+  test(`${profile}: a pending link or identity change also holds restricted sends; the link route itself still goes out`, async () => {
+    const f = fixture(profile);
+    f.osiCloudHttp.useAccountWorkFsForTests(f.io.fs);
+    try {
+      processStarted(true);
+      const before = cloud.sent.length;
+      f.io.files.set(RESTART_DIR + 'account_link-fixture.json', '{}');
+      await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands' }), { code: 'account_restart_pending' });
+      await f.osiCloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/auth/local-sync', payload: {} });
+      f.io.files.delete(RESTART_DIR + 'account_link-fixture.json');
+      f.io.files.set('/var/run/osi-identity-restart.json', '{}');
+      await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands' }), { code: 'account_restart_pending' });
+      f.io.files.delete('/var/run/osi-identity-restart.json');
+      await f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands' });
+      assert.deepEqual(cloud.sent.slice(before).map((r) => r.path), ['/auth/local-sync', '/api/v1/sync/gateways/X/pending-commands'], 'only the link request and the send after the restart went out');
+    } finally {
+      f.osiCloudHttp.useAccountWorkFsForTests(null);
+      f.cleanup();
+    }
   });
 }
 

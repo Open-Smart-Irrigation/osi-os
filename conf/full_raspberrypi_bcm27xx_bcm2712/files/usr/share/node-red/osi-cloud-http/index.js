@@ -28,10 +28,30 @@ function linkedOnlyPath(pathname) {
 }
 
 function unlinkedRefusal(parsed, env = process.env) {
-  if (gatewayLinked(env) || !linkedOnlyPath(parsed.pathname)) return null;
-  const error = new Error('Gateway is not linked to a cloud account; cloud sync request not sent');
-  error.code = 'gateway_unlinked';
-  return error;
+  if (!linkedOnlyPath(parsed.pathname)) return null;
+  if (!gatewayLinked(env)) {
+    const error = new Error('Gateway is not linked to a cloud account; cloud sync request not sent');
+    error.code = 'gateway_unlinked';
+    return error;
+  }
+  // A link, an unlink or an identity change is committed or in progress and
+  // Node-RED has not restarted yet: the process still holds the old
+  // environment, and a request built before the change may carry the old
+  // token. Read at send time, as the cloud MQTT guards do (#766).
+  if (accountWorkPending()) {
+    const error = new Error('Gateway account or identity change is pending a restart; cloud sync request not sent');
+    error.code = 'account_restart_pending';
+    return error;
+  }
+  return null;
+}
+
+// The account-work gate lives in osi-installation-helper, which itself loads
+// this module; require it at call time to keep the load order free of cycles.
+let accountWorkFs = require('fs');
+function accountWorkPending() {
+  const helper = require('../osi-installation-helper');
+  return helper.gatewayWorkBlocked({ fs: accountWorkFs, warn: (text) => console.warn('osi-cloud-http: ' + text) });
 }
 
 function hasHeader(headers, wanted) {
@@ -153,3 +173,6 @@ module.exports = {
   gatewayLinked,
   linkedOnlyPath
 };
+
+// Tests read the account files from an in-memory gateway instead of the disk.
+module.exports.useAccountWorkFsForTests = (fsImpl) => { accountWorkFs = fsImpl || require('fs'); };
