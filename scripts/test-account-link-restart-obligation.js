@@ -266,7 +266,7 @@ for(const profile of ['bcm2712','bcm2709']) test(`${profile}: every cloud MQTT p
   // commit in a shallow CI checkout. The new function guards are excluded.
   const immutableTypes = new Set(['mqtt in','mqtt out','mqtt-broker']);
   const configuration = f.flows.filter(n=>immutableTypes.has(n.type));
-  assert.equal(require('node:crypto').createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),'599dc6a8837663abdef706512a6302959924956a6df0d5ba2a391f637060322c','MQTT endpoint and broker configuration stays unchanged');
+  assert.equal(require('node:crypto').createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),'7857edae0f73eacc882fc24682c7d313bf0dd8f2c19fb216f839ee51436c8e96','MQTT endpoint and broker configuration stays unchanged (reviewed #766: cloud broker autoConnect reads ${OSI_CLOUD_BROKER_AUTOCONNECT})');
   for(const target of cloudOutputs) {
     const guard=f.flows.find(n=>n.id==='account-cloud-guard-'+target.id);
     assert.ok(guard,'cloud MQTT output must have an account recovery guard');
