@@ -1540,11 +1540,12 @@ function legacyZoneStatement(cmd, context) {
 // The statement as applied: Build UPDATE SQL's, made conditional on a newer
 // version and a live row.
 function legacyZoneGuardedStatement(type, cmd, sql) {
+  // A NULL stored version counts as 0, as applyLegacyZoneCommand reads it.
   if (type === 'UPSERT_ZONE') {
-    return sql + ' WHERE excluded.sync_version > irrigation_zones.sync_version' +
+    return sql + ' WHERE excluded.sync_version > COALESCE(irrigation_zones.sync_version, 0)' +
       ' AND irrigation_zones.deleted_at IS NULL';
   }
-  return sql + ' AND deleted_at IS NULL AND sync_version < ' + legacyRequestedVersion(cmd);
+  return sql + ' AND deleted_at IS NULL AND COALESCE(sync_version, 0) < ' + legacyRequestedVersion(cmd);
 }
 
 function legacyRowWithoutClock(row) {
@@ -1589,6 +1590,19 @@ function legacyZoneAck(cmd, type, result, detail) {
 
 const LEGACY_ROW_SQL = 'SELECT * FROM irrigation_zones WHERE zone_uuid=? LIMIT 1';
 
+// The delivery a command came in, when the lifecycle adapter has its envelope and
+// the command ledger: SUCCESS outcomes are then recorded in applied_commands with a
+// REST ACK row (osi-command-ledger withLifecycleCommandTransaction, the path legacy
+// schedule commands take), in the same transaction as the write. An exact retry of
+// that delivery is answered from the ledger, before any of the rules below.
+function legacyLedgerDelivery(opts) {
+  const envelope = opts.envelope;
+  if (!opts.ledger || typeof opts.ledger.withLifecycleCommandTransaction !== 'function') return null;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null;
+  if (!Number.isSafeInteger(envelope.commandId) || envelope.commandId <= 0) return null;
+  return { ledger: opts.ledger, envelope };
+}
+
 async function applyLegacyZoneCommand(db, command, runtime) {
   const cmd = object(command, 'Legacy zone command');
   const type = legacyZoneCommandType(cmd);
@@ -1604,7 +1618,9 @@ async function applyLegacyZoneCommand(db, command, runtime) {
   const zoneUuid = cmd.zoneUuid || cmd.zone_uuid;
   const keyed = zoneUuid !== undefined && zoneUuid !== null;
   const requested = legacyRequestedVersion(cmd);
-  const result = await db.transaction(async function(tx) {
+  const delivery = legacyLedgerDelivery(opts);
+
+  async function decideAndWrite(tx) {
     const row = keyed ? await tx.get(LEGACY_ROW_SQL, [String(zoneUuid)]) : null;
     const current = row ? Number(row.sync_version || 0) : null;
     const conflict = (reason) => ({
@@ -1614,18 +1630,20 @@ async function applyLegacyZoneCommand(db, command, runtime) {
       current,
       ack: legacyZoneAck(cmd, type, 'CONFLICT', { reason, requested, current }),
     });
-    const success = (decision) => ({
-      decision,
-      requested,
-      current,
-      ack: legacyZoneAck(cmd, type, 'SUCCESS', null),
-    });
+    const success = (decision) => ({ decision, requested, current, success: true });
     if (!row) {
       await tx.run(legacyZoneGuardedStatement(type, cmd, sql));
       return success('applied');
     }
     if (row.deleted_at !== null && row.deleted_at !== undefined) {
-      if (type === 'DELETE_ZONE' && requested === current) return success('replay');
+      // Only a DELETE_ZONE whose content provably made this tombstone is a replay:
+      // the same version and the same explicit deletedAt. A delete that named no
+      // time cannot be told from another delete at that version, so it is a
+      // CONFLICT here; its exact retry is answered from the ledger instead.
+      if (type === 'DELETE_ZONE' && requested === current && cmd.deletedAt &&
+          String(cmd.deletedAt) === String(row.deleted_at)) {
+        return success('replay');
+      }
       return conflict('zone_deleted');
     }
     if (requested > current) {
@@ -1644,7 +1662,39 @@ async function applyLegacyZoneCommand(db, command, runtime) {
       await tx.run('RELEASE legacy_zone_replay');
     }
     return unchanged ? success('replay') : conflict('version_conflict');
-  });
+  }
+
+  let result;
+  if (delivery) {
+    result = await delivery.ledger.withLifecycleCommandTransaction(db, delivery.envelope, {
+      gateway_device_eui: context.gateway,
+      command_type_recognized: opts.command_type_recognized === true,
+      now: context.now,
+    }, async function(scoped) {
+      const outcome = await decideAndWrite(scoped.tx);
+      if (outcome.success) {
+        outcome.ack = await scoped.terminalAck({
+          commandType: type,
+          deviceEui: context.gateway,
+          result: 'APPLIED',
+          requestedSyncVersion: requested,
+          appliedSyncVersion: requested,
+        });
+      }
+      return outcome;
+    });
+    // The ledger answered an exact retry before the rules ran.
+    if (result && result.handled && !result.decision) {
+      result = { decision: 'duplicate', requested, current: null, ack: result.ack };
+    }
+  } else {
+    result = await db.transaction(async function(tx) {
+      const outcome = await decideAndWrite(tx);
+      if (outcome.success) outcome.ack = legacyZoneAck(cmd, type, 'SUCCESS', null);
+      return outcome;
+    });
+  }
+  delete result.success;
   result.warnings = warnings;
   return result;
 }

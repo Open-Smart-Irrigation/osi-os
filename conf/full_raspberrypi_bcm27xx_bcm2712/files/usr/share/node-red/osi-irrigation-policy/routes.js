@@ -585,10 +585,11 @@ const LEGACY_ZONE_COMMAND_TYPES = new Set(['UPSERT_ZONE', 'UPSERT_ZONE_CONFIG', 
 
 // E3: osi-zone-commands applies the legacy zone commands itself: it reads the stored row and
 // writes in one transaction, so nothing lands between the version check and the write. Every
-// outcome (applied, replayed, CONFLICT) is answered on output 3 (MQTT), the transport the legacy
-// path ACKs on; none reaches Build UPDATE SQL. A missing helper or a failed transaction sends
+// outcome (applied, replayed, CONFLICT) is answered on output 3 (MQTT); a SUCCESS is also a
+// command-ledger row and a REST ACK row, committed with the write, as for the S2120 unclaim.
+// None reaches Build UPDATE SQL. A missing helper or a failed transaction sends
 // nothing on any output: no write, no ACK, and the command stays leased and comes back.
-async function legacyZoneCommandApply(context, command, dbLoad) {
+async function legacyZoneCommandApply(context, command, dbLoad, ledger) {
   const { msg, node, env, osiLib } = context;
   const zoneLoad = osiLib.require('zone-commands');
   if (!zoneLoad.ok || typeof zoneLoad.value.applyLegacyZoneCommand !== 'function') {
@@ -602,6 +603,11 @@ async function legacyZoneCommandApply(context, command, dbLoad) {
     const outcome = await zoneLoad.value.applyLegacyZoneCommand(db, command, {
       // Build UPDATE SQL's own gateway expression, for the zone's gateway_device_eui default.
       gateway_device_eui: String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase(),
+      // A SUCCESS is recorded in the command ledger with its REST ACK row, so an exact
+      // retry of the delivery is answered from the ledger.
+      ledger,
+      envelope: command._pendingCommandEnvelope,
+      command_type_recognized: msg._commandTypeRecognized === true,
     });
     for (const warning of outcome.warnings || []) node.warn(warning);
     if (!outcome.ack) {
@@ -647,7 +653,7 @@ async function conditionalLifecycleCommand(context) {
   // E3: the legacy zone commands are applied by osi-zone-commands, version-checked, and never
   // reach Build UPDATE SQL; the type is that node's own expression, so it would take that branch.
   if (LEGACY_ZONE_COMMAND_TYPES.has(String(command.commandType || command.command_type || command.action || '').toUpperCase())) {
-    return legacyZoneCommandApply(context, command, dbLoad);
+    return legacyZoneCommandApply(context, command, dbLoad, ledgerLoad.value);
   }
   const envelope = command._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return [msg, null];

@@ -205,19 +205,25 @@ function assertConflict(out, version, current, reason) {
   assert.equal(out.ack.currentSyncVersion, current);
 }
 
-// The ACK the legacy path sent: "Build Schedule ACK", field for field.
-function assertLegacySuccess(out, command) {
-  assertAnswered(out, 'SUCCESS');
-  assert.deepEqual(out.ack, {
+// A SUCCESS is the command ledger's terminal ACK (osi-command-ledger, as for the
+// legacy schedule commands), sent on MQTT and queued as a REST ACK row.
+function assertSuccess(out, command) {
+  assertAnswered(out, 'APPLIED');
+  const { appliedAt, ...rest } = out.ack;
+  assert.match(String(appliedAt), /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(rest, {
     commandId: command.commandId,
     eventUuid: command.eventUuid,
     aggregateType: 'ZONE',
     aggregateKey: ZONE_UUID,
-    result: 'SUCCESS',
-    state: 'APPLIED',
     commandType: command.commandType,
+    status: 'ACKED',
+    result: 'APPLIED',
+    requestedSyncVersion: command.appliedSyncVersion,
     appliedSyncVersion: command.appliedSyncVersion,
-    error: null,
+    duplicate: false,
+    reason: null,
+    detail: null,
   });
 }
 
@@ -305,7 +311,7 @@ for (const profile of PROFILES) {
     try {
       const deleteCommand = pending('DELETE_ZONE', 6, { syncVersion: 6 });
       const deleted = await deliver(profile, db, deleteCommand);
-      assertLegacySuccess(deleted, deleteCommand);
+      assertSuccess(deleted, deleteCommand);
       const tombstone = fullZone(db);
       assert.notEqual(tombstone.deleted_at, null);
       assert.equal(tombstone.sync_version, 6);
@@ -337,9 +343,105 @@ for (const profile of PROFILES) {
       const out = await deliver(profile, db, pending('DELETE_ZONE', 7, { syncVersion: 7 }));
       assertConflict(out, 7, 6, 'zone_deleted');
       assert.deepEqual(fullZone(db), before, 'the tombstone keeps its version and time');
-      const replay = pending('DELETE_ZONE', 6, { syncVersion: 6 });
-      assertLegacySuccess(await deliver(profile, db, replay), replay);
-      assert.deepEqual(fullZone(db), before, 'the equal-version redelivery writes nothing either');
+      const replay = pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-20T00:00:00.000Z' });
+      assertSuccess(await deliver(profile, db, replay), replay);
+      assert.deepEqual(fullZone(db), before, 'an equal-version delete that made this tombstone writes nothing');
+    } finally {
+      db.close();
+    }
+  });
+
+  // CodeRabbit #753: a different delete at the tombstone's version is not a replay.
+  test(`${profile}: an equal-version DELETE_ZONE is a replay only when it provably made the tombstone`, async () => {
+    const db = fixture({ version: 6, deletedAt: '2026-11-20T00:00:00.000Z' });
+    try {
+      const before = fullZone(db);
+      for (const other of [
+        pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-23T00:00:00.000Z' }),
+        pending('DELETE_ZONE', 6, { syncVersion: 6 }),
+      ]) {
+        assertConflict(await deliver(profile, db, other), 6, 6, 'zone_deleted');
+        assert.deepEqual(fullZone(db), before);
+      }
+    } finally {
+      db.close();
+    }
+    // A delete that named no time: its exact retry is answered from the command ledger.
+    const live = fixture();
+    try {
+      const del = pending('DELETE_ZONE', 6, { syncVersion: 6 });
+      const first = await deliver(profile, live, del);
+      assertSuccess(first, del);
+      const tombstone = fullZone(live);
+      const again = await deliver(profile, live, del);
+      assert.deepEqual(again.ack, first.ack, 'the exact retry gets the stored ACK');
+      assert.deepEqual(fullZone(live), tombstone);
+      assertConflict(await deliver(profile, live, pending('DELETE_ZONE', 6, { syncVersion: 6 })), 6, 6, 'zone_deleted');
+    } finally {
+      live.close();
+    }
+  });
+
+  // CodeRabbit #753: a NULL stored version is version 0 for the rules and the statement alike.
+  test(`${profile}: a zone with a NULL sync_version takes a newer command and records it`, async () => {
+    for (const make of [
+      () => staleRename(6, 'from null'),
+      () => pending('UPSERT_ZONE_CONFIG', 6, { notes: 'from null', syncVersion: 6 }),
+      () => pending('UPSERT_ZONE_LOCATION', 6, { latitude: 1, longitude: 2, syncVersion: 6 }),
+      () => pending('DELETE_ZONE', 6, { syncVersion: 6 }),
+    ]) {
+      const db = fixture();
+      try {
+        // The zone outbox trigger cannot carry a NULL version, so unlink for this write.
+        db.exec(`UPDATE sync_link_state SET linked = 0; UPDATE irrigation_zones SET sync_version = NULL WHERE zone_uuid = '${ZONE_UUID}'; UPDATE sync_link_state SET linked = 1`);
+        const command = make();
+        const out = await deliver(profile, db, command);
+        assert.equal(fullZone(db).sync_version, 6, `${command.commandType}: written, not a SUCCESS without a write`);
+        assertSuccess(out, command);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  // CodeRabbit #753: the exact redelivery of a stage reset, whose second run would
+  // write the supplied date onto the now-unset stage, is answered SUCCESS.
+  test(`${profile}: a redelivered stage reset is answered from the ledger, not judged again`, async () => {
+    const db = fixture();
+    try {
+      db.exec(`UPDATE irrigation_zones SET phenological_stage = 'development', stage_started_on = '2026-04-20' WHERE zone_uuid = '${ZONE_UUID}'`);
+      const reset = pending('UPSERT_ZONE_CONFIG', 6, { phenologicalStage: 'default', stageStartedOn: '2026-05-01', syncVersion: 6 });
+      const first = await deliver(profile, db, reset);
+      assertSuccess(first, reset);
+      assert.deepEqual([fullZone(db).phenological_stage, fullZone(db).stage_started_on], ['default', null]);
+      const applied = fullZone(db);
+      const again = await deliver(profile, db, reset);
+      assert.deepEqual(again.ack, first.ack);
+      assert.deepEqual(fullZone(db), applied);
+      // The same content in another delivery cannot be proven identical: CONFLICT.
+      const copy = pending('UPSERT_ZONE_CONFIG', 6, { phenologicalStage: 'default', stageStartedOn: '2026-05-01', syncVersion: 6 });
+      assertConflict(await deliver(profile, db, copy), 6, 6, 'version_conflict');
+      assert.deepEqual(fullZone(db), applied);
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: a SUCCESS is one command-ledger row and one REST ACK row; a CONFLICT is neither`, async () => {
+    const db = fixture();
+    try {
+      const command = staleRename(6, 'ledgered');
+      const out = await deliver(profile, db, command);
+      assertSuccess(out, command);
+      const ledgerRow = { ...db.prepare('SELECT command_type, result FROM applied_commands WHERE command_id = ?').get(String(command.commandId)) };
+      assert.deepEqual(ledgerRow, { command_type: 'UPSERT_ZONE', result: 'APPLIED' });
+      const rest = db.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id = ?').all(String(command.commandId));
+      assert.equal(rest.length, 1);
+      assert.deepEqual(JSON.parse(rest[0].payload_json), out.ack);
+      const stale = staleRename(5, 'stale');
+      assertConflict(await deliver(profile, db, stale), 5, 6, 'stale_sync_version');
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id = ?').get(String(stale.commandId)).n, 0);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id = ?').get(String(stale.commandId)).n, 0);
     } finally {
       db.close();
     }
@@ -351,7 +453,7 @@ for (const profile of PROFILES) {
       const configA = pending('UPSERT_ZONE_CONFIG', 2, {
         areaM2: 456, notes: 'race A r1', irrigationEfficiencyPct: 80, syncVersion: 2,
       });
-      assertLegacySuccess(await deliver(profile, db, configA), configA);
+      assertSuccess(await deliver(profile, db, configA), configA);
       const afterA = fullZone(db);
       assert.equal(afterA.sync_version, 2);
       const outboxAfterA = outbox(db);
@@ -440,7 +542,7 @@ for (const profile of PROFILES) {
       const direct = fixture();
       try {
         const out = await deliver(profile, guarded, command);
-        assertLegacySuccess(out, command);
+        assertSuccess(out, command);
         const built = await run(profile, BUILD_SQL, direct, { payload: command });
         direct.exec(built.result.topic);
         // created_at and a DELETE_ZONE's deleted_at come from each writer's own clock.
@@ -467,7 +569,7 @@ for (const profile of PROFILES) {
     try {
       db.exec('DELETE FROM irrigation_schedules; DELETE FROM irrigation_zones; DELETE FROM sync_outbox');
       const command = staleRename(1, 'new from cloud');
-      assertLegacySuccess(await deliver(profile, db, command), command);
+      assertSuccess(await deliver(profile, db, command), command);
       assert.equal(zone(db).name, 'new from cloud');
       assert.equal(zone(db).sync_version, 1);
     } finally {
@@ -486,7 +588,7 @@ for (const profile of PROFILES) {
         pending('DELETE_ZONE', 10, { syncVersion: 10 }),
       ]) {
         const first = await deliver(profile, db, command);
-        assertLegacySuccess(first, command);
+        assertSuccess(first, command);
         const applied = fullZone(db);
         const events = outbox(db);
         const again = await deliver(profile, db, command);
@@ -504,7 +606,7 @@ for (const profile of PROFILES) {
     try {
       const before = fullZone(db);
       const command = pending('UPSERT_ZONE_CONFIG', 5, { syncVersion: 5 });
-      assertLegacySuccess(await deliver(profile, db, command), command);
+      assertSuccess(await deliver(profile, db, command), command);
       assert.deepEqual(fullZone(db), before);
       assert.deepEqual(outbox(db), []);
     } finally {
@@ -537,7 +639,7 @@ for (const profile of PROFILES) {
         const db = fixture();
         try {
           const base = pending('UPSERT_ZONE', 6, { ...FULL_ZONE, syncVersion: 6 });
-          assertLegacySuccess(await deliver(profile, db, base), base);
+          assertSuccess(await deliver(profile, db, base), base);
           const applied = fullZone(db);
           const events = outbox(db);
           const same = type === 'UPSERT_ZONE'
@@ -546,7 +648,7 @@ for (const profile of PROFILES) {
               ? { latitude: FULL_ZONE.latitude, longitude: FULL_ZONE.longitude }
               : Object.fromEntries(Object.keys(variants).map((key) => [key, FULL_ZONE[key]]));
           const replay = pending(type, 6, { ...same, syncVersion: 6 });
-          assertLegacySuccess(await deliver(profile, db, replay), replay);
+          assertSuccess(await deliver(profile, db, replay), replay);
           const out = await deliver(profile, db, pending(type, 6, { ...same, [field]: value, syncVersion: 6 }));
           assertConflict(out, 6, 6, 'version_conflict');
           assert.deepEqual(fullZone(db), applied, `${type}.${field}: no write`);
@@ -623,7 +725,7 @@ for (const profile of PROFILES) {
       assert.equal(schedule(db).enabled, 1);
       assert.equal(row.name, 'renamed', 'the rename was applied before the delete');
       assert.match(String(blocked), /locked|busy/i, 'no other connection writes during the check');
-      assertAnswered(out, 'SUCCESS');
+      assertAnswered(out, 'APPLIED');
     } finally {
       local.close();
       db.close();
@@ -640,7 +742,7 @@ for (const profile of PROFILES) {
       try {
         const del = pending('DELETE_ZONE', 7, { syncVersion: 7 });
         const first = await deliver(profile, db, del);
-        assertLegacySuccess(first, del);
+        assertSuccess(first, del);
         assert.notEqual(zone(db).deleted_at, null, 'B: written when the adapter returns');
         const second = await deliver(profile, db, staleRename(6, 'renamed'));
         assertConflict(second, 6, 7, 'zone_deleted');
@@ -654,7 +756,7 @@ for (const profile of PROFILES) {
       const db = fixture();
       try {
         const config = pending('UPSERT_ZONE_CONFIG', 7, { irrigationEfficiencyPct: 90, syncVersion: 7 });
-        assertLegacySuccess(await deliver(profile, db, config), config);
+        assertSuccess(await deliver(profile, db, config), config);
         assert.equal(zone(db).irrigation_efficiency_pct, 90, 'C: written when the adapter returns');
         const second = await deliver(profile, db, staleRename(6, 'renamed'));
         assertConflict(second, 6, 7, 'stale_sync_version');
