@@ -2694,6 +2694,51 @@ check_fetched_manifest() {
     ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$1" "$2" "$3"
 }
 
+# Fails, naming the file, when a fetched runner file's bytes differ from the
+# SHA-256 that scripts/deploy-runner-checksums.json (fetched from the same
+# source) records for it. A download cut short can still parse: a prefix
+# that ends between two statements loses module.exports or a CLI block
+# without a syntax error (#762).
+check_fetched_runner_checksums() {
+    node -e '
+        const crypto = require("crypto");
+        const fs = require("fs");
+        const path = require("path");
+        const [manifestFile, root, ...files] = process.argv.slice(1);
+        let manifest;
+        try {
+            manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+            if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("not an object");
+        } catch (error) {
+            console.error("ERROR: " + manifestFile + " is unreadable (truncated or altered download): " + error.message);
+            process.exit(1);
+        }
+        let failed = false;
+        for (const file of files) {
+            const rel = path.relative(root, file);
+            const expected = manifest[rel];
+            if (typeof expected !== "string") {
+                console.error("ERROR: " + file + " has no checksum in deploy-runner-checksums.json");
+                failed = true;
+                continue;
+            }
+            let actual;
+            try {
+                actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+            } catch (error) {
+                console.error("ERROR: " + file + " is missing (" + (error.code || error.message) + ")");
+                failed = true;
+                continue;
+            }
+            if (actual !== expected) {
+                console.error("ERROR: " + file + " does not match its checksum (truncated or altered download)");
+                failed = true;
+            }
+        }
+        process.exit(failed ? 1 : 0);
+    ' "$TMP_DIR/scripts/deploy-runner-checksums.json" "$TMP_DIR" "$@"
+}
+
 # Fails, naming the file, when a fetched JavaScript file is missing, empty or
 # does not parse as a CommonJS module (a truncated download usually does not).
 check_fetched_js_files() {
@@ -2733,6 +2778,9 @@ fetch_migration_runner() {
         return 1
     fi
 
+    fetch_required "Migration runner checksums" \
+        "scripts/deploy-runner-checksums.json" \
+        "$TMP_DIR/scripts/deploy-runner-checksums.json" || return 1
     fetch_required "Migration manifest parser" \
         "lib/osi-migrate/migration-manifest.js" \
         "$TMP_DIR/lib/osi-migrate/migration-manifest.js" || return 1
@@ -2740,6 +2788,7 @@ fetch_migration_runner() {
         "lib/osi-migrate/migrations-loader.js" \
         "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
     check_fetched_js_files "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+    check_fetched_runner_checksums "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
 
     fetch_required "Migration checksum manifest" \
         "database/migrations/ordered/CHECKSUMS.json" \
@@ -2789,6 +2838,7 @@ fetch_migration_runner() {
         set -- "$@" "$TMP_DIR/lib/osi-migrate/$module"
     done
     check_fetched_js_files "$@" || return 1
+    check_fetched_runner_checksums "$@" || return 1
     MIGRATION_RUNNER_AVAILABLE=1
 }
 
@@ -2801,6 +2851,7 @@ fetch_reconciliation_assets() {
     fetch_required "Ledger numbering reconciliation tool" \
         "scripts/reconcile-ledger-numbering.js" \
         "$TMP_DIR/scripts/reconcile-ledger-numbering.js" || return 1
+    check_fetched_runner_checksums "$TMP_DIR/scripts/reconcile-ledger-numbering.js" || return 1
 
     lineage_fixtures_dir="$TMP_DIR/scripts/fixtures/lineages"
     mkdir -p "$lineage_fixtures_dir" || return 1

@@ -614,7 +614,8 @@ mkdir -p "$TMP_DIR" "$PAYLOADS_ROOT" "$GUI_ROOT"
 # a 404 (curl -f writes nothing and exits 22); "truncated" and "empty" are a
 # server that answers 200 with half of the file or with no bytes at all;
 # "unwritten" reports success but leaves no file, so the file is absent from
-# the directory although CHECKSUMS.json names it.
+# the directory although CHECKSUMS.json names it. "prefix" answers 200 with the
+# first HARNESS_FETCH_PREFIX_BYTES bytes.
 fetch() {
     mkdir -p "$(dirname "$2")"
     if [ -n "\${HARNESS_FETCH_PATH:-}" ] && [ "$1" = "$HARNESS_FETCH_PATH" ]; then
@@ -623,6 +624,7 @@ fetch() {
             unwritten) return 0 ;;
             empty) : > "$2"; return 0 ;;
             truncated) head -c "$(( $(wc -c < "$REPO_ROOT/$1") / 2 ))" "$REPO_ROOT/$1" > "$2"; return 0 ;;
+            prefix) head -c "\${HARNESS_FETCH_PREFIX_BYTES}" "$REPO_ROOT/$1" > "$2"; return 0 ;;
         esac
     fi
     cp "$REPO_ROOT/$1" "$2"
@@ -637,6 +639,7 @@ ${['command_ledger_live_hashes', 'report_command_ledger_activation_failure', 'ke
   'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
 ${shellFunction('check_fetched_manifest')}
 ${shellFunction('check_fetched_js_files')}
+${shellFunction('check_fetched_runner_checksums')}
 ${deployFragment('# deploy outcome begin\n', '# deploy outcome end')}
 ${identity}
 ${payload}
@@ -1143,6 +1146,7 @@ const RUNNER_FETCH_TARGETS = [
   ['lib/osi-migrate/runner.js', 'runner.js'],
   ['lib/osi-migrate/migration-manifest.js', 'migration-manifest.js'],
   ['lib/osi-migrate/migrations-loader.js', 'migrations-loader.js'],
+  ['scripts/deploy-runner-checksums.json', 'deploy-runner-checksums.json'],
 ];
 
 for (const [target, name] of RUNNER_FETCH_TARGETS) {
@@ -1168,6 +1172,34 @@ for (const [target, name] of RUNNER_FETCH_TARGETS) {
       });
     });
   }
+}
+
+// A download cut between two statements still parses: the syntax check
+// passes, and the file has lost its exports or its CLI block (#762). The
+// checksum check stops the deploy before the migration all the same.
+for (const [target, name, marker] of [
+  ['lib/osi-migrate/runner.js', 'runner.js', /^module\.exports = /m],
+  ['scripts/verify-devices-rebuild-fence.js', 'verify-devices-rebuild-fence.js', /^if \(require\.main === module\)/m],
+  ['scripts/migrate-cli.js', 'migrate-cli.js', /^if \(require\.main === module\)/m],
+]) {
+  test(`a download of ${name} cut at a statement boundary (valid JavaScript) stops the deploy before the migration`, () => {
+    const source = fs.readFileSync(path.join(ROOT, target), 'utf8');
+    const cut = source.search(marker);
+    assert.ok(cut > 0, `${name} has the marker`);
+    const prefix = source.slice(0, cut);
+    // The premise: the prefix parses, so a syntax check alone would let it through.
+    new (require('node:vm').Script)(`(function (exports, require, module, __filename, __dirname) {${prefix.replace(/^#!.*/, '')}\n})`);
+    withActivationRoot((root) => {
+      const result = runRunnerHarness(root, { HARNESS_FETCH_PATH: target, HARNESS_FETCH_FAULT: 'prefix', HARNESS_FETCH_PREFIX_BYTES: String(Buffer.byteLength(prefix)) });
+      assert.notEqual(result.status, 0, harnessOutput(result));
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      assert.match(result.stderr, new RegExp(`ERROR: [^\\n]*${escaped} does not match its checksum`), harnessOutput(result));
+      assert.doesNotMatch(result.stdout, /--- Stop Node-RED for schema migration ---/);
+      assert.equal(dbHead(root), '67', 'nothing may be migrated');
+      assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+      assert.equal(result.nodeRed, '1');
+    });
+  });
 }
 
 // --- Other steps of the schema phase that ran without set -e ------------------

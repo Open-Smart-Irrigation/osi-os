@@ -103,7 +103,7 @@ COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
 ${g.pinOverride ? `COMMAND_LEDGER_HELPER_SHA256="${g.pinOverride}"` : pin('COMMAND_LEDGER_HELPER_SHA256')}
 DAMAGED_DB_DOC=docs/operations/damaged-farm-database.md
 export SWAP_ROOT SWAP_JS
-${['fetch', 'fetch_required', 'file_sha256', 'check_fetched_manifest', 'check_fetched_js_files', 'fetch_migration_runner', 'swap_call', 'ensure_sqlite3_cli', 'check_live_db_readonly', 'gateway_state_preflight'].map(fn).join('\n')}
+${['fetch', 'fetch_required', 'file_sha256', 'check_fetched_manifest', 'check_fetched_js_files', 'check_fetched_runner_checksums', 'fetch_migration_runner', 'swap_call', 'ensure_sqlite3_cli', 'check_live_db_readonly', 'gateway_state_preflight'].map(fn).join('\n')}
 check_live_db_readonly || exit 1
 gateway_state_preflight || exit 1
 echo PREFLIGHT_PASSED
