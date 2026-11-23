@@ -80,6 +80,9 @@ jobs:
       # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build
       # Telemetry drops FPort 11 before its raw decoder.
       - run: node scripts/test-watermark-ingest-flow.js
+        env:
+          # Compare against the PR's base branch (release/0.8.4 on that line).
+          OSI_FLOWS_SIZE_BASE_REF: origin/${{ github.base_ref || github.ref_name }}
       # WATERMARK calibration GET/PUT/DELETE through the whole chain (http in ->
       # scoped-device-config-guard -> watermark-cal-fn), flag off and scoped,
       # plus the soil-depth PUT (-> put-soil-depth-fn) the depth form uses.
