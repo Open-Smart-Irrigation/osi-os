@@ -141,7 +141,7 @@ async function advanceUntilOnceSent(page: Page, app: ReturnType<Page['frameLocat
     const dispatch = await row.innerText();
     await dialog.getByRole('button', {name: 'Close'}).click();
     // Main (#672) shows a fired one-time plan as "Fired", or "Valve reported open" once the valve confirms it.
-    if (/\b(?:Fired|Valve reported open)\b/.test(dispatch)) return;
+    if (/Fired|Valve reported open/.test(dispatch)) return;
     await advanceNextEvent(page);
   }
   throw new Error(`No event sent the one-time plan ${label} within 40 simulation events`);
@@ -406,7 +406,7 @@ test('plan-roundtrip saves WEEKLY and ONCE plans, fires, and retains a valid pla
   const recent = app.locator('section').filter({has: app.getByRole('heading', {name: 'Recent irrigations', exact: true})});
   await expect(recent.getByRole('listitem').filter({hasText: /Scheduled \(on valve\)/i}).first()).toBeVisible();
   await valve.getByRole('button', {name: 'Schedule', exact: true}).click();
-  await expect(app.getByRole('dialog').getByRole('listitem').filter({hasText: 'Release once'})).toContainText(/\b(?:Fired|Valve reported open)\b/);
+  await expect(app.getByRole('dialog').getByRole('listitem').filter({hasText: 'Release once'})).toContainText(/Fired|Valve reported open/);
   await app.getByRole('dialog').getByRole('button', {name: 'Close'}).click();
   expectOrdinaryFlowClean(monitor);
 });

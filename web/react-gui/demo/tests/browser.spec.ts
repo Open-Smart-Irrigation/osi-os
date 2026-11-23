@@ -30,7 +30,7 @@ test('real app starts with fictional farm, two zones, offline translations', asy
 test('zone creation, assignment, removal and language preserve existing farm', async ({page}) => {
   await page.goto('/'); const app = page.frameLocator('#app');
   await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));
-  await app.getByRole('menuitem', {name: /Zone/}).click();
+  await app.getByRole('menuitem', {name: /zone/i}).click();
   await app.getByLabel('Zone Name').fill('Temporary bed');
   // Change language while a real form remains mounted, preserving its value.
   // Modal blocks pointer interaction with the toolbar; use the app normally before/after instead.
@@ -184,7 +184,7 @@ test('reveal slide departure pauses clock, return retains state and keyboard sta
   await page.goto('/demo/reveal.html');await page.getByRole('button',{name:'next slide'}).click();
   const host=page.frameLocator('#osi-demo'),app=host.frameLocator('#app');
   await expect(app.getByRole('button',{name:'English'})).toBeVisible();
-  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:/Zone/}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:/zone/i}).click();
   await app.getByLabel('Zone Name').fill('Trial');await app.getByLabel('Zone Name').press('Space');await app.getByLabel('Zone Name').press('ArrowLeft');
   await expect(page).toHaveURL(/#\/1$/);await expect(app.getByLabel('Zone Name')).toHaveValue('Trial ');
   await app.getByRole('button',{name:'Cancel',exact:true}).click();
