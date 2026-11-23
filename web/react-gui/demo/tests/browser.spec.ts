@@ -222,7 +222,7 @@ test('existing device registration and SWT trigger configuration', async ({page}
 
 test('all shipped languages work offline and preserve the open zone', async ({page,context}) => {
   await page.goto('/');const app=page.frameLocator('#app');
-  await expect(app.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+  await expect(app.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
   await app.getByRole('button',{name:/Tomato plot.*devices/}).click();
   await context.setOffline(true);
   let current='English';

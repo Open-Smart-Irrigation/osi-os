@@ -59,7 +59,7 @@ async function openDashboard(page: Page) {
   await page.goto('/simulator/');
   await expect(page.locator('#loading')).toBeHidden({timeout: 25_000});
   const app = page.frameLocator('#app');
-  await expect(app.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(app.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   return app;
 }
 

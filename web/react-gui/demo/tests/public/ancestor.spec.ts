@@ -21,7 +21,7 @@ for (const scenario of scenarios) {
   test(`${scenario.name} accepts a permitted full outer-to-app chain`, async ({page}) => {
     await page.goto(`http://${scenario.parent}:4174/__ancestor/outer.html?target=${scenario.target}`);
     await expect(page.frameLocator('#wrapper').frameLocator('#simulator').frameLocator('#app')
-      .getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible({timeout: 20_000});
+      .getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible({timeout: 20_000});
   });
 
   test(`${scenario.name} rejects an attacker above an otherwise permitted parent`, async ({page, request}) => {

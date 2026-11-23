@@ -27,13 +27,13 @@ test('public simulator loads at its deployed base and reset stays beneath that b
   await expect(page.frameLocator('#app').locator('#root')).toHaveAttribute('data-public-simulator', 'true');
   const initialAppUrl = new URL(await page.locator('#app').getAttribute('src')!, page.url());
   expect(initialAppUrl.pathname).toBe('/simulator/app.html');
-  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
 
   await page.reload();
   await expect(page.locator('#loading')).toBeHidden({timeout: 20_000});
   const refreshedAppUrl = new URL(await page.locator('#app').getAttribute('src')!, page.url());
   expect(refreshedAppUrl.pathname).toBe('/simulator/app.html');
-  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
 
   await page.getByRole('button', {name: 'Reset', exact: true}).click();
   await page.locator('#reset-confirm').click();
@@ -99,7 +99,7 @@ test('public hostname, static headers, absent paths and traversal are constraine
 test('URL parameters do not switch the public artifact compiled runtime mode', async ({page}) => {
   await page.goto('/simulator/?VITE_PUBLIC_SIMULATOR=true&auth_token=inert-demo-session-not-a-jwt');
   await expect(page.locator('#loading')).toBeHidden({timeout: 20_000});
-  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   expect(await page.locator('#app').getAttribute('src')).toContain('./app.html?lang=en&session=');
 });
 

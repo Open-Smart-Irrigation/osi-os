@@ -2,6 +2,7 @@ import {expect, test, type Locator, type Page} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {PUBLIC_EPOCH} from '../../fixtures';
 import {expectSwtThreshold, setCustomSwtThreshold} from './swt-threshold';
+import {openSettingsFromHeader} from './header';
 
 test.setTimeout(120_000);
 
@@ -75,7 +76,7 @@ function expectOrdinaryFlowClean(monitor: ReleaseMonitor): void {
 async function openPublicApp(page: Page): Promise<ReturnType<Page['frameLocator']>> {
   await page.goto('/simulator/');
   await expect(page.locator('#loading')).toBeHidden({timeout: 25_000});
-  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(page.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   return page.frameLocator('#app');
 }
 
@@ -497,7 +498,7 @@ test('preferences-auth reopens preferences and preserves farm edits through logo
   await loginForm.getByLabel(/username/i).fill('Demo farmer');
   await loginForm.getByLabel(/password/i).fill('demo');
   await loginForm.getByRole('button', {name: 'Sign In', exact: true}).click();
-  await expect(app.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(app.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   await expect(app.locator('#irrigation-zone-1')).toContainText('Persisted public farm');
   expectOrdinaryFlowClean(monitor);
 });
@@ -619,7 +620,7 @@ test('reset-continuity restores seed, auth, clock, valve, preferences, and a usa
   await app.getByRole('menuitem', {name: /zone/i}).click();
   await app.getByRole('dialog').locator('#zone-name').fill('Discarded reset zone');
   await app.getByRole('dialog').locator('form').getByRole('button', {name: /create/i}).click();
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
   await app.getByRole('button', {name: 'Dark', exact: true}).click();
   await setAppRoute(app, '/dashboard');
   const valve = valveTile(app, 'Tomato valve');
@@ -638,7 +639,7 @@ test('reset-continuity restores seed, auth, clock, valve, preferences, and a usa
   expect(resetTime).toBeGreaterThanOrEqual(PUBLIC_EPOCH);
   expect(resetTime).toBeLessThanOrEqual(PUBLIC_EPOCH + 30_000);
   const resetApp = page.frameLocator('#app');
-  await expect(resetApp.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(resetApp.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   await expect(resetApp.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(resetApp.getByTestId('water-soil-tile')).toContainText('45.0 kPa');
   await expect(resetApp.getByTestId('water-today-card')).toContainText('0 L');
@@ -745,7 +746,7 @@ test('native confirmations preserve state on dismissal and apply state on accept
   await expect(scheduleZone.getByRole('button', {name: 'On', exact: true})).toBeVisible();
   await scheduleZone.getByRole('button', {name: 'Save schedule'}).click();
   await expect(scheduleZone.getByRole('button', {name: 'On', exact: true})).toBeVisible();
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
   const modules = app.getByRole('region', {name: 'Modules'});
   const scheduler = modules.getByRole('group', {name: 'Trigger-based irrigation', exact: true});
   await expect(scheduler.getByRole('button', {name: 'On'})).toHaveAttribute('aria-pressed', 'true');

@@ -33,7 +33,7 @@ test('demo account actions preserve the session and give dismissible feedback',a
   const app=page.frameLocator('#app');
   for(const action of ['Logout','OSI Server']) {
     await app.getByRole('button',{name:/Account/}).click();await app.getByRole('menuitem',{name:action,exact:true}).click();
-    await expect(app.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+    await expect(app.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
     await expect(page.locator('#host-notice')).toContainText('not simulated');
     await page.getByRole('button',{name:'Dismiss notice',exact:true}).click();await expect(page.locator('#host-notice')).toBeEmpty();
   }
@@ -100,7 +100,7 @@ test('opening the app directly retains unsupported-action feedback',async({page}
   await page.goto('/demo/app.html#/dashboard');
   await page.getByRole('button',{name:/Account/}).click();
   await page.getByRole('menuitem',{name:'Logout',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
   await expect(page.locator('#demo-notice')).toContainText('not simulated');
   await page.locator('#demo-notice').click();await expect(page.locator('#demo-notice')).toBeHidden();
 });

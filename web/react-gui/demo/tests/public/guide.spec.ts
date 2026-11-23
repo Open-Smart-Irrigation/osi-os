@@ -1,5 +1,6 @@
 import {expect, test, type Locator, type Page} from '@playwright/test';
 import {mkdir} from 'node:fs/promises';
+import {openSettingsFromHeader} from './header';
 
 test.setTimeout(120_000);
 
@@ -140,7 +141,7 @@ test('guide skip target is fresh, locale-aware, reset clears it and close restor
   await app.getByRole('menuitem', {name: 'Français', exact: true}).click();
   await expect(page.locator('#skip-event')).toContainText('heure de la ferme');
   const kampalaTime = await page.locator('#skip-event [data-skip-time]').innerText();
-  await app.getByRole('link', {name: 'Réglages', exact: true}).click();
+  await openSettingsFromHeader(app, 'Réglages');
   await app.getByLabel('Fuseau horaire de la passerelle').fill('Europe/Zurich');
   await app.getByRole('button', {name: 'Enregistrer', exact: true}).click();
   await expect(app.getByText('Fuseau horaire enregistré', {exact: true})).toBeVisible();

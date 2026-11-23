@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test';
 import {expectSwtThreshold} from './swt-threshold';
+import {openSettingsFromHeader} from './header';
 
 test.setTimeout(90_000);
 
@@ -111,7 +112,7 @@ test('visitor host fits supported viewports and keeps the app edge-to-edge on mo
   const zoomed = await page.evaluate(() => ({width: innerWidth, scroll: document.documentElement.scrollWidth, height: innerHeight, bodyHeight: document.body.scrollHeight}));
   expect(zoomed.scroll).toBeLessThanOrEqual(zoomed.width);
   expect(zoomed.bodyHeight).toBeLessThanOrEqual(zoomed.height + 1);
-  const dashboardHeading = await page.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'}).evaluate(element => {
+  const dashboardHeading = await page.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true}).evaluate(element => {
     const style = getComputedStyle(element);
     return {height: element.getBoundingClientRect().height, lineHeight: Number.parseFloat(style.lineHeight)};
   });
@@ -179,7 +180,7 @@ test('tools drawer restores focus and host language follows the native app selec
     await expect(page.getByRole('button', {name: locale.tools})).toBeVisible();
     await expect(page.locator('#retry')).toHaveText(locale.retry);
     if (locale.code === 'fr') {
-      await app.getByRole('link', {name: 'Réglages', exact: true}).click();
+      await openSettingsFromHeader(app, 'Réglages');
       await app.getByRole('button', {name: 'Sombre', exact: true}).click();
       await expect(app.locator('html')).toHaveAttribute('data-theme', 'dark');
       await page.setViewportSize({width: 360, height: 640});
@@ -253,7 +254,7 @@ test('native confirmation preserves an enabled schedule on cancel and disables i
   const initialMetric = await zone.getByLabel('Sensor').inputValue();
   const initialThreshold = '30';
 
-  await frame.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(frame);
   const scheduler = frame.getByRole('region', {name: 'Modules'}).getByRole('group', {name: 'Trigger-based irrigation', exact: true});
   const dismissDialog = page.waitForEvent('dialog').then(async dialog => {
     expect(dialog.type()).toBe('confirm');
@@ -268,7 +269,7 @@ test('native confirmation preserves an enabled schedule on cancel and disables i
   await expect(zone.getByLabel('Sensor')).toHaveValue(initialMetric);
   await expectSwtThreshold(zone, initialThreshold);
 
-  await frame.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(frame);
   const acceptDialog = page.waitForEvent('dialog').then(async dialog => {
     expect(dialog.type()).toBe('confirm');
     await dialog.accept();
@@ -405,7 +406,7 @@ test('native History, valve command, focused draft, and exact reset survive layo
   await expect.poll(() => app.locator('body').evaluate(body => body.ownerDocument.defaultView!.location.hash))
     .toBe('#/dashboard');
   await expect(app.getByRole('button', {name: /Tomato plot/})).toBeVisible();
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
   await app.getByRole('button', {name: 'Dark', exact: true}).click();
   await app.getByLabel('Gateway time zone').fill('Europe/Zurich');
   await app.getByRole('button', {name: 'Save', exact: true}).click();
@@ -511,7 +512,7 @@ test('native History, valve command, focused draft, and exact reset survive layo
   await expect(app.getByTestId('water-flow-meter-tile')).toContainText('0 L');
   await expect(app.getByTestId('water-soil-tile')).toContainText('45.0 kPa');
   await expect(app.getByRole('heading', {name: /Configure zone/})).toHaveCount(0);
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
   await expect(app.locator('#gateway-timezone')).toHaveValue('Africa/Kampala');
 });
 

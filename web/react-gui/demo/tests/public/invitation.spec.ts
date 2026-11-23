@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test';
 import {expectSwtThreshold} from './swt-threshold';
+import {openSettingsFromHeader} from './header';
 
 const preview = '/website-demo/preview.html';
 const invitation = '#osi-simulator-invitation';
@@ -169,7 +170,7 @@ test('screenshot and caption each enter same-tab simulator navigation in a fresh
     if (clicked === 'image') await entry.getByRole('img', {name: /OSI OS dashboard/i}).click();
     else await entry.getByText('Try me!', {exact: true}).click();
     await expect(targetPage).toHaveURL(/\/simulator\/$/);
-    await expect(targetPage.frameLocator('#app').getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible({timeout: 20_000});
+    await expect(targetPage.frameLocator('#app').getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible({timeout: 20_000});
     await targetPage.goBack();
     await expect(targetPage).toHaveURL(/\/website-demo\/preview\.html$/);
     await expect(targetPage.locator(invitation)).toBeHidden();
@@ -353,7 +354,7 @@ test('the actual outer iframe fixture permits cancel and accept of a native simu
   await expect(appFrame).toHaveAttribute('sandbox', /allow-modals/);
   await expect(appFrame).toHaveAttribute('sandbox', /allow-downloads/);
   const app = host.frameLocator('#app');
-  await expect(app.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible({timeout: 20_000});
+  await expect(app.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible({timeout: 20_000});
 
   const zone = app.locator('#irrigation-zone-1');
   await zone.getByRole('button', {name: 'Trigger-based irrigation'}).click();
@@ -364,7 +365,7 @@ test('the actual outer iframe fixture permits cancel and accept of a native simu
   await expect(zone.getByText('Saved.', {exact: true})).toBeVisible();
 
   const disableScheduler = async (accept: boolean) => {
-    await app.getByRole('link', {name: /settings/i}).click();
+    await openSettingsFromHeader(app);
     const scheduler = app.getByRole('region', {name: 'Modules'}).getByRole('group', {name: 'Trigger-based irrigation'});
     const confirmation = page.waitForEvent('dialog').then(async dialog => {
       expect(dialog.type()).toBe('confirm');

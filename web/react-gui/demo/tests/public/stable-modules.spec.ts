@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
+import {openSettingsFromHeader} from './header';
 
 type Monitor = {
   pageErrors: string[];
@@ -54,7 +55,7 @@ async function openPublicApp(page: Page) {
   await page.goto('/simulator/');
   await expect(page.locator('#loading')).toBeHidden({timeout: 25_000});
   const app = page.frameLocator('#app');
-  await expect(app.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+  await expect(app.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
   return app;
 }
 
@@ -78,7 +79,7 @@ async function openSoilMoistureHistoryFromOverview(app: ReturnType<Page['frameLo
 test('public Settings keeps stable modules and omits every experimental control', async ({page}) => {
   const monitor = await installMonitor(page);
   const app = await openPublicApp(page);
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
 
   const modules = app.getByRole('region', {name: 'Modules'});
   await expect(modules.locator('[data-experimental-module]')).toHaveCount(0);
@@ -121,7 +122,7 @@ for (const route of [
     await setAppRoute(app, route);
     await expect.poll(() => app.locator('body').evaluate(body => body.ownerDocument.defaultView!.location.hash))
       .toBe('#/dashboard');
-    await expect(app.getByRole('heading', {name: 'OSI OS Dashboard'})).toBeVisible();
+    await expect(app.getByRole('heading', {name: 'OSI OS', exact: true})).toBeVisible();
     expectClean(monitor);
   });
 }
@@ -191,7 +192,7 @@ test('public Environment shows data-backed tabs and the native S2120 card has co
 test('support submission remains a normal Settings journey', async ({page}) => {
   const monitor = await installMonitor(page);
   const app = await openPublicApp(page);
-  await app.getByRole('link', {name: /settings/i}).click();
+  await openSettingsFromHeader(app);
   const requestTitle = app.locator('#user-request-title');
   const requestDescription = app.locator('#user-request-description');
   await requestTitle.fill('Release local support check');
