@@ -261,6 +261,63 @@ for (const [name, sql] of Object.entries(NEWER)) {
   });
 }
 
+function failedRow(version, name, checksum, status) {
+  return `INSERT INTO schema_migrations(version, name, checksum, applied_at, app_version, status, error) VALUES (${version}, '${name}', '${checksum}', '2026-11-23T00:00:00.000Z', 'test', '${status}', 'fixture');`;
+}
+// Rows above the last version this line shares with main (80) that are not
+// this release's own migration, in any status: written by a newer release.
+const FOREIGN_ABOVE_SHARED = {
+  "main's own 0081 applied, cut before 0082": {
+    sql: `DELETE FROM schema_migrations WHERE version = 81; ${row(81, '0081__uplink_idempotency.sql', MAIN_0081)}`,
+    version: 81,
+  },
+  "a failed row 82 above main's 0081": {
+    sql: `DELETE FROM schema_migrations WHERE version = 81; ${row(81, '0081__uplink_idempotency.sql', MAIN_0081)}
+      ${failedRow(82, '0082__history_repair_progress_indexes.sql', MAIN_0082, 'failed')}`,
+    version: 81,
+  },
+  "a failed row 82 above this release's own 81": {
+    sql: failedRow(82, '0082__history_repair_progress_indexes.sql', MAIN_0082, 'failed'),
+    version: 82,
+  },
+  "a repair_required row 83 above this release's own 81": {
+    sql: failedRow(83, '0083__sdi12_archive_retention_index.sql', MAIN_0083, 'repair_required'),
+    version: 83,
+  },
+};
+for (const [name, { sql, version }] of Object.entries(FOREIGN_ABOVE_SHARED)) {
+  test(`newer database (${name}): refused in the read-only preflight, the tree byte-identical, Node-RED never stopped`, () => {
+    const g = gateway({ layout: 'linked' });
+    try {
+      ledgerSql(g, sql);
+      const before = g.manifest();
+      const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+      assert.notEqual(r.status, 0, r.stdout + r.stderr);
+      assert.doesNotMatch(r.stdout, /CONFIGURATION_REACHED/);
+      assert.match(r.stderr, new RegExp(`this gateway has a newer database \\(schema_migrations row ${version} is not this release's migration ${version}\\); deploy the newer release; refusing before anything is changed`));
+      assert.deepEqual(g.manifest(), before, 'the gateway-side tree is byte-identical');
+      assert.equal(fs.existsSync(path.join(g.root, 'node-red.log')), false, 'Node-RED was never stopped or started');
+      assert.equal(fs.readFileSync(path.join(g.root, 'node-red.state'), 'utf8').trim(), '1');
+    } finally { g.cleanup(); }
+  });
+}
+
+test('a ledger table the preflight cannot read: refused, the tree byte-identical, Node-RED never stopped', () => {
+  const g = gateway({ layout: 'linked' });
+  try {
+    // A schema_migrations table without the ledger's columns: the table exists,
+    // the ledger query fails, and the preflight fails closed.
+    ledgerSql(g, 'DROP TABLE schema_migrations; CREATE TABLE schema_migrations (x INTEGER);');
+    const before = g.manifest();
+    const r = runPrefix(g, CONFIG_REACHED, 'echo CONFIGURATION_REACHED');
+    assert.notEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /CONFIGURATION_REACHED/);
+    assert.match(r.stderr, /could not read the schema_migrations ledger; refusing before anything is changed/);
+    assert.deepEqual(g.manifest(), before, 'the gateway-side tree is byte-identical');
+    assert.equal(fs.existsSync(path.join(g.root, 'node-red.log')), false, 'Node-RED was never stopped or started');
+  } finally { g.cleanup(); }
+});
+
 const SUPPORTED = {
   'this release again (81)': '',
   '0.8.3 (80)': 'DELETE FROM schema_migrations WHERE version = 81;',

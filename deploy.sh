@@ -2746,11 +2746,18 @@ gateway_state_preflight() {
     fi
     [ -e "$DB_PATH" ] || return 0
     fetch_migration_runner || { gsp_refuse "the migration runner could not be fetched and verified"; return 1; }
-    # A database a newer release already migrated (an applied ledger row above
-    # this release's migration head) is refused here, before anything changes.
-    # Migrating it with this release re-runs migrations the newer release
-    # renumbered and leaves a failed ledger row the newer release cannot clear.
-    # Foreign-numbered lineages the reconciliation renumbers sit below the head.
+    # A database a newer release already worked on is refused here, before
+    # anything changes. Migrating it with this release re-runs migrations the
+    # newer release renumbered or meets rows this release does not know, and
+    # ends in a failed ledger row or a late refusal after Node-RED is stopped.
+    # Two signs: an applied row above this release's head, or any row (any
+    # status) above the last version this line shares with main that is not
+    # this release's own migration. The known foreign-numbered lineages the
+    # reconciliation renumbers (the lineage fixtures, the private SDI-12 row
+    # at 76) sit below both. Refusing a ledger a newer release renumbered and
+    # then left (for example ...,80,84 before its first migration) is a
+    # policy choice: this release's reconciliation could map such a row back,
+    # but a database that entered a newer deploy finishes with that deploy.
     if ! gsp_newest="$(sqlite3 -readonly "$DB_PATH" "SELECT COALESCE(MAX(version),0) FROM schema_migrations WHERE status='applied'" 2>/dev/null)"; then
         if sqlite3 -readonly "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;" 2>/dev/null | grep -qx '1'; then
             gsp_refuse "could not read the schema_migrations ledger" || return 1
@@ -2765,6 +2772,24 @@ gateway_state_preflight() {
     esac
     if [ "$gsp_newest" -gt "$gsp_head" ]; then
         gsp_refuse "this gateway has a newer database (schema_migrations has an applied version $gsp_newest, above this release's head $gsp_head); deploy the newer release" || return 1
+    fi
+    # Versions 1-80 are byte-identical with main on this release line; 81 is
+    # this line's own (main's 0084 file). Line-specific: a later line moves it.
+    gsp_shared_head=80
+    gsp_above="$(sqlite3 -readonly "$DB_PATH" "SELECT version || ':' || checksum FROM schema_migrations WHERE version > $gsp_shared_head ORDER BY version" 2>/dev/null || true)"
+    if [ -n "$gsp_above" ]; then
+        gsp_foreign_rc=0
+        gsp_foreign="$(printf '%s\n' "$gsp_above" | node -e '
+            const rows = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+            const manifest = require(process.argv[1]).readMigrationManifest(process.argv[2]);
+            const bad = rows.find((r) => { const [v, c] = r.split(":"); const e = manifest.find((m) => m.version === Number(v)); return !e || e.checksum !== c; });
+            if (bad) { process.stdout.write(bad.split(":")[0]); process.exit(3); }
+        ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir")" || gsp_foreign_rc=$?
+        case "$gsp_foreign_rc" in
+            0) ;;
+            3) gsp_refuse "this gateway has a newer database (schema_migrations row $gsp_foreign is not this release's migration $gsp_foreign); deploy the newer release" || return 1 ;;
+            *) gsp_refuse "could not compare the ledger with this release's migrations" || return 1 ;;
+        esac
     fi
     # A repair_required ledger row whose checksum already matches the release
     # stops the migration runner, and nothing in the deploy clears it.
