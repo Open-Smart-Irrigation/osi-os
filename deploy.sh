@@ -2069,6 +2069,12 @@ restore_as_found() {
     if [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] || [ "$raf_active" != "${PRE_STOP_ACTIVE:-}" ]; then
         return 1
     fi
+    # A ledger that still reads proves nothing about the pages behind it (a
+    # file cut while it was being copied back, #762): check them first.
+    if [ "$(sqlite3 -readonly "$DB_PATH" 'PRAGMA quick_check' 2>/dev/null)" != ok ]; then
+        echo "ERROR: the database fails PRAGMA quick_check; not returning to the payload as found" >&2
+        return 1
+    fi
     if [ "${PRE_STOP_RUNNING:-0}" != "1" ]; then
         echo "OK: Node-RED was not running when this deploy began; left as found (payloads/$raf_active)" >&2
         node_red_restart_needed=0

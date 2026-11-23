@@ -122,7 +122,11 @@ applied set, not on `MAX(version)`. The runner's drift grace path
 set) from `baseline-existing-db.js`'s `buildReferenceForApplied`:
 reference(P) for the contiguous applied prefix 1..P, plus the applied versions
 above P applied on a private copy, memoized per corpus and applied set. An
-in-order ledger gets reference(head) exactly as before. `applyPending`'s pending
+in-order ledger gets reference(head) exactly as before. The gateway may have
+run an out-of-order version before lower ones, so the builder refuses
+(`ERR_REFERENCE_ORDER`) when an out-of-order version creates, drops or alters
+an object that any lower version also touches; the comparator also compares an
+index's predicate, key order, direction, collation and expression text. `applyPending`'s pending
 set is the corpus minus the applied set, as is `boot-owned-fingerprints.js`'s,
 and `bootSchemaDecision` reads "cut during its migration" as the set relation
 from ⊆ db ⊂ target. Before the remap commits, `--planned-schema-out <file>`

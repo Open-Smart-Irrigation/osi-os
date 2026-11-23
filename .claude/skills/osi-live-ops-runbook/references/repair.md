@@ -211,7 +211,7 @@ own 81 holds `…,80,84` while 81 to 83 are still pending. What a cut leaves:
 
 | Cut | What the gateway does | Next step |
 |---|---|---|
-| Signal (SSH drop, Ctrl-C, TERM) or a refusal before the first migration commits, including during the reconcile itself | the previous payload runs again; the deploy prints `NOTE: the ledger numbering reconciliation renumbered ledger rows only` | run the 0.9 deploy again |
+| Signal (SSH drop, Ctrl-C, TERM) or a refusal before the first migration commits, including during the reconcile itself | the previous payload runs again. A cut while the reconcile itself runs also prints `NOTE: the ledger numbering reconciliation renumbered ledger rows only`; after it, the deploy reports the usual return to the payload it found | run the 0.9 deploy again |
 | Power cut before the first migration commits | the old payload starts, state `unverified` (`recorded for schema 81, the database is at schema 84`) | run the 0.9 deploy again |
 | Power cut after a migration committed, before the last | the old payload starts `unverified` ("cut during its migration"), or the boot holds when a stamped new body would be undone by the old boot node | run the 0.9 deploy again |
 | Signal after a migration committed | held, Node-RED stopped (as on an in-order ledger) | run the 0.9 deploy again |
@@ -220,7 +220,10 @@ own 81 holds `…,80,84` while 81 to 83 are still pending. What a cut leaves:
 A migration committed without its fingerprint stamp is drift the retry
 explains itself: the runner rebuilds the reference from the applied set
 (reference of the contiguous prefix, plus the out-of-order versions), finds the
-live schema equal to it, restamps and continues. On the first retry that
+live schema equal to it, restamps and continues. It refuses instead when an
+out-of-order migration touches an object a lower migration also touches
+(`ran out of version order and touches …`): the reference cannot follow the
+order the gateway ran them in. For 0.9 no such pair exists. On the first retry that
 reference chain is built on the gateway and takes minutes (211 s for the 0.9
 chain on a 16-core workstation, longer on a Pi). Do not interrupt it.
 
@@ -244,15 +247,19 @@ first, on a copy, with a deploy tree that contains the fix:
    main rows, no `failed` or `repair_required` row.
 3. On the copy: `node scripts/migrate-cli.js copy.db --backup-dir <scratch> --migrations-dir database/migrations/ordered`,
    then `node scripts/verify-head-cli.js copy.db`. Both succeed only when the
-   live schema equals what its applied migrations make, apart from the triggers
-   the boot node rewrites.
+   live schema equals what its applied migrations make when run in version
+   order, as `scripts/semantic-schema-compare.js` compares schemas (column
+   position is not compared), apart from the triggers the boot node rewrites.
 
 If step 3 succeeds, deploy that tree to the gateway; it repeats the same check
 and needs no restamp. If you must keep the older tree, step 3's success is the
 confirmation `node scripts/restamp-fingerprints.js /data/db/farming.db` needs
 ("Stale-fingerprint recovery" above), followed by the deploy again. If step 3
-refuses, the schema differs from every applied migration set; a restamp would
-record that difference as the baseline. Stop and escalate with the copy.
+refuses, the schema differs from that version-order reference, or the order
+check above refused; either way the copy does not prove the schema. A correct
+database can refuse here when the order the gateway ran its migrations in
+matters. Do not restamp: a restamp would record an unproven schema as the
+baseline. Stop and escalate with the copy.
 
 ### Rehearsing that cutover on a copy
 

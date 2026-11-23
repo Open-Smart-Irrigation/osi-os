@@ -253,6 +253,19 @@ test('R2p: a deploy cut or refused after the renumber, before 0081 commits, retu
   assert.equal(before.result, 'HELD', before.out);
 });
 
+test('restore_as_found refuses a database whose ledger reads but whose pages do not pass quick_check', async () => {
+  const g = await gateway();
+  // Damage pages away from the ledger: the second half of the file.
+  const size = fs.statSync(g.db).size;
+  const fd = fs.openSync(g.db, 'r+');
+  fs.writeSync(fd, Buffer.alloc(8192, 0xff), 0, 8192, Math.floor(size / 2 / 4096) * 4096);
+  fs.closeSync(fd);
+  assert.equal(schema(g.db).raw, g.renumbered.raw, 'precondition: the ledger still reads');
+  const cut = exitPath(g, { PRE_STOP_SCHEMA: g.renumbered.raw });
+  assert.equal(cut.result, 'HELD', cut.out);
+  assert.match(cut.out, /fails PRAGMA quick_check/);
+});
+
 test('a planned-ledger file does not excuse a committed migration: R3 after a signal still holds', async () => {
   const g = await gateway();
   assert.equal(migrate(g.db, { commit: 1 }).signal, 'SIGKILL');

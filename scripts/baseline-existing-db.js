@@ -184,10 +184,61 @@ function appliedReferencePlan(entries, appliedVersions) {
   return { versions, prefixHead, extras: versions.filter((v) => v > prefixHead) };
 }
 
+// The schema objects a migration creates, drops or alters, as "<type> <name>"
+// ("column <table>.<column>" for ADD/DROP/RENAME COLUMN). Comments and string
+// literals are blanked first, so a trigger body that only reads a table does
+// not name it.
+function migrationObjectNames(sql) {
+  const src = String(sql)
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:[^']|'')*'/g, "''");
+  const id = '["`\\[]?([A-Za-z0-9_]+)["`\\]]?';
+  const names = new Set();
+  const created = new RegExp(`\\b(?:CREATE|DROP)\\s+(?:TEMP(?:ORARY)?\\s+)?(?:UNIQUE\\s+)?(TABLE|INDEX|TRIGGER|VIEW)\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?${id}`, 'gi');
+  for (const m of src.matchAll(created)) names.add(`${m[1].toLowerCase()} ${m[2].toLowerCase()}`);
+  const altered = new RegExp(`\\bALTER\\s+TABLE\\s+${id}\\s+(ADD|DROP|RENAME)\\s+(?:COLUMN\\s+)?(TO\\s+)?${id}(?:\\s+TO\\s+${id})?`, 'gi');
+  for (const m of src.matchAll(altered)) {
+    const table = m[1].toLowerCase();
+    if (m[2].toUpperCase() === 'RENAME' && m[3]) {
+      names.add(`table ${table}`);
+      names.add(`table ${m[4].toLowerCase()}`);
+    } else {
+      names.add(`column ${table}.${m[4].toLowerCase()}`);
+      if (m[5]) names.add(`column ${table}.${m[5].toLowerCase()}`);
+    }
+  }
+  return names;
+}
+
+// The reference applies the out-of-order versions after the prefix, in
+// version order; the gateway may have run them before versions below them
+// (#762). The two orders give the same schema unless two of those migrations
+// touch the same object. The ledger keeps no reliable history of the order,
+// so every out-of-order version is checked against every lower version of
+// the corpus, and a shared object refuses: the reference cannot then be
+// proven to be what the gateway ran.
+function assertOrderIndependent(entries, extras) {
+  const names = new Map(entries.map((m) => [m.version, migrationObjectNames(m.sql)]));
+  for (const extra of extras) {
+    const own = names.get(extra);
+    for (const m of entries) {
+      if (m.version >= extra) break;
+      const shared = [...own].filter((n) => names.get(m.version).has(n));
+      if (shared.length) {
+        const e = new Error(`applied migration ${extra} ran out of version order and touches ${shared.join(', ')}, as migration ${m.version} does; the reference cannot follow the order the gateway ran them in`);
+        e.code = 'ERR_REFERENCE_ORDER';
+        throw e;
+      }
+    }
+  }
+}
+
 async function buildReferenceForApplied(migrationsDir, appliedVersions, scratchRoot, runnerOptions = {}) {
   const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
   const plan = appliedReferencePlan(state.entries, appliedVersions);
   if (plan.extras.length === 0) return buildReference(migrationsDir, plan.prefixHead, scratchRoot, runnerOptions);
+  assertOrderIndependent(state.entries, plan.extras);
   const key = `${state.dir}\0${plan.versions.join(',')}`;
   let pending = appliedSetReferences.get(key);
   if (!pending) {
@@ -331,4 +382,4 @@ if (require.main === module) {
   })().catch((e) => { console.error(`[baseline] FAILED: ${e.message}`); process.exit(2); });
 }
 
-module.exports = { runBaseline, buildReference, buildReferenceForApplied, appliedReferencePlan, referenceSnapshot, parseArgs, APP_VERSION };
+module.exports = { runBaseline, buildReference, buildReferenceForApplied, appliedReferencePlan, migrationObjectNames, assertOrderIndependent, referenceSnapshot, parseArgs, APP_VERSION };
