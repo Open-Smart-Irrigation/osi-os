@@ -25,6 +25,9 @@ export const AccountLink: React.FC = () => {
 
   const [unlinking, setUnlinking] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  // Set by a successful unlink on this page. The gateway stopped reporting
+  // locally; the cloud still lists it until the farmer unlinks it there (#766).
+  const [unlinkedHere, setUnlinkedHere] = useState(false);
   const [forcingSync, setForcingSync] = useState(false);
   const [forceSyncResult, setForceSyncResult] = useState<ForceSyncResult | null>(null);
   const [showReauth, setShowReauth] = useState(false);
@@ -66,6 +69,7 @@ export const AccountLink: React.FC = () => {
         password,
       });
       setResult(res);
+      setUnlinkedHere(false);
       setStatus({
         linked: true,
         serverUsername: res.serverUsername,
@@ -92,6 +96,7 @@ export const AccountLink: React.FC = () => {
     try {
       await accountLinkAPI.unlink();
       setStatus({ linked: false, serverUsername: null, linkedAt: null });
+      setUnlinkedHere(true);
       setResult(null);
       setForceSyncResult(null);
     } catch {
@@ -450,6 +455,11 @@ export const AccountLink: React.FC = () => {
             </div>
           ) : (
             <div>
+              {unlinkedHere && (
+                <div role="status" className="bg-[var(--secondary-bg)] border border-[var(--border)] rounded-lg p-4 mb-4">
+                  <p className="text-[var(--text)]">{t('unlink.stoppedReporting')}</p>
+                </div>
+              )}
               <div className="bg-[var(--secondary-bg)] rounded-lg p-4 mb-6">
                 <p className="text-[var(--text-secondary)]">{t('status.notLinked')}</p>
               </div>

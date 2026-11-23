@@ -71,6 +71,9 @@ const ENV = { DEVICE_EUI: GATEWAY, CHIRPSTACK_APP_ACTUATORS: 'app-actuators' };
 // runs it with the real installation helper on a gateway with no account
 // journal, queued account request or identity sentinel, so it forwards.
 const ACK_GUARD = 'account-cloud-guard-' + ACK_OUT;
+// The guard also drops cloud MQTT in a process that started unlinked (#766);
+// this harness models a linked gateway.
+process.env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
 assert.deepEqual(byId[ACK_GUARD] && byId[ACK_GUARD].wires, [[ACK_OUT]], 'the ACK guard forwards only to Command ACK → Cloud');
 const INSTALLATION = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper'));
 const CLEAN_GATEWAY_FS = { existsSync: () => false, readdirSync: () => [] };

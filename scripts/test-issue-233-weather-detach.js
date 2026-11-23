@@ -40,6 +40,9 @@ function policyFor(profile) {
 // EB2 puts an account-recovery guard in front of the ACK MQTT node. The
 // traversal runs it with the real installation helper on a clean gateway.
 const CLEAN_GATEWAY_FS = { existsSync: () => false, readdirSync: () => [] };
+// The guard also drops cloud MQTT in a process that started unlinked (#766);
+// this traversal models a linked gateway.
+process.env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
 
 function wiring(profile) {
   const guard = loadNode(loadNode('weather-zones-command-apply-fn', profile.flowsPath).wires[1][0], profile.flowsPath);

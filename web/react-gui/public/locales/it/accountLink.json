@@ -34,7 +34,8 @@
   "unlink": {
     "button": "Disconnetti da OSI Server",
     "confirm": "Sei sicuro? Dopo la disconnessione, devi usare la tua password locale originale.",
-    "success": "Disconnesso da OSI Server"
+    "success": "Disconnesso da OSI Server",
+    "stoppedReporting": "Questo gateway ha smesso di inviare dati. Per rimuoverlo anche dal tuo account cloud, scollegalo nel cloud."
   },
   "errors": {
     "networkError": "Impossibile raggiungere OSI Server. Controlla l'URL e la connessione Internet.",

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const cloudHttp = require('../osi-cloud-http');
 
 function normalizeInstallationUuid(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -675,9 +676,12 @@ try {
   }, async (tx) => {
   const local = await tx.get('SELECT id FROM users WHERE id=? AND username=?', [Number(auth.userId), auth.username]);
   if (!local) throw new Error('Local account no longer exists');
+  // The link belongs to the gateway, not to one local account (#766): the REST
+  // sync nodes send for any account row that still holds a cloud address, so
+  // every row gives up its link. Each keeps its own local password.
   await tx.run(
-    'UPDATE users SET auth_mode = ?, server_username = NULL, server_password_hash = NULL, server_offline_verifier = NULL, server_offline_verifier_version = 0, server_linked_at = NULL, server_url = NULL, server_sync_token = NULL, server_sync_token_expires_at = NULL, cloud_user_id = NULL, last_auth_sync_at = NULL, last_auth_sync_status = NULL, last_auth_sync_error = NULL WHERE id = ? AND username = ?',
-    ['local', Number(auth.userId), String(auth.username || '').trim()]
+    "UPDATE users SET auth_mode = 'local', server_username = NULL, server_password_hash = NULL, server_offline_verifier = NULL, server_offline_verifier_version = 0, server_linked_at = NULL, server_url = NULL, server_sync_token = NULL, server_sync_token_expires_at = NULL, cloud_user_id = NULL, last_auth_sync_at = NULL, last_auth_sync_status = NULL, last_auth_sync_error = NULL WHERE auth_mode <> 'local' OR server_url IS NOT NULL OR server_sync_token IS NOT NULL OR server_username IS NOT NULL OR server_linked_at IS NOT NULL OR cloud_user_id IS NOT NULL OR server_offline_verifier IS NOT NULL",
+    []
   );
   await tx.run("UPDATE sync_link_state SET linked=0, server_url=NULL, cloud_user_id=NULL, gateway_device_eui=NULL, peer_capabilities_json=NULL, peer_capabilities_context_json=NULL, peer_capabilities_request_id=NULL, link_attempt_json=NULL, updated_at=? WHERE peer_node='cloud'", [new Date().toISOString()]);
   await tx.run("DELETE FROM sync_history_dirty_keys WHERE peer_node='cloud'", []);
@@ -1205,8 +1209,17 @@ try {
 }
 
 // The MQTT connection keeps boot-time credentials until identityd restarts it.
-// Stop new cloud publications while an account operation/receipt is unresolved.
+// Stop new cloud publications while an account operation/receipt is unresolved,
+// and in a process that started unlinked (#766).
+let unlinkedDropReported = false;
 function accountCloudMessage({msg, node, global}) {
+  if (!cloudHttp.gatewayLinked()) {
+    if (!unlinkedDropReported) {
+      unlinkedDropReported = true;
+      node.warn('Gateway is not linked to a cloud account; cloud MQTT messages are dropped');
+    }
+    return null;
+  }
   return gatewayWorkBlocked({fs: global.get('fs'), warn: text => node.warn(text)}) ? null : msg;
 }
 module.exports.accountCloudMessage = accountCloudMessage;

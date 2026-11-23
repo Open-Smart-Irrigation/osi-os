@@ -159,9 +159,16 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
-# An unlinked gateway, or one linked to the default host, gets byte-identical
-# behaviour to the old literal.
+# A gateway linked to the default host gets byte-identical behaviour to the
+# old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
+# An unlinked gateway (no osi-server.cloud.mqtt_password; linking always
+# stores one) reports to no cloud (#766). It gets this name, which never
+# resolves (RFC 6761 .invalid), instead of the default cloud. An empty URL
+# would not do: Node-RED 3.1 turns an empty broker into mqtt://localhost:1883,
+# the gateway's own broker. start_service() also removes the broker's
+# credentials and turns off its auto-connect.
+OSI_UNLINKED_CLOUD_BROKER_URL="wss://unlinked.invalid/mqtt"
 
 # Describes why a configured value was rejected without printing it: the
 # value may be mistyped credentials or a private host name.
@@ -464,10 +471,16 @@ start_service() {
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
     local mqtt_broker_url=$(uci -q get osi-server.cloud.mqtt_broker_url 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
-    resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
+    if [ -n "$mqtt_password" ]; then
+        resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
+    else
+        CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
+        CLOUD_BROKER_URL_SOURCE="unlinked"
+    fi
     logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
-    # Only a URL that came from UCI may replace a literal in an older
-    # flows.json; with nothing usable configured that literal stays.
+    # Only a URL that came from UCI (or the unlinked name) may replace a
+    # literal in an older flows.json; with nothing usable configured that
+    # literal stays.
     local cloud_broker_patch_url=""
     [ "$CLOUD_BROKER_URL_SOURCE" = "default" ] || cloud_broker_patch_url="$CLOUD_BROKER_URL"
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
@@ -908,6 +921,10 @@ try {
       creds[cloudBrokerNodeId] = nextCloudCreds;
       credsChanged = true;
     }
+  } else if (!deviceMqttPassword && Object.prototype.hasOwnProperty.call(creds, cloudBrokerNodeId)) {
+    // Unlinked (#766): the account's broker credentials go; other entries stay.
+    delete creds[cloudBrokerNodeId];
+    credsChanged = true;
   }
 
   if (agroscopeUsername && agroscopePassword) {
@@ -921,6 +938,15 @@ try {
   const cloudBroker = flows.find((node) => node && node.id === cloudBrokerNodeId);
   if (cloudBroker && deviceEui && cloudBroker.clientid !== `device_${deviceEui}`) {
     cloudBroker.clientid = `device_${deviceEui}`;
+    flowsChanged = true;
+  }
+  // An unlinked gateway never opens the cloud connection (#766); a link
+  // stores the password and turns auto-connect back on at the next start.
+  // Node-RED treats a missing autoConnect as true, so a linked start only
+  // undoes an earlier false.
+  const cloudAutoConnect = Boolean(deviceMqttPassword);
+  if (cloudBroker && (cloudAutoConnect ? cloudBroker.autoConnect === false : cloudBroker.autoConnect !== false)) {
+    cloudBroker.autoConnect = cloudAutoConnect;
     flowsChanged = true;
   }
   // Current flows carry the env placeholder and Node-RED substitutes

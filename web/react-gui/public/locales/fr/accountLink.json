@@ -34,7 +34,8 @@
   "unlink": {
     "button": "Se déconnecter d'OSI Server",
     "confirm": "Êtes-vous sûr ? Après la déconnexion, vous devez utiliser votre mot de passe local d'origine.",
-    "success": "Déconnecté d'OSI Server"
+    "success": "Déconnecté d'OSI Server",
+    "stoppedReporting": "Cette passerelle n'envoie plus de données. Pour la retirer aussi de votre compte cloud, dissociez-la dans le cloud."
   },
   "errors": {
     "networkError": "Impossible d'atteindre OSI Server. Vérifiez l'URL et votre connexion Internet.",

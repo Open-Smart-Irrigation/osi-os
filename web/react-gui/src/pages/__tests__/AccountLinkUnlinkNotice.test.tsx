@@ -1,0 +1,84 @@
+// @vitest-environment jsdom
+// Issue #766: after a local unlink the page says the gateway stopped sending
+// data and that the cloud account still lists it until it is unlinked there.
+import '@testing-library/jest-dom/vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import en from '../../../public/locales/en/accountLink.json';
+import { AccountLink } from '../AccountLink';
+
+const mocks = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+  getSyncState: vi.fn(),
+  link: vi.fn(),
+  unlink: vi.fn(),
+  forceSync: vi.fn(),
+}));
+
+vi.mock('../../services/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/api')>()),
+  accountLinkAPI: {
+    getStatus: mocks.getStatus,
+    getSyncState: mocks.getSyncState,
+    link: mocks.link,
+    unlink: mocks.unlink,
+    forceSync: mocks.forceSync,
+  },
+}));
+
+// Resolves keys from the shipped English resource, so the test checks the
+// exact sentence a farmer reads.
+function lookup(key: string): string {
+  const value = key.split('.').reduce<unknown>(
+    (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
+    en,
+  );
+  return typeof value === 'string' ? value : key;
+}
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: lookup }) }));
+
+const NOTICE = 'This gateway stopped sending data. To remove it from your cloud account too, unlink it in the cloud.';
+
+const renderPage = () => render(<MemoryRouter><AccountLink /></MemoryRouter>);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getStatus.mockResolvedValue({ linked: true, serverUsername: 'farmer', linkedAt: '2026-07-01T00:00:00.000Z' });
+  mocks.getSyncState.mockResolvedValue(null);
+  mocks.unlink.mockResolvedValue({});
+});
+
+async function unlinkFromPage() {
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: en.unlink.button }));
+  fireEvent.click(screen.getByRole('button', { name: en.unlink.button }));
+}
+
+describe('AccountLink unlink notice', () => {
+  it('the English resource carries the exact notice', () => {
+    expect(en.unlink.stoppedReporting).toBe(NOTICE);
+  });
+
+  it('shows the notice after a successful local unlink', async () => {
+    await unlinkFromPage();
+    expect(await screen.findByRole('status')).toHaveTextContent(NOTICE);
+    expect(mocks.unlink).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(en.status.notLinked)).toBeInTheDocument();
+  });
+
+  it('does not show the notice when the unlink fails', async () => {
+    mocks.unlink.mockRejectedValue(new Error('offline'));
+    await unlinkFromPage();
+    await waitFor(() => expect(screen.getByText(en.errors.generic)).toBeInTheDocument());
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+  });
+
+  it('does not show the notice on a gateway that was already unlinked when the page opened', async () => {
+    mocks.getStatus.mockResolvedValue({ linked: false, serverUsername: null, linkedAt: null });
+    renderPage();
+    expect(await screen.findByText(en.status.notLinked)).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+  });
+});

@@ -34,7 +34,8 @@
   "unlink": {
     "button": "Verbindung zum OSI Server trennen",
     "confirm": "Sind Sie sicher? Nach dem Trennen müssen Sie Ihr lokales Originalpasswort verwenden.",
-    "success": "Verbindung zum OSI Server getrennt"
+    "success": "Verbindung zum OSI Server getrennt",
+    "stoppedReporting": "Dieses Gateway sendet keine Daten mehr. Um es auch aus Ihrem Cloud-Konto zu entfernen, trennen Sie es in der Cloud."
   },
   "errors": {
     "networkError": "OSI Server nicht erreichbar. Prüfen Sie die URL und Ihre Internetverbindung.",

@@ -273,9 +273,14 @@ for(const profile of ['bcm2712','bcm2709']) test(`${profile}: every cloud MQTT p
     const fn=new vm.Script('(function(msg,node,global,osiLib){'+guard.func+'\n})').runInNewContext();
     const msg={topic:'devices/0016C001F1000001/telemetry',payload:{fixture:true}};
     const node={warn(){}};const globals={get:key=>f.io[key]};const lib={require:()=>({ok:true,value:f.helper})};
+    // A linked gateway: node-red.init exported its MQTT password (#766).
+    process.env.DEVICE_MQTT_PASSWORD='fixture-mqtt';
     assert.equal(fn(msg,node,globals,lib),null,'pending receipt blocks MQTT with boot-time credentials');
     f.files.delete(journalPath);
     assert.equal(fn(msg,node,globals,lib),msg,'settled account passes MQTT unchanged');
+    process.env.DEVICE_MQTT_PASSWORD='';
+    assert.equal(fn(msg,node,globals,lib),null,'a process that started unlinked drops cloud MQTT');
+    process.env.DEVICE_MQTT_PASSWORD='fixture-mqtt';
     f.files.set('/var/run/osi-identity-restart.json','{}');
     assert.equal(fn(msg,node,globals,lib),null,'identity sentinel also blocks cloud publication');
     f.files.delete('/var/run/osi-identity-restart.json');

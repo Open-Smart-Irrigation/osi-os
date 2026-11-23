@@ -5,6 +5,31 @@ const https = require('https');
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// Issue #766: an unlinked gateway reports nothing to the cloud. Linking always
+// stores an MQTT password (the link is refused without one, since v0.7.0), and
+// node-red.init exports it to the process as DEVICE_MQTT_PASSWORD, empty when
+// unlinked. Link and unlink both restart Node-RED, so the value holds for the
+// life of the process.
+function gatewayLinked(env = process.env) {
+  return String((env && env.DEVICE_MQTT_PASSWORD) || '').trim() !== '';
+}
+
+// Requests that carry gateway data or keep a gateway session alive. Linking
+// (/auth/local-sync) and support work requests stay open to an unlinked
+// gateway.
+const LINKED_ONLY_PATHS = [/^\/api\/v1\/sync\//, /^\/api\/v2\/journal\//, /^\/auth\/refresh-sync(?:\/|$)/];
+
+function linkedOnlyPath(pathname) {
+  return LINKED_ONLY_PATHS.some((pattern) => pattern.test(String(pathname || '')));
+}
+
+function unlinkedRefusal(parsed, env = process.env) {
+  if (gatewayLinked(env) || !linkedOnlyPath(parsed.pathname)) return null;
+  const error = new Error('Gateway is not linked to a cloud account; cloud sync request not sent');
+  error.code = 'gateway_unlinked';
+  return error;
+}
+
 function hasHeader(headers, wanted) {
   const needle = String(wanted || '').toLowerCase();
   return Object.keys(headers || {}).some((key) => key.toLowerCase() === needle);
@@ -47,6 +72,8 @@ function normalizeRequest(input) {
 
 function requestJsonIpv4(input) {
   const request = normalizeRequest(input);
+  const refusal = unlinkedRefusal(request.parsed);
+  if (refusal) return Promise.reject(refusal);
   const transport = request.parsed.protocol === 'https:' ? https : http;
   const diagnostics = {
     family: 4,
@@ -118,5 +145,7 @@ function requestJsonIpv4(input) {
 }
 
 module.exports = {
-  requestJsonIpv4
+  requestJsonIpv4,
+  gatewayLinked,
+  linkedOnlyPath
 };

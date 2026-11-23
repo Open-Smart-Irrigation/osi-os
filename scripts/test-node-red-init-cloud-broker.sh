@@ -4,10 +4,11 @@
 # "${OSI_CLOUD_BROKER_URL}" in the "OSI Cloud Broker" node and Node-RED
 # substitutes it at start.
 #
-# Precedence: osi-server.cloud.mqtt_broker_url (written at account link),
-# then wss://<osi-server.cloud.server_host>/mqtt, then the built-in default.
-# The default must stay byte-identical to the URL flows.json carried before,
-# so a gateway with neither key set behaves exactly as before.
+# Precedence for a linked gateway: osi-server.cloud.mqtt_broker_url (written
+# at account link), then wss://<osi-server.cloud.server_host>/mqtt, then the
+# built-in default, byte-identical to the URL flows.json carried before.
+# An unlinked gateway (no mqtt_password) gets a name that never resolves, no
+# cloud broker credentials and auto-connect off (#766).
 #
 # Run from the repository root: sh scripts/test-node-red-init-cloud-broker.sh
 
@@ -97,6 +98,9 @@ uci() {
             osi-server.cloud.server_host)
                 [ -n "$TEST_SERVER_HOST" ] || return 1
                 printf '%s\n' "$TEST_SERVER_HOST"; return 0 ;;
+            osi-server.cloud.mqtt_password)
+                [ -n "$TEST_MQTT_PASSWORD" ] || return 1
+                printf '%s\n' "$TEST_MQTT_PASSWORD"; return 0 ;;
             *) return 1 ;;
         esac
     fi
@@ -139,6 +143,7 @@ run_start() {
     INIT_PATH="$SANDBOX/node-red.init" \
     TEST_MQTT_BROKER_URL="$1" \
     TEST_SERVER_HOST="$2" \
+    TEST_MQTT_PASSWORD="${3-linked-secret}" \
     TEST_ENV_LOG="$SANDBOX/env.log" \
     TEST_LOGGER_LOG="$SANDBOX/logger.log" \
     GATEWAY_IDENTITY_DEVICE_EUI="0016C001F1000001" \
@@ -203,5 +208,81 @@ if grep -q "s3cret\|gwuser" "$SANDBOX/logger.log"; then
 fi
 grep -q "cloud MQTT broker wss://\*\*\*@broker.example.net/mqtt source=mqtt_broker_url" "$SANDBOX/logger.log" \
     || fail "the start log masks userinfo: $(cat "$SANDBOX/logger.log")"
+
+# ---------------------------------------------------------------------------
+# Part 3 (#766): an unlinked gateway gets no cloud broker. Its credentials
+# leave flows_cred.json (other entries stay, mode 0600), auto-connect goes
+# off, and the exported URL never resolves. Relinking restores all three.
+# ---------------------------------------------------------------------------
+UNLINKED_URL="wss://unlinked.invalid/mqtt"
+CRED="$SANDBOX/srv/node-red/flows_cred.json"
+
+autoconnect_field() {
+    node -e '
+const flows = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const node = flows.find((n) => n && n.id === process.argv[2]);
+process.stdout.write(node ? String(node.autoConnect) : "<missing>");
+' "$SANDBOX/srv/node-red/flows.json" "$BROKER_NODE_ID"
+}
+cred_keys() {
+    node -e '
+const creds = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write(Object.keys(creds).sort().map((k) => k + "{" + Object.keys(creds[k]).sort().join(",") + "}").join(" "));
+' "$CRED"
+}
+cred_mode() {
+    stat -c '%a' "$CRED"
+}
+write_creds() {
+    printf '{"%s":{"user":"0016C001F1000001","password":"old-secret"},"agroscope-mqtt-broker":{"user":"a","password":"b"}}' "$BROKER_NODE_ID" > "$CRED"
+    chmod 644 "$CRED"
+}
+
+write_flows "$PLACEHOLDER"
+write_creds
+run_start "wss://broker.example.net/mqtt" "cloud.example.org" ""
+assert_eq "$UNLINKED_URL" "$(exported_url)" "unlinked: exports the name that never resolves, not the default cloud"
+grep -q "cloud MQTT broker $UNLINKED_URL source=unlinked" "$SANDBOX/logger.log" \
+    || fail "unlinked start logs source=unlinked: $(cat "$SANDBOX/logger.log")"
+assert_eq "false" "$(autoconnect_field)" "unlinked: cloud broker auto-connect is off"
+assert_eq "agroscope-mqtt-broker{password,user}" "$(cred_keys)" "unlinked: cloud broker credentials removed, other entries kept"
+assert_eq "600" "$(cred_mode)" "unlinked: credential file mode 0600"
+grep -q "^DEVICE_MQTT_PASSWORD=$" "$SANDBOX/env.log" || fail "unlinked: DEVICE_MQTT_PASSWORD exported empty"
+if grep -q "old-secret" "$SANDBOX/logger.log" "$SANDBOX/env.log"; then fail "the old password must not appear in logs or env"; fi
+
+# A restart while still unlinked changes nothing more.
+cp "$CRED" "$SANDBOX/cred.before"; cp "$SANDBOX/srv/node-red/flows.json" "$SANDBOX/flows.before"
+run_start "" "" ""
+cmp -s "$CRED" "$SANDBOX/cred.before" || fail "unlinked restart rewrites flows_cred.json"
+cmp -s "$SANDBOX/srv/node-red/flows.json" "$SANDBOX/flows.before" || fail "unlinked restart rewrites flows.json"
+
+# A deploy ships flows.json with auto-connect on and may restore an old
+# credential file; the next start removes both again.
+write_flows "$PLACEHOLDER"
+node -e '
+const fs = require("fs"); const f = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+f.find((n) => n.id === process.argv[2]).autoConnect = true; fs.writeFileSync(process.argv[1], JSON.stringify(f));
+' "$SANDBOX/srv/node-red/flows.json" "$BROKER_NODE_ID"
+write_creds
+run_start "" "" ""
+assert_eq "false" "$(autoconnect_field)" "unlinked after a deploy: auto-connect off again"
+assert_eq "agroscope-mqtt-broker{password,user}" "$(cred_keys)" "unlinked after a deploy: cloud credentials removed again"
+
+# An older flows.json with the default literal is pointed away from the cloud.
+write_flows "$DEFAULT_URL"
+run_start "" "" ""
+assert_eq "$UNLINKED_URL" "$(broker_field)" "unlinked, older flows.json literal: replaced by the unlinked name"
+
+# Relink: credentials, auto-connect and the broker URL come back.
+write_flows "$PLACEHOLDER"
+run_start "" "" ""
+run_start "wss://broker.example.net/mqtt" "cloud.example.org" "new-secret"
+assert_eq "wss://broker.example.net/mqtt" "$(exported_url)" "relinked: exports the linked broker URL"
+assert_eq "true" "$(autoconnect_field)" "relinked: auto-connect back on"
+assert_eq "agroscope-mqtt-broker{password,user} $BROKER_NODE_ID{password,user}" "$(cred_keys)" "relinked: cloud broker credentials written"
+node -e '
+const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]];
+if (c.password !== "new-secret" || c.user !== "0016C001F1000001") process.exit(1);
+' "$CRED" "$BROKER_NODE_ID" || fail "relinked: credentials carry the new password"
 
 printf 'PASS: node-red.init cloud broker URL resolution and export\n'

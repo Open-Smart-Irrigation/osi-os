@@ -34,7 +34,8 @@
   "unlink": {
     "button": "Desligar do OSI Server",
     "confirm": "Tem a certeza? Após desligar, deve usar a sua palavra-passe local original.",
-    "success": "Desligado do OSI Server"
+    "success": "Desligado do OSI Server",
+    "stoppedReporting": "Este gateway deixou de enviar dados. Para o remover também da sua conta na nuvem, desassocie-o na nuvem."
   },
   "errors": {
     "networkError": "Não foi possível alcançar o OSI Server. Verifique o URL e a sua ligação à Internet.",

@@ -1,10 +1,10 @@
 'use strict';
 // Issue #766 slice A: an unlinked gateway stops reporting to the cloud at once.
 //
-// Runs the shipped unlink, link, cloud-guard and REST builder function nodes
-// of both profiles against a copy of the bundled seed database. The cloud
-// side is a recording stand-in for osi-cloud-http: a request counts as sent
-// when the real module would have opened a connection for it.
+// Runs the shipped unlink, cloud-guard, REST builder and http function nodes
+// of both profiles against a copy of the bundled seed database. The http
+// nodes use the shipped osi-cloud-http module; the cloud is a local HTTP
+// server that records every request that reaches it.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -12,12 +12,12 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const Module = require('node:module');
+const http = require('node:http');
 const { DatabaseSync } = require('node:sqlite');
 
 const root = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
 const GATEWAY_EUI = '0016C001F1000001';
-const SERVER = 'https://cloud.example.org';
 const JOURNAL = '/data/db/osi-account-link-config.json';
 const RESTART_DIR = '/var/run/osi-node-red-restart-requests/';
 // The REST nodes that pick their cloud target from the users table.
@@ -138,6 +138,29 @@ function gatewayIo() {
   return { fs: fakeFs, cp, files, config };
 }
 
+// The cloud: answers 503 to everything and records what arrived.
+const cloud = { sent: [], url: '' };
+let cloudServer;
+test.before(async () => {
+  cloudServer = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      cloud.sent.push({ method: req.method, path: req.url });
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end('{"message":"fixture cloud"}');
+    });
+  });
+  await new Promise((resolve) => cloudServer.listen(0, '127.0.0.1', resolve));
+  cloud.url = 'http://127.0.0.1:' + cloudServer.address().port;
+});
+test.after(() => new Promise((resolve) => cloudServer.close(resolve)));
+
+// node-red.init exports the UCI MQTT password to the Node-RED process; it is
+// empty in a process that started unlinked.
+function processStarted(linked) {
+  process.env.DEVICE_MQTT_PASSWORD = linked ? 'old-mqtt' : '';
+}
+
 function fixture(profile) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-unlink-reporting-'));
   const dbPath = path.join(tmp, 'farming.db');
@@ -149,21 +172,14 @@ function fixture(profile) {
   process.env.OSI_LIB_BASE = nodeRed;
   const osiLib = freshRequire(path.join(nodeRed, 'osi-lib/index.js'));
   if (previousBase === undefined) delete process.env.OSI_LIB_BASE; else process.env.OSI_LIB_BASE = previousBase;
-  const sent = [];
-  // Stand-in for the module the http nodes load as `osiCloudHttp`.
-  const osiCloudHttp = {
-    async requestJsonIpv4(request) {
-      sent.push({ method: request.method, url: request.url });
-      return { statusCode: 503, headers: {}, payload: { message: 'fixture cloud' }, rawBody: '', diagnostics: {} };
-    },
-  };
+  const osiCloudHttp = freshRequire(path.join(nodeRed, 'osi-cloud-http/index.js'));
   const io = gatewayIo();
   const native = new DatabaseSync(dbPath);
   const installationUuid = '123e4567-e89b-42d3-a456-426614174000';
   native.prepare("INSERT INTO installation_identity(singleton_id,installation_uuid,current_gateway_device_eui,created_at,updated_at) VALUES(1,?,?,'now','now') ON CONFLICT(singleton_id) DO UPDATE SET installation_uuid=excluded.installation_uuid, current_gateway_device_eui=excluded.current_gateway_device_eui").run(installationUuid, GATEWAY_EUI);
   native.close();
   return {
-    profile, tmp, dbPath, osiDb, osiLib, osiCloudHttp, sent, io, installationUuid,
+    profile, tmp, dbPath, osiDb, osiLib, osiCloudHttp, io, installationUuid,
     flows: readFlows(profile),
     env: {
       DEVICE_EUI: GATEWAY_EUI,
@@ -186,9 +202,9 @@ function sql(f, text, ...params) {
 // account reaches by linking after the first (the link path never clears
 // other rows).
 function seedTwoLinkedUsers(f) {
-  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','server','first@cloud',?,'token-first',1900000000000,'2026-01-01T00:00:00Z',11,'verifier-1',2)", SERVER);
-  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','server','second@cloud',?,'token-second',1900000000000,'2026-02-01T00:00:00Z',11,'verifier-2',2)", SERVER);
-  sql(f, "INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,?,'11',?,?,'now') ON CONFLICT(peer_node) DO UPDATE SET linked=1, server_url=excluded.server_url, cloud_user_id=excluded.cloud_user_id, gateway_device_eui=excluded.gateway_device_eui, installation_uuid=excluded.installation_uuid", SERVER, GATEWAY_EUI, f.installationUuid);
+  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','server','first@cloud',?,'token-first',1900000000000,'2026-01-01T00:00:00Z',11,'verifier-1',2)", cloud.url);
+  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','server','second@cloud',?,'token-second',1900000000000,'2026-02-01T00:00:00Z',11,'verifier-2',2)", cloud.url);
+  sql(f, "INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,?,'11',?,?,'now') ON CONFLICT(peer_node) DO UPDATE SET linked=1, server_url=excluded.server_url, cloud_user_id=excluded.cloud_user_id, gateway_device_eui=excluded.gateway_device_eui, installation_uuid=excluded.installation_uuid", cloud.url, GATEWAY_EUI, f.installationUuid);
   // One pending event, so the outbox builder has something to send.
   sql(f, "INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui) VALUES('evt-766','ZONE','zone-766','ZONE_UPDATED','{}',1,'2026-03-01T00:00:00Z',?)", GATEWAY_EUI);
   for (const [key, value] of Object.entries({ server_host: 'cloud.example.org', mqtt_password: 'old-mqtt', mqtt_broker_url: 'wss://cloud.example.org/mqtt', link_gateway_device_eui: GATEWAY_EUI })) {
@@ -217,7 +233,7 @@ async function runNode(f, id, msg, flowStore, envOverride) {
 
 // Runs each builder and, for a message, its http node: what leaves the gateway.
 async function restRequests(f, flowStore) {
-  const before = f.sent.length;
+  const before = cloud.sent.length;
   const emitted = {};
   for (const id of REST_BUILDERS) {
     const { result } = await runNode(f, id, { payload: Date.now() }, flowStore);
@@ -229,7 +245,7 @@ async function restRequests(f, flowStore) {
       if (httpId) await runNode(f, httpId, out, flowStore);
     }
   }
-  return { emitted, sent: f.sent.slice(before) };
+  return { emitted, sent: cloud.sent.slice(before) };
 }
 
 function linkedFlowStore() {
@@ -245,35 +261,101 @@ async function unlinkAs(f, flowStore, userId, username) {
   for (const file of [...f.io.files.keys()]) if (file.startsWith(RESTART_DIR)) f.io.files.delete(file);
 }
 
+async function cloudGuards(f, flowStore) {
+  const guards = f.flows.filter((n) => /^account-cloud-guard-/.test(n.id));
+  assert.ok(guards.length >= 6, 'every cloud MQTT output has its guard');
+  const passed = [];
+  for (const guard of guards) {
+    const { result } = await runNode(f, guard.id, { topic: 'fixture', payload: { fixture: true } }, flowStore);
+    if (result) passed.push(guard.id);
+  }
+  return { guards: guards.map((g) => g.id), passed };
+}
+
 for (const profile of PROFILES) {
-  test(`${profile}: baseline: a linked gateway sends REST sync requests`, async () => {
+  test(`${profile}: baseline: a linked gateway sends REST sync requests and cloud MQTT messages`, async () => {
     const f = fixture(profile);
     try {
+      processStarted(true);
       seedTwoLinkedUsers(f);
       const { sent } = await restRequests(f, linkedFlowStore());
-      assert.ok(sent.length > 0, 'positive control: the builders reach the cloud while linked');
-      assert.ok(sent.every((r) => r.url.startsWith(SERVER)), JSON.stringify(sent));
+      assert.ok(sent.some((r) => r.path.startsWith('/api/v1/sync/')), 'positive control: the builders reach the cloud while linked: ' + JSON.stringify(sent));
+      const mqtt = await cloudGuards(f, linkedFlowStore());
+      assert.deepEqual(mqtt.passed, mqtt.guards, 'positive control: the guards pass cloud MQTT while linked');
     } finally { f.cleanup(); }
   });
 
   test(`${profile}: after one of two linked local users unlinks, no REST sync request leaves the gateway`, async () => {
     const f = fixture(profile);
     try {
+      processStarted(true);
       seedTwoLinkedUsers(f);
       const flowStore = linkedFlowStore();
       await unlinkAs(f, flowStore, 902, 'second');
+      // Before the restart the process still holds the linked environment.
       const live = await restRequests(f, flowStore);
-      // A Node-RED restart starts with empty flow context.
+      // A Node-RED restart starts unlinked with empty flow context.
+      processStarted(false);
       const restarted = await restRequests(f, new Map());
       assert.deepEqual({ live: live.sent, restarted: restarted.sent }, { live: [], restarted: [] },
         'builders that still emit: ' + JSON.stringify({ live: live.emitted, restarted: restarted.emitted }));
-      const rows = sql(f, "SELECT id, auth_mode, server_url, server_sync_token, cloud_user_id FROM users WHERE id IN (901,902) ORDER BY id");
+      const rows = sql(f, "SELECT id, auth_mode, server_url, server_sync_token, cloud_user_id, password_hash FROM users WHERE id IN (901,902) ORDER BY id");
       for (const row of rows) {
         assert.equal(row.server_url, null, 'user ' + row.id + ' keeps no cloud address');
         assert.equal(row.server_sync_token, null, 'user ' + row.id + ' keeps no sync token');
+        assert.equal(row.auth_mode, 'local', 'user ' + row.id + ' signs in locally');
+        assert.equal(row.password_hash, 'hash-' + (row.id - 900), 'user ' + row.id + ' keeps its local password');
       }
+    } finally { f.cleanup(); }
+  });
+
+  test(`${profile}: a gateway unlinked before this fix, with a stale second linked account, sends nothing after the restart`, async () => {
+    const f = fixture(profile);
+    try {
+      seedTwoLinkedUsers(f);
+      // What the old unlink left: the caller's row and the peer cleared, the
+      // other account row still linked.
+      sql(f, "UPDATE users SET auth_mode='local', server_url=NULL, server_sync_token=NULL, server_linked_at=NULL, cloud_user_id=NULL WHERE id=902");
+      sql(f, "UPDATE sync_link_state SET linked=0, server_url=NULL, cloud_user_id=NULL, gateway_device_eui=NULL WHERE peer_node='cloud'");
+      processStarted(false);
+      const { sent, emitted } = await restRequests(f, new Map());
+      assert.deepEqual(sent, [], 'builders that still address the cloud are refused: ' + JSON.stringify(emitted));
+      assert.ok(Object.values(emitted).some(Boolean), 'the stale row still makes a builder address the cloud; only the gate stops it');
+    } finally { f.cleanup(); }
+  });
+
+  test(`${profile}: a process that started unlinked drops every cloud MQTT message`, async () => {
+    const f = fixture(profile);
+    try {
+      processStarted(false);
+      const { passed } = await cloudGuards(f, new Map());
+      assert.deepEqual(passed, []);
     } finally { f.cleanup(); }
   });
 }
 
-module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, SERVER, GATEWAY_EUI };
+test('the gate refuses only linked-only paths, and only while unlinked', () => {
+  const cloudHttp = require(path.join(profileDir('bcm2712'), 'node-red/osi-cloud-http/index.js'));
+  for (const p of ['/api/v1/sync/edge/events', '/api/v1/sync/gateways/X/pending-commands', '/api/v1/sync/chameleon/calibrations/lookup', '/api/v2/journal/gateways/X/entries', '/auth/refresh-sync']) {
+    assert.equal(cloudHttp.linkedOnlyPath(p), true, p);
+  }
+  for (const p of ['/auth/local-sync', '/auth/local-sync/conditional-irrigation-v1', '/api/v1/support/edge/work-requests', '/auth/refresh-synced']) {
+    assert.equal(cloudHttp.linkedOnlyPath(p), false, p);
+  }
+  assert.equal(cloudHttp.gatewayLinked({ DEVICE_MQTT_PASSWORD: 'x' }), true);
+  assert.equal(cloudHttp.gatewayLinked({ DEVICE_MQTT_PASSWORD: '' }), false);
+  assert.equal(cloudHttp.gatewayLinked({ DEVICE_MQTT_PASSWORD: '  ' }), false);
+  assert.equal(cloudHttp.gatewayLinked({}), false, 'absent counts as unlinked; node-red.init always exports it');
+});
+
+test('an unlinked process still reaches the link and support routes', async () => {
+  const cloudHttp = require(path.join(profileDir('bcm2712'), 'node-red/osi-cloud-http/index.js'));
+  processStarted(false);
+  const before = cloud.sent.length;
+  await cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/auth/local-sync', payload: {} });
+  await cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/support/edge/work-requests', payload: {} });
+  await assert.rejects(cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/sync/edge/events', payload: {} }), { code: 'gateway_unlinked' });
+  assert.deepEqual(cloud.sent.slice(before).map((r) => r.path), ['/auth/local-sync', '/api/v1/support/edge/work-requests']);
+});
+
+module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, GATEWAY_EUI, cloud, processStarted };
