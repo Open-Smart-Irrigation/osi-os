@@ -596,6 +596,10 @@ for (const profile of PROFILES) {
       sql(f, insert, 921, 'valid', 'h', 'now', 'u-921', 'admin', 'server', 'valid@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', 'verifier', 2, 'up_to_date');
       sql(f, insert, 922, 'stale', 'h', 'now', 'u-922', 'admin', 'server', 'stale@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', null, 0, 'up_to_date');
       sql(f, insert, 923, 'local', 'h', 'now', 'u-923', 'admin', 'local', null, null, null, null, 0, null);
+      // Each half of package validity on its own, and a blank verifier.
+      sql(f, insert, 924, 'noversion', 'h', 'now', 'u-924', 'admin', 'server', 'nv@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', 'verifier', 0, 'up_to_date');
+      sql(f, insert, 925, 'noverifier', 'h', 'now', 'u-925', 'admin', 'server', 'nf@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', null, 2, 'up_to_date');
+      sql(f, insert, 926, 'blankverifier', 'h', 'now', 'u-926', 'admin', 'server', 'bv@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', '   ', 2, 'up_to_date');
       const valid = await statusFor(f, 921, 'valid');
       assert.equal(valid.linked, true);
       assert.equal(valid.linkedAuthPackageValid, true);
@@ -606,6 +610,12 @@ for (const profile of PROFILES) {
       assert.equal(stale.linkedAuthPackageValid, false);
       assert.equal(stale.linkedAuthRepairRequired, true);
       assert.equal(stale.linkedAuthSyncStatus, 'repair_required', 'a stale up_to_date state is downgraded');
+      for (const [uid, name] of [[924, 'noversion'], [925, 'noverifier'], [926, 'blankverifier']]) {
+        const status = await statusFor(f, uid, name);
+        assert.equal(status.linkedAuthPackageValid, false, name + ': package invalid');
+        assert.equal(status.linkedAuthRepairRequired, true, name + ': repair required');
+        assert.equal(status.linkedAuthSyncStatus, 'repair_required', name + ': stale state downgraded');
+      }
       const local = await statusFor(f, 923, 'local');
       assert.equal(local.linked, false);
       assert.equal(local.linkedAuthRepairRequired, false);
@@ -671,6 +681,8 @@ for (const profile of PROFILES) {
     ['disabled researcher who linked, no admin on the gateway', 'researcher', true, true, false, false],
     ['researcher who linked, with an enabled admin on the gateway', 'researcher', true, false, true, false],
     ['researcher who linked, with only a disabled admin on the gateway', 'researcher', true, false, 'disabled', true],
+    // auth_mode 'server' without a cloud address is not a current link.
+    ['researcher with auth_mode server but no server_url, no admin on the gateway', 'researcher', 'no-url', false, false, false],
   ];
   for (const [label, role, linkedRow, disabled, admin, allowed] of OWNER_PROXY_CASES) {
     test(`${profile} scoped off: unlink by a ${label} is ${allowed ? 'allowed' : 'refused with 403'}, and canUnlink agrees`, async () => {
@@ -684,15 +696,14 @@ for (const profile of PROFILES) {
         }
         sql(f, 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at,auth_mode,server_url,server_sync_token,server_linked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
           931, 'caller', 'h', 'now', 'u-931', role, disabled ? '2026-02-01T00:00:00Z' : null,
-          linkedRow ? 'server' : 'local', linkedRow ? cloud.url : null, linkedRow ? 'token-931' : null, linkedRow ? '2026-03-01T00:00:00Z' : null);
+          linkedRow ? 'server' : 'local', linkedRow === true ? cloud.url : null, linkedRow ? 'token-931' : null, linkedRow ? '2026-03-01T00:00:00Z' : null);
         if (admin) {
           sql(f, 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at) VALUES(932,?,?,?,?,?,?)',
             'admin', 'h', 'now', 'u-932', 'admin', admin === 'disabled' ? '2026-02-01T00:00:00Z' : null);
         }
-        if (!disabled) {
-          const status = await statusFor(f, 931, 'caller');
-          assert.equal(status.canUnlink, allowed, 'canUnlink');
-        }
+        const status = await statusFor(f, 931, 'caller');
+        assert.equal(status.canUnlink, allowed, 'canUnlink');
+        const usersBefore = sql(f, 'SELECT * FROM users ORDER BY id');
         const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(931, 'caller'), false);
         const peer = sql(f, "SELECT linked FROM sync_link_state WHERE peer_node='cloud'")[0];
         if (allowed) {
@@ -702,6 +713,8 @@ for (const profile of PROFILES) {
           assert.equal(outcome.response && outcome.response.statusCode, 403, JSON.stringify(outcome));
           assert.deepEqual(JSON.parse(JSON.stringify(outcome.response.payload)), { message: 'Forbidden', code: 'forbidden' });
           assert.equal(peer.linked, 1, 'a refused caller leaves the link in place');
+          assert.equal(f.io.config.get('osi-server.cloud.mqtt_password'), 'old-mqtt', 'a refused caller leaves the MQTT password in place');
+          assert.deepEqual(sql(f, 'SELECT * FROM users ORDER BY id'), usersBefore, 'a refused caller leaves every account row unchanged');
         }
       } finally { f.cleanup(); }
     });

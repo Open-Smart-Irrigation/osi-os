@@ -1564,7 +1564,7 @@ expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'require
 // scripts/test-unlink-stops-cloud-reporting.js drives both nodes end to end.
 expectIncludes('Decode token & build query', 'statusLoad.value.ACCOUNT_LINK_STATUS_SQL', 'loads the account-link status row from osi-installation-helper');
 expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, '", 'loads linked-auth verifier metadata for account-link status');
-expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "CASE WHEN COALESCE(server_offline_verifier, '') <> '' THEN 1 ELSE 0 END AS has_offline_verifier", 'reports verifier presence, not the verifier, in account-link status');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "CASE WHEN TRIM(COALESCE(server_offline_verifier, '')) <> '' THEN 1 ELSE 0 END AS has_offline_verifier", 'reports verifier presence, not the verifier, in account-link status');
 expectIncludes('Format status response', 'load.value.accountLinkStatusResponse({ msg, env })', 'formats account-link status in osi-installation-helper');
 expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, 'const offlineVerifierVersion = Number(user.server_offline_verifier_version || 0) || 0;', 'reads linked-auth verifier metadata for account-link status');
 expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, 'linkedAuthPackageValid: linkedAuthPackageValid,', 'reports linked-auth package validity in account-link status');

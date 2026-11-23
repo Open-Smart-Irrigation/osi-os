@@ -1279,7 +1279,7 @@ const UNLINK_CALLER_SQL = 'SELECT role, disabled_at, auth_mode, server_url, ' + 
 // The account-link status query (al-status-decode): named columns only, no
 // password hash, verifier or token; the verifier is reported as present or not.
 const ACCOUNT_LINK_STATUS_SQL = 'SELECT server_username, server_linked_at, server_url, auth_mode, ' +
-  "CASE WHEN COALESCE(server_offline_verifier, '') <> '' THEN 1 ELSE 0 END AS has_offline_verifier, " +
+  "CASE WHEN TRIM(COALESCE(server_offline_verifier, '')) <> '' THEN 1 ELSE 0 END AS has_offline_verifier, " +
   'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, ' +
   'last_auth_sync_at, last_auth_sync_status, last_auth_sync_error, role, disabled_at, ' +
   ENABLED_ADMINS_SQL + ' FROM users WHERE id = ? AND username = ?';
