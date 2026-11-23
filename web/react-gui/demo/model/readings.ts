@@ -4,6 +4,15 @@ import {convertWatermarkChannel} from './watermark';
 
 export type ReadingValues = Record<string, unknown>;
 export type ReadingSample = {deviceEui: string; at: number; values: ReadingValues; source: 'seed' | 'fictional-history' | 'synthetic' | 'observed-flow'};
+/** Supplies a device's uplink values at a simulated instant (for example from an external soil and weather model).
+ * Contract for a host source: a pure, deterministic function of its arguments that returns a new object of flat,
+ * finite values in the units and precision the simulator stores (kPa, millimetres and litres to 0.01; rain and flow
+ * deltas of at least 0), keeps no reference to that object, and never calls back into the simulator. A source that
+ * breaks this contract is a host bug: values are stored as given, and an exception reaches the caller of the simulator
+ * call that took the uplink. A failed creation uplink registers nothing; after a failed scheduled uplink the next one
+ * is still queued. */
+export type ReadingSource = (device: Device, at: number, synthetic: () => ReadingValues) => ReadingValues;
+export type ReadingLedgerOptions = {source?: ReadingSource; fictionalHistory?: boolean};
 
 const INTERVAL_MS = 30 * 60 * 1000;
 const round = (n: number) => Number(n.toFixed(2));
@@ -151,8 +160,12 @@ export class ReadingLedger {
   private sampleIndexes = new Map<string, Map<number, number>>();
   private soilResponse = new Map<string, number>();
   private watermarkCalibration = new Map<string, Record<string, number>>();
-  constructor(devices: Device[], public readonly enabled: boolean) {
-    if (enabled) this.seed(devices);
+  private readonly source?: ReadingSource;
+  private readonly fictionalHistory: boolean;
+  constructor(devices: Device[], public readonly enabled: boolean, options: ReadingLedgerOptions = {}) {
+    this.source = options.source;
+    this.fictionalHistory = options.fictionalHistory ?? true;
+    if (enabled && this.fictionalHistory) this.seed(devices);
   }
 
   private seed(devices: Device[]): void {
@@ -171,12 +184,16 @@ export class ReadingLedger {
     }
   }
 
+  /** History for a device added at runtime. With a reading source the creation sample is not taken here: the
+   * simulator takes it as a normal uplink (Simulator.sampleDevice), so it never stores fixture values. */
   seedNewDevice(device: Device, createdAt: number): void {
-    const start = createdAt - 90 * 24 * 60 * 60 * 1000;
-    for (let at = start; at < createdAt; at += INTERVAL_MS) {
-      this.append(device.deveui, at, this.convertWatermark(device.deveui, deviceValues(device, at), at), 'fictional-history');
+    if (this.fictionalHistory) {
+      const start = createdAt - 90 * 24 * 60 * 60 * 1000;
+      for (let at = start; at < createdAt; at += INTERVAL_MS) {
+        this.append(device.deveui, at, this.convertWatermark(device.deveui, deviceValues(device, at), at), 'fictional-history');
+      }
     }
-    this.append(device.deveui, createdAt, {...device.latest_data}, 'synthetic');
+    if (!this.source) this.append(device.deveui, createdAt, {...device.latest_data}, 'synthetic');
   }
 
   append(deviceEui: string, at: number, values: ReadingValues, source: ReadingSample['source'] = 'synthetic'): void {
@@ -224,12 +241,19 @@ export class ReadingLedger {
     return measured.length ? round(measured.reduce((sum, value) => sum + value, 0)) : null;
   }
 
+  /** True when a valve-run (observed-flow) sample is stored at exactly this instant. */
+  hasObservedFlowAt(deviceEui: string, at: number): boolean {
+    const index = this.sampleIndexes.get(deviceEui)?.get(at);
+    return index !== undefined && this.samples.get(deviceEui)?.[index]?.source === 'observed-flow';
+  }
+
   latestSample(deviceEui: string): ReadingSample | undefined {
     const samples = this.samples.get(deviceEui);
     return samples?.[samples.length - 1];
   }
 
   sampleValues(device: Device, at: number): ReadingValues {
+    if (this.source) return this.convertWatermark(device.deveui, {...this.source(device, at, () => deviceValues(device, at))}, at);
     const values = deviceValues(device, at), response = this.soilResponse.get(device.deveui) ?? 0;
     for (const field of ['swt_1', 'swt_2', 'swt_3']) {
       if (typeof values[field] === 'number') values[field] = round(Math.max(0, values[field]! - response));
@@ -270,7 +294,7 @@ export class ReadingLedger {
   }
 
   applySoilResponse(deviceEui: string, at: number, deliveredLiters: number, device: Device): void {
-    if (deliveredLiters <= 0) return;
+    if (deliveredLiters <= 0 || this.source) return;
     const response = Math.min(18, (this.soilResponse.get(deviceEui) ?? 0) + deliveredLiters / 100 * 0.85 * 1.5);
     this.soilResponse.set(deviceEui, response);
     const values = this.sampleValues(device, at);
@@ -284,7 +308,7 @@ export class ReadingLedger {
 
   clear(): void { this.samples.clear(); this.sampleIndexes.clear(); }
   clone(): ReadingLedger {
-    const copy = new ReadingLedger([], false);
+    const copy = new ReadingLedger([], false, {source: this.source, fictionalHistory: this.fictionalHistory});
     for (const [eui, samples] of this.samples) for (const sample of samples) copy.append(eui, sample.at, sample.values, sample.source);
     copy.soilResponse = new Map(this.soilResponse);
     copy.watermarkCalibration = new Map(this.watermarkCalibration);
