@@ -21,6 +21,7 @@ const {
   resolveStructuralProofs,
   classifyLedger,
   applyRemap,
+  plannedSchemaMetadata,
   verifyReconciliationConsistency,
   runReconcile,
   clearRepairRequired,
@@ -571,6 +572,22 @@ test('parseArgs defaults to report mode and parses flags', () => {
 test('parseArgs recognizes --clear-repair-required', () => {
   const opts = parseArgs(['/data/db/farming.db', '--clear-repair-required']);
   assert.equal(opts.clearRepairRequired, true);
+});
+
+test('parseArgs recognizes --planned-schema-out (#759)', () => {
+  assert.equal(parseArgs(['/data/db/farming.db', '--apply', '--planned-schema-out', '/tmp/x']).plannedSchemaOut, '/tmp/x');
+  assert.equal(parseArgs(['/data/db/farming.db']).plannedSchemaOut, null);
+});
+
+test('plannedSchemaMetadata: the ledger deploy.sh reads once the remap commits (#759)', () => {
+  const rows = [
+    { version: 80, checksum: 'c80', status: 'applied', decision: 'match' },
+    { version: 81, checksum: 'foreign', status: 'applied', decision: 'remap', target: { version: 84, checksum: 'c84' } },
+    { version: 82, checksum: 'x', status: 'failed', decision: 'match' },
+    { version: 83, checksum: 'rr', status: 'repair_required', decision: 'remap', target: { version: 79, checksum: 'c79' } },
+  ];
+  assert.equal(plannedSchemaMetadata(rows), '84|79:c79,80:c80,84:c84');
+  assert.equal(plannedSchemaMetadata([]), '0|');
 });
 
 // ============================================================================

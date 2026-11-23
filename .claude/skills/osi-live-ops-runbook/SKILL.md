@@ -202,7 +202,11 @@ deploy again, the same way.
   deploy is run again. Any other such cut starts the old payload as
   `unverified`. Either way, running the deploy again, the same way, applies
   the rest and switches; when the fingerprints could not be read, check the
-  database first, as the `HELD:` line says.
+  database first, as the `HELD:` line says. "Between" compares the ledgers
+  as sets, so it also covers a ledger the deploy renumbered first, where a
+  higher version is applied below the pending ones: `references/repair.md`,
+  "A deploy cut after the renumber (#759)". Never answer such a failed
+  deploy with an older release.
 - Cut after the last migration and before the switch: the boot switches
   forward to the new payload (`unverified`, its health check owed to the
   next deploy). Run the deploy again, the same way: it runs the owed check
@@ -331,6 +335,6 @@ in runbooks, docs, or scripts.
 ## References
 
 - `references/deploy.md`: Read before pushing a build to a gateway, when reading a deploy verdict, or when `deploy.sh` refuses to proceed. Sections: "How `seed_db_if_missing()` guards the live database"; "Quick reference"; "Deploy runbook (reverse-tunnel flow)"; "What `deploy.sh` actually does end-to-end"; "Private branch deployments"; "Post-deploy verification checklist".
-- `references/repair.md`: Read before any repair on a live gateway: the backup script, fingerprint and ledger recovery, and the repair recipes. Sections: "Pre-repair backup script"; "Stale-fingerprint recovery"; "Foreign-numbered ledger recovery"; "Rehearsing that cutover on a copy"; "Live-repair recipes"; "Stale `.chirpstack.env` overriding runtime identity"; "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`"; "Changing DEVICE_EUI and linked offline login"; "ChirpStack v4 has no plain REST API"; "Flows fail to load / all routes 404"; "Live valve testing (STREGA)".
+- `references/repair.md`: Read before any repair on a live gateway: the backup script, fingerprint and ledger recovery, and the repair recipes. Sections: "Pre-repair backup script"; "Stale-fingerprint recovery"; "Foreign-numbered ledger recovery"; "A deploy cut after the renumber (#759)"; "Rehearsing that cutover on a copy"; "Live-repair recipes"; "Stale `.chirpstack.env` overriding runtime identity"; "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`"; "Changing DEVICE_EUI and linked offline login"; "ChirpStack v4 has no plain REST API"; "Flows fail to load / all routes 404"; "Live valve testing (STREGA)".
 - `references/busybox-traps.md`: Read before pasting any command onto a Pi. Sections: "BusyBox / ash traps on the Pi".
 - `references/pitfalls-and-maintenance.md`: Read when something looks wrong after a deploy, or to re-verify this skill against the repo. Sections: "Common mistakes"; "Provenance and maintenance".

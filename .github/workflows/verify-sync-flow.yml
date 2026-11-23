@@ -265,6 +265,13 @@ jobs:
       # the real migration runner.
       - name: Cut during the migration
         run: node --test --test-concurrency=1 scripts/deploy-cut-during-migration.test.js
+      # The same cuts after a ledger renumber (#759): the old line's 81 moved
+      # to 84, then 81 to 83 applied; each cut state, the boot, the deploy's
+      # exit path and the deploy run again.
+      - name: Cut after a ledger renumber
+        env:
+          OSI_BASELINE_RUNNER: node-sqlite
+        run: node --test --test-concurrency=1 scripts/deploy-renumbered-ledger-cuts.test.js
       # The swap helpers of the v0.8.1 and v0.8.2 tags, read from git, on a
       # gateway in the payloads/active layout: a downgrade ends complete.
       - name: Payload layout downgrade

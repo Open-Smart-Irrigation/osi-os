@@ -2057,6 +2057,15 @@ restore_as_found() {
     [ -n "${PRE_STOP_SCHEMA:-}" ] || return 1
     raf_schema="$(schema_compatibility_metadata 2>/dev/null || true)"
     raf_active="$(swap_call currentStamp 2>/dev/null || true)"
+    # A ledger numbering reconciliation cut part way (#759) has either not
+    # committed (the schema as found), or committed exactly the ledger it
+    # announced: ledger rows only, nothing the old payload reads.
+    if [ -n "$raf_schema" ] && [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] \
+        && [ -n "${RECONCILE_PLANNED_SCHEMA:-}" ] && [ -f "$RECONCILE_PLANNED_SCHEMA" ] \
+        && [ "$raf_schema" = "$(cat "$RECONCILE_PLANNED_SCHEMA" 2>/dev/null)" ]; then
+        echo "NOTE: the ledger numbering reconciliation renumbered ledger rows only; the schema the previous payload ran on is unchanged" >&2
+        PRE_STOP_SCHEMA="$raf_schema"
+    fi
     if [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] || [ "$raf_active" != "${PRE_STOP_ACTIVE:-}" ]; then
         return 1
     fi
@@ -3022,16 +3031,29 @@ run_schema_migration() {
                 echo "ERROR: could not fetch the ledger numbering reconciliation assets; aborting schema migration" >&2
                 return 1
             fi
+            # #759: the reconcile rewrites ledger rows only (no DDL), so the
+            # schema the old payload ran on is unchanged. It writes the ledger
+            # it is about to commit to RECONCILE_PLANNED_SCHEMA first; a deploy
+            # cut or refused while it runs accepts that ledger as "as found"
+            # (restore_as_found), and so does one cut or refused after it,
+            # before the first migration commits.
+            RECONCILE_PLANNED_SCHEMA="$TMP_DIR/reconcile-planned-schema"
+            rm -f "$RECONCILE_PLANNED_SCHEMA"
             if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
                 --migrations-dir "$migrations_dir" \
                 --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
                 --backup-dir "$backup_dir" \
+                --planned-schema-out "$RECONCILE_PLANNED_SCHEMA" \
                 --apply
             then
                 echo "ERROR: ledger numbering reconciliation refused or failed; aborting schema migration" >&2
                 return 1
             fi
             echo "OK: ledger numbering reconciliation applied"
+            # reconcile as-found begin
+            PRE_STOP_SCHEMA="$(schema_compatibility_metadata 2>/dev/null || true)"
+            RECONCILE_PLANNED_SCHEMA=""
+            # reconcile as-found end
         fi
     else
         if ! node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"; then

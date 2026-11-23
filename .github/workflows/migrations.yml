@@ -98,6 +98,7 @@ jobs:
             lib/osi-migrate/__tests__/runner-iface.test.js \
             lib/osi-migrate/__tests__/runner-partial-batch-retry.test.js \
             lib/osi-migrate/__tests__/runner-preexisting-add-column-real.test.js \
+            lib/osi-migrate/__tests__/runner-renumbered-ledger.test.js \
             lib/osi-migrate/__tests__/seed-replay.test.js \
             lib/osi-migrate/__tests__/sql-normalize.test.js \
             lib/osi-migrate/__tests__/verify-head-gap.test.js
