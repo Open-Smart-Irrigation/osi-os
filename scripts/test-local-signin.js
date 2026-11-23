@@ -186,11 +186,13 @@ function gateway(profile, { realHelper = false } = {}) {
   const pending = (id) => native.prepare('SELECT value FROM app_settings WHERE key=?').get(local.CHANGE_KEY_PREFIX + id);
   const writes = () => statements.filter((s) => /^(UPDATE|INSERT|DELETE)/.test(s));
 
-  async function login(body, env = {}) {
+  // afterLookup runs once the account was read, before the node handles it.
+  async function login(body, env = {}, { afterLookup } = {}) {
     const node = nodeBody(profile);
     const warnings = [];
     const errors = [];
     const rows = native.prepare(LOOKUP_SQL).all(body.username, body.username, body.username).map((r) => ({ ...r }));
+    if (afterLookup) afterLookup(native);
     const msg = {
       checkType: 'login',
       payload: rows,
@@ -612,6 +614,47 @@ for (const profile of PROFILES) {
     assert.equal(noDb.payload.passwordChangeRequired, true);
     assert.deepEqual(Object.keys(tokenClaims(noDb.payload.token)), ORDINARY_CLAIMS);
     assert.ok(noDb.warnings.some((w) => /pending password change could not be read; asking for a new password$/.test(w)));
+  });
+
+  t('a stored value replaced after the account was read answers 401 and is kept', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync('owner-pass-1', 10) });
+    const u = g.addUser({ username: 'grower', password_hash: 'synthetic-old-value-2' });
+    const replaced = g.bcrypt.hashSync('reset-by-admin-7', 10);
+    const res = await g.login({ username: 'grower', password: 'synthetic-old-value-2' }, {}, {
+      afterLookup: (native) => native.prepare('UPDATE users SET password_hash=? WHERE id=?').run(replaced, u.id),
+    });
+    assert.equal(res.status, 401);
+    assert.deepEqual(res.payload, { message: 'Invalid username or password' });
+    assert.equal(g.user(u.id).password_hash, replaced);
+    assert.deepEqual(res.warnings, []);
+  });
+
+  t('a stored value already rehashed with the same password by another sign-in still signs in', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync('owner-pass-1', 10) });
+    const u = g.addUser({ username: 'grower', password_hash: 'synthetic-old-value-2' });
+    const rehashed = g.bcrypt.hashSync('synthetic-old-value-2', 10);
+    const res = await g.login({ username: 'grower', password: 'synthetic-old-value-2' }, {}, {
+      afterLookup: (native) => native.prepare('UPDATE users SET password_hash=? WHERE id=?').run(rehashed, u.id),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.keys(res.payload), ['token']);
+    assert.equal(g.user(u.id).password_hash, rehashed);
+    assert.deepEqual(res.warnings, []);
+  });
+
+  t('a failed re-read after the guarded rehash write is a storage failure: warns and signs in', async () => {
+    const g = gateway(profile);
+    g.addUser({ username: 'first-owner', password_hash: g.bcrypt.hashSync('owner-pass-1', 10) });
+    const u = g.addUser({ username: 'grower', password_hash: 'synthetic-old-value-2' });
+    g.hooks.push({ match: /^SELECT password_hash, auth_mode FROM users WHERE id=\?/, message: 'disk I/O error' });
+    const res = await g.login({ username: 'grower', password: 'synthetic-old-value-2' }, {}, {
+      afterLookup: (native) => native.prepare('UPDATE users SET password_hash=? WHERE id=?').run('synthetic-other-value', u.id),
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.payload.token);
+    assert.ok(res.warnings.some((w) => /account re-read failed for user \d+; signing in: disk I\/O error/.test(w)), JSON.stringify(res.warnings));
   });
 
   t('a correct password on a disabled account answers 403 and writes nothing', async () => {

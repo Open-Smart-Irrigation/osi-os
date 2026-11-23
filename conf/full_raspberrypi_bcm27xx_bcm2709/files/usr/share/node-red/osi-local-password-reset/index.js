@@ -201,6 +201,29 @@ async function storeNewPassword(db, options) {
   });
 }
 
+// Re-reads the account after a guarded write matched no row. Resolves true
+// when the current stored value accepts the password. A read that fails is a
+// storage failure: it is logged and the sign-in proceeds, as for a failed
+// rehash write.
+async function currentValueAccepts(db, options) {
+  const { user, password, bcrypt, crypto, warn } = options;
+  let row;
+  try {
+    row = await db.get('SELECT password_hash, auth_mode FROM users WHERE id=? LIMIT 1', [user.id]);
+  } catch (error) {
+    warn('account re-read failed for user ' + String(user.id) + '; signing in: ' + errorText(error));
+    return true;
+  }
+  if (!row || row.auth_mode === 'server') return false;
+  const current = row.password_hash;
+  try {
+    return isBcryptValue(current) ? bcrypt.compareSync(password, current) : storedValueMatches(current, password, crypto);
+  } catch (error) {
+    warn('password comparison failed: ' + errorText(error));
+    return false;
+  }
+}
+
 async function rehashStoredValue(db, options) {
   const { user, bcrypt, password, now, markChange } = options;
   const passwordHash = bcrypt.hashSync(password, LOCAL_HASH_COST);
@@ -210,6 +233,7 @@ async function rehashStoredValue(db, options) {
       [passwordHash, now, user.id, user.password_hash]
     );
     const n = await changedRows(tx);
+    if (n === 0) throw Object.assign(new Error('rehash matched 0 rows'), { staleCredential: true });
     if (n !== 1) throw new Error('rehash matched ' + String(n) + ' rows');
     if (markChange) {
       await tx.run(
@@ -301,7 +325,13 @@ async function verifyLocalLogin(options) {
         try {
           await rehashStoredValue(db, { user, bcrypt, password, now, markChange: firstAccount });
         } catch (error) {
-          warn('rehash failed for user ' + String(user.id) + '; it is retried at the next sign-in: ' + errorText(error));
+          if (error && error.staleCredential) {
+            // The stored value changed after this request read it. Sign in only
+            // if the current value still accepts this password.
+            if (!(await currentValueAccepts(db, { user, password, bcrypt, crypto, warn }))) return { valid: false };
+          } else {
+            warn('rehash failed for user ' + String(user.id) + '; it is retried at the next sign-in: ' + errorText(error));
+          }
         }
       }
     }
