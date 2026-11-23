@@ -1,10 +1,10 @@
 name: Doc Hygiene
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'release/0.8.4' ]
   pull_request:
     types: [opened, edited, synchronize, reopened]
-    branches: [ main ]
+    branches: [ main, 'release/0.8.4' ]
 jobs:
   doc-hygiene:
     # The private repository merges public main and holds the names by

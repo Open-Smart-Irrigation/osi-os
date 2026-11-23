@@ -1,9 +1,9 @@
 name: History Router Tests
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'release/0.8.4' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, 'release/0.8.4' ]
 jobs:
   history-router:
     runs-on: ubuntu-latest
