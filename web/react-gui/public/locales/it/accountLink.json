@@ -6,7 +6,8 @@
     "linked": "Account collegato a OSI Server",
     "notLinked": "Non connesso a OSI Server",
     "linkedAs": "Collegato come: {{username}}",
-    "linkedSince": "Dal: {{date}}"
+    "linkedSince": "Dal: {{date}}",
+    "gatewayLinkedOtherAccount": "Questo gateway è collegato a OSI Server tramite un altro account."
   },
   "form": {
     "serverUrl": "URL del server OSI",

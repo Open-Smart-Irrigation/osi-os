@@ -721,4 +721,35 @@ for (const profile of PROFILES) {
   }
 }
 
+// An enabled admin whose own account is local, on a gateway that another
+// account linked: the status reports the gateway as linked and the admin as
+// able to unlink, and the admin's unlink clears every account's link.
+for (const profile of PROFILES) {
+  test(`${profile} scoped off: an admin whose own account is local unlinks a gateway another account linked`, async () => {
+    const f = fixture(profile);
+    try {
+      processStarted(true);
+      sql(f, 'DELETE FROM users');
+      sql(f, "INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,?,'11',?,?,'now') ON CONFLICT(peer_node) DO UPDATE SET linked=1", cloud.url, GATEWAY_EUI, f.installationUuid);
+      for (const [key, value] of Object.entries({ server_host: 'cloud.example.org', mqtt_password: 'old-mqtt', mqtt_broker_url: 'wss://cloud.example.org/mqtt', link_gateway_device_eui: GATEWAY_EUI })) {
+        f.io.config.set('osi-server.cloud.' + key, value);
+      }
+      sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode) VALUES(941,'admin','h','now','u-941','admin','local')");
+      sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,server_url,server_sync_token,server_linked_at) VALUES(942,'linker','h','now','u-942','researcher','server',?,'token-942','2026-03-01T00:00:00Z')", cloud.url);
+      const status = await statusFor(f, 941, 'admin');
+      assert.equal(status.linked, false, 'the admin account itself is not linked');
+      assert.equal(status.gatewayLinked, true, 'the gateway is linked');
+      assert.equal(status.canUnlink, true, 'the admin may unlink it');
+      const linkerStatus = await statusFor(f, 942, 'linker');
+      assert.equal(linkerStatus.gatewayLinked, true);
+      assert.equal(linkerStatus.canUnlink, false, 'with an enabled admin present, the linking researcher may not');
+      const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(941, 'admin'), false);
+      assert.equal(outcome.unlinked, true, JSON.stringify(outcome));
+      assert.equal(sql(f, "SELECT linked FROM sync_link_state WHERE peer_node='cloud'")[0].linked, 0);
+      assert.deepEqual(sql(f, "SELECT id FROM users WHERE server_url IS NOT NULL OR server_sync_token IS NOT NULL OR auth_mode <> 'local'"), [], 'every account row gives up its link');
+      assert.equal((await statusFor(f, 941, 'admin')).gatewayLinked, false, 'after the unlink the gateway reads as unlinked');
+    } finally { f.cleanup(); }
+  });
+}
+
 module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, GATEWAY_EUI, cloud, processStarted };

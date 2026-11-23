@@ -98,6 +98,7 @@ const PENDING_HUMAN_TRANSLATION: Partial<Record<Locale, ReadonlySet<string>>> = 
     'sync.outboxCounts.rejectedCode',
     'unlink.stoppedReporting',
     'unlink.adminOnly',
+    'status.gatewayLinkedOtherAccount',
   ]),
 };
 

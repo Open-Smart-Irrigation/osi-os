@@ -1274,6 +1274,9 @@ function unlinkPermitted(row) {
   return Number(row.enabled_admins) === 0 && linked && row.role !== 'viewer';
 }
 const ENABLED_ADMINS_SQL = "(SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled_at IS NULL) AS enabled_admins";
+// Whether the gateway itself is linked (the cloud peer record), whichever
+// account linked it: an admin whose own row is local may still unlink it.
+const GATEWAY_LINKED_SQL = "COALESCE((SELECT MAX(linked) FROM sync_link_state WHERE peer_node = 'cloud'), 0) AS gateway_linked";
 const UNLINK_CALLER_SQL = 'SELECT role, disabled_at, auth_mode, server_url, ' + ENABLED_ADMINS_SQL +
   ' FROM users WHERE id = ? AND username = ? LIMIT 1';
 // The account-link status query (al-status-decode): named columns only, no
@@ -1282,7 +1285,7 @@ const ACCOUNT_LINK_STATUS_SQL = 'SELECT server_username, server_linked_at, serve
   "CASE WHEN TRIM(COALESCE(server_offline_verifier, '')) <> '' THEN 1 ELSE 0 END AS has_offline_verifier, " +
   'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, ' +
   'last_auth_sync_at, last_auth_sync_status, last_auth_sync_error, role, disabled_at, ' +
-  ENABLED_ADMINS_SQL + ' FROM users WHERE id = ? AND username = ?';
+  ENABLED_ADMINS_SQL + ', ' + GATEWAY_LINKED_SQL + ' FROM users WHERE id = ? AND username = ?';
 module.exports.unlinkPermitted = unlinkPermitted;
 module.exports.ACCOUNT_LINK_STATUS_SQL = ACCOUNT_LINK_STATUS_SQL;
 
@@ -1315,6 +1318,7 @@ function accountLinkStatusResponse({msg, env}) {
     offlineVerifierVersion: linked ? offlineVerifierVersion : 0,
     lastAuthSyncAt: user.last_auth_sync_at || null,
     lastAuthSyncError: user.last_auth_sync_error || null,
+    gatewayLinked: Number(user.gateway_linked) === 1,
     canUnlink: scoped ? (user.role === 'admin' && !user.disabled_at) : unlinkPermitted(user),
   };
   return msg;

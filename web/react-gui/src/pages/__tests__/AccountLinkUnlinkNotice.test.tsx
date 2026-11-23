@@ -100,3 +100,41 @@ describe('AccountLink unlink notice', () => {
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
   });
 });
+
+describe('AccountLink gateway-level disconnect', () => {
+  it('shows the disconnect control to an admin whose own account is local when another account linked the gateway', async () => {
+    mocks.getStatus.mockResolvedValue({ linked: false, serverUsername: null, linkedAt: null, gatewayLinked: true, canUnlink: true });
+    renderPage();
+    expect(await screen.findByText(en.status.gatewayLinkedOtherAccount)).toBeInTheDocument();
+    expect(screen.queryByText(en.status.notLinked)).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: en.unlink.button }));
+    fireEvent.click(screen.getByRole('button', { name: en.unlink.button }));
+    expect(await screen.findByRole('status')).toHaveTextContent(NOTICE);
+    expect(mocks.unlink).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(en.status.notLinked)).toBeInTheDocument();
+  });
+
+  it('gives no disconnect control to a local account that may not unlink a gateway another account linked', async () => {
+    mocks.getStatus.mockResolvedValue({ linked: false, serverUsername: null, linkedAt: null, gatewayLinked: true, canUnlink: false });
+    renderPage();
+    expect(await screen.findByText(en.status.gatewayLinkedOtherAccount)).toBeInTheDocument();
+    expect(screen.getByText(en.unlink.adminOnly)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.unlink.button })).not.toBeInTheDocument();
+  });
+
+  it('reads the gateway status again after linking, so the disconnect control appears without a reload', async () => {
+    mocks.getStatus
+      .mockResolvedValueOnce({ linked: false, serverUsername: null, linkedAt: null, gatewayLinked: false, canUnlink: false })
+      .mockResolvedValueOnce({ linked: true, serverUsername: 'farmer', linkedAt: '2026-07-01T00:00:00.000Z', gatewayLinked: true, canUnlink: true });
+    mocks.link.mockResolvedValue({ success: true, serverUsername: 'farmer', claimedDevices: [], skippedDevices: [] });
+    const { container } = renderPage();
+    await screen.findByText(en.status.notLinked);
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+    fireEvent.click(await screen.findByRole('button', { name: en.warning.proceed }));
+    await waitFor(() => expect(mocks.link).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('button', { name: en.unlink.button })).toBeInTheDocument();
+    expect(mocks.getStatus).toHaveBeenCalledTimes(2);
+  });
+});

@@ -6,7 +6,8 @@
     "linked": "Akawunti ya ku OSI Server eyungibbwa",
     "notLinked": "Tewali kugyungibbwa ku OSI Server",
     "linkedAs": "Eyungibbwa nga: {{username}}",
-    "linkedSince": "Okuva: {{date}}"
+    "linkedSince": "Okuva: {{date}}",
+    "gatewayLinkedOtherAccount": "This gateway is connected to OSI Server through another account."
   },
   "form": {
     "serverUrl": "Endabirwamu ya OSI Server",
