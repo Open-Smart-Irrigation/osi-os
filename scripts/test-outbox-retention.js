@@ -104,10 +104,10 @@ function triggerAggregateTypes(seed) {
   return types;
 }
 
-test('declared sets partition exactly the trigger set aggregate_types (41 triggers)', () => {
+test('declared sets partition exactly the trigger set aggregate_types (42 triggers)', () => {
   const seed = fs.readFileSync(SEED, 'utf8');
   const blocks = seed.split(/CREATE TRIGGER/).filter((b) => b.includes('INSERT INTO sync_outbox'));
-  assert.equal(blocks.length, 41, `expected 41 outbox triggers, found ${blocks.length}`);
+  assert.equal(blocks.length, 42, `expected 42 outbox triggers, found ${blocks.length}`);
   const declared = new Set([...TELEMETRY, ...PROTECTED]);
   const types = triggerAggregateTypes(seed);
   // Every aggregate_type a trigger writes MUST be classified (this is what forces a
