@@ -59,6 +59,7 @@ const MIGRATION_OWNED_TRIGGER_NAMES = new Set([
   'trg_dp_zone_agronomy_outbox_au',
   'trg_watermark_calibrations_outbox_ai',
   'trg_watermark_calibrations_outbox_au',
+  'trg_sync_schedules_outbox_ai',
 ]);
 
 // Rule 1: the interpolated test EUI and the seed's hardcoded fallback EUI.

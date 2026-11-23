@@ -78,5 +78,6 @@
   "0077__conditional_irrigation_sync.sql": "e37e715cdf60d66903377046db44ce3feea1ed80805dbed067b0a84b54b3e34c",
   "0078__clear_lorain_legacy_rain_rate.sql": "85c1740c7800112f390c1cad320d28597410a8a6eccaec80b4da91c37e249da9",
   "0079__chameleon_reading_links.sql": "de4d0c177d1c218f6ffcf1683dc182833e3637f632f8b783cae2d8f89ffad1d9",
-  "0080__sdi12_transmissions.sql": "126072b50e960359769cac9cd9fabe7899899b0a4fb7b991e0f3b83681c4687a"
+  "0080__sdi12_transmissions.sql": "126072b50e960359769cac9cd9fabe7899899b0a4fb7b991e0f3b83681c4687a",
+  "0081__schedule_insert_outbox_trigger.sql": "a3afa737568ff779d459b99a884c88cf779ccec4bf977ef6b5dc7d270b143073"
 }

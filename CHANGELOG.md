@@ -9,6 +9,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.4] — 2026-11-30
+
+0.8.4 is 0.8.3 with two gateway sync fixes. Field gateways can go from
+0.8.0, 0.8.1, 0.8.2 or 0.8.3 straight to this release.
+
+**Update to edit zones from the cloud:** editing zones from the cloud needs
+this release on the gateway.
+
+### Upgrade notes
+- The deploy adds one database migration (0081, a new trigger, no data
+  change). It is the same file as migration 0084 on the 0.9 line; a later
+  upgrade to 0.9 renumbers the ledger row and applies the 0.9 migrations
+  in between.
+- A cloud zone delete applied on the gateway before the upgrade, whose
+  confirmation never reached the cloud: if the cloud sends it again after
+  the upgrade, the cloud may report the resent delete as not applied. The
+  gateway has deleted the zone.
+
+### Fixed
+- A zone deleted on the gateway no longer comes back when the cloud sends
+  an older change for it. Cloud zone commands (create or rename, settings,
+  location, delete) are applied only when they are newer than the
+  gateway's copy of the zone; an older one, or one that would bring a
+  deleted zone back, is answered as a conflict and changes nothing. A
+  command the gateway has already applied is confirmed again without a
+  second write (#753).
+- A schedule created on the gateway reaches the cloud within a sync cycle
+  (about 30 s). Before, the cloud learned of it at the next six-hourly
+  snapshot, and a cloud "disable all schedules" could miss it for that long
+  (#754).
+
 ## [0.8.3] — 2026-11-19
 
 ### Upgrade notes

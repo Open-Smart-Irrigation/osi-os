@@ -1332,8 +1332,379 @@ function applyZoneCommand(db, envelope, runtime) {
   return scheduled;
 }
 
+// ---------------------------------------------------------------------------
+// Legacy zone commands (E3).
+//
+// The cloud sends UPSERT_ZONE, UPSERT_ZONE_CONFIG, UPSERT_ZONE_LOCATION and
+// DELETE_ZONE in their legacy camelCase form, which the exact-base path above
+// declines. "Build UPDATE SQL" wrote them with no version check and, for
+// UPSERT_ZONE, copied deleted_at from the command. applyLegacyZoneCommand now
+// applies them here, from the lifecycle command adapter, so they never reach that
+// node. It reads the stored row and writes in one BEGIN IMMEDIATE transaction,
+// so no other writer can land between the check and the write:
+//   - no row:            apply (UPSERT_ZONE inserts; the others match nothing).
+//   - command version above the row's, row not tombstoned: apply.
+//   - lower version:     CONFLICT, no write.
+//   - equal version:     the statement is tried inside a savepoint. If it leaves
+//                        the row as it was (every column but updated_at), it is
+//                        the redelivery of a command already applied: SUCCESS,
+//                        rolled back, no write and no outbox event. That holds
+//                        for a command that sets no column at all. Otherwise
+//                        CONFLICT, rolled back.
+//   - tombstoned zone:   CONFLICT, no write, at any version. The one exception is
+//                        the equal-version redelivery of the DELETE_ZONE that
+//                        tombstoned it, a replay.
+// The applied statement also carries `sync_version < N AND deleted_at IS NULL`
+// (the upsert: excluded.sync_version > the row's), so it can never lower a
+// version or clear a tombstone even if the rules above were wrong.
+// ---------------------------------------------------------------------------
+
+const LEGACY_ZONE_TYPES = new Set([
+  'UPSERT_ZONE',
+  'UPSERT_ZONE_CONFIG',
+  'UPSERT_ZONE_LOCATION',
+  'DELETE_ZONE',
+]);
+
+// The branch "Build UPDATE SQL" takes: its own type expression, untrimmed.
+function legacyZoneCommandType(command) {
+  const cmd = command && typeof command === 'object' ? command : {};
+  return String(cmd.commandType || cmd.command_type || cmd.action || '').toUpperCase();
+}
+
+// Build UPDATE SQL: `Number(cmd.appliedSyncVersion || cmd.syncVersion || 1) || 1`
+// for UPSERT_ZONE and `n(cmd.appliedSyncVersion || cmd.syncVersion || 1, 1)` for
+// the other three; both give 1 for a missing, zero or non-numeric value.
+function legacyRequestedVersion(cmd) {
+  const value = Number(cmd.appliedSyncVersion || cmd.syncVersion || 1);
+  return Number.isFinite(value) && value !== 0 ? value : 1;
+}
+
+// Copied verbatim from "Build UPDATE SQL" (flows.json node 4f4a765f36cee6f3): its
+// helpers and its four zone branches, with `msg.topic = X; return msg;` turned into
+// `return X;`. This copy is the one that runs; the node's branches are no longer
+// reached but are kept. Tests build the statement with both and assert the same SQL
+// and warnings, for the command shapes they hold: the drift test in
+// scripts/test-legacy-zone-command-versions.js (every written field, in each key
+// spelling the node reads) and every case of test-legacy-upsert-zone-config,
+// test-legacy-upsert-zone-name and test-zone-weather-source. A change to either copy
+// on an input none of those shapes uses would not be caught.
+function legacyZoneStatement(cmd, context) {
+  var commandType = legacyZoneCommandType(cmd);
+  var now = context.now;
+  var gateway = context.gateway;
+  var node = { warn: context.warn };
+  var osiLib = { require: function(name) { return name === "entity-name" ? { ok: true, value: entityName } : { ok: false, error: "unregistered: " + name }; } };
+  function s(v) { return (v === null || v === undefined) ? 'NULL' : ("'" + String(v).replace(/'/g, "''") + "'"); }
+  function n(v, fallback) { var num = Number(v); return Number.isFinite(num) ? String(num) : String(fallback || 0); }
+  function b(v, fallback) { if (v === undefined || v === null) return fallback ? 1 : 0; return v ? 1 : 0; }
+  function deviceEui(cmd) { return String(cmd.deviceEui || cmd.device_eui || cmd.devEui || '').trim().toUpperCase(); }
+  // Stage start date (spec 2026-09-27-daily-agronomy-parity B5): { present, sql } where sql is
+  // NULL or a quoted calendar date; an absent key or an invalid value is not present, and an
+  // invalid value is warned once with the zone UUID (the legacy path has no rejection channel).
+  function stageStartedOnOf(cmd, zoneUuid) {
+    if (cmd.stageStartedOn === undefined && cmd.stage_started_on === undefined) return { present: false, sql: null };
+    var raw = cmd.stageStartedOn !== undefined ? cmd.stageStartedOn : cmd.stage_started_on;
+    var text = raw === null ? '' : String(raw).trim();
+    if (!text) return { present: true, sql: 'NULL' };
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toISOString().slice(0, 10) === text) return { present: true, sql: s(text) };
+    node.warn('Build UPDATE SQL: ' + commandType + ' carried an invalid stage_started_on for ' + String(zoneUuid) + '; ignoring the value');
+    return { present: false, sql: null };
+  }
+  // osi-crop-kc normalizeStage as a table: the five FAO keys and the nine legacy keys; anything else is unset.
+  var STAGE_KEY = { initial: 'initial', development: 'development', mid_season: 'mid_season', late_season: 'late_season', dormancy: 'dormancy', budbreak: 'initial', bud_break: 'initial', fruitset: 'development', cell_division: 'development', cell_expansion: 'development', veraison: 'mid_season', fruit_maturation: 'mid_season', harvest: 'late_season', post_harvest: 'late_season' };
+  function stageKeyOf(v) { var k = String(v == null ? '' : v).trim().toLowerCase(); return Object.prototype.hasOwnProperty.call(STAGE_KEY, k) ? STAGE_KEY[k] : null; }
+  function storedStageKeySql(column) { return '(CASE lower(trim(COALESCE(' + column + ", ''))) " + Object.keys(STAGE_KEY).map(function (k) { return "WHEN '" + k + "' THEN '" + STAGE_KEY[k] + "'"; }).join(' ') + ' END)'; }
+  // Today in the zone's timezone; UTC for a missing or unknown zone id, as osi-agronomy-daily reads it.
+  function zoneLocalToday(tz) {
+    var fmt;
+    try { fmt = new Intl.DateTimeFormat('en-US', { timeZone: String(tz || 'UTC'), year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    catch (tzError) { fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    var p = {};
+    fmt.formatToParts(new Date()).forEach(function (part) { p[part.type] = part.value; });
+    return p.year + '-' + p.month + '-' + p.day;
+  }
+  // The stage-date rules for a command that carries a stage: a change to unset clears the date
+  // whatever the command says; otherwise a supplied date wins; a change to another set stage starts
+  // it on the zone-local today; the same stage keeps the stored date. The node builds SQL text and
+  // never reads the row, so the stored stage is compared inside the statement, a CASE on `column`
+  // (SQLite evaluates every SET expression against the row before the update).
+  function stageStartedOnRuleSql(column, dateColumn, nextStage, suppliedSql, timezone) {
+    var nextKey = stageKeyOf(nextStage);
+    if (!nextKey) return 'CASE WHEN ' + storedStageKeySql(column) + ' IS NOT NULL THEN NULL ELSE ' + (suppliedSql || dateColumn) + ' END';
+    if (suppliedSql) return suppliedSql;
+    return 'CASE WHEN ' + storedStageKeySql(column) + ' = ' + s(nextKey) + ' THEN ' + dateColumn + ' ELSE ' + s(zoneLocalToday(timezone)) + ' END';
+  }
+  function userSelector(user) {
+    user = user || {};
+    var clauses = [];
+    if (user.userUuid) clauses.push("user_uuid = " + s(user.userUuid));
+    if (user.username) clauses.push("username = " + s(user.username));
+    if (user.username) clauses.push("server_username = " + s(user.username));
+    if (Number.isFinite(Number(user.cloudUserId))) clauses.push("cloud_user_id = " + Number(user.cloudUserId));
+    return clauses.length ? clauses.join(' OR ') : '0';
+  }
+  if (commandType === 'UPSERT_ZONE') {
+    var zoneUuid = cmd.zoneUuid || cmd.zone_uuid;
+    var syncVersion = Number(cmd.appliedSyncVersion || cmd.syncVersion || 1) || 1;
+    var schedulingMode = String(cmd.schedulingMode || cmd.scheduling_mode || 'local').trim().toLowerCase();
+    if (schedulingMode !== 'server_preferred') schedulingMode = 'local';
+    var zoneName = null;
+    var nameLoad = osiLib.require('entity-name');
+    if (!nameLoad.ok) {
+      node.warn('Build UPDATE SQL: entity-name helper unavailable (' + nameLoad.error + '); keeping the stored zone name');
+    } else if (cmd.name !== undefined && cmd.name !== null) {
+      try {
+        zoneName = nameLoad.value.normalizeEntityName(cmd.name);
+      } catch (nameError) {
+        node.warn('Build UPDATE SQL: legacy UPSERT_ZONE carried an invalid name for ' + String(zoneUuid) + ' (' + String(nameError && nameError.code || 'name_invalid') + '); keeping the stored zone name');
+      }
+    }
+    var insertName = zoneName === null ? "'Zone'" : s(zoneName);
+    var conflictName = zoneName === null ? 'irrigation_zones.name' : 'excluded.name';
+    var zoneWeatherSource = null;
+    if (cmd.weatherSource !== undefined || cmd.weather_source !== undefined) {
+      var rawZoneWeatherSource = cmd.weatherSource !== undefined ? cmd.weatherSource : cmd.weather_source;
+      var trimmedZoneWeatherSource = rawZoneWeatherSource === null ? '' : String(rawZoneWeatherSource).trim().toLowerCase();
+      if (/^[a-z_]{1,20}$/.test(trimmedZoneWeatherSource)) zoneWeatherSource = trimmedZoneWeatherSource;
+      else if (trimmedZoneWeatherSource) node.warn('Build UPDATE SQL: legacy UPSERT_ZONE carried an invalid weather_source for ' + String(zoneUuid) + '; keeping the stored provider');
+    }
+    var conflictWeatherSource = zoneWeatherSource === null ? 'weather_source=irrigation_zones.weather_source' : 'weather_source=excluded.weather_source';
+    var zoneStageStartedOn = stageStartedOnOf(cmd, zoneUuid);
+    var conflictStageStartedOn = 'stage_started_on=' + stageStartedOnRuleSql('irrigation_zones.phenological_stage', 'irrigation_zones.stage_started_on', cmd.phenologicalStage || cmd.phenological_stage || 'default', zoneStageStartedOn.present ? 'excluded.stage_started_on' : null, cmd.timezone || 'UTC');
+    return "INSERT INTO irrigation_zones (name, user_id, zone_uuid, gateway_device_eui, created_at, updated_at, timezone, latitude, longitude, phenological_stage, calibration_key, crop_type, variety, soil_type, irrigation_method, area_m2, irrigation_efficiency_pct, scheduling_mode, prediction_card_enabled, notes, sync_version, deleted_at, weather_source, stage_started_on) " +
+      "SELECT " + insertName + ", id, " + s(zoneUuid) + ", " + s(cmd.gatewayDeviceEui || cmd.gateway_device_eui || gateway) + ", '" + now + "', '" + now + "', " + s(cmd.timezone || 'UTC') + ", " + (cmd.latitude == null ? 'NULL' : Number(cmd.latitude)) + ", " + (cmd.longitude == null ? 'NULL' : Number(cmd.longitude)) + ", " + s(cmd.phenologicalStage || cmd.phenological_stage || 'default') + ", " + s(cmd.calibrationKey || cmd.calibration_key || 'default') + ", " + s(cmd.cropType || cmd.crop_type) + ", " + s(cmd.variety) + ", " + s(cmd.soilType || cmd.soil_type) + ", " + s(cmd.irrigationMethod || cmd.irrigation_method) + ", " + (cmd.areaM2 == null && cmd.area_m2 == null ? 'NULL' : Number(cmd.areaM2 != null ? cmd.areaM2 : cmd.area_m2)) + ", " + (cmd.irrigationEfficiencyPct == null && cmd.irrigation_efficiency_pct == null ? 'NULL' : Number(cmd.irrigationEfficiencyPct != null ? cmd.irrigationEfficiencyPct : cmd.irrigation_efficiency_pct)) + ", " + s(schedulingMode) + ", " + b(cmd.predictionCardEnabled !== undefined ? cmd.predictionCardEnabled : cmd.prediction_card_enabled, false) + ", " + s(cmd.notes) + ", " + syncVersion + ", " + s(cmd.deletedAt || cmd.deleted_at) + ", " + s(zoneWeatherSource || 'auto') + ", " + (zoneStageStartedOn.sql || 'NULL') + " FROM users WHERE " + userSelector(cmd.user || cmd) + " LIMIT 1 " +
+      "ON CONFLICT(zone_uuid) DO UPDATE SET name=" + conflictName + ", gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at, timezone=excluded.timezone, latitude=excluded.latitude, longitude=excluded.longitude, phenological_stage=excluded.phenological_stage, calibration_key=excluded.calibration_key, crop_type=excluded.crop_type, variety=excluded.variety, soil_type=excluded.soil_type, irrigation_method=excluded.irrigation_method, area_m2=excluded.area_m2, irrigation_efficiency_pct=excluded.irrigation_efficiency_pct, scheduling_mode=excluded.scheduling_mode, prediction_card_enabled=excluded.prediction_card_enabled, notes=excluded.notes, sync_version=excluded.sync_version, deleted_at=excluded.deleted_at, " + conflictWeatherSource + ", " + conflictStageStartedOn;
+  }
+  if (commandType === 'DELETE_ZONE') {
+    return 'UPDATE irrigation_zones SET deleted_at = ' + s(cmd.deletedAt || now) + ', updated_at = ' + s(now) + ', sync_version = ' + n(cmd.appliedSyncVersion || cmd.syncVersion || 1, 1) + ' WHERE zone_uuid = ' + s(cmd.zoneUuid || cmd.zone_uuid);
+  }
+  if (commandType === 'UPSERT_ZONE_CONFIG') {
+    var sets = [];
+    if (cmd.cropType !== undefined) sets.push('crop_type = ' + s(cmd.cropType));
+    if (cmd.crop_type !== undefined) sets.push('crop_type = ' + s(cmd.crop_type));
+    if (cmd.variety !== undefined) sets.push('variety = ' + s(cmd.variety));
+    if (cmd.soilType !== undefined) sets.push('soil_type = ' + s(cmd.soilType));
+    if (cmd.soil_type !== undefined) sets.push('soil_type = ' + s(cmd.soil_type));
+    if (cmd.irrigationMethod !== undefined) sets.push('irrigation_method = ' + s(cmd.irrigationMethod));
+    if (cmd.irrigation_method !== undefined) sets.push('irrigation_method = ' + s(cmd.irrigation_method));
+    if (cmd.notes !== undefined) sets.push('notes = ' + s(cmd.notes));
+    if (cmd.timezone !== undefined) sets.push('timezone = ' + s(cmd.timezone));
+    if (cmd.phenologicalStage !== undefined) sets.push('phenological_stage = ' + s(cmd.phenologicalStage));
+    if (cmd.phenological_stage !== undefined) sets.push('phenological_stage = ' + s(cmd.phenological_stage));
+    if (cmd.calibrationKey !== undefined) sets.push('calibration_key = ' + s(cmd.calibrationKey));
+    if (cmd.calibration_key !== undefined) sets.push('calibration_key = ' + s(cmd.calibration_key));
+    if (cmd.areaM2 !== undefined || cmd.area_m2 !== undefined) {
+      var areaM2 = cmd.areaM2 !== undefined ? cmd.areaM2 : cmd.area_m2;
+      sets.push('area_m2 = ' + (areaM2 == null ? 'NULL' : Number(areaM2)));
+    }
+    if (cmd.irrigationEfficiencyPct !== undefined || cmd.irrigation_efficiency_pct !== undefined) {
+      var irrigationEfficiencyPct = cmd.irrigationEfficiencyPct !== undefined ? cmd.irrigationEfficiencyPct : cmd.irrigation_efficiency_pct;
+      sets.push('irrigation_efficiency_pct = ' + (irrigationEfficiencyPct == null ? 'NULL' : Number(irrigationEfficiencyPct)));
+    }
+    if (cmd.schedulingMode !== undefined || cmd.scheduling_mode !== undefined) {
+      var rawSchedulingMode = cmd.schedulingMode !== undefined ? cmd.schedulingMode : cmd.scheduling_mode;
+      var normalizedSchedulingMode = String(rawSchedulingMode == null ? '' : rawSchedulingMode).trim().toLowerCase();
+      if (normalizedSchedulingMode !== 'server_preferred') normalizedSchedulingMode = 'local';
+      sets.push('scheduling_mode = ' + s(normalizedSchedulingMode));
+    }
+    if (cmd.predictionCardEnabled !== undefined || cmd.prediction_card_enabled !== undefined) {
+      var predictionCardEnabled = cmd.predictionCardEnabled !== undefined ? cmd.predictionCardEnabled : cmd.prediction_card_enabled;
+      sets.push('prediction_card_enabled = ' + b(predictionCardEnabled, false));
+    }
+    if (cmd.weatherSource !== undefined || cmd.weather_source !== undefined) {
+      var ws = cmd.weatherSource !== undefined ? cmd.weatherSource : cmd.weather_source;
+      var normalizedWeatherSource = ws === null ? '' : String(ws).trim().toLowerCase();
+      if (!normalizedWeatherSource) sets.push('weather_source = ' + s('auto'));
+      else if (/^[a-z_]{1,20}$/.test(normalizedWeatherSource)) sets.push('weather_source = ' + s(normalizedWeatherSource));
+      else node.warn('Build UPDATE SQL: UPSERT_ZONE_CONFIG carried an invalid weather_source for ' + String(cmd.zoneUuid || cmd.zone_uuid) + '; keeping the stored provider');
+    }
+    var configStageStartedOn = stageStartedOnOf(cmd, cmd.zoneUuid || cmd.zone_uuid);
+    if (cmd.phenologicalStage !== undefined || cmd.phenological_stage !== undefined) {
+      var configStage = cmd.phenologicalStage !== undefined ? cmd.phenologicalStage : cmd.phenological_stage;
+      sets.push('stage_started_on = ' + stageStartedOnRuleSql('phenological_stage', 'stage_started_on', configStage, configStageStartedOn.present ? configStageStartedOn.sql : null, cmd.timezone));
+    } else if (configStageStartedOn.present) {
+      sets.push('stage_started_on = ' + configStageStartedOn.sql);
+    }
+    sets.push('updated_at = ' + s(now));
+    sets.push('sync_version = ' + n(cmd.appliedSyncVersion || cmd.syncVersion || 1, 1));
+    return 'UPDATE irrigation_zones SET ' + sets.join(', ') + ' WHERE zone_uuid = ' + s(cmd.zoneUuid || cmd.zone_uuid);
+  }
+  if (commandType === 'UPSERT_ZONE_LOCATION') {
+    return 'UPDATE irrigation_zones SET latitude = ' + (cmd.latitude == null ? 'NULL' : Number(cmd.latitude)) + ', longitude = ' + (cmd.longitude == null ? 'NULL' : Number(cmd.longitude)) + ', updated_at = ' + s(now) + ', sync_version = ' + n(cmd.appliedSyncVersion || cmd.syncVersion || 1, 1) + ' WHERE zone_uuid = ' + s(cmd.zoneUuid || cmd.zone_uuid);
+  }
+  return null;
+}
+
+// The statement as applied: Build UPDATE SQL's, made conditional on a newer
+// version and a live row.
+function legacyZoneGuardedStatement(type, cmd, sql) {
+  // A NULL stored version counts as 0, as applyLegacyZoneCommand reads it.
+  if (type === 'UPSERT_ZONE') {
+    return sql + ' WHERE excluded.sync_version > COALESCE(irrigation_zones.sync_version, 0)' +
+      ' AND irrigation_zones.deleted_at IS NULL';
+  }
+  return sql + ' AND deleted_at IS NULL AND COALESCE(sync_version, 0) < ' + legacyRequestedVersion(cmd);
+}
+
+function legacyRowWithoutClock(row) {
+  if (!row) return null;
+  const copy = Object.assign({}, row);
+  delete copy.updated_at;
+  return copy;
+}
+
+function sameLegacyRow(left, right) {
+  const a = legacyRowWithoutClock(left);
+  const b = legacyRowWithoutClock(right);
+  if (!a || !b) return a === b;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length &&
+    keys.every(function(key) { return Object.is(a[key], b[key]); });
+}
+
+// The ACK "Build Schedule ACK" sends for the legacy path, field for field.
+// appliedSyncVersion stays the command's own version: the cloud drops an ACK
+// whose appliedSyncVersion differs from the command's
+// (CommandService.matchesAckSource). The stored version goes in its own field.
+function legacyZoneAck(cmd, type, result, detail) {
+  const ack = {
+    commandId: cmd.commandId || null,
+    eventUuid: cmd.eventUuid || null,
+    aggregateType: cmd.aggregateType || null,
+    aggregateKey: cmd.aggregateKey || null,
+    result,
+    state: result === 'SUCCESS' ? 'APPLIED' : result,
+    commandType: type,
+    appliedSyncVersion: Number(cmd.appliedSyncVersion || cmd.syncVersion || 0) || null,
+    error: detail ? detail.reason : null,
+  };
+  if (detail) {
+    ack.reason = detail.reason;
+    ack.requestedSyncVersion = detail.requested;
+    ack.currentSyncVersion = detail.current;
+  }
+  return ack;
+}
+
+const LEGACY_ROW_SQL = 'SELECT * FROM irrigation_zones WHERE zone_uuid=? LIMIT 1';
+
+// The delivery a command came in, when the lifecycle adapter has its envelope and
+// the command ledger: SUCCESS outcomes are then recorded in applied_commands with a
+// REST ACK row (osi-command-ledger withLifecycleCommandTransaction, the path legacy
+// schedule commands take), in the same transaction as the write. An exact retry of
+// that delivery is answered from the ledger, before any of the rules below.
+function legacyLedgerDelivery(opts) {
+  const envelope = opts.envelope;
+  if (!opts.ledger || typeof opts.ledger.withLifecycleCommandTransaction !== 'function') return null;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null;
+  if (!Number.isSafeInteger(envelope.commandId) || envelope.commandId <= 0) return null;
+  return { ledger: opts.ledger, envelope };
+}
+
+async function applyLegacyZoneCommand(db, command, runtime) {
+  const cmd = object(command, 'Legacy zone command');
+  const type = legacyZoneCommandType(cmd);
+  if (!LEGACY_ZONE_TYPES.has(type)) return { decision: 'not_handled' };
+  const opts = runtime || {};
+  const warnings = [];
+  const context = {
+    now: opts.now || new Date().toISOString(),
+    gateway: String(opts.gateway_device_eui || 'UNKNOWN').toUpperCase(),
+    warn: function(message) { warnings.push(String(message)); },
+  };
+  const sql = legacyZoneStatement(cmd, context);
+  const zoneUuid = cmd.zoneUuid || cmd.zone_uuid;
+  const keyed = zoneUuid !== undefined && zoneUuid !== null;
+  const requested = legacyRequestedVersion(cmd);
+  const delivery = legacyLedgerDelivery(opts);
+
+  async function decideAndWrite(tx) {
+    const row = keyed ? await tx.get(LEGACY_ROW_SQL, [String(zoneUuid)]) : null;
+    const current = row ? Number(row.sync_version || 0) : null;
+    const conflict = (reason) => ({
+      decision: 'conflict',
+      reason,
+      requested,
+      current,
+      ack: legacyZoneAck(cmd, type, 'CONFLICT', { reason, requested, current }),
+    });
+    const success = (decision) => ({ decision, requested, current, success: true });
+    if (!row) {
+      await tx.run(legacyZoneGuardedStatement(type, cmd, sql));
+      return success('applied');
+    }
+    if (row.deleted_at !== null && row.deleted_at !== undefined) {
+      // Only a DELETE_ZONE whose content provably made this tombstone is a replay:
+      // the same version and the same explicit deletedAt. A delete that named no
+      // time cannot be told from another delete at that version, so it is a
+      // CONFLICT here; its exact retry is answered from the ledger instead.
+      if (type === 'DELETE_ZONE' && requested === current && cmd.deletedAt &&
+          String(cmd.deletedAt) === String(row.deleted_at)) {
+        return success('replay');
+      }
+      return conflict('zone_deleted');
+    }
+    if (requested > current) {
+      await tx.run(legacyZoneGuardedStatement(type, cmd, sql));
+      return success('applied');
+    }
+    if (requested < current) return conflict('stale_sync_version');
+    // Equal version: would the statement change anything? Try it and look.
+    await tx.run('SAVEPOINT legacy_zone_replay');
+    let unchanged;
+    try {
+      await tx.run(sql);
+      unchanged = sameLegacyRow(row, await tx.get(LEGACY_ROW_SQL, [String(zoneUuid)]));
+    } finally {
+      await tx.run('ROLLBACK TO legacy_zone_replay');
+      await tx.run('RELEASE legacy_zone_replay');
+    }
+    return unchanged ? success('replay') : conflict('version_conflict');
+  }
+
+  let result;
+  if (delivery) {
+    result = await delivery.ledger.withLifecycleCommandTransaction(db, delivery.envelope, {
+      gateway_device_eui: context.gateway,
+      command_type_recognized: opts.command_type_recognized === true,
+      now: context.now,
+    }, async function(scoped) {
+      const outcome = await decideAndWrite(scoped.tx);
+      if (outcome.success) {
+        outcome.ack = await scoped.terminalAck({
+          commandType: type,
+          deviceEui: context.gateway,
+          result: 'APPLIED',
+          requestedSyncVersion: requested,
+          appliedSyncVersion: requested,
+        });
+      }
+      return outcome;
+    });
+    // The ledger answered an exact retry before the rules ran.
+    if (result && result.handled && !result.decision) {
+      result = { decision: 'duplicate', requested, current: null, ack: result.ack };
+    }
+  } else {
+    result = await db.transaction(async function(tx) {
+      const outcome = await decideAndWrite(tx);
+      if (outcome.success) outcome.ack = legacyZoneAck(cmd, type, 'SUCCESS', null);
+      return outcome;
+    });
+  }
+  delete result.success;
+  result.warnings = warnings;
+  return result;
+}
+
 module.exports = {
   TYPES,
+  LEGACY_ZONE_TYPES,
+  applyLegacyZoneCommand,
+  legacyZoneStatement,
+  legacyZoneGuardedStatement,
   applyZoneCommand,
   validEffectBinding,
   intentHash: canonicalHash,

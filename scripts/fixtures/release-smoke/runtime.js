@@ -23,6 +23,9 @@ for (const e of fs.readdirSync(nr, {withFileTypes:true})) {
   if (e.isDirectory() && (e.name.startsWith('osi-') || e.name === 'codecs' || e.name === 'nodes')) {
     fs.cpSync(path.join(nr,e.name), path.join(RUN,e.name), {recursive:true});
     if (e.name.startsWith('osi-')) dependencies[e.name] = 'file:' + e.name;
+  } else if (e.isFile() && e.name.startsWith('osi-')) {
+    // Top-level helper files (osi-atomic-write.js) sit beside the modules on a gateway.
+    fs.copyFileSync(path.join(nr,e.name), path.join(RUN,e.name));
   }
 }
 fs.mkdirSync(path.join(RUN,'node_modules'), {recursive:true});

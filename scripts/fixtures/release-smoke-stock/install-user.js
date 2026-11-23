@@ -10,6 +10,7 @@ function install(root,run) {
   for(const name of ['package.json','package-lock.json','edge-channels.json'])fs.copyFileSync(path.join(source,name),path.join(run,name));
   for(const entry of fs.readdirSync(source,{withFileTypes:true})) {
     if(entry.isDirectory()&&(entry.name.startsWith('osi-')||entry.name==='codecs'||entry.name==='nodes'))fs.cpSync(path.join(source,entry.name),path.join(run,entry.name),{recursive:true});
+    else if(entry.isFile()&&entry.name.startsWith('osi-'))fs.copyFileSync(path.join(source,entry.name),path.join(run,entry.name));
   }
   const npm=path.resolve(path.dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js');
   if(!fs.existsSync(npm))throw new Error('npm CLI beside pinned Node is missing');

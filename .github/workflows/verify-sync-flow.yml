@@ -1,9 +1,9 @@
 name: Sync Flow Verifier
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'release/0.8.4' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, 'release/0.8.4' ]
 jobs:
   verify-sync-flow:
     runs-on: ubuntu-latest
@@ -80,6 +80,9 @@ jobs:
       # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build
       # Telemetry drops FPort 11 before its raw decoder.
       - run: node scripts/test-watermark-ingest-flow.js
+        env:
+          # Compare against the PR's base branch (release/0.8.4 on that line).
+          OSI_FLOWS_SIZE_BASE_REF: origin/${{ github.base_ref || github.ref_name }}
       # WATERMARK calibration GET/PUT/DELETE through the whole chain (http in ->
       # scoped-device-config-guard -> watermark-cal-fn), flag off and scoped,
       # plus the soil-depth PUT (-> put-soil-depth-fn) the depth form uses.
@@ -430,6 +433,10 @@ jobs:
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
         run: node --test scripts/test-stage-started-on-migration.js scripts/test-legacy-upsert-zone-config.js
+      # E3: legacy cloud zone commands are written only at a newer version; a stale
+      # or tombstone-crossing one is answered CONFLICT, through the shipped nodes, both profiles.
+      - name: Legacy zone command version guard
+        run: node --test scripts/test-legacy-zone-command-versions.js
       # Daily agronomy parity: the daily record's migration-owned outbox triggers
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync

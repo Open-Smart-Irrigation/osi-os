@@ -2637,6 +2637,47 @@ BEGIN
   );
 END;
 
+-- Schedule outbox on insert (0081, E5): report newly created schedules at
+-- once. The extra WHEN guards partition inserts against
+-- trg_sync_schedules_defaults_ai so every insert emits exactly one event;
+-- see database/migrations/ordered/0081__schedule_insert_outbox_trigger.sql.
+CREATE TRIGGER trg_sync_schedules_outbox_ai
+AFTER INSERT ON irrigation_schedules
+FOR EACH ROW
+WHEN
+  EXISTS (
+    SELECT 1 FROM sync_link_state
+     WHERE peer_node = 'cloud' AND linked = 1
+  )
+  AND COALESCE(NEW.sync_version, 0) > 0
+  AND NEW.response_mode IS NOT NULL
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'SCHEDULE',
+    COALESCE((SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),''),
+    'SCHEDULE_UPSERTED',
+    json_object(
+      'contract_version', 1,
+      'zone_uuid',       (SELECT zone_uuid FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL),
+      'trigger_metric',  NEW.trigger_metric,
+      'threshold_kpa',   NEW.threshold_kpa,
+      'enabled',         NEW.enabled,
+      'duration_minutes', NEW.duration_minutes,
+      'response_mode',   NEW.response_mode,
+      'sync_version',    NEW.sync_version,
+      'deleted_at',      NEW.deleted_at,
+      'last_applied_at', NEW.last_applied_at
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    (SELECT gateway_device_eui FROM irrigation_zones WHERE id = NEW.irrigation_zone_id AND deleted_at IS NULL)
+  );
+END;
+
 -- device_data → sync_outbox (insert)
 CREATE TRIGGER trg_dp_device_data_outbox_ai
 AFTER INSERT ON device_data

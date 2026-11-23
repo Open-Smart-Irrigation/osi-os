@@ -1646,6 +1646,17 @@ for (const triggerName of ['trg_dp_zone_agronomy_outbox_ai', 'trg_dp_zone_agrono
   expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "'ZONE_AGRONOMY_UPSERTED'", 'emits ZONE_AGRONOMY_UPSERTED');
   expectExcludes('Sync Init Schema + Triggers', triggerName, `leaves the migration-owned ${triggerName} to 0067`);
 }
+// 0081 (E5, schedule insert outbox): migration-owned insert twin of the
+// boot-managed trg_sync_schedules_outbox_au, so the seed carries it and the
+// boot node does not.
+for (const triggerName of ['trg_sync_schedules_outbox_ai']) {
+  expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "COALESCE(NEW.sync_version, 0) > 0", 'defaults-trigger partition guard (version)');
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, 'NEW.response_mode IS NOT NULL', 'defaults-trigger partition guard (response_mode)');
+  expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "'SCHEDULE_UPSERTED'", 'emits SCHEDULE_UPSERTED');
+  expectExcludes('Sync Init Schema + Triggers', triggerName, `leaves the migration-owned ${triggerName} to 0081`);
+}
 expectIncludes('Build Cloud Bootstrap', 'FROM zone_daily_agronomy za', 'includes the daily agronomy record in bootstrap snapshots');
 expectIncludes('Build Cloud Bootstrap', "'LIMIT 1000'", 'bounds the daily agronomy snapshot at 1,000 rows');
 for (const triggerName of [
@@ -3806,8 +3817,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.8.3 ---
-const EXPECTED_VERSION = '0.8.3';
+// --- firmware version 0.8.4 ---
+const EXPECTED_VERSION = '0.8.4';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);

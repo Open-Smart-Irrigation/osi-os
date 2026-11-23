@@ -598,10 +598,9 @@ class FlowRuntime {
 
 function seedDb() {
   const db = seedScopedDb();
-  db.prepare(`INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at)
-    VALUES ('cloud',1,?,'2026-01-01')
-    ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui,updated_at=excluded.updated_at`)
-    .run(GATEWAY_EUI);
+  // Fixture rows land before the cloud link so harness seeding itself emits no
+  // outbox events (the trg_sync_schedules_outbox_ai insert trigger fires on the
+  // linked gateway); event-count assertions then see only request traffic.
   db.exec(`
     INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode)
       VALUES ('Z Three', 2, 'z-3', 'UTC', 'local');
@@ -616,6 +615,10 @@ function seedDb() {
       (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version)
       VALUES (1, 'SWT_1', 30, 15, 1, 'proportional', 4);
   `);
+  db.prepare(`INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at)
+    VALUES ('cloud',1,?,'2026-01-01')
+    ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui,updated_at=excluded.updated_at`)
+    .run(GATEWAY_EUI);
   return db;
 }
 
@@ -1838,21 +1841,23 @@ for (const order of ['cloud first', 'cloud paused']) {
 }
 
 // Generic cloud ACK (Build Schedule ACK): a command routed without its own id must
-// not borrow the id of another command routed after it.
+// not borrow the id of another command routed after it. The vehicle is a device
+// flags command, which still goes through Build UPDATE SQL; legacy zone commands
+// are applied and answered by osi-zone-commands (E3) and no longer reach it.
 test('cloud command ACK: a command without commandId does not borrow a later command id', async () => {
   await withRuntime({ scoped: false }, async (rt) => {
-    const zone = (uuid, name, commandId) => ({
+    const flags = (deviceEui, commandId) => ({
       payload: Object.assign({
-        commandType: 'UPSERT_ZONE',
-        zoneUuid: uuid,
-        name,
+        commandType: 'UPSERT_DEVICE_FLAGS',
+        deviceEui,
+        dendroEnabled: true,
         appliedSyncVersion: 7,
-        aggregateType: 'ZONE',
-        aggregateKey: uuid,
+        aggregateType: 'DEVICE',
+        aggregateKey: deviceEui,
       }, commandId === undefined ? {} : { commandId }),
     });
-    rt.inject('A', ID.routeCommand, zone('z-cloud-a', 'Cloud A'));
-    rt.inject('B', ID.routeCommand, zone('z-cloud-b', 'Cloud B', 77));
+    rt.inject('A', ID.routeCommand, flags('A840410000000001'));
+    rt.inject('B', ID.routeCommand, flags('A840410000000002', 77));
     await rt.runUntil('A', ID.cloudUpdateDb);
     await rt.run('B');
     await rt.run('A');
@@ -1863,7 +1868,7 @@ test('cloud command ACK: a command without commandId does not borrow a later com
     assert.equal(ack('B')[0].commandId, 77);
     assert.equal(ack('A').length, 1);
     assert.equal(ack('A')[0].commandId, null, 'A must not carry B\'s command id');
-    assert.equal(ack('A')[0].aggregateKey, 'z-cloud-a');
+    assert.equal(ack('A')[0].aggregateKey, 'A840410000000001');
   });
 });
 
@@ -1949,8 +1954,8 @@ function assertScheduleApplied(rt, db, name, expected) {
   const scheduleEvents = db.prepare(
     "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='SCHEDULE' AND aggregate_key=? AND op='SCHEDULE_UPSERTED'"
   ).get(expected.zoneUuid).n;
-  assert.equal(scheduleEvents, expected.zoneId === 1 ? 1 : 0,
-    name + ' source trigger emits one event for UPDATE and none for INSERT');
+  assert.equal(scheduleEvents, 1,
+    name + ' source trigger emits exactly one event for UPDATE and for INSERT (0081)');
 }
 
 function assertScheduleRejected(rt, name, statusCode) {
@@ -3076,6 +3081,26 @@ function assertOutboxUnchanged(db, checkpoint, label) {
     label + ' preserves the complete outbox by UUID, payload, version, and row order');
 }
 
+// A schedule PUT on a fresh zone enqueues exactly one SCHEDULE_UPSERTED (the
+// 0081 insert trigger) and touches no other outbox row: the isolation proof
+// for a schedule create is a one-event delta, not an unchanged outbox.
+function assertOutboxGrewByOneScheduleEvent(db, checkpoint, spec, label) {
+  const after = zoneState(db).outbox;
+  const before = checkpoint.outbox;
+  assert.equal(after.length, before.length + 1,
+    label + ' adds exactly one outbox row (its own insert event)');
+  assert.deepEqual(after.slice(0, before.length), before,
+    label + ' preserves every pre-existing outbox row by UUID, payload, version, and row order');
+  const added = after[after.length - 1];
+  assert.equal(added.aggregate_type, 'SCHEDULE', label + ' added row is a SCHEDULE event');
+  assert.equal(added.aggregate_key, spec.zoneUuid, label + ' added row carries its own zone');
+  assert.equal(added.op, 'SCHEDULE_UPSERTED', label + ' added row op is SCHEDULE_UPSERTED');
+  assert.equal(added.sync_version, spec.version, label + ' added row carries the PUT version');
+  const payload = JSON.parse(added.payload_json);
+  assert.equal(payload.threshold_kpa, spec.patch.threshold_kpa, label + ' added row payload threshold matches the PUT');
+  assert.equal(payload.response_mode, spec.patch.response_mode, label + ' added row payload response mode matches the PUT');
+}
+
 function assertZoneDeleteRejected(rt, name, statusCode) {
   const response = onlyResponse(rt, name);
   assert.equal(response.statusCode, statusCode, name + ' status: ' + JSON.stringify(response.payload));
@@ -3419,7 +3444,7 @@ test('zone delete A holds exact pretx zoneByRef; schedule B on zone 3 commits fi
       'delete zoneByRef is selected before the lifecycle transaction');
     await rt.run('B');
     assertScheduleApplied(rt, db, 'B', SCHEDULE.B);
-    assertOutboxUnchanged(db, before, 'zone-3 schedule INSERT B');
+    assertOutboxGrewByOneScheduleEvent(db, before, SCHEDULE.B, 'zone-3 schedule INSERT B');
     const afterScheduleCommit = zoneState(db);
     gate.release(held);
     await rt.settleStep(key);
@@ -3457,7 +3482,7 @@ test('schedule A holds exact pretx zoneByRef; zone delete B commits first', asyn
     await rt.settleStep(key);
     await rt.run('A');
     assertScheduleApplied(rt, db, 'A', SCHEDULE.B);
-    assertOutboxUnchanged(db, afterDeleteCommit, 'zone-3 schedule INSERT A after delete B');
+    assertOutboxGrewByOneScheduleEvent(db, afterDeleteCommit, SCHEDULE.B, 'zone-3 schedule INSERT A after delete B');
     assertZoneUntouched(db, 2, before, 'zone 2');
     assertOneHeldCallTrace(gate, held, 1);
     const commit = gate.events.findIndex((event) => event.phase === 'transaction_commit' && event.lane === 'B');
