@@ -1,5 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
-import {openSettingsFromHeader} from './header';
+import {clickHeaderControl, openSettingsFromHeader} from './header';
 
 type Monitor = {
   pageErrors: string[];
@@ -104,7 +104,7 @@ test('public dashboard navigation hides experimental module entries', async ({pa
   await expect(app.getByRole('button', {name: 'Data', exact: true})).toHaveCount(0);
   await expect(dashboardHeader.getByRole('link', {name: 'Network', exact: true})).toHaveCount(0);
   await expect(app.getByRole('heading', {name: 'Gateway', exact: true})).toHaveCount(0);
-  await app.getByRole('button', {name: 'Add', exact: true}).click();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Add', exact: true}));
   await expect(app.getByRole('menuitem', {name: 'Log activity', exact: true})).toHaveCount(0);
 
   expectClean(monitor);

@@ -2,7 +2,7 @@ import {expect, test, type Locator, type Page} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {PUBLIC_EPOCH} from '../../fixtures';
 import {expectSwtThreshold, setCustomSwtThreshold} from './swt-threshold';
-import {openSettingsFromHeader} from './header';
+import {clickHeaderControl, openSettingsFromHeader} from './header';
 
 test.setTimeout(120_000);
 
@@ -217,7 +217,7 @@ async function startConfirm(page: Page, app: ReturnType<Page['frameLocator']>, a
 test('farm-device-roundtrip creates, renames, assigns, unassigns, removes, and reads saved farm state', async ({page}) => {
   const monitor = await installMonitor(page);
   const app = await openPublicApp(page);
-  await app.getByRole('button', {name: 'Add', exact: true}).click();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Add', exact: true}));
   await app.getByRole('menuitem', {name: /zone/i}).click();
   const createZone = app.getByRole('dialog');
   await createZone.locator('#zone-name').fill('Release trial bed');
@@ -233,7 +233,7 @@ test('farm-device-roundtrip creates, renames, assigns, unassigns, removes, and r
   await renameZone.press('Enter');
   await expect(zone).toContainText('Release test bed');
 
-  await app.getByRole('button', {name: 'Add', exact: true}).click();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Add', exact: true}));
   await app.getByRole('menuitem', {name: /device/i}).click();
   const addDevice = app.getByRole('dialog');
   await addDevice.locator('#device-type').selectOption('KIWI_SENSOR');
@@ -491,9 +491,9 @@ test('preferences-auth reopens preferences and preserves farm edits through logo
   await expect(app.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(app.getByRole('button', {name: 'pF', exact: true})).toHaveAttribute('aria-pressed', 'true');
   await setAppRoute(app, '/dashboard');
-  await app.getByRole('button', {name: 'Account'}).click();
-  await app.getByRole('menuitem', {name: 'Logout', exact: true}).click();
-  await expect(app.getByRole('heading', {name: 'OSI OS v0.8.2 (Alpha)'})).toBeVisible();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Account'}));
+  await app.getByRole('menuitem', {name: 'Log out', exact: true}).click();
+  await expect(app.getByRole('heading', {name: /^OSI OS v\d+\.\d+\.\d+/})).toBeVisible();
   const loginForm = app.locator('form');
   await loginForm.getByLabel(/username/i).fill('Demo farmer');
   await loginForm.getByLabel(/password/i).fill('demo');
@@ -616,7 +616,7 @@ test('reset-continuity restores seed, auth, clock, valve, preferences, and a usa
   const monitor = await installMonitor(page);
   const app = await openPublicApp(page);
   await pausePublicClock(page);
-  await app.getByRole('button', {name: 'Add', exact: true}).click();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Add', exact: true}));
   await app.getByRole('menuitem', {name: /zone/i}).click();
   await app.getByRole('dialog').locator('#zone-name').fill('Discarded reset zone');
   await app.getByRole('dialog').locator('form').getByRole('button', {name: /create/i}).click();

@@ -17,7 +17,7 @@ test('expanded valve device keeps a readable title and translated actions keep w
 
 test('create form has padding, initial focus and feedback; collapsed zone can be deleted',async({page})=>{
   const app=page.frameLocator('#app');
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add Zone',exact:true}).click();
+  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add zone',exact:true}).click();
   await expect(app.getByLabel('Zone Name')).toBeFocused();
   expect(await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).evaluate(el=>parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
   await app.getByLabel('Zone Name').fill('Polish trial');await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).click();
@@ -31,7 +31,7 @@ test('create form has padding, initial focus and feedback; collapsed zone can be
 
 test('demo account actions preserve the session and give dismissible feedback',async({page})=>{
   const app=page.frameLocator('#app');
-  for(const action of ['Logout','OSI Server']) {
+  for(const action of ['Log out','OSI Server']) {
     await app.getByRole('button',{name:/Account/}).click();await app.getByRole('menuitem',{name:action,exact:true}).click();
     await expect(app.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
     await expect(page.locator('#host-notice')).toContainText('not simulated');
@@ -99,7 +99,7 @@ for(const zone of ['Europe/Zurich','America/Los_Angeles'])test.describe(zone,()=
 test('opening the app directly retains unsupported-action feedback',async({page})=>{
   await page.goto('/demo/app.html#/dashboard');
   await page.getByRole('button',{name:/Account/}).click();
-  await page.getByRole('menuitem',{name:'Logout',exact:true}).click();
+  await page.getByRole('menuitem',{name:'Log out',exact:true}).click();
   await expect(page.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
   await expect(page.locator('#demo-notice')).toContainText('not simulated');
   await page.locator('#demo-notice').click();await expect(page.locator('#demo-notice')).toBeHidden();

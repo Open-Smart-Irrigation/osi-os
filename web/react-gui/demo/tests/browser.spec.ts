@@ -201,7 +201,7 @@ test('reveal slide departure pauses clock, return retains state and keyboard sta
 
 test('existing device registration and SWT trigger configuration', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add Device',exact:true}).click();
+  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add device',exact:true}).click();
   await app.getByLabel('Device Name',{exact:true}).fill('Practice probe');await app.getByLabel('DevEUI',{exact:true}).fill('00000000000000B0');
   await app.getByRole('dialog').getByRole('button',{name:'Add Device',exact:true}).click();
   await expect(app.getByText('Practice probe',{exact:true})).toBeVisible();

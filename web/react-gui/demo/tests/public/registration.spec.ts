@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
+import {clickHeaderControl} from './header';
 
 test.setTimeout(120_000);
 
@@ -64,7 +65,7 @@ async function openDashboard(page: Page) {
 }
 
 async function openAddDevice(app: Awaited<ReturnType<typeof openDashboard>>) {
-  await app.getByRole('button', {name: 'Add', exact: true}).click();
+  await clickHeaderControl(app, app.getByRole('button', {name: 'Add', exact: true}));
   await app.getByRole('menuitem', {name: /device/i}).click();
   return app.getByRole('dialog');
 }
