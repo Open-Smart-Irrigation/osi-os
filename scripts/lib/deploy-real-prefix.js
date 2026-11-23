@@ -92,6 +92,10 @@ function gateway({ layout = 'image', capacityKb = 4 * 1024 * 1024, database = tr
     swap.markHealthy(g.srv, '20261101T000000Z');
     swap.writePayloadState(g.srv, '20261101T000000Z', 'healthy', 'fixture');
     fs.copyFileSync(path.join(REPO, 'scripts/deploy-payload-swap.js'), path.join(g.srv, '.payload-swap.js'));
+    // #733 installs the atomic writer beside the swap helper, before any live
+    // link changes; a gateway a 0.8.3 deploy left linked already has it.
+    fs.mkdirSync(path.join(gw, 'usr/share/node-red'), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-atomic-write.js'), path.join(gw, 'usr/share/node-red/osi-atomic-write.js'));
     fs.rmSync(src, { recursive: true, force: true });
   }
   // The GUI archive the deploy fetches.
