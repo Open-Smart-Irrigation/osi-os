@@ -157,12 +157,53 @@ async function runBaseline(c) {
 
 const observationStates = new Set(['unobserved', 'observed_running', 'observed_complete',
   'observed_closed', 'stale_no_observation', 'stale_open_observed']);
+// K1 R1 (K3 S7): after the requester loses the zone grant (a demotion to viewer
+// counts, CTO 23 Nov), is disabled or is deleted, only a command accepted before that point may continue, and only as
+// a stop (pause, cancel, or confirmed CLOSE-only override). It never opens,
+// stays with the original actor, notes the revocation, is ACKed and shown as
+// applied, and proves no physical closure. Everything else after revocation is
+// refused with no enqueue.
+const revocationNotes = {
+  revoke_zone_grant: 'grant_lost', demote_to_viewer: 'demoted_to_viewer', disable_requester: 'disabled', delete_requester: 'deleted',
+};
+function isStopContinuation(context) {
+  if (context.return_position === 'OPEN') return false;
+  if (['PAUSE_IRRIGATION_POLICY', 'CANCEL_VALVE_ACTUATION'].includes(context.command_type)) return true;
+  return context.command_type === 'CLOSE' && context.confirmed_override === true && context.effect === 'CLOSE_ONLY';
+}
+function validateRevocation(c) {
+  const events = (c.input && c.input.events) || [];
+  const revokeAt = events.findIndex((event) => revocationNotes[event.type]);
+  if (revokeAt < 0) return;
+  const e = c.expected;
+  const context = c.input.context || {};
+  const acceptedBefore = context.authorized_at_queue === true
+    && events.slice(0, revokeAt).some((event) => event.type === 'cloud_accept');
+  if (isStopContinuation(context) && acceptedBefore) {
+    assert.equal(e.edge_admission, 'accepted', c.id + ': accepted stop must continue after revocation (R1)');
+    assert.equal(e.open_enqueues, 0, c.id + ': stop continuation cannot open');
+    assert.equal(e.attributed_actor, 'original_requester', c.id + ': stop stays with the original actor');
+    assert.equal(e.revocation_noted, revocationNotes[events[revokeAt].type], c.id + ': revocation must be noted');
+    assert.notEqual(e.physical_closed, true, c.id + ': a stop does not prove closure');
+    assert.equal(e.ack, 'APPLIED', c.id + ': ACK must show the stop applied');
+    assert.equal(e.after_both && e.after_both.ui, 'stop_applied', c.id + ': UI must show the stop applied');
+    if (context.command_type === 'PAUSE_IRRIGATION_POLICY') {
+      assert.equal(e.confirmed_enabled, false, c.id + ': a continued pause must leave the policy disabled');
+    }
+  } else {
+    assert.equal(e.edge_admission, 'refused', c.id + ': only an accepted stop continues after revocation (R1)');
+    assert.equal(e.physical_enqueues, 0, c.id + ': refusal after revocation cannot enqueue');
+  }
+}
 function validateSemantics(c) {
   const e = c.expected;
   if (e.observation !== undefined) assert.ok(observationStates.has(e.observation), c.id + ': invalid observation');
-  if (e.admission === 'refused' && e.new_physical_enqueues !== undefined) {
-    assert.equal(e.new_physical_enqueues, 0, c.id + ': refusal cannot enqueue');
+  if (e.admission === 'refused' || e.edge_admission === 'refused') {
+    for (const field of ['new_physical_enqueues', 'physical_enqueues', 'open_enqueues']) {
+      if (e[field] !== undefined) assert.equal(e[field], 0, c.id + ': refusal cannot enqueue');
+    }
   }
+  validateRevocation(c);
   if (['handed_off', 'uncertain', 'already_running'].includes(e.cancel_outcome)) {
     assert.notEqual(e.physically_closed, true, c.id + ': cancel cannot prove closure');
   }
@@ -185,7 +226,7 @@ assert.equal(manifest.status, 'edge_lead_signed_with_exceptions');
 assert.equal(manifest.signed_at, '2026-11-20');
 assert.deepEqual(manifest.decision_status, {
   S1: 'signed', S2: 'signed', S3: 'deferred_to_1.1', S4: 'open_CL1', S5: 'signed',
-  S6: 'CTO_ruled_fixed_only_0.9_1.0', S7: 'open_until_K1', S8: 'R8_decided_activation_receipts_open',
+  S6: 'CTO_ruled_fixed_only_0.9_1.0', S7: 'closed_by_K1_R1', S8: 'R8_decided_activation_receipts_open',
 });
 assert.equal(manifest.proportional_policy_field_count, null);
 assert.equal(manifest.proportional_policy_field_count_status, 'unknown_pending_named_hosts');
@@ -236,11 +277,24 @@ async function main() {
   assert.throws(() => validateSemantics({ id: 'bad', expected: { observation: 'delivered' } }), /invalid observation/);
   assert.throws(() => validateSemantics({ id: 'bad', expected: { admission: 'refused', new_physical_enqueues: 1 } }), /refusal cannot enqueue/);
   assert.throws(() => assertProjection({ collateral: [] }, { collateral: [{ owner_id: 'other' }] }, 'negative'), /length/);
+  // R1 negative controls: a timed close with an OPEN return accepted after
+  // revocation, and a continued pause that opens, is credited to the zone owner
+  // and claims proven closure, must both fail.
+  const cloud = suites.find((s) => s.suite === 'cloud-activation');
+  const timedClose = structuredClone(cloud.cases.find((c) => c.id === 'timed-close-with-open-return-after-revoke-refused'));
+  Object.assign(timedClose.expected, { edge_admission: 'accepted', physical_enqueues: 1 });
+  assert.throws(() => validateSemantics(timedClose), /R1|enqueue/);
+  const pause = structuredClone(cloud.cases.find((c) => c.id === 'queued-pause-after-grant-loss-applies'));
+  Object.assign(pause.expected, { open_enqueues: 1, attributed_actor: 'zone_owner', physical_closed: true });
+  assert.throws(() => validateSemantics(pause), /cannot open|original actor|closure/);
+  const reenabled = structuredClone(cloud.cases.find((c) => c.id === 'queued-pause-after-grant-loss-applies'));
+  reenabled.expected.confirmed_enabled = true;
+  assert.throws(() => validateSemantics(reenabled), /leave the policy disabled/);
   const swt = suites.find((s) => s.suite === 'policy').cases.find((c) => c.id === 'swt-equality-waters');
   const actualSwt = await runBaseline(swt);
   assert.throws(() => assertProjection(actualSwt, { ...swt.expected, value: 31 }, 'negative'), /negative.value/);
 
-  console.log(`verify-valve-command-fixtures: OK (${ids.size} cases; ${executed} baseline vectors executed; ${scenarios} consumer scenarios validated; 6 negative controls)`);
+  console.log(`verify-valve-command-fixtures: OK (${ids.size} cases; ${executed} baseline vectors executed; ${scenarios} consumer scenarios validated; 9 negative controls)`);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
