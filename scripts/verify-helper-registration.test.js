@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, checkCallerNames,
+  checkHelperModuleCallers,
 } = require('./verify-helper-registration');
 
 const NAME_TO_PATH = {
@@ -256,6 +257,48 @@ test('checkCallerNames: initialize and finalize are scanned; other node types ar
   assert.equal(result.issues.length, 2);
   assert.match(result.issues.join(' '), /initialize.*'nope-init'/);
   assert.match(result.issues.join(' '), /finalize.*'nope-final'/);
+});
+
+// PR #763 Sol r2: the account-link stage probes the conditional modules from
+// osi-installation-helper, a helper module the flow-side scan never reads.
+test('checkHelperModuleCallers: a misspelled probe in a helper module fails, a literal registered name passes', () => {
+  const nameToPath = { 'zone-commands': 'osi-zone-commands', 'osi-irrigation-policy': 'osi-irrigation-policy' };
+  const misspelled = checkHelperModuleCallers({
+    moduleFiles: [{ label: 'osi-installation-helper/index.js', source: "const zoneCommandsLoad = osiLib.require('zone-command');" }],
+    nameToPath,
+  });
+  assert.equal(misspelled.calls, 1);
+  assert.equal(misspelled.issues.length, 1);
+  assert.match(misspelled.issues[0], /'zone-command' is not a NAME_TO_PATH key/);
+  assert.match(misspelled.issues[0], /osi-installation-helper/);
+  const literal = checkHelperModuleCallers({
+    moduleFiles: [{ label: 'osi-installation-helper/index.js', source: "const a = osiLib.require('osi-irrigation-policy'); const b = osiLib.require('zone-commands');" }],
+    nameToPath,
+  });
+  assert.equal(literal.calls, 2);
+  assert.deepEqual(literal.issues, []);
+});
+
+test('checkHelperModuleCallers: a dynamic probe argument fails like the flow side', () => {
+  const result = checkHelperModuleCallers({
+    moduleFiles: [{ label: 'osi-example/index.js', source: 'osiLib.require(name);' }],
+    nameToPath: { 'zone-commands': 'osi-zone-commands' },
+  });
+  assert.equal(result.calls, 1);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /not one plain string literal/);
+});
+
+test('checkHelperModuleCallers: comments and strings are masked', () => {
+  const result = checkHelperModuleCallers({
+    moduleFiles: [{
+      label: 'osi-example/index.js',
+      source: "// osiLib.require('nope-comment')\n/* osiLib.require(name) */\nconst quoted = \"osiLib.require('nope-string')\";\nosiLib?.require('zone-commands');",
+    }],
+    nameToPath: { 'zone-commands': 'osi-zone-commands' },
+  });
+  assert.equal(result.calls, 1);
+  assert.deepEqual(result.issues, []);
 });
 
 test('every shipped osi-lib caller names a registered module, in both profiles', () => {

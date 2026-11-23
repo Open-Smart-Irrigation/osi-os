@@ -199,6 +199,62 @@ function checkCallerNames({ flows, nameToPath }) {
   return { issues, calls };
 }
 
+// Helper-module stage code (PR #763 Sol r2): the account-link build stage runs
+// in osi-installation-helper, not in a flow node, so checkCallerNames never
+// saw its probes. Helper modules receive the loader as the `osiLib` stage
+// dependency, so the loader name is fixed. Scan every shipped non-test source
+// of the runtime helper modules and apply the same two rules: the argument is
+// one plain string literal, and the name is a NAME_TO_PATH key. Test files
+// (module-local *.test.js, __tests__ dirs) are excluded: they define their
+// own fake loaders whose call sites are deliberately dynamic and never run on
+// a gateway. Blind spots match the flow side: an alias or bracket access is
+// not seen.
+function checkHelperModuleCallers({ moduleFiles, nameToPath }) {
+  const issues = [];
+  let calls = 0;
+  const call = /(?<![\w$.])osiLib\s*\??\.\s*require\s*\(/g;
+  for (const file of moduleFiles) {
+    const masked = maskNonCode(file.source);
+    for (const match of masked.matchAll(call)) {
+      calls += 1;
+      const rest = file.source.slice(match.index + match[0].length);
+      const literal = rest.match(PLAIN_NAME_ARGUMENT);
+      if (!literal) {
+        issues.push(file.label + ': osiLib.require argument is not one plain string literal: ' +
+          JSON.stringify(rest.slice(0, 40)));
+        continue;
+      }
+      const name = literal[1] ?? literal[2] ?? literal[3];
+      if (!Object.prototype.hasOwnProperty.call(nameToPath, name)) {
+        issues.push(file.label + ": '" + name + "' is not a NAME_TO_PATH key");
+      }
+    }
+  }
+  return { issues, calls };
+}
+
+function collectHelperModuleFiles(nodeRedDir, helperNames) {
+  const files = [];
+  for (const name of helperNames) {
+    const dir = path.join(nodeRedDir, name);
+    if (!fs.existsSync(dir)) continue;
+    const walk = (current) => {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const entryPath = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
+          walk(entryPath);
+          continue;
+        }
+        if (!entry.name.endsWith('.js') || entry.name.endsWith('.test.js')) continue;
+        files.push({ label: path.relative(nodeRedDir, entryPath), source: fs.readFileSync(entryPath, 'utf8') });
+      }
+    };
+    walk(dir);
+  }
+  return files;
+}
+
 function inspectModuleDir(nodeRedDir, name, warn = console.warn) {
   const dir = path.join(nodeRedDir, name);
   if (!fs.existsSync(dir)) return { hasDir: false };
@@ -242,6 +298,11 @@ function run() {
     if (callers.calls === 0) failures.push('[' + profile + '] caller scan found no osi-lib require calls');
     if (callers.issues.length) failures.push(...callers.issues.map((i) => '[' + profile + '] ' + i));
     else console.log('OK [' + profile + '] ' + callers.calls + ' osi-lib caller names are registered');
+    const helperNames = collectHelperNames({ packageJson, nameToPath });
+    const moduleCallers = checkHelperModuleCallers({ moduleFiles: collectHelperModuleFiles(nodeRedDir, helperNames), nameToPath });
+    if (moduleCallers.calls === 0) failures.push('[' + profile + '] helper-module caller scan found no osi-lib require calls');
+    if (moduleCallers.issues.length) failures.push(...moduleCallers.issues.map((i) => '[' + profile + '] ' + i));
+    else console.log('OK [' + profile + '] ' + moduleCallers.calls + ' helper-module osi-lib caller names are registered');
     const codecIssues = checkCodecs({ nameToPath, deploySource, codecsDir: path.join(nodeRedDir, 'codecs') });
     if (codecIssues.length) failures.push(...codecIssues.map((i) => '[' + profile + '] ' + i));
     else console.log('OK [' + profile + '] codec NAME_TO_PATH entries');
@@ -255,5 +316,6 @@ function run() {
 
 if (require.main === module) run();
 module.exports = {
-  collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, checkCallerNames, STAGED_DELIVERY,
+  collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, checkCallerNames,
+  checkHelperModuleCallers, collectHelperModuleFiles, STAGED_DELIVERY,
 };
