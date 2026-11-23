@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OSI OS</title>
+    <style>
+      body { margin: 0; color: #203027; background: #f3f6f4; font: 16px/1.5 system-ui, sans-serif; }
+      main { max-width: 1120px; margin: 0 auto; padding: 24px; }
+      iframe { display: block; width: 100%; height: min(900px, 90vh); border: 1px solid #cad5cf; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Try OSI OS</h1>
+      <p>Explore irrigation zones, sensor readings, schedules and valve controls in the OSI OS dashboard.</p>
+      <iframe id="osi-simulator-frame" src="/simulator/" title="OSI OS dashboard"
+        loading="lazy"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals"
+        allow="geolocation 'none'; camera 'none'; microphone 'none'"></iframe>
+      <p><a href="/simulator/">Open OSI OS</a></p>
+    </main>
+  </body>
+</html>

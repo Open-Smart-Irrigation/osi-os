@@ -1,0 +1,1496 @@
+{
+  "schema": "osi-public-simulator-coverage-map/1",
+  "source": "Empty Task 10 browser placeholders from actions.spec.ts, plans.spec.ts and triggers.spec.ts. Trace IDs remain indexed here and in action-inventory.md.",
+  "rows": [
+    {
+      "trace_id": "AU01",
+      "source_title": "AU01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU02",
+      "source_title": "AU02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU03",
+      "source_title": "AU03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU04",
+      "source_title": "AU04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU05",
+      "source_title": "AU05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU06",
+      "source_title": "AU06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU07",
+      "source_title": "AU07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU08",
+      "source_title": "AU08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU09",
+      "source_title": "AU09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AU10",
+      "source_title": "AU10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/sessions.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR01",
+      "source_title": "PR01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR02",
+      "source_title": "PR02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR03",
+      "source_title": "PR03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR04",
+      "source_title": "PR04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR05",
+      "source_title": "PR05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR06",
+      "source_title": "PR06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR07",
+      "source_title": "PR07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR08",
+      "source_title": "PR08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR09",
+      "source_title": "PR09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR10",
+      "source_title": "PR10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "PR11",
+      "source_title": "PR11 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SY01",
+      "source_title": "SY01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SY02",
+      "source_title": "SY02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SY03",
+      "source_title": "SY03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SY04",
+      "source_title": "SY04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/preferences-system.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SU01",
+      "source_title": "SU01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/support.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "SU02",
+      "source_title": "SU02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/support.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA01",
+      "source_title": "FA01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA02",
+      "source_title": "FA02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA03",
+      "source_title": "FA03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA04",
+      "source_title": "FA04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA05",
+      "source_title": "FA05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA06",
+      "source_title": "FA06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA07",
+      "source_title": "FA07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA08",
+      "source_title": "FA08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA09",
+      "source_title": "FA09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "FA10",
+      "source_title": "FA10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/farm.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV01",
+      "source_title": "DV01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV02",
+      "source_title": "DV02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV03",
+      "source_title": "DV03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV04",
+      "source_title": "DV04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV05",
+      "source_title": "DV05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV06",
+      "source_title": "DV06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV07",
+      "source_title": "DV07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV08",
+      "source_title": "DV08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV09",
+      "source_title": "DV09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV10",
+      "source_title": "DV10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV11",
+      "source_title": "DV11 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV12",
+      "source_title": "DV12 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV13",
+      "source_title": "DV13 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV14",
+      "source_title": "DV14 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV15",
+      "source_title": "DV15 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV16",
+      "source_title": "DV16 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV17",
+      "source_title": "DV17 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV18",
+      "source_title": "DV18 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV19",
+      "source_title": "DV19 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV20",
+      "source_title": "DV20 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV21",
+      "source_title": "DV21 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV22",
+      "source_title": "DV22 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV23",
+      "source_title": "DV23 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV24",
+      "source_title": "DV24 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV25",
+      "source_title": "DV25 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV26",
+      "source_title": "DV26 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "DV27",
+      "source_title": "DV27 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/devices.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/registration.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA01",
+      "source_title": "VA01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA02",
+      "source_title": "VA02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA03",
+      "source_title": "VA03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA04",
+      "source_title": "VA04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA05",
+      "source_title": "VA05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA06",
+      "source_title": "VA06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA07",
+      "source_title": "VA07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA08",
+      "source_title": "VA08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA09",
+      "source_title": "VA09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA10",
+      "source_title": "VA10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA11",
+      "source_title": "VA11 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA12",
+      "source_title": "VA12 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA13",
+      "source_title": "VA13 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA14",
+      "source_title": "VA14 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA15",
+      "source_title": "VA15 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA16",
+      "source_title": "VA16 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA17",
+      "source_title": "VA17 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA18",
+      "source_title": "VA18 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA19",
+      "source_title": "VA19 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA20",
+      "source_title": "VA20 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR01",
+      "source_title": "TR01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR02",
+      "source_title": "TR02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR03",
+      "source_title": "TR03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD01",
+      "source_title": "RD01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD02",
+      "source_title": "RD02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD03",
+      "source_title": "RD03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD04",
+      "source_title": "RD04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD05",
+      "source_title": "RD05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD06",
+      "source_title": "RD06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD07",
+      "source_title": "RD07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "RD08",
+      "source_title": "RD08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/rain-history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "EN01",
+      "source_title": "EN01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/environment.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "EN02",
+      "source_title": "EN02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/environment.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN01",
+      "source_title": "AN01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN02",
+      "source_title": "AN02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN03",
+      "source_title": "AN03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN04",
+      "source_title": "AN04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN05",
+      "source_title": "AN05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "AN06",
+      "source_title": "AN06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/analysis.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI01",
+      "source_title": "HI01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI02",
+      "source_title": "HI02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI03",
+      "source_title": "HI03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI04",
+      "source_title": "HI04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI05",
+      "source_title": "HI05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI06",
+      "source_title": "HI06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI07",
+      "source_title": "HI07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI08",
+      "source_title": "HI08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI09",
+      "source_title": "HI09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI10",
+      "source_title": "HI10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI11",
+      "source_title": "HI11 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "HI12",
+      "source_title": "HI12 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/history-api.test.ts",
+        "demo/tests/history.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "NE01",
+      "source_title": "NE01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/network.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "NE02",
+      "source_title": "NE02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/network.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "NE03",
+      "source_title": "NE03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/network.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "NE04",
+      "source_title": "NE04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/network.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO01",
+      "source_title": "JO01 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO02",
+      "source_title": "JO02 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO03",
+      "source_title": "JO03 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO04",
+      "source_title": "JO04 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO05",
+      "source_title": "JO05 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO06",
+      "source_title": "JO06 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO07",
+      "source_title": "JO07 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO08",
+      "source_title": "JO08 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO09",
+      "source_title": "JO09 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO10",
+      "source_title": "JO10 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO11",
+      "source_title": "JO11 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO12",
+      "source_title": "JO12 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO13",
+      "source_title": "JO13 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO14",
+      "source_title": "JO14 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO15",
+      "source_title": "JO15 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO16",
+      "source_title": "JO16 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO17",
+      "source_title": "JO17 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO18",
+      "source_title": "JO18 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO19",
+      "source_title": "JO19 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "JO20",
+      "source_title": "JO20 pending public host and fixture (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/journal.test.ts",
+        "demo/tests/journal-review.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA07",
+      "source_title": "VA07 schedules overview shows seven compiled day windows and push state (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA08",
+      "source_title": "VA08 create WEEKLY and ONCE plans and verify dependent overview reads (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA09",
+      "source_title": "VA09 edit a plan and show native conflict labels without losing the prior schedule (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA10",
+      "source_title": "VA10 delete WEEKLY plan and verify it disappears from the overview (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA11",
+      "source_title": "VA11 resend unchanged plan and observe delivery acknowledgement (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "VA12",
+      "source_title": "VA12 deactivate, skip today, and reactivate weekly scheduling (Tasks 7-9)",
+      "model_tests": [
+        "demo/tests/irrigation.test.ts",
+        "demo/tests/plans.test.ts",
+        "demo/tests/contracts.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR01",
+      "source_title": "TR01 dry SWT at 06:00 opens through the native schedule and valve history (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR02",
+      "source_title": "TR02 wet SWT skips; disabling the saved rule prevents the next daily evaluation (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "TR03",
+      "source_title": "TR03 threshold and duration edits change the next daily evaluation (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": "demo/tests/public/release.spec.ts",
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "C22",
+      "source_title": "C22 SWT_AVG shows the row-mean result and does not count WATERMARK-linked rows (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "C27-C30",
+      "source_title": "C27-C30 DENDRO sensitivity, response mode, freshness, and source selection appear in the advisory (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    },
+    {
+      "trace_id": "C36",
+      "source_title": "C36 a manual or weekly valve owner makes a simultaneous automatic start skip as busy (Tasks 7-10)",
+      "model_tests": [
+        "demo/tests/triggers.test.ts"
+      ],
+      "browser_test": null,
+      "coverage_note": "The empty browser slot is retired. Model assertions remain in the listed suite; browser_test is a separate existing surface check and does not imply this inventory row was exercised in UI."
+    }
+  ]
+}

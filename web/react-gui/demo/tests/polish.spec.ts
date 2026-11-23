@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {clickHeaderControl} from './header';
 
 test.beforeEach(async({page})=>{await page.goto('/');});
 
@@ -17,7 +18,7 @@ test('expanded valve device keeps a readable title and translated actions keep w
 
 test('create form has padding, initial focus and feedback; collapsed zone can be deleted',async({page})=>{
   const app=page.frameLocator('#app');
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add Zone',exact:true}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:'Add zone',exact:true}).click();
   await expect(app.getByLabel('Zone Name')).toBeFocused();
   expect(await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).evaluate(el=>parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
   await app.getByLabel('Zone Name').fill('Polish trial');await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).click();
@@ -31,9 +32,9 @@ test('create form has padding, initial focus and feedback; collapsed zone can be
 
 test('demo account actions preserve the session and give dismissible feedback',async({page})=>{
   const app=page.frameLocator('#app');
-  for(const action of ['Logout','OSI Server']) {
-    await app.getByRole('button',{name:/Account/}).click();await app.getByRole('menuitem',{name:action,exact:true}).click();
-    await expect(app.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+  for(const action of ['Log out','OSI Server']) {
+    await clickHeaderControl(app,app.getByRole('button',{name:/Account/}));await app.getByRole('menuitem',{name:action,exact:true}).click();
+    await expect(app.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
     await expect(page.locator('#host-notice')).toContainText('not simulated');
     await page.getByRole('button',{name:'Dismiss notice',exact:true}).click();await expect(page.locator('#host-notice')).toBeEmpty();
   }
@@ -44,7 +45,7 @@ test('accelerated opening never displays more time than requested',async({page})
   await page.getByRole('combobox',{name:'Simulation speed'}).selectOption('10');await page.waitForTimeout(800);
   await app.getByRole('button',{name:'Open',exact:true}).click();await app.getByRole('spinbutton').fill('1');
   await app.getByRole('button',{name:'Open for 1 min',exact:true}).click();
-  const tile=app.getByTestId('valve-last-seen').locator('..');
+  const tile=app.getByTestId('valve-actions').locator('xpath=..');
   await expect(tile).toContainText('min left');
   await expect(tile).not.toContainText('2 min left');
   await page.getByRole('button',{name:'Pause',exact:true}).click();
@@ -99,8 +100,8 @@ for(const zone of ['Europe/Zurich','America/Los_Angeles'])test.describe(zone,()=
 test('opening the app directly retains unsupported-action feedback',async({page})=>{
   await page.goto('/demo/app.html#/dashboard');
   await page.getByRole('button',{name:/Account/}).click();
-  await page.getByRole('menuitem',{name:'Logout',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'OSI OS Dashboard',exact:true})).toBeVisible();
+  await page.getByRole('menuitem',{name:'Log out',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
   await expect(page.locator('#demo-notice')).toContainText('not simulated');
   await page.locator('#demo-notice').click();await expect(page.locator('#demo-notice')).toBeHidden();
 });

@@ -2,13 +2,15 @@ import { useEffect, useRef, type RefObject } from 'react';
 
 interface Entry { element: HTMLElement; opener: HTMLElement | null }
 const dialogs: Entry[] = [];
-const focusableSelector = 'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])';
+const focusableSelector = 'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex]:not([tabindex="-1"])';
 function topDialog() { return dialogs[dialogs.length - 1]; }
 function controls(element: HTMLElement): HTMLElement[] {
   return Array.from(element.querySelectorAll<HTMLElement>(focusableSelector)).filter(control => {
     for (let node: HTMLElement | null = control; node; node = node.parentElement) {
       const style = getComputedStyle(node);
       if (node.hidden || style.display === 'none' || style.visibility === 'hidden') return false;
+      const closedDetails: HTMLElement | null = node.closest<HTMLElement>('details:not([open])');
+      if (closedDetails && control !== closedDetails.querySelector('summary')) return false;
       if (node === element) break;
     }
     return control.tabIndex >= 0;
@@ -16,9 +18,11 @@ function controls(element: HTMLElement): HTMLElement[] {
 }
 
 /** Only the front dialog owns keyboard focus; closing it returns to its opener. */
-export function useModalFocus(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void, initialFocus?: string) {
+export function useModalFocus(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void, initialFocus?: string | 'self', suspended = false) {
   const close = useRef(onClose);
   close.current = onClose;
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
   useEffect(() => {
     const element = ref.current;
     if (!open || !element) return;
@@ -28,11 +32,11 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, open: boolean,
     dialogs.splice(childIndex < 0 ? dialogs.length : childIndex, 0, entry);
     const focusFirst = () => (controls(element)[0] ?? element).focus();
     if (topDialog() === entry) {
-      (initialFocus ? element.querySelector<HTMLElement>(initialFocus) : null)?.focus();
+      (initialFocus === 'self' ? element : initialFocus ? element.querySelector<HTMLElement>(initialFocus) : null)?.focus();
       if (!element.contains(document.activeElement)) focusFirst();
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (topDialog() !== entry) return;
+      if (topDialog() !== entry || suspendedRef.current) return;
       if (event.key === 'Escape' && !event.shiftKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -40,14 +44,15 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, open: boolean,
       } else if (event.key === 'Tab') {
         const items = controls(element);
         const index = items.indexOf(document.activeElement as HTMLElement);
-        if (!items.length || index < 0 || (event.shiftKey ? index === 0 : index === items.length - 1)) {
+        if (index < 0 && element.contains(document.activeElement)) return;
+        if (!items.length || (event.shiftKey ? index === 0 : index === items.length - 1)) {
           event.preventDefault();
           (event.shiftKey ? items[items.length - 1] ?? element : items[0] ?? element).focus();
         }
       }
     };
     const onFocus = (event: FocusEvent) => {
-      if (topDialog() === entry && !element.contains(event.target as Node)) focusFirst();
+      if (topDialog() === entry && !suspendedRef.current && !element.contains(event.target as Node)) focusFirst();
     };
     document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('focusin', onFocus);

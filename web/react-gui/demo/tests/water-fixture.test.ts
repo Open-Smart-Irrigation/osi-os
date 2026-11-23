@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {environmentFixture, seedDevices, zoneFixture} from '../fixtures';
-import {Simulator, VALVE_EUI} from '../model';
+import {netIrrigationMm, Simulator, VALVE_EUI} from '../model';
 import {zoneHasFlowMeter, zoneHasRainGauge} from '../../src/utils/zoneSoil';
 test('offline water summaries retain local rain, measured irrigation and simulated soil advice',()=>{
   for(const id of [1,2]) {
@@ -54,4 +54,28 @@ test('historical rain and volume agree with daily totals and stay fixed during v
   sim.advance(2000);
   sim.request('POST',`/api/valve/${VALVE_EUI}`,{action:'CLOSE'});
   assert.deepEqual(sim.request('GET','/api/irrigation-zones/1/environment-summary'),initial);
+});
+
+test('public net irrigation keeps missing setup null and supports measured zero and sub-square-metre zones', () => {
+  const sim = new Simulator({mode: 'public'});
+  const configure = (patch: Record<string, unknown>) => sim.request('PUT', '/api/irrigation-zones/1/config', patch);
+  const summary = () => sim.request('GET', '/api/irrigation-zones/1/environment-summary') as {water: {irrigationTodayLiters: number | null; irrigationTodayNetMm: number | null; measuredIrrigationNetMm: number | null; daily: Array<{measuredIrrigationLiters: number | null; measuredIrrigationNetMm: number | null}>}};
+  configure({areaM2: null});
+  configure({irrigationEfficiencyPct: null});
+  sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
+  sim.advanceTo(sim.now + 62_000);
+  const missing = summary().water;
+  assert.equal(missing.irrigationTodayLiters, 6);
+  assert.equal(missing.irrigationTodayNetMm, null);
+  assert.equal(missing.measuredIrrigationNetMm, null);
+  assert.equal(missing.daily.at(-1)?.measuredIrrigationNetMm, null);
+  configure({areaM2: 0.5, irrigationEfficiencyPct: 85});
+  const small = summary().water;
+  assert.equal(small.irrigationTodayNetMm, 10.2);
+  assert.equal(small.daily.at(-1)?.measuredIrrigationNetMm, 10.2);
+  configure({areaM2: null});
+  const nullSetupWithMeasuredZero = summary().water;
+  assert.equal(nullSetupWithMeasuredZero.irrigationTodayNetMm, null);
+  assert.equal(netIrrigationMm(0, 0.5, 85), 0);
+  assert.equal(netIrrigationMm(0, null, 85), null);
 });

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4F6F8">
+  <meta name="description" content="Explore irrigation zones, sensor readings, valve controls and schedules in OSI OS.">
+  <meta property="og:title" content="Explore OSI OS">
+  <meta property="og:description" content="Explore irrigation zones, sensor readings, valve controls and schedules in OSI OS.">
+  <meta property="og:image" content="https://opensmartirrigation.org/simulator/assets/osi-os-preview.png">
+  <title>Explore OSI OS</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./host.css">
+</head>
+<body>
+  <main class="visitor-shell">
+    <header class="host-bar">
+      <div class="host-heading">
+        <p id="brand" class="brand">Open Smart Irrigation</p>
+        <h1 id="page-title">Explore OSI OS</h1>
+      </div>
+      <div class="persistent-controls">
+        <a id="home-link" class="host-home-link" data-public-link="home">Home</a>
+        <button id="guide-start" type="button" class="control-button">Guide</button>
+        <button id="open-tools" type="button" class="control-button" aria-label="Controls" aria-controls="tools-dialog" aria-haspopup="dialog"><span>Controls</span></button>
+        <button id="reset" type="button" class="control-button primary-control">Reset session</button>
+      </div>
+    </header>
+    <div id="event-row" class="event-row" hidden><button id="skip-event" type="button" class="control-button" hidden><span data-skip-label>Skip to next event</span><span data-skip-time></span></button></div>
+    <p id="farm-safety" class="farm-safety" role="note">Simulated farm. Nothing here controls real equipment.</p>
+    <p id="mobile-luganda-review" class="review-note mobile-review-note" role="note" hidden></p>
+
+    <div class="visitor-layout">
+      <aside id="guide-panel" class="guide-panel" hidden aria-labelledby="guide-title">
+        <div class="drawer-heading"><h2 id="guide-title">Explore a farm workflow</h2><button id="guide-close" type="button" class="control-button">Close</button></div>
+        <p id="guide-intro">Follow a short path through advice, history, timed irrigation, results and a schedule. The guide only navigates.</p>
+        <p id="guide-step-copy" hidden></p>
+        <div class="guide-actions"><button id="guide-next" type="button" class="control-button primary-control">Start guide</button></div>
+        <nav id="guide-links" class="public-links" aria-label="More about OSI OS" hidden><a data-public-link="visitor">What OSI OS is</a><a data-public-link="installer">Set up a gateway</a><a data-public-link="developer">Source code</a><a data-public-link="home">Home</a></nav>
+      </aside>
+      <aside class="guidance" role="region" tabindex="0" aria-labelledby="features-title instructions-title">
+        <section id="core-features" aria-labelledby="features-title">
+          <h2 id="features-title">OSI OS core features</h2>
+          <ul class="feature-list">
+            <li><strong id="feature-one-title">Raspberry Pi 4 &amp; 5</strong><span id="feature-one-copy">Runs locally on your Raspberry Pi gateway.</span></li>
+            <li><strong id="feature-two-title">Offline operation</strong><span id="feature-two-copy">Monitor and control irrigation without an internet connection.</span></li>
+            <li><strong id="feature-three-title">Flexible device support</strong><span id="feature-three-copy">OSI OS supports 12 devices for sensing and irrigation control.</span></li>
+            <li><strong id="feature-four-title">Multiple languages</strong><span id="feature-four-copy">Use the dashboard in your preferred language.</span></li>
+            <li><strong id="feature-five-title">Multiple accounts &amp; roles</strong><span id="feature-five-copy">Give each user the access their role needs.</span></li>
+            <li><strong id="feature-six-title">Automated irrigation</strong><span id="feature-six-copy">Manage zones, schedules and sensor-based triggers.</span></li>
+          </ul>
+        <nav class="public-links" aria-label="More about OSI OS">
+          <a data-public-link="visitor">What OSI OS is</a><a data-public-link="installer">Set up a gateway</a><a data-public-link="developer">Source code</a>
+        </nav>
+        </section>
+        <section class="try-controls" aria-labelledby="instructions-title">
+          <h2 id="instructions-title">Try these controls</h2>
+          <ol>
+            <li id="instruction-one">Choose a language from the app menu.</li>
+            <li id="instruction-two">Open a zone to inspect its readings and controls.</li>
+            <li id="instruction-three">Open a valve or try a schedule.</li>
+          </ol>
+        </section>
+        <p id="luganda-review" class="review-note" hidden></p>
+      </aside>
+
+      <section class="simulator" aria-label="OSI OS farm">
+        <div class="phone-space">
+          <div class="phone-frame">
+            <iframe id="app" title="OSI OS farmer app" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals"></iframe>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <dialog id="reset-dialog" aria-labelledby="reset-title">
+    <h2 id="reset-title">Reset this session?</h2>
+    <p id="reset-detail">Reset clears farm changes, valve history and schedules. Your language stays the same.</p>
+    <div class="guide-actions"><button id="reset-confirm" type="button" class="control-button primary-control">Reset session</button><button id="reset-cancel" type="button" class="control-button" autofocus>Keep exploring</button></div>
+  </dialog>
+
+  <section id="loading" class="loading-panel" role="status" aria-live="polite">
+    <span id="loading-message">Loading OSI OS…</span>
+    <button id="retry" type="button" class="control-button primary-control" hidden>Retry</button>
+  </section>
+  <p id="host-notice" role="status" aria-live="polite" hidden></p>
+
+  <dialog id="tools-dialog" aria-labelledby="tools-title">
+    <div class="drawer-heading">
+      <h2 id="tools-title">Controls</h2>
+      <button id="close-tools" type="button" class="control-button" aria-label="Close">Close</button>
+    </div>
+    <p class="sim-time"><span id="time-label">Time</span>: <time id="simulated-time">—</time></p>
+    <p id="tools-luganda-review" class="review-note" hidden></p>
+    <label class="speed-control" for="speed"><span id="speed-label">Clock speed</span>
+      <select id="speed">
+        <option value="1">1×</option>
+        <option value="10">10×</option>
+        <option value="60">60×</option>
+      </select>
+    </label>
+    <button id="pause" type="button" class="control-button" aria-pressed="false">Pause time</button>
+    <button id="next-event" type="button" class="control-button">Advance to next event</button>
+    <button id="view-toggle" type="button" class="control-button" aria-pressed="false">Expanded view</button>
+  </dialog>
+
+  <script type="module" src="./host.ts"></script>
+</body>
+</html>

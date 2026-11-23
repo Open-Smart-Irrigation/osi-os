@@ -4,6 +4,7 @@ import { useDateFormat } from '../../../utils/datetime';
 import { formatDisplayFallbackReason } from '../../../utils/displayFallback';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
+import { subscribePublicSimulatorInvalidation } from '../../../utils/publicSimulatorInvalidation';
 import { LocalTab } from './LocalTab';
 import { AgronomicTab } from './AgronomicTab';
 import { WaterTab } from './WaterTab';
@@ -129,9 +130,11 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
     };
 
     void load();
+    const unsubscribe = subscribePublicSimulatorInvalidation(() => void load());
     const interval = setInterval(() => void load(), 5 * 60 * 1000);
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(interval);
     };
   }, [zone.id]);

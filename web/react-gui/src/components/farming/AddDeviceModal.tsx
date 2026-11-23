@@ -4,6 +4,7 @@ import { devicesAPI } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 import { Button, FormField, INPUT_CLASS, Modal } from '../../ui-core';
 import { normalizeEntityName } from '../../utils/entityName';
+import { createPublicSimulatorDevEui, isPublicSimulatorBuild } from '../../utils/publicSimulatorDeviceDefaults';
 
 interface AddDeviceModalProps {
   isOpen: boolean;
@@ -30,7 +31,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     setName('');
-    setDeveui('');
+    setDeveui(isPublicSimulatorBuild() ? createPublicSimulatorDevEui() : '');
     setAppkey('');
     setStregaGeneration('GEN1');
     setError('');

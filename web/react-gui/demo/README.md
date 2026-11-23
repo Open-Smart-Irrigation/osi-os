@@ -128,7 +128,7 @@ any different version used by the eventual presentation.
 | Valve dialog, pending/observed states and countdown | Two simulated seconds to acknowledge, local close/expiry |
 | SWT trigger editor | Saves/reloads configuration; no scheduler execution |
 
-The dashboard title is **OSI OS Dashboard**. Full environment and weather panels
+The dashboard title is **OSI OS**. Full environment and weather panels
 start disabled through the existing display preference. Each zone has a simulated
 LSN50 MOD9 node with a rain gauge and flow meter: Tomato has 6 mm and 120 L today;
 Demonstration bed has 6 mm and 80 L. Readings and device history share the same

@@ -8,6 +8,7 @@ declare global {
   interface ImportMetaEnv {
     readonly VITE_OSI_SERVER_URL?: string;
     readonly VITE_BASE_PATH?: string;
+    readonly VITE_PUBLIC_SIMULATOR?: string;
   }
 
   interface ImportMeta {

@@ -7,12 +7,12 @@ test('demo-only machine Luganda fills valve fallback strings and preserves inter
   const english=flatten(read('public/locales/en/valves.json'));
   const overrides=read('demo/locales/lg-valves.json') as Record<string,string>;
   const copy={...flatten(read('public/locales/lg/valves.json')),...overrides};
-  const shared=new Set(['openDialog.liters','scheduleDialog.noWindows','scheduleDialog.preview','scheduleDialog.previewLiters','settingsDialog.gen1','settingsDialog.gen2','format.temperature']);
+  const shared=new Set(['openDialog.liters','scheduleDialog.noWindows','scheduleDialog.preview','scheduleDialog.previewLiters','scheduleDialog.saveSucceeded','settingsDialog.gen1','settingsDialog.gen2','format.temperature']);
   // Conditional irrigation and CMD-04 valve text waits for a human Luganda pass
   // (docs/i18n/pending-luganda-translations.md). The demo shows the English source
   // text for it, never machine Luganda; a human pass drops the key from this list.
   const pendingPrefixes=['irrigationPolicy.','irrigationPreference.','cancelOutcome.','cancelCollateral.','commandNoAnswer.'];
-  const pendingKeys=new Set(['planLost','schedulerStatusLost','scheduleDialog.push.LOST','resumeRefusedClearPending','cancelHelp','cancelHelpLabel','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton','settingsDialog.title','settingsDialog.flowFromZone']);
+  const pendingKeys=new Set(['scheduleDialog.saveSucceeded','planLost','schedulerStatusLost','scheduleDialog.push.LOST','resumeRefusedClearPending','cancelHelp','cancelHelpLabel','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton','settingsDialog.title','settingsDialog.flowFromZone']);
   const pendingHuman=(key:string)=>pendingKeys.has(key)||pendingPrefixes.some((prefix)=>key.startsWith(prefix));
   assert.deepEqual(Object.keys(copy).sort(),Object.keys(english).sort());
   for(const [key,value] of Object.entries(english)) {
