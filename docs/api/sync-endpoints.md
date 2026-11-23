@@ -63,9 +63,15 @@ Built identically by `sync-bootstrap-build`, `al-link-build-req` and
 `entity_name_commands_v1`, `zone_config_weather_source_v1`,
 `zone_config_stage_started_on_v1`, `watermark_v1`,
 `chameleon_config_commands_v1`, `device_soil_depth_commands_v1`,
-`conditional_irrigation_v1`, and `field_journal_v1` when the journal is enabled. `watermark_v1` covers the
+`conditional_irrigation_v1`, `zone_apply_versioned_v1`, and `field_journal_v1` when the journal is enabled. `watermark_v1` covers the
 calibration resource, its set/delete commands, snapshots, and events. The other
-two tokens independently gate their named exact-base device commands. The cloud
+two tokens independently gate their named exact-base device commands. Two
+tokens are conditional on their backing module loading: the list drops
+`conditional_irrigation_v1` while `osi-irrigation-policy` cannot load, and
+drops `zone_apply_versioned_v1` while `osi-zone-commands` does not expose the
+version-checked legacy zone apply (`applyLegacyZoneCommand`). The cloud
+offers cloud-side zone editing only to a gateway that reported
+`zone_apply_versioned_v1` or runs a stable version >= 0.8.4. The cloud
 reads the list as `gatewayIdentity.syncCapabilities()`. It puts `weatherSource`
 into `UPSERT_ZONE` and `UPSERT_ZONE_CONFIG` only for a gateway that reported
 `zone_config_weather_source_v1`, and `stageStartedOn` only for one that

@@ -27,15 +27,20 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
 }
 
 // The link request is built by the installation helper's build stage, which
-// al-link-build-req ("Build server auth request") delegates to.
+// al-link-build-req ("Build server auth request") delegates to. Its capability
+// list comes from the helper's shared reportedSyncCapabilities builder, so the
+// tokens are pinned behaviourally against that output.
 const linkSource = linkBuilderSource(flows, 'bcm27xx_bcm2712');
-for (const cap of expectedCaps) assert.match(linkSource, new RegExp(cap), `link advertises ${cap}`);
-const capabilityLists = [
-  ...flows.filter((node) => /sync-bootstrap-build|sync-force-build/.test(node.id + ' ' + node.name)).map((node) => node.func),
-  linkSource,
-].map((source) => [...source.matchAll(/['"]([a-z][a-z0-9_]+_v1)['"]/g)].map((m) => m[1]).filter((v) => expectedCaps.includes(v)));
-assert.ok(capabilityLists.length >= 3, 'all three builders expose capability tokens');
+assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, 'link builds the list through the shared builder');
+const installation = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'));
+const linkCapabilities = installation.reportedSyncCapabilities(() => ({ ok: false }));
+for (const cap of expectedCaps) assert.ok(linkCapabilities.includes(cap), `link advertises ${cap}`);
+const capabilityLists = flows
+  .filter((node) => /sync-bootstrap-build|sync-force-build/.test(node.id + ' ' + node.name))
+  .map((node) => [...node.func.matchAll(/['"]([a-z][a-z0-9_]+_v1)['"]/g)].map((m) => m[1]).filter((v) => expectedCaps.includes(v)));
+assert.ok(capabilityLists.length >= 2, 'both flows builders expose capability tokens');
 for (const list of capabilityLists) assert.deepEqual(list, expectedCaps, 'capability order is stable');
+assert.deepEqual(linkCapabilities.filter((v) => expectedCaps.includes(v)), expectedCaps, 'link capability order is stable');
 
 // Execute both shipped builders against one real SQLite fixture. The child
 // adapts node:sqlite's synchronous API to the callback-shaped DB helper and

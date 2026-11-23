@@ -67,6 +67,28 @@ function capabilityBaseFrom(source, builderId) {
   return values;
 }
 
+// The link request builds its list through the installation helper's
+// reportedSyncCapabilities, so its base is pinned behaviourally: with only
+// osi-irrigation-policy loadable the builder returns exactly the canonical
+// base, and a loadable version-checked zone apply appends the zone token.
+function linkCapabilityBaseFrom(profile) {
+  const helper = require(path.join(
+    ROOT,
+    `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
+  ));
+  const loader = (modules) => (name) => (Object.prototype.hasOwnProperty.call(modules, name)
+    ? { ok: true, value: modules[name] }
+    : { ok: false, error: 'module not installed: ' + name });
+  const base = helper.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {} }));
+  assert.deepEqual(base, capabilityBase, `${profile}/al-link-build-req advertises the canonical capability base`);
+  assert.deepEqual(
+    helper.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {}, 'zone-commands': { applyLegacyZoneCommand() {} } })),
+    capabilityBase.concat(['zone_apply_versioned_v1']),
+    `${profile}/al-link-build-req appends zone_apply_versioned_v1 only while the zone apply is loadable`
+  );
+  return base;
+}
+
 for (const profile of ['bcm2712', 'bcm2709']) {
   const profileFlowPath = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
   const profileFlows = JSON.parse(fs.readFileSync(profileFlowPath, 'utf8'));
@@ -76,7 +98,9 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   assert.doesNotMatch(profileApplier.func, /\bcapabilities\s*:/, `${profile} protected applier supplies no runtime capability metadata`);
   // The link request is built by the installation helper's build stage.
   const linkSource = linkBuilderSource(profileFlows, profile);
-  const bases = ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build'].map((id) => capabilityBaseFrom(id === 'al-link-build-req' ? linkSource : profileById[id].func, `${profile}/${id}`));
+  assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${profile} link request builds the list through the shared builder`);
+  const bases = ['sync-bootstrap-build', 'sync-force-build'].map((id) => capabilityBaseFrom(profileById[id].func, `${profile}/${id}`));
+  bases.unshift(linkCapabilityBaseFrom(profile));
   assert.deepEqual(bases[0], bases[1], `${profile} bootstrap/link capability bases match`);
   assert.deepEqual(bases[0], bases[2], `${profile} bootstrap/force capability bases match`);
   assert.match(profileById['sync-bootstrap-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} bootstrap keeps journal conditional capability`);
