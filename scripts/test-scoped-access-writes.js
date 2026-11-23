@@ -4052,14 +4052,9 @@ test('admin system writes: scoped, an enabled admin passes on to the handler unc
   }
 });
 
-// Unlinking stops the whole gateway's cloud reporting (#766): its guard
-// requires an enabled admin with scoped access off too. Every other admin
-// system write keeps the flag-off passthrough.
-const ADMIN_ALWAYS_GUARDS = new Set(['account-unlink-admin-write-guard']);
-
 test('admin system writes: flag off, every request passes on untouched without loading a helper', async () => {
   const envOff = { ...ENV, OSI_SCOPED_ACCESS: '0' };
-  for (const route of ADMIN_SYSTEM_WRITES.filter((candidate) => !ADMIN_ALWAYS_GUARDS.has(candidate.guard))) {
+  for (const route of ADMIN_SYSTEM_WRITES) {
     for (const [label, authorization] of [
       ['researcher', bearerFor(2, 'res1')],
       ['viewer', bearerFor(3, 'view1')],
@@ -4075,24 +4070,6 @@ test('admin system writes: flag off, every request passes on untouched without l
       assert.deepEqual(run.errors, [], route.label + ' (' + label + ')');
     }
   }
-});
-
-test('account unlink: flag off, only an enabled admin passes the guard', async () => {
-  const envOff = { ...ENV, OSI_SCOPED_ACCESS: '0' };
-  const route = ADMIN_SYSTEM_WRITES.find((candidate) => candidate.guard === 'account-unlink-admin-write-guard');
-  for (const [label, authorization, status] of [
-    ['researcher', bearerFor(2, 'res1'), 403],
-    ['viewer', bearerFor(3, 'view1'), 403],
-    ['no token', null, 401],
-  ]) {
-    const run = await runAdminSystemGuard(route, authorization, { env: envOff });
-    assert.equal(run.pass, null, label);
-    assert.equal(run.refuse.statusCode, status, label);
-    if (status === 403) assert.deepEqual(run.refuse.payload, { message: 'Forbidden', code: 'forbidden' }, label);
-  }
-  const admin = await runAdminSystemGuard(route, bearerFor(1, 'admin1'), { env: envOff });
-  assert.equal(admin.refuse, null, 'admin');
-  assert.equal(admin.pass, admin.sent, 'admin: the same message goes on');
 });
 
 const path434 = require('node:path');
@@ -4550,15 +4527,6 @@ test('R6 flag-off guards and full-scope wildcard keep their old bearer boundary'
       const forbiddenLib = { require() { throw new Error('flag-off scope helper touched'); } };
       try {
         for (const route of adminRoutes434) {
-          if (route.id === 'account-unlink-admin-write-guard') {
-            // #766: unlinking needs an enabled admin with the flag off too.
-            const refused = await run434(profile, route.id, db,
-              req434(3, 'view1', route.method, route.path, route.params || {}),
-              { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' } });
-            assert.equal(refused.result[0], null, `${name}/${route.id}: flag-off viewer refused`);
-            assert.equal(refused.result[1].statusCode, 403);
-            continue;
-          }
           const out = await run434(profile, route.id, db,
             req434(3, 'view1', route.method, route.path, route.params || {}),
             { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },

@@ -57,10 +57,11 @@ dev workstation unless noted.
 **Mandatory before a release that carries the #766 change, on a gateway that
 is linked:** check on the gateway that the MQTT password is present. From that
 release on, a gateway without it is treated as unlinked and stops reporting
-to the cloud. The check prints only `present` or `MISSING`, never the value:
+to the cloud. The check prints only `present` or `MISSING`, never the value,
+and treats a blank value as missing, as the gateway does:
 
 ```sh
-[ -n "$(uci -q get osi-server.cloud.mqtt_password)" ] && echo present || echo MISSING
+case "$(uci -q get osi-server.cloud.mqtt_password)" in *[![:space:]]*) echo present ;; *) echo MISSING ;; esac
 ```
 
 On `MISSING`, do not deploy: stop and escalate. The same check applies to the

@@ -148,7 +148,9 @@ test.before(async () => {
     req.on('end', () => {
       cloud.sent.push({ method: req.method, path: req.url });
       const answer = cloud.respond && cloud.respond(req, Buffer.concat(chunks).toString('utf8'));
-      res.writeHead(answer ? answer.status : 503, { 'content-type': 'application/json' });
+      // No keep-alive: a reused socket that this server times out between
+      // tests would reset the next request (ECONNRESET).
+      res.writeHead(answer ? answer.status : 503, { 'content-type': 'application/json', connection: 'close' });
       res.end(JSON.stringify(answer ? answer.body : { message: 'fixture cloud' }));
     });
   });
@@ -202,10 +204,10 @@ function sql(f, text, ...params) {
 
 // Two local accounts linked to the same cloud: the state a second farmer
 // account reaches by linking after the first (the link path never clears
-// other rows).
+// other rows). Both are enabled admins, so either may unlink (#766).
 function seedTwoLinkedUsers(f) {
-  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','server','first@cloud',?,'token-first',1900000000000,'2026-01-01T00:00:00Z',11,'verifier-1',2)", cloud.url);
-  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','server','second@cloud',?,'token-second',1900000000000,'2026-02-01T00:00:00Z',11,'verifier-2',2)", cloud.url);
+  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','admin','server','first@cloud',?,'token-first',1900000000000,'2026-01-01T00:00:00Z',11,'verifier-1',2)", cloud.url);
+  sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,server_username,server_url,server_sync_token,server_sync_token_expires_at,server_linked_at,cloud_user_id,server_offline_verifier,server_offline_verifier_version) VALUES(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','admin','server','second@cloud',?,'token-second',1900000000000,'2026-02-01T00:00:00Z',11,'verifier-2',2)", cloud.url);
   sql(f, "INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,?,'11',?,?,'now') ON CONFLICT(peer_node) DO UPDATE SET linked=1, server_url=excluded.server_url, cloud_user_id=excluded.cloud_user_id, gateway_device_eui=excluded.gateway_device_eui, installation_uuid=excluded.installation_uuid", cloud.url, GATEWAY_EUI, f.installationUuid);
   // One pending event, so the outbox builder has something to send.
   sql(f, "INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui) VALUES('evt-766','ZONE','zone-766','ZONE_UPDATED','{}',1,'2026-03-01T00:00:00Z',?)", GATEWAY_EUI);
@@ -415,7 +417,7 @@ for (const profile of PROFILES) {
   test(`${profile}: two local accounts link through the shipped nodes; one unlink stops all reporting; a relink restores it`, async () => {
     const f = fixture(profile);
     try {
-      sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','local'),(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','local')");
+      sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','admin','local'),(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','admin','local')");
       processStarted(false);
       await linkAs(f, 901, 'first', 11);
       processStarted(true);
@@ -473,9 +475,10 @@ test('settings.js never refills DEVICE_MQTT_PASSWORD from the env file', () => {
   assert.ok(keys.includes('DEVICE_MQTT_PASSWORD'));
 });
 
-// Unlinking is a gateway system command: only an enabled gateway admin may do
-// it, with scoped access off or on. The edge has no proof of the cloud gateway
-// owner, so the account that linked the gateway is admitted only as an admin.
+// Unlinking is a gateway system command: an enabled gateway admin may do it,
+// with scoped access off or on. On a gateway that has an enabled admin, the
+// account that linked the gateway is admitted only as an admin (the owner
+// stand-in for gateways without an admin is tested further down).
 const SECRET = 'fixture-auth-secret';
 function bearer(userId, username) {
   const crypto = require('node:crypto');
@@ -546,7 +549,7 @@ for (const profile of PROFILES) {
     }
   }
 
-  test(`${profile}: account-link status reports canUnlink only for an enabled admin`, async () => {
+  test(`${profile}: account-link status reports canUnlink only for an enabled admin while the gateway has one`, async () => {
     const f = fixture(profile);
     try {
       for (const [, uid, name, r, off] of UNLINK_CALLERS) {
@@ -568,6 +571,141 @@ for (const profile of PROFILES) {
       }
     } finally { f.cleanup(); }
   });
+}
+
+// Account-link status through the shipped nodes (decode, then the helper's
+// formatter): the query loads the verifier metadata, the response reports
+// package validity and repair requirements, and a stale "up_to_date" sync
+// status is downgraded when the linked-auth package is incomplete.
+async function statusFor(f, userId, username) {
+  let id = findNode(f.flows, 'al-status-in').wires[0][0];
+  let msg = { req: { headers: { authorization: bearer(userId, username) } } };
+  for (let hops = 0; hops < 4 && id; hops++) {
+    const { result } = await runNode(f, id, msg, new Map(), { AUTH_TOKEN_SECRET: SECRET });
+    msg = (Array.isArray(result) ? result : [result]).find(Boolean);
+    id = (findNode(f.flows, id).wires[0] || []).find((next) => findNode(f.flows, next).type === 'function');
+  }
+  return JSON.parse(JSON.stringify(msg.payload));
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: account-link status reports linked-auth package validity and downgrades a stale state`, async () => {
+    const f = fixture(profile);
+    try {
+      const insert = 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,auth_mode,server_username,server_url,server_linked_at,server_offline_verifier,server_offline_verifier_version,last_auth_sync_status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)';
+      sql(f, insert, 921, 'valid', 'h', 'now', 'u-921', 'admin', 'server', 'valid@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', 'verifier', 2, 'up_to_date');
+      sql(f, insert, 922, 'stale', 'h', 'now', 'u-922', 'admin', 'server', 'stale@cloud', 'https://cloud.example.org', '2026-01-01T00:00:00Z', null, 0, 'up_to_date');
+      sql(f, insert, 923, 'local', 'h', 'now', 'u-923', 'admin', 'local', null, null, null, null, 0, null);
+      const valid = await statusFor(f, 921, 'valid');
+      assert.equal(valid.linked, true);
+      assert.equal(valid.linkedAuthPackageValid, true);
+      assert.equal(valid.linkedAuthRepairRequired, false);
+      assert.equal(valid.linkedAuthSyncStatus, 'up_to_date');
+      assert.equal(valid.offlineVerifierVersion, 2, 'the query loads the verifier version');
+      const stale = await statusFor(f, 922, 'stale');
+      assert.equal(stale.linkedAuthPackageValid, false);
+      assert.equal(stale.linkedAuthRepairRequired, true);
+      assert.equal(stale.linkedAuthSyncStatus, 'repair_required', 'a stale up_to_date state is downgraded');
+      const local = await statusFor(f, 923, 'local');
+      assert.equal(local.linked, false);
+      assert.equal(local.linkedAuthRepairRequired, false);
+      assert.equal(local.offlineVerifierVersion, 0);
+    } finally { f.cleanup(); }
+  });
+}
+
+// A gateway installed from the current seed with scoped access off: the first
+// registered account is a researcher and no account is an admin. The linked
+// account stands in for the gateway owner then (unless it is a viewer), so the
+// farmer who linked the gateway can unlink it. Reported by the round-2 review
+// with this sequence: register, link through the shipped chain, unlink.
+for (const profile of PROFILES) {
+  for (const scoped of [false, true]) {
+    test(`${profile} scoped ${scoped ? 'on' : 'off'}: the first registered account links and then unlinks the gateway`, async () => {
+      const f = fixture(profile);
+      const previous = process.env.OSI_SCOPED_ACCESS;
+      process.env.OSI_SCOPED_ACCESS = scoped ? '1' : '';
+      try {
+        processStarted(true);
+        sql(f, 'DELETE FROM users');
+        const env = { AUTH_TOKEN_SECRET: SECRET, OSI_SCOPED_ACCESS: scoped ? '1' : '' };
+        const registered = await runNode(f, 'auth-db-insert', { userInsert: { username: 'farmer', passwordHash: 'h', createdAt: '2026-01-01T00:00:00Z' } }, new Map(), env);
+        assert.ok(registered.result[0], 'registered');
+        const user = sql(f, "SELECT id, role FROM users WHERE username='farmer'")[0];
+        assert.equal(user.role, scoped ? 'admin' : 'researcher', 'the role registration gives the first account');
+        await linkAs(f, user.id, 'farmer', 501);
+        processStarted(true);
+        const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(user.id, 'farmer'), scoped);
+        assert.equal(outcome.unlinked, true, 'the only account on the gateway can unlink: ' + JSON.stringify(outcome));
+      } finally {
+        if (previous === undefined) delete process.env.OSI_SCOPED_ACCESS; else process.env.OSI_SCOPED_ACCESS = previous;
+        f.cleanup();
+      }
+    });
+
+    test(`${profile} scoped ${scoped ? 'on' : 'off'}: unlink with a missing or malformed token is refused`, async () => {
+      const f = fixture(profile);
+      const previous = process.env.OSI_SCOPED_ACCESS;
+      process.env.OSI_SCOPED_ACCESS = scoped ? '1' : '';
+      try {
+        processStarted(true);
+        seedTwoLinkedUsers(f);
+        for (const authorization of [undefined, 'Bearer x.y', 'Basic abc']) {
+          const outcome = await unlinkRoute(f, linkedFlowStore(), authorization, scoped);
+          assert.ok(!outcome.unlinked, String(authorization));
+          assert.equal(outcome.response.statusCode, 401, String(authorization));
+          assert.equal(sql(f, "SELECT linked FROM sync_link_state WHERE peer_node='cloud'")[0].linked, 1);
+        }
+      } finally {
+        if (previous === undefined) delete process.env.OSI_SCOPED_ACCESS; else process.env.OSI_SCOPED_ACCESS = previous;
+        f.cleanup();
+      }
+    });
+  }
+
+  // Scoped access off. [label, role, linked, disabled, gateway has an enabled admin, allowed]
+  const OWNER_PROXY_CASES = [
+    ['researcher who linked, no admin on the gateway', 'researcher', true, false, false, true],
+    ['researcher who did not link, no admin on the gateway', 'researcher', false, false, false, false],
+    ['viewer who linked, no admin on the gateway', 'viewer', true, false, false, false],
+    ['disabled researcher who linked, no admin on the gateway', 'researcher', true, true, false, false],
+    ['researcher who linked, with an enabled admin on the gateway', 'researcher', true, false, true, false],
+    ['researcher who linked, with only a disabled admin on the gateway', 'researcher', true, false, 'disabled', true],
+  ];
+  for (const [label, role, linkedRow, disabled, admin, allowed] of OWNER_PROXY_CASES) {
+    test(`${profile} scoped off: unlink by a ${label} is ${allowed ? 'allowed' : 'refused with 403'}, and canUnlink agrees`, async () => {
+      const f = fixture(profile);
+      try {
+        processStarted(true);
+        sql(f, 'DELETE FROM users');
+        sql(f, "INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,?,'11',?,?,'now') ON CONFLICT(peer_node) DO UPDATE SET linked=1", cloud.url, GATEWAY_EUI, f.installationUuid);
+        for (const [key, value] of Object.entries({ server_host: 'cloud.example.org', mqtt_password: 'old-mqtt', mqtt_broker_url: 'wss://cloud.example.org/mqtt', link_gateway_device_eui: GATEWAY_EUI })) {
+          f.io.config.set('osi-server.cloud.' + key, value);
+        }
+        sql(f, 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at,auth_mode,server_url,server_sync_token,server_linked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+          931, 'caller', 'h', 'now', 'u-931', role, disabled ? '2026-02-01T00:00:00Z' : null,
+          linkedRow ? 'server' : 'local', linkedRow ? cloud.url : null, linkedRow ? 'token-931' : null, linkedRow ? '2026-03-01T00:00:00Z' : null);
+        if (admin) {
+          sql(f, 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at) VALUES(932,?,?,?,?,?,?)',
+            'admin', 'h', 'now', 'u-932', 'admin', admin === 'disabled' ? '2026-02-01T00:00:00Z' : null);
+        }
+        if (!disabled) {
+          const status = await statusFor(f, 931, 'caller');
+          assert.equal(status.canUnlink, allowed, 'canUnlink');
+        }
+        const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(931, 'caller'), false);
+        const peer = sql(f, "SELECT linked FROM sync_link_state WHERE peer_node='cloud'")[0];
+        if (allowed) {
+          assert.equal(outcome.unlinked, true, JSON.stringify(outcome));
+          assert.equal(peer.linked, 0);
+        } else {
+          assert.equal(outcome.response && outcome.response.statusCode, 403, JSON.stringify(outcome));
+          assert.deepEqual(JSON.parse(JSON.stringify(outcome.response.payload)), { message: 'Forbidden', code: 'forbidden' });
+          assert.equal(peer.linked, 1, 'a refused caller leaves the link in place');
+        }
+      } finally { f.cleanup(); }
+    });
+  }
 }
 
 module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, GATEWAY_EUI, cloud, processStarted };

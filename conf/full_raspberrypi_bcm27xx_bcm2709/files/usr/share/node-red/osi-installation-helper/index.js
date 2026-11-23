@@ -670,6 +670,19 @@ try {
     await close();
     return [msg, null];
   }
+  // Who may unlink: see unlinkPermitted(). With OSI_SCOPED_ACCESS on, the
+  // route's admin guard decides through the scope helper. With it off, this
+  // check reads the caller's row and the admin count, so no flag-off path
+  // needs the scope helper, and it fails closed.
+  const scoped = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';
+  const caller = scoped ? null : await db.get(UNLINK_CALLER_SQL, [Number(auth.userId), String(auth.username).trim()]);
+  if (!scoped && !unlinkPermitted(caller)) {
+    releaseAccountOperation(msg);
+    await close();
+    msg.statusCode = 403;
+    msg.payload = { message: 'Forbidden', code: 'forbidden' };
+    return [null, msg];
+  }
   await accountConfigTransaction(db, {
     fs: global.get('fs'), cp: global.get('cp'), desired: emptyMqttConfig(),
     marker: { kind: 'disconnect', username: auth.username },
@@ -1248,13 +1261,35 @@ function accountCloudMessage({msg, node, global}) {
 }
 module.exports.accountCloudMessage = accountCloudMessage;
 
-// GET /api/account-link/status response from the caller's users row (the
-// decode node selects the whole row). canUnlink mirrors the unlink route's
-// admin guard (account-unlink-admin-write-guard, scoped access on or off), so
-// the page shows the disconnect control only to an enabled admin. The edge
-// holds no proof of the cloud gateway owner (authority contract K1, "Gateway
-// owner"), so ownership alone does not admit anyone.
-function accountLinkStatusResponse({msg}) {
+// Unlinking stops the whole gateway's cloud reporting, a gateway system
+// command (#766). The edge holds no proof of the cloud gateway owner
+// (authority contract K1, "Gateway owner"), so an enabled admin may unlink;
+// on a gateway with no enabled admin, the enabled, currently linked account
+// stands in for the owner, unless it is a viewer. A disabled account never
+// may. row: role, disabled_at, auth_mode, server_url, enabled_admins.
+function unlinkPermitted(row) {
+  if (!row || row.disabled_at) return false;
+  if (row.role === 'admin') return true;
+  const linked = row.auth_mode === 'server' && String(row.server_url || '').trim() !== '';
+  return Number(row.enabled_admins) === 0 && linked && row.role !== 'viewer';
+}
+const ENABLED_ADMINS_SQL = "(SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled_at IS NULL) AS enabled_admins";
+const UNLINK_CALLER_SQL = 'SELECT role, disabled_at, auth_mode, server_url, ' + ENABLED_ADMINS_SQL +
+  ' FROM users WHERE id = ? AND username = ? LIMIT 1';
+// The account-link status query (al-status-decode): named columns only, no
+// password hash, verifier or token; the verifier is reported as present or not.
+const ACCOUNT_LINK_STATUS_SQL = 'SELECT server_username, server_linked_at, server_url, auth_mode, ' +
+  "CASE WHEN COALESCE(server_offline_verifier, '') <> '' THEN 1 ELSE 0 END AS has_offline_verifier, " +
+  'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, ' +
+  'last_auth_sync_at, last_auth_sync_status, last_auth_sync_error, role, disabled_at, ' +
+  ENABLED_ADMINS_SQL + ' FROM users WHERE id = ? AND username = ?';
+module.exports.unlinkPermitted = unlinkPermitted;
+module.exports.ACCOUNT_LINK_STATUS_SQL = ACCOUNT_LINK_STATUS_SQL;
+
+// GET /api/account-link/status response from the row ACCOUNT_LINK_STATUS_SQL
+// selects. canUnlink follows the unlink rule: the route guard's admin check
+// with scoped access on, unlinkPermitted() with it off.
+function accountLinkStatusResponse({msg, env}) {
   const result = msg.payload;
   if (!Array.isArray(result) || result.length === 0) {
     msg.statusCode = 401;
@@ -1262,10 +1297,11 @@ function accountLinkStatusResponse({msg}) {
     return msg;
   }
   const user = result[0];
+  const scoped = String((env && env.get('OSI_SCOPED_ACCESS')) || '') === '1';
   const linked = user.auth_mode === 'server';
-  const offlineVerifier = String(user.server_offline_verifier || '').trim();
+  const hasOfflineVerifier = Number(user.has_offline_verifier) === 1;
   const offlineVerifierVersion = Number(user.server_offline_verifier_version || 0) || 0;
-  const linkedAuthPackageValid = linked && !!offlineVerifier && offlineVerifierVersion >= 1;
+  const linkedAuthPackageValid = linked && hasOfflineVerifier && offlineVerifierVersion >= 1;
   const linkedAuthRepairRequired = linked && !linkedAuthPackageValid;
   msg.statusCode = 200;
   msg.payload = {
@@ -1279,7 +1315,7 @@ function accountLinkStatusResponse({msg}) {
     offlineVerifierVersion: linked ? offlineVerifierVersion : 0,
     lastAuthSyncAt: user.last_auth_sync_at || null,
     lastAuthSyncError: user.last_auth_sync_error || null,
-    canUnlink: user.role === 'admin' && !user.disabled_at,
+    canUnlink: scoped ? (user.role === 'admin' && !user.disabled_at) : unlinkPermitted(user),
   };
   return msg;
 }

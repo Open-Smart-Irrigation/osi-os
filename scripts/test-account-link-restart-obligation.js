@@ -64,6 +64,8 @@ function fixture(profile, kind) {
       run:async()=>{writes++;},
     }),
     all() {throw new Error('a recovery retry must not prepare another cloud authentication');},
+    // The unlinking caller is the gateway's enabled admin (#766 admin check).
+    get:async sql=>sql.includes('FROM users')?{role:'admin',disabled_at:null}:undefined,
     close:async callback=>{if(callback)callback();},
   };
   const osiDb={Database:class{constructor(){return db;}}};

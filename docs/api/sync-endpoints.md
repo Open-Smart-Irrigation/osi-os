@@ -30,7 +30,8 @@ also under a base path, with error code `gateway_unlinked`, and the cloud
 MQTT guards drop every message. One route stays open on purpose: support
 work requests (`/api/v1/support/edge/work-requests`), which the farmer starts
 and which carry only the support request. Unlinking requires an enabled
-gateway admin (#766).
+gateway admin; on a gateway without an enabled admin, the enabled, linked
+account that is not a viewer may unlink it (#766).
 
 ## Cloud to edge command types
 

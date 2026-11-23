@@ -36,7 +36,7 @@
     "confirm": "Are you sure? After disconnecting, you must use your original local password to log in.",
     "success": "Disconnected from OSI Server",
     "stoppedReporting": "This gateway stopped sending data. To remove it from your cloud account too, unlink it in the cloud.",
-    "adminOnly": "Only a gateway admin can disconnect this gateway from OSI Server."
+    "adminOnly": "This account cannot disconnect the gateway from OSI Server."
   },
   "errors": {
     "networkError": "Cannot reach OSI Server. Check the URL and your internet connection.",

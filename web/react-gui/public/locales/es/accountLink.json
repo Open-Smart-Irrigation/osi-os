@@ -36,7 +36,7 @@
     "confirm": "¿Estás seguro? Después de desconectarte, debes usar tu contraseña local original.",
     "success": "Desconectado de OSI Server",
     "stoppedReporting": "Esta pasarela dejó de enviar datos. Para quitarla también de tu cuenta en la nube, desvincúlala en la nube.",
-    "adminOnly": "Solo un administrador de la pasarela puede desconectarla de OSI Server."
+    "adminOnly": "Esta cuenta no puede desconectar la pasarela de OSI Server."
   },
   "errors": {
     "networkError": "No se puede llegar a OSI Server. Comprueba la URL y tu conexión a Internet.",

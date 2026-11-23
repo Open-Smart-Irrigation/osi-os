@@ -1559,10 +1559,17 @@ for (const capability of [
 }
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
-expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
-expectIncludes('Format status response', 'linkedAuthPackageValid', 'reports linked-auth package validity in account-link status');
-expectIncludes('Format status response', 'linkedAuthRepairRequired', 'reports linked-auth repair requirements in account-link status');
-expectIncludes('Format status response', "linkedAuthRepairRequired ? 'repair_required'", 'downgrades stale linked-auth state in account-link status');
+// #766: the status query (named columns, no secrets) and the formatter live in
+// osi-installation-helper.
+// scripts/test-unlink-stops-cloud-reporting.js drives both nodes end to end.
+expectIncludes('Decode token & build query', 'statusLoad.value.ACCOUNT_LINK_STATUS_SQL', 'loads the account-link status row from osi-installation-helper');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "'COALESCE(server_offline_verifier_version, 0) AS server_offline_verifier_version, '", 'loads linked-auth verifier metadata for account-link status');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "CASE WHEN COALESCE(server_offline_verifier, '') <> '' THEN 1 ELSE 0 END AS has_offline_verifier", 'reports verifier presence, not the verifier, in account-link status');
+expectIncludes('Format status response', 'load.value.accountLinkStatusResponse({ msg, env })', 'formats account-link status in osi-installation-helper');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, 'const offlineVerifierVersion = Number(user.server_offline_verifier_version || 0) || 0;', 'reads linked-auth verifier metadata for account-link status');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, 'linkedAuthPackageValid: linkedAuthPackageValid,', 'reports linked-auth package validity in account-link status');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, 'linkedAuthRepairRequired: linkedAuthRepairRequired,', 'reports linked-auth repair requirements in account-link status');
+expectFileIncludes('osi-installation-helper/index.js', accountLinkSource, "linkedAuthRepairRequired ? 'repair_required'", 'downgrades stale linked-auth state in account-link status');
 expectIncludes('Build Sync State', 'lastMirroredEventAt', 'returns the last mirrored sync event timestamp');
 expectIncludes('Build Sync State', 'dbHealth: {', 'returns a DB health block in sync state');
 expectIncludes('Build Sync State', "journalMode: helperHealth.journalMode || null", 'returns SQLite journal mode in sync state');
