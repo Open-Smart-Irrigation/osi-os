@@ -55,7 +55,15 @@ jobs:
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Fetch migration base ref
-        run: git fetch --no-tags origin main:refs/remotes/origin/main
+        # A PR into release/0.8.4 compares against that branch: its 0081 is
+        # main's 0084 under the line's own numbering.
+        env:
+          BASE_BRANCH: ${{ github.base_ref || github.ref_name }}
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if [ "$BASE_BRANCH" != main ]; then
+            git fetch --no-tags origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+          fi
       # Test files are listed one by one: node --test skips a pattern or path
       # that matches nothing and stays green. run-module-tests.js fails on a
       # missing file, and verify-test-inventory.js (test-inventory.yml) fails
@@ -123,9 +131,15 @@ jobs:
       - run: node --test scripts/test-scheduler-clock-jump.js
       - run: node --test scripts/test-crash-loop-escalation.js
       - run: node --test scripts/migration-caller-corpus.test.js scripts/ops/rebuild-corpus.test.js scripts/deploy-corpus.test.js
-      - run: node scripts/verify-migrations.js
-      - run: node scripts/verify-no-stray-ddl.js
-      - run: node scripts/verify-flows-size-ratchet.js
+      - name: Base-ref gates (migrations, stray DDL, flows size)
+        env:
+          OSI_MIGRATIONS_BASE_REF: origin/${{ github.base_ref || github.ref_name }}
+          OSI_DDL_BASE_REF: origin/${{ github.base_ref || github.ref_name }}
+          OSI_FLOWS_SIZE_BASE_REF: origin/${{ github.base_ref || github.ref_name }}
+        run: |
+          node scripts/verify-migrations.js
+          node scripts/verify-no-stray-ddl.js
+          node scripts/verify-flows-size-ratchet.js
       - run: node scripts/verify-seed-replay.js
       # The bundled seed must ship stamped at head, or every fresh install
       # falls into baseline-existing-db's reference-chain rebuild on the Pi.
