@@ -187,6 +187,9 @@ function validateRevocation(c) {
     assert.notEqual(e.physical_closed, true, c.id + ': a stop does not prove closure');
     assert.equal(e.ack, 'APPLIED', c.id + ': ACK must show the stop applied');
     assert.equal(e.after_both && e.after_both.ui, 'stop_applied', c.id + ': UI must show the stop applied');
+    if (context.command_type === 'PAUSE_IRRIGATION_POLICY') {
+      assert.equal(e.confirmed_enabled, false, c.id + ': a continued pause must leave the policy disabled');
+    }
   } else {
     assert.equal(e.edge_admission, 'refused', c.id + ': only an accepted stop continues after revocation (R1)');
     assert.equal(e.physical_enqueues, 0, c.id + ': refusal after revocation cannot enqueue');
@@ -284,11 +287,14 @@ async function main() {
   const pause = structuredClone(cloud.cases.find((c) => c.id === 'queued-pause-after-grant-loss-applies'));
   Object.assign(pause.expected, { open_enqueues: 1, attributed_actor: 'zone_owner', physical_closed: true });
   assert.throws(() => validateSemantics(pause), /cannot open|original actor|closure/);
+  const reenabled = structuredClone(cloud.cases.find((c) => c.id === 'queued-pause-after-grant-loss-applies'));
+  reenabled.expected.confirmed_enabled = true;
+  assert.throws(() => validateSemantics(reenabled), /leave the policy disabled/);
   const swt = suites.find((s) => s.suite === 'policy').cases.find((c) => c.id === 'swt-equality-waters');
   const actualSwt = await runBaseline(swt);
   assert.throws(() => assertProjection(actualSwt, { ...swt.expected, value: 31 }, 'negative'), /negative.value/);
 
-  console.log(`verify-valve-command-fixtures: OK (${ids.size} cases; ${executed} baseline vectors executed; ${scenarios} consumer scenarios validated; 8 negative controls)`);
+  console.log(`verify-valve-command-fixtures: OK (${ids.size} cases; ${executed} baseline vectors executed; ${scenarios} consumer scenarios validated; 9 negative controls)`);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });
