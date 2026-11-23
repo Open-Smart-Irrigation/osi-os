@@ -2,28 +2,30 @@
 'use strict';
 
 // E3: legacy cloud zone commands (UPSERT_ZONE, UPSERT_ZONE_CONFIG,
-// UPSERT_ZONE_LOCATION, DELETE_ZONE) are written only at a newer version.
+// UPSERT_ZONE_LOCATION, DELETE_ZONE) are written only at a newer version, never
+// on a tombstoned zone, and with the version check and the write in one
+// transaction.
 //
-// Each case drives the shipped nodes of one profile in order, the way a pending
-// command travels after Route Command:
-//   "Lifecycle command adapter" (conditional-lifecycle-command-adapter, which
-//   calls osi-irrigation-policy routes and the guard in osi-zone-commands)
-//   -> output 1: "Build UPDATE SQL" (4f4a765f36cee6f3), its statement executed
-//      on the database, then "Route command ACK verification" and
-//      "Build Schedule ACK" for the MQTT ACK
-//   -> output 3: the ACK the guard answers with, written nothing.
-// The assertions are about the zone row, its schedule, the sync outbox and the
-// ACK, on a database built from database/seed-blank.sql with the gateway linked
-// so the zone outbox triggers fire.
+// Each case drives the shipped nodes of one profile the way a pending command
+// travels after Route Command: "Lifecycle command adapter"
+// (conditional-lifecycle-command-adapter, which calls osi-irrigation-policy routes
+// and applyLegacyZoneCommand in osi-zone-commands). The adapter answers every
+// legacy zone command itself on output 3 (MQTT). If a command ever left on output
+// 1 again, the test would run "Build UPDATE SQL" and its ACK nodes as production
+// does, and the assertions would catch the unguarded write. The assertions are
+// about the zone row, its schedule, the sync outbox and the ACK, on a database
+// built from database/seed-blank.sql with the gateway linked so the zone outbox
+// triggers fire.
 //
 // The sequences "config A then a stale rename B" and "delete A then a stale
-// rename B" replay the two live reproductions of the lost-cloud-edit
-// investigation (r1 and r4), with fixture identifiers.
+// rename B" replay the investigation's live reproductions r1 and r4. The race
+// cases A, B and C are the #753 review's reproductions.
 //
 // Run: node --test scripts/test-legacy-zone-command-versions.js
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
@@ -41,10 +43,7 @@ const BUILD_SQL = '4f4a765f36cee6f3';
 const ACK_ROUTE = 'command-postcondition-route';
 const ACK_BUILD = 'e2e139678c3ddded';
 
-// A zone the gateway holds at version 5, linked to the cloud, with an enabled
-// schedule (45 kPa): the state after cloud edit A was applied and acknowledged.
-function fixture({ version = 5, deletedAt = null } = {}) {
-  const db = new DatabaseSync(':memory:');
+function seed(db, { version = 5, deletedAt = null } = {}) {
   db.exec(SEED);
   db.prepare('INSERT INTO users(id, username, password_hash, created_at, user_uuid, role, sync_version) '
     + "VALUES (1, 'farmer', 'x', '2026-01-01', ?, 'admin', 1)").run(USER_UUID);
@@ -60,6 +59,12 @@ function fixture({ version = 5, deletedAt = null } = {}) {
     .run();
   db.exec('DELETE FROM sync_outbox');
   return db;
+}
+
+// A zone the gateway holds at version 5, linked to the cloud, with an enabled
+// schedule (45 kPa): the state after cloud edit A was applied and acknowledged.
+function fixture(options) {
+  return seed(new DatabaseSync(':memory:'), options);
 }
 
 let nextCommandId = 9001;
@@ -108,6 +113,28 @@ function staleRename(version, name = 'renamed-by-cloud') {
   });
 }
 
+// An UPSERT_ZONE that sets every column the node writes.
+const FULL_ZONE = {
+  name: 'Full zone',
+  timezone: 'Africa/Kampala',
+  latitude: 0.35,
+  longitude: 32.58,
+  phenologicalStage: 'mid_season',
+  calibrationKey: 'coffee',
+  cropType: 'coffee',
+  variety: 'arabica',
+  soilType: 'loam',
+  irrigationMethod: 'drip',
+  areaM2: 1200,
+  irrigationEfficiencyPct: 85,
+  schedulingMode: 'server_preferred',
+  predictionCardEnabled: true,
+  notes: 'full note',
+  weatherSource: 'provider_a',
+  stageStartedOn: '2026-05-01',
+  user: { userUuid: USER_UUID, username: 'farmer' },
+};
+
 async function run(profile, nodeId, db, msg, extra = {}) {
   const { flowsPath, nodeRedModules } = profilePaths(profile);
   return executeFunction(loadNode(nodeId, flowsPath), {
@@ -119,26 +146,25 @@ async function run(profile, nodeId, db, msg, extra = {}) {
   });
 }
 
-// One pending command through the shipped nodes. Returns where it went, the
-// ACK that left for the cloud (parsed) and what the nodes logged.
-async function deliver(profile, db, payload, extra = {}) {
+// One pending command through the adapter. `hop` runs between the adapter and
+// Build UPDATE SQL, the Node-RED hop where another writer could land.
+async function deliver(profile, db, payload, extra = {}, hop = null) {
   const adapter = await run(profile, ADAPTER, db, { payload }, extra);
   const outputs = Array.isArray(adapter.result) ? adapter.result : [adapter.result];
-  const out = { adapter, wrote: false, ack: null };
+  const out = { adapter, viaBuildSql: false, ack: null };
+  if (hop) hop();
   if (outputs[0]) {
+    // The pre-E3-round-2 route: Build UPDATE SQL writes after the adapter returned.
+    out.viaBuildSql = true;
     const built = await run(profile, BUILD_SQL, db, outputs[0]);
-    assert.equal(typeof built.result.topic, 'string', 'Build UPDATE SQL must build a statement');
     db.exec(built.result.topic);
-    out.wrote = true;
     const routed = await run(profile, ACK_ROUTE, db, built.result);
-    assert.equal(routed.result[0], null, 'a zone command is not postcondition-verified');
     const ack = await run(profile, ACK_BUILD, db, routed.result[1]);
     out.ack = JSON.parse(ack.result.payload);
     out.ackTopic = ack.result.topic;
   } else if (outputs[1]) {
     out.ack = outputs[1].payload;
     out.ackTopic = outputs[1].topic;
-    out.restQueue = true;
   } else if (outputs[2]) {
     out.ack = JSON.parse(outputs[2].payload);
     out.ackTopic = outputs[2].topic;
@@ -164,18 +190,44 @@ function outbox(db) {
     + 'FROM sync_outbox ORDER BY rowid').all().map((r) => ({ ...r }));
 }
 
-function assertConflict(out, version, current, reason) {
-  assert.equal(out.wrote, false, 'a conflicting command must not reach Build UPDATE SQL');
-  assert.ok(out.ack, 'a conflicting command is answered');
+function assertAnswered(out, result) {
+  assert.equal(out.viaBuildSql, false, 'a legacy zone command never reaches Build UPDATE SQL');
+  assert.ok(out.ack, 'the command is answered');
   assert.equal(out.ackTopic, `devices/${GATEWAY}/command_ack`);
-  assert.equal(out.ack.result, 'CONFLICT');
+  assert.equal(out.ack.result, result);
+}
+
+function assertConflict(out, version, current, reason) {
+  assertAnswered(out, 'CONFLICT');
   assert.equal(out.ack.reason, reason);
   assert.equal(out.ack.appliedSyncVersion, version, 'the ACK echoes the command version (cloud matchesAckSource)');
   assert.equal(out.ack.requestedSyncVersion, version);
   assert.equal(out.ack.currentSyncVersion, current);
 }
 
+// The ACK the legacy path sent: "Build Schedule ACK", field for field.
+function assertLegacySuccess(out, command) {
+  assertAnswered(out, 'SUCCESS');
+  assert.deepEqual(out.ack, {
+    commandId: command.commandId,
+    eventUuid: command.eventUuid,
+    aggregateType: 'ZONE',
+    aggregateKey: ZONE_UUID,
+    result: 'SUCCESS',
+    state: 'APPLIED',
+    commandType: command.commandType,
+    appliedSyncVersion: command.appliedSyncVersion,
+    error: null,
+  });
+}
+
+function normaliseClock(sql) {
+  return String(sql).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<now>');
+}
+
 for (const profile of PROFILES) {
+  const zoneCommands = require(path.join(profilePaths(profile).nodeRedModules, 'osi-zone-commands'));
+
   test(`${profile}: a stale UPSERT_ZONE at the stored version is a CONFLICT and writes nothing`, async () => {
     const db = fixture();
     try {
@@ -251,9 +303,9 @@ for (const profile of PROFILES) {
   test(`${profile}: delete then a stale rename (investigation r4): the zone stays deleted, CONFLICT, schedule untouched`, async () => {
     const db = fixture();
     try {
-      const deleted = await deliver(profile, db, pending('DELETE_ZONE', 6, { syncVersion: 6 }));
-      assert.equal(deleted.wrote, true, 'the delete at a newer version is applied as today');
-      assert.equal(deleted.ack.result, 'SUCCESS');
+      const deleteCommand = pending('DELETE_ZONE', 6, { syncVersion: 6 });
+      const deleted = await deliver(profile, db, deleteCommand);
+      assertLegacySuccess(deleted, deleteCommand);
       const tombstone = fullZone(db);
       assert.notEqual(tombstone.deleted_at, null);
       assert.equal(tombstone.sync_version, 6);
@@ -266,7 +318,8 @@ for (const profile of PROFILES) {
       assert.deepEqual(outbox(db), outboxAfterDelete);
       // A legacy command never brings a tombstoned zone back, whatever its version.
       for (const late of [staleRename(7, 'later'), pending('UPSERT_ZONE_CONFIG', 8, { notes: 'x', syncVersion: 8 }),
-        pending('UPSERT_ZONE_LOCATION', 9, { latitude: 1, longitude: 2, syncVersion: 9 })]) {
+        pending('UPSERT_ZONE_LOCATION', 9, { latitude: 1, longitude: 2, syncVersion: 9 }),
+        pending('DELETE_ZONE', 10, { syncVersion: 10 })]) {
         const out = await deliver(profile, db, late);
         assertConflict(out, late.appliedSyncVersion, 6, 'zone_deleted');
       }
@@ -277,14 +330,28 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: a DELETE_ZONE above a tombstone's version is a CONFLICT, not a replay`, async () => {
+    const db = fixture({ version: 6, deletedAt: '2026-11-20T00:00:00.000Z' });
+    try {
+      const before = fullZone(db);
+      const out = await deliver(profile, db, pending('DELETE_ZONE', 7, { syncVersion: 7 }));
+      assertConflict(out, 7, 6, 'zone_deleted');
+      assert.deepEqual(fullZone(db), before, 'the tombstone keeps its version and time');
+      const replay = pending('DELETE_ZONE', 6, { syncVersion: 6 });
+      assertLegacySuccess(await deliver(profile, db, replay), replay);
+      assert.deepEqual(fullZone(db), before, 'the equal-version redelivery writes nothing either');
+    } finally {
+      db.close();
+    }
+  });
+
   test(`${profile}: config A then a stale rename B at A's version (investigation r1): B is a CONFLICT, A stays`, async () => {
     const db = fixture({ version: 1 });
     try {
-      const a = await deliver(profile, db, pending('UPSERT_ZONE_CONFIG', 2, {
+      const configA = pending('UPSERT_ZONE_CONFIG', 2, {
         areaM2: 456, notes: 'race A r1', irrigationEfficiencyPct: 80, syncVersion: 2,
-      }));
-      assert.equal(a.wrote, true);
-      assert.equal(a.ack.result, 'SUCCESS');
+      });
+      assertLegacySuccess(await deliver(profile, db, configA), configA);
       const afterA = fullZone(db);
       assert.equal(afterA.sync_version, 2);
       const outboxAfterA = outbox(db);
@@ -299,24 +366,60 @@ for (const profile of PROFILES) {
     }
   });
 
+  const NEWER = [
+    () => staleRename(6, 'renamed at six'),
+    () => pending('UPSERT_ZONE', 6, { ...FULL_ZONE, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE', 6, { name: '  spaced  ', latitude: '0.5', areaM2: '77', schedulingMode: ' SERVER_PREFERRED ',
+      weatherSource: 'Bad Value!', stageStartedOn: '2026-02-31', predictionCardEnabled: 'yes', syncVersion: 6,
+      user: { userUuid: USER_UUID } }),
+    () => pending('UPSERT_ZONE', 6, { name: 'with tombstone', deletedAt: '2026-11-23T00:00:00.000Z', syncVersion: 6,
+      user: { username: 'farmer' } }),
+    () => pending('UPSERT_ZONE_CONFIG', 6, { notes: 'new note', irrigationEfficiencyPct: 75, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_CONFIG', 6, { notes: " it's padded ", variety: '', soil_type: 'sand', irrigationMethod: null,
+      timezone: 'Europe/Zurich', calibration_key: 'apple', area_m2: '12.5', irrigation_efficiency_pct: null,
+      scheduling_mode: 'bogus', prediction_card_enabled: 0, weather_source: 'provider_c', stage_started_on: null, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE', 6, { ...FULL_ZONE, notes: " it's padded ", crop_type: 'tea', soil_type: 'sand',
+      irrigation_method: 'flood', area_m2: 5, irrigation_efficiency_pct: 60, scheduling_mode: 'server_preferred',
+      prediction_card_enabled: 1, weather_source: 'provider_c', stage_started_on: '2026-04-01', gateway_device_eui: undefined,
+      syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_CONFIG', 6, { cropType: 'maize', crop_type: 'beans', phenologicalStage: 'initial',
+      weatherSource: '', schedulingMode: 'server_preferred', predictionCardEnabled: 1, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_CONFIG', 6, { phenological_stage: 'late_season', stageStartedOn: '2026-06-01', syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_LOCATION', 6, { latitude: 0.35, longitude: 32.58, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_LOCATION', 6, { latitude: null, longitude: null, syncVersion: 6 }),
+    () => pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-23T00:00:00.000Z' }),
+    () => pending('DELETE_ZONE', 6, { syncVersion: 6 }),
+  ];
+
+  test(`${profile}: osi-zone-commands builds the statement Build UPDATE SQL builds, for every command shape`, async () => {
+    for (const make of NEWER) {
+      const command = make();
+      const built = await run(profile, BUILD_SQL, fixture(), { payload: command });
+      const warnings = [];
+      const statement = zoneCommands.legacyZoneStatement(command, {
+        now: new Date().toISOString(), gateway: GATEWAY, warn: (m) => warnings.push(m),
+      });
+      assert.equal(normaliseClock(statement), normaliseClock(built.result.topic), `${command.commandType}: same statement`);
+      assert.deepEqual(warnings, built.warnings, `${command.commandType}: same warnings`);
+    }
+  });
+
   test(`${profile}: higher-version commands are applied exactly as Build UPDATE SQL alone applies them`, async () => {
-    const commands = [
-      staleRename(6, 'renamed at six'),
-      pending('UPSERT_ZONE_CONFIG', 6, { notes: 'new note', irrigationEfficiencyPct: 75, syncVersion: 6 }),
-      pending('UPSERT_ZONE_LOCATION', 6, { latitude: 0.35, longitude: 32.58, syncVersion: 6 }),
-      pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-23T00:00:00.000Z' }),
-    ];
-    for (const command of commands) {
+    for (const make of NEWER) {
+      const command = make();
       const guarded = fixture();
       const direct = fixture();
       try {
         const out = await deliver(profile, guarded, command);
-        assert.equal(out.wrote, true, `${command.commandType} at a newer version reaches Build UPDATE SQL`);
-        assert.equal(out.ack.result, 'SUCCESS');
-        assert.equal(out.ack.appliedSyncVersion, 6);
+        assertLegacySuccess(out, command);
         const built = await run(profile, BUILD_SQL, direct, { payload: command });
         direct.exec(built.result.topic);
-        const pick = (row) => { const { created_at: _c, ...rest } = row; return rest; };
+        // created_at and a DELETE_ZONE's deleted_at come from each writer's own clock.
+        const pick = (row) => {
+          const { created_at: _c, ...rest } = row;
+          if (rest.deleted_at && !command.deletedAt) rest.deleted_at = normaliseClock(rest.deleted_at);
+          return rest;
+        };
         assert.deepEqual(pick(fullZone(guarded)), pick(fullZone(direct)), `${command.commandType}: same row as today`);
         assert.deepEqual(outbox(guarded), outbox(direct), `${command.commandType}: same outbox as today`);
         assert.equal(fullZone(guarded).sync_version, 6);
@@ -331,10 +434,10 @@ for (const profile of PROFILES) {
     const db = fixture();
     try {
       db.exec('DELETE FROM irrigation_schedules; DELETE FROM irrigation_zones; DELETE FROM sync_outbox');
-      const out = await deliver(profile, db, staleRename(1, 'new from cloud'));
-      assert.equal(out.wrote, true);
-      assert.equal(out.ack.result, 'SUCCESS');
+      const command = staleRename(1, 'new from cloud');
+      assertLegacySuccess(await deliver(profile, db, command), command);
       assert.equal(zone(db).name, 'new from cloud');
+      assert.equal(zone(db).sync_version, 1);
     } finally {
       db.close();
     }
@@ -345,36 +448,209 @@ for (const profile of PROFILES) {
     try {
       for (const command of [
         staleRename(6, 'renamed at six'),
-        pending('UPSERT_ZONE_CONFIG', 7, { notes: 'seven', areaM2: 77, syncVersion: 7 }),
-        pending('UPSERT_ZONE_LOCATION', 8, { latitude: 0.35, longitude: 32.58, syncVersion: 8 }),
-        pending('DELETE_ZONE', 9, { syncVersion: 9 }),
+        pending('UPSERT_ZONE', 7, { ...FULL_ZONE, syncVersion: 7 }),
+        pending('UPSERT_ZONE_CONFIG', 8, { notes: 'eight', areaM2: 77, syncVersion: 8 }),
+        pending('UPSERT_ZONE_LOCATION', 9, { latitude: 0.35, longitude: 32.58, syncVersion: 9 }),
+        pending('DELETE_ZONE', 10, { syncVersion: 10 }),
       ]) {
         const first = await deliver(profile, db, command);
-        assert.equal(first.wrote, true, `${command.commandType}: first delivery applies`);
+        assertLegacySuccess(first, command);
         const applied = fullZone(db);
         const events = outbox(db);
         const again = await deliver(profile, db, command);
-        assert.equal(again.wrote, false, `${command.commandType}: the replay is not written again`);
         assert.deepEqual(again.ack, first.ack, `${command.commandType}: the replay gets the same ACK`);
-        assert.deepEqual(fullZone(db), applied);
-        assert.deepEqual(outbox(db), events);
+        assert.deepEqual(fullZone(db), applied, `${command.commandType}: the replay is not written again`);
+        assert.deepEqual(outbox(db), events, `${command.commandType}: the replay emits no event`);
       }
     } finally {
       db.close();
     }
   });
 
-  test(`${profile}: without the guard helper the command fails closed: no write, no ACK`, async () => {
+  test(`${profile}: an equal-version UPSERT_ZONE_CONFIG that sets no column is a replay`, async () => {
     const db = fixture();
     try {
       const before = fullZone(db);
-      const out = await deliver(profile, db, staleRename(6), { osiLibModules: { 'zone-commands': {} } });
-      assert.equal(out.wrote, false);
-      assert.equal(out.ack, null);
-      assert.match(out.adapter.errors.join('\n'), /legacy zone command guard unavailable/);
+      const command = pending('UPSERT_ZONE_CONFIG', 5, { syncVersion: 5 });
+      assertLegacySuccess(await deliver(profile, db, command), command);
       assert.deepEqual(fullZone(db), before);
+      assert.deepEqual(outbox(db), []);
     } finally {
       db.close();
+    }
+  });
+
+  // Every column the node writes is compared: an equal-version command that
+  // differs from the stored row in any one of them is a CONFLICT, not a replay.
+  const COLUMN_VARIANTS = {
+    UPSERT_ZONE: {
+      name: 'Other name', timezone: 'UTC', latitude: 1.1, longitude: 30.1, phenologicalStage: 'late_season',
+      calibrationKey: 'banana', cropType: 'banana', variety: 'robusta', soilType: 'clay', irrigationMethod: 'sprinkler',
+      areaM2: 1300, irrigationEfficiencyPct: 70, schedulingMode: 'local', predictionCardEnabled: false, notes: 'other note',
+      weatherSource: 'provider_b', stageStartedOn: '2026-05-02', gatewayDeviceEui: '0016C001F1000002',
+      deletedAt: '2026-11-23T00:00:00.000Z',
+    },
+    UPSERT_ZONE_CONFIG: {
+      notes: 'other note', cropType: 'banana', variety: 'robusta', soilType: 'clay', irrigationMethod: 'sprinkler',
+      timezone: 'UTC', phenologicalStage: 'late_season', calibrationKey: 'banana', areaM2: 1300,
+      irrigationEfficiencyPct: 70, schedulingMode: 'local', predictionCardEnabled: false, weatherSource: 'provider_b',
+      stageStartedOn: '2026-05-02',
+    },
+    UPSERT_ZONE_LOCATION: { latitude: 1.1, longitude: 30.1 },
+  };
+
+  test(`${profile}: an equal-version command differing in any single written column is a CONFLICT`, async () => {
+    for (const [type, variants] of Object.entries(COLUMN_VARIANTS)) {
+      for (const [field, value] of Object.entries(variants)) {
+        const db = fixture();
+        try {
+          const base = pending('UPSERT_ZONE', 6, { ...FULL_ZONE, syncVersion: 6 });
+          assertLegacySuccess(await deliver(profile, db, base), base);
+          const applied = fullZone(db);
+          const events = outbox(db);
+          const same = type === 'UPSERT_ZONE'
+            ? { ...FULL_ZONE }
+            : type === 'UPSERT_ZONE_LOCATION'
+              ? { latitude: FULL_ZONE.latitude, longitude: FULL_ZONE.longitude }
+              : Object.fromEntries(Object.keys(variants).map((key) => [key, FULL_ZONE[key]]));
+          const replay = pending(type, 6, { ...same, syncVersion: 6 });
+          assertLegacySuccess(await deliver(profile, db, replay), replay);
+          const out = await deliver(profile, db, pending(type, 6, { ...same, [field]: value, syncVersion: 6 }));
+          assertConflict(out, 6, 6, 'version_conflict');
+          assert.deepEqual(fullZone(db), applied, `${type}.${field}: no write`);
+          assert.deepEqual(outbox(db), events, `${type}.${field}: no event`);
+        } finally {
+          db.close();
+        }
+      }
+    }
+  });
+
+  test(`${profile}: fails closed with no write and no ACK on any output`, async () => {
+    const cases = {
+      'helper missing': { 'zone-commands': {} },
+      'apply throws': { 'zone-commands': { applyLegacyZoneCommand: () => Promise.reject(new Error('injected guard failure')) } },
+      'transaction fails': {
+        'osi-db-helper': {
+          Database: function Database() {
+            return {
+              transaction: () => Promise.reject(new Error('SQLITE_BUSY: injected')),
+              close: (callback) => callback(),
+            };
+          },
+        },
+      },
+    };
+    for (const [name, osiLibModules] of Object.entries(cases)) {
+      const db = fixture();
+      try {
+        const before = fullZone(db);
+        const adapter = await run(profile, ADAPTER, db, { payload: staleRename(6) }, { osiLibModules });
+        const outputs = Array.isArray(adapter.result) ? adapter.result : [adapter.result];
+        assert.deepEqual(outputs, [null, null, null], `${name}: nothing on any output`);
+        assert.ok(adapter.errors.length >= 1, `${name}: the failure is reported`);
+        assert.deepEqual(fullZone(db), before, `${name}: no write`);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  // Review reproduction A: a local delete (v7) lands in the hop between the
+  // guard and the write of a cloud rename admitted at v6. The guard's read and
+  // write share one BEGIN IMMEDIATE transaction on a file database, so a second
+  // connection cannot write while it runs; the delete retried once the adapter
+  // returns lands after the rename, and nothing writes after it.
+  test(`${profile}: race A: a local delete between the version check and the write keeps its tombstone`, async () => {
+    const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'e3-race-'));
+    const file = path.join(dir, 'farming.db');
+    const db = seed(new DatabaseSync(file));
+    const local = new DatabaseSync(file);
+    const localDelete = () => local.exec(`UPDATE irrigation_zones SET deleted_at = '2026-11-23T10:00:00.000Z', sync_version = 7 WHERE zone_uuid = '${ZONE_UUID}'`);
+    let blocked = null;
+    const dbCallGate = {
+      select({ method, sql }) {
+        if (blocked === null && method === 'get' && /FROM irrigation_zones WHERE zone_uuid/.test(sql)) {
+          try {
+            localDelete();
+            blocked = false;
+          } catch (error) {
+            blocked = String(error && error.message || error);
+          }
+        }
+        return { kind: 'execute', hold: false };
+      },
+    };
+    try {
+      const out = await deliver(profile, db, staleRename(6, 'renamed'), { dbCallGate }, () => {
+        if (blocked !== false) localDelete();
+      });
+      const row = fullZone(db);
+      assert.notEqual(row.deleted_at, null, 'the local delete keeps its tombstone');
+      assert.equal(row.sync_version, 7, 'the version never goes back');
+      assert.equal(schedule(db).enabled, 1);
+      assert.equal(row.name, 'renamed', 'the rename was applied before the delete');
+      assert.match(String(blocked), /locked|busy/i, 'no other connection writes during the check');
+      assertAnswered(out, 'SUCCESS');
+    } finally {
+      local.close();
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Review reproductions B and C: two commands for one zone where both used to
+  // pass the check before either write. The check and the write are now one
+  // step, so the first is written before the second is checked.
+  test(`${profile}: races B and C: the first command is written before the second is checked`, async () => {
+    {
+      const db = fixture();
+      try {
+        const del = pending('DELETE_ZONE', 7, { syncVersion: 7 });
+        const first = await deliver(profile, db, del);
+        assertLegacySuccess(first, del);
+        assert.notEqual(zone(db).deleted_at, null, 'B: written when the adapter returns');
+        const second = await deliver(profile, db, staleRename(6, 'renamed'));
+        assertConflict(second, 6, 7, 'zone_deleted');
+        assert.notEqual(zone(db).deleted_at, null);
+        assert.equal(zone(db).sync_version, 7);
+      } finally {
+        db.close();
+      }
+    }
+    {
+      const db = fixture();
+      try {
+        const config = pending('UPSERT_ZONE_CONFIG', 7, { irrigationEfficiencyPct: 90, syncVersion: 7 });
+        assertLegacySuccess(await deliver(profile, db, config), config);
+        assert.equal(zone(db).irrigation_efficiency_pct, 90, 'C: written when the adapter returns');
+        const second = await deliver(profile, db, staleRename(6, 'renamed'));
+        assertConflict(second, 6, 7, 'stale_sync_version');
+        assert.deepEqual([zone(db).sync_version, zone(db).irrigation_efficiency_pct, zone(db).area_m2], [7, 90, 456]);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  test(`${profile}: the applied statement itself refuses a lower version and a tombstone`, async () => {
+    // The rules above decide first; this pins the second line of defence in the
+    // statement, by running it against rows the rules would have refused.
+    for (const [type, payload] of [['UPSERT_ZONE', { name: 'x', user: { username: 'farmer' } }],
+      ['UPSERT_ZONE_CONFIG', { notes: 'x' }], ['UPSERT_ZONE_LOCATION', { latitude: 1, longitude: 2 }], ['DELETE_ZONE', {}]]) {
+      for (const state of [{ version: 9 }, { version: 2, deletedAt: '2026-11-20T00:00:00.000Z' }]) {
+        const db = fixture(state);
+        try {
+          const before = fullZone(db);
+          const command = pending(type, 6, { ...payload, syncVersion: 6 });
+          const sql = zoneCommands.legacyZoneGuardedStatement(type, command,
+            zoneCommands.legacyZoneStatement(command, { now: new Date().toISOString(), gateway: GATEWAY, warn: () => {} }));
+          db.exec(sql);
+          assert.deepEqual(fullZone(db), before, `${type} on ${JSON.stringify(state)}: no change`);
+        } finally {
+          db.close();
+        }
+      }
     }
   });
 }

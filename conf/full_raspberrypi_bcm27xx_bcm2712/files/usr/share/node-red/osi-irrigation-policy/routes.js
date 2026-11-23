@@ -583,35 +583,43 @@ async function conditionalLegacySchedule(context) {
 
 const LEGACY_ZONE_COMMAND_TYPES = new Set(['UPSERT_ZONE', 'UPSERT_ZONE_CONFIG', 'UPSERT_ZONE_LOCATION', 'DELETE_ZONE']);
 
-// E3: output 1 (Build UPDATE SQL) only for a command the guard lets through. A CONFLICT, or
-// the replay of a command already applied, is answered on output 3 (MQTT), the transport the
-// legacy path ACKs on, and nothing is written. A missing helper or a failed read sends nothing:
-// the command stays leased and comes back, rather than reaching the unguarded write.
-async function legacyZoneCommandGuard(context, command, dbLoad) {
+// E3: osi-zone-commands applies the legacy zone commands itself: it reads the stored row and
+// writes in one transaction, so nothing lands between the version check and the write. Every
+// outcome (applied, replayed, CONFLICT) is answered on output 3 (MQTT), the transport the legacy
+// path ACKs on; none reaches Build UPDATE SQL. A missing helper or a failed transaction sends
+// nothing on any output: no write, no ACK, and the command stays leased and comes back.
+async function legacyZoneCommandApply(context, command, dbLoad) {
   const { msg, node, env, osiLib } = context;
   const zoneLoad = osiLib.require('zone-commands');
-  if (!zoneLoad.ok || typeof zoneLoad.value.guardLegacyZoneCommand !== 'function') {
-    node.error('legacy zone command guard unavailable: ' + String(zoneLoad.error || 'guardLegacyZoneCommand missing'), msg);
+  if (!zoneLoad.ok || typeof zoneLoad.value.applyLegacyZoneCommand !== 'function') {
+    node.error('legacy zone command guard unavailable: ' + String(zoneLoad.error || 'applyLegacyZoneCommand missing'), msg);
     return [null, null, null];
   }
-  const gateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
+  const ackGateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
   let db = null;
   try {
     db = new dbLoad.value.Database('/data/db/farming.db');
-    const verdict = await zoneLoad.value.guardLegacyZoneCommand(db, command, { gateway_device_eui: gateway });
-    if (verdict.decision === 'apply' || verdict.decision === 'not_guarded') return [msg, null, null];
-    if (verdict.decision === 'conflict') {
-      node.warn('legacy zone command ' + String(command.commandId) + ' not applied: ' + verdict.reason
-        + ' (command version ' + verdict.requested + ', stored ' + verdict.current + ')');
+    const outcome = await zoneLoad.value.applyLegacyZoneCommand(db, command, {
+      // Build UPDATE SQL's own gateway expression, for the zone's gateway_device_eui default.
+      gateway_device_eui: String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase(),
+    });
+    for (const warning of outcome.warnings || []) node.warn(warning);
+    if (!outcome.ack) {
+      node.error('legacy zone command was not handled: ' + String(outcome.decision), msg);
+      return [null, null, null];
     }
-    return [null, null, { topic: 'devices/' + gateway + '/command_ack', payload: JSON.stringify(verdict.ack), qos: 1 }];
+    if (outcome.decision === 'conflict') {
+      node.warn('legacy zone command ' + String(command.commandId) + ' not applied: ' + outcome.reason
+        + ' (command version ' + outcome.requested + ', stored ' + outcome.current + ')');
+    }
+    return [null, null, { topic: 'devices/' + ackGateway + '/command_ack', payload: JSON.stringify(outcome.ack), qos: 1 }];
   } catch (error) {
-    node.error('legacy zone command guard failed closed without ACK: ' + String(error && error.message || error), msg);
+    node.error('legacy zone command failed closed without write or ACK: ' + String(error && error.message || error), msg);
     return [null, null, null];
   } finally {
     if (db) {
       try { await new Promise((resolve) => db.close(() => resolve())); }
-      catch (closeError) { node.warn('legacy zone command guard DB close failed: ' + String(closeError && closeError.message || closeError)); }
+      catch (closeError) { node.warn('legacy zone command DB close failed: ' + String(closeError && closeError.message || closeError)); }
     }
   }
 }
@@ -636,10 +644,10 @@ async function conditionalLifecycleCommand(context) {
     node.error('lifecycle command parse failed closed: ' + String(parseError && parseError.message || parseError), msg);
     return [null, null];
   }
-  // E3: the legacy zone commands pass on to Build UPDATE SQL only when the version guard
-  // in osi-zone-commands lets them; it decides on the same fields that node reads.
+  // E3: the legacy zone commands are applied by osi-zone-commands, version-checked, and never
+  // reach Build UPDATE SQL; the type is that node's own expression, so it would take that branch.
   if (LEGACY_ZONE_COMMAND_TYPES.has(String(command.commandType || command.command_type || command.action || '').toUpperCase())) {
-    return legacyZoneCommandGuard(context, command, dbLoad);
+    return legacyZoneCommandApply(context, command, dbLoad);
   }
   const envelope = command._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return [msg, null];
