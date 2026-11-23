@@ -36,7 +36,19 @@ function includes(name, text) {
   assert.match(source(name), new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${name}: ${text}`);
 }
 
-includes('Build server auth request', 'installation_recovery_v1');
+// The capability list moved into the helper's shared reportedSyncCapabilities
+// builder; the build stage delegates to it, so pin the token where it lives.
+includes('Build server auth request', 'reportedSyncCapabilities');
+{
+  const helper = require(path.join(
+    root,
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
+  ));
+  assert.ok(
+    helper.reportedSyncCapabilities().includes('installation_recovery_v1'),
+    'Build server auth request: the shared capability list advertises installation_recovery_v1'
+  );
+}
 includes('Build server auth request', 'installationUuid');
 includes('Build server auth request', 'INSERT OR IGNORE INTO installation_identity');
 includes('Handle server auth response', 'installation identity mismatch');

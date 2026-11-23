@@ -1546,8 +1546,17 @@ expectIncludes('Build server auth request', 'localUserUuid', 'sends the local us
 expectIncludes('Build server auth request', 'localUsernameSnapshot', 'sends the local username snapshot for linked-auth targeting');
 expectIncludes('Build server auth request', 'edgeBuildVersion', 'sends the edge build version during local-sync');
 expectIncludes('Build server auth request', 'syncCapabilities', 'advertises linked-auth sync capabilities during local-sync');
-expectIncludes('Build server auth request', 'linked_auth_sync_v1', 'advertises the linked-auth sync capability');
-expectIncludes('Build server auth request', 'force_edge_sync_v1', 'advertises the force-edge-sync capability');
+expectIncludes('Build server auth request', "const syncCapabilities = reportedSyncCapabilities({ conditionalIrrigation: replicationLoad, zoneCommands: osiLib.require('zone-commands') });", 'builds the advertised list through the shared capability builder from literal module probes');
+// The capability tokens live in the helper's SYNC_CAPABILITY_BASE (shared by
+// the link request and, via their wiring, the bootstrap and force builders).
+for (const capability of [
+  'linked_auth_sync_v1', 'force_edge_sync_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1',
+  'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1',
+  'zone_apply_versioned_v1',
+]) {
+  if (!accountLinkSource.includes(`'${capability}'`)) fail(`Build server auth request must advertise ${capability} through the shared capability list`);
+  else console.log(`OK Build server auth request advertises ${capability} through the shared capability list`);
+}
 expectIncludes('Handle server auth response', "const claimed = Array.isArray(data.claimed)", 'accepts claimed device results directly from local-sync');
 expectIncludes('Handle server auth response', 'offlineVerifierVersion', 'requires and stores the offline verifier version from local-sync');
 expectIncludes('Decode token & build query', 'server_offline_verifier_version', 'loads linked-auth verifier metadata for account-link status');
@@ -2226,35 +2235,13 @@ expectIncludesById('cmd-type-registry', 'UPSERT_DEVICE_NAME:', 'allows cloud dev
 expectIncludesById('cmd-type-registry', 'UPSERT_ZONE_NAME:', 'allows cloud zone rename commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'UPSERT_DEVICE_NAME:', 'fallback command registry allows device rename commands before startup registry loads');
 expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command registry allows zone rename commands before startup registry loads');
+// The flows builders delegate to the installation helper's shared
+// reportedSyncCapabilities list (as does the link request's build stage); the
+// tokens themselves are pinned in SYNC_CAPABILITY_BASE above.
 expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'entity_name_commands_v1'",
-  'advertises the entity-name command capability to the cloud'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'zone_config_weather_source_v1'",
-  'advertises that zone commands may carry weather_source'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'zone_config_stage_started_on_v1'",
-  'advertises that zone commands may carry stage_started_on'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'watermark_v1'",
-  'advertises the WATERMARK calibration capability'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'chameleon_config_commands_v1'",
-  'advertises the protected Chameleon capability'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
-  "'device_soil_depth_commands_v1'",
-  'advertises the protected soil-depth capability'
+  ['Build Cloud Bootstrap', 'Run Force Sync'],
+  "const syncCapabilities = installation.reportedSyncCapabilities({ conditionalIrrigation: osiLib.require('osi-irrigation-policy'), zoneCommands: osiLib.require('zone-commands') });",
+  'builds the advertised list through the shared capability builder from literal module probes'
 );
 expectIncludesById('sync-bootstrap-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in bootstrap');
 expectIncludesById('sync-force-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in force sync');

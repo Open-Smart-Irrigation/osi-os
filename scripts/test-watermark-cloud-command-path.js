@@ -58,13 +58,23 @@ assert.match(helper.func, /applyLegacySoilDepthsCommand/, 'legacy soil-depth com
 assert.match(helper.func, /isExactLegacySoilDepthsPayload/, 'legacy classifier is consulted before protected apply');
 assert.doesNotMatch(helper.func, /\bcapabilities\s*:/, 'protected applier does not inject runtime capability metadata');
 
-function capabilityBaseFrom(source, builderId) {
-  const match = String(source).match(/const syncCapabilities = \[([^\]]*)\];/);
-  assert.ok(match, `${builderId} has an unconditional capability base`);
-  const values = [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
-  assert.deepEqual(values, capabilityBase, `${builderId} advertises the canonical capability base`);
-  assert.equal(new Set(values).size, values.length, `${builderId} capability base has no duplicates`);
-  return values;
+// All three builders report the installation helper's reportedSyncCapabilities
+// list, so their bases are pinned behaviourally: with only
+// osi-irrigation-policy loadable the builder returns exactly the canonical
+// base, and a loadable version-checked zone apply appends the zone token.
+function sharedCapabilityBaseFrom(profile) {
+  const helper = require(path.join(
+    ROOT,
+    `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
+  ));
+  const base = helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} } });
+  assert.deepEqual(base, capabilityBase, `${profile} shared builder advertises the canonical capability base`);
+  assert.deepEqual(
+    helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} }, zoneCommands: { ok: true, value: { applyLegacyZoneCommand() {} } } }),
+    capabilityBase.concat(['zone_apply_versioned_v1']),
+    `${profile} shared builder appends zone_apply_versioned_v1 only while the zone apply is loadable`
+  );
+  return base;
 }
 
 for (const profile of ['bcm2712', 'bcm2709']) {
@@ -74,11 +84,15 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   const profileApplier = profileById['watermark-config-command-apply-fn'];
   assert.ok(profileApplier, `${profile} protected applier is shipped`);
   assert.doesNotMatch(profileApplier.func, /\bcapabilities\s*:/, `${profile} protected applier supplies no runtime capability metadata`);
-  // The link request is built by the installation helper's build stage.
+  // The link request is built by the installation helper's build stage; the
+  // flows builders delegate to the same shared list.
   const linkSource = linkBuilderSource(profileFlows, profile);
-  const bases = ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build'].map((id) => capabilityBaseFrom(id === 'al-link-build-req' ? linkSource : profileById[id].func, `${profile}/${id}`));
-  assert.deepEqual(bases[0], bases[1], `${profile} bootstrap/link capability bases match`);
-  assert.deepEqual(bases[0], bases[2], `${profile} bootstrap/force capability bases match`);
+  assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\{ conditionalIrrigation: replicationLoad, zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, `${profile} link request builds the list through the shared builder`);
+  for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+    assert.match(profileById[id].func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/, `${profile} ${id} builds the list through the shared builder`);
+  }
+  const base = sharedCapabilityBaseFrom(profile);
+  assert.ok(Array.isArray(base) && base.includes('watermark_v1'), `${profile} canonical capability base carries the WATERMARK tokens`);
   assert.match(profileById['sync-bootstrap-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} bootstrap keeps journal conditional capability`);
   assert.match(profileById['sync-force-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} force keeps journal conditional capability`);
   assert.doesNotMatch(profileById['al-link-build-req'].func, /field_journal_v1/, `${profile} link node keeps journal capability distinction`);

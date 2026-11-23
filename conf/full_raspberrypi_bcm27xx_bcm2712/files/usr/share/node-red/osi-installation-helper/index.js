@@ -69,6 +69,36 @@ function canonicalWritesAllowed(recoveryState) {
   return String(recoveryState || '').trim().toUpperCase() === 'ACTIVE';
 }
 
+// The capability list every edge reporter (link request, bootstrap upload,
+// force sync) sends the cloud. Conditional capabilities are dropped when the
+// module backing them cannot load: conditional_irrigation_v1 (owner decision
+// 2026-10-22) and zone_apply_versioned_v1, which needs osi-zone-commands to
+// expose the version-checked applyLegacyZoneCommand. Callers pass the osi-lib
+// load RESULTS of literal osiLib.require(...) probes, so the caller-name
+// audit in verify-helper-registration sees and validates every probe name.
+const SYNC_CAPABILITY_BASE = [
+  'linked_auth_sync_v1',
+  'force_edge_sync_v1',
+  'installation_recovery_v1',
+  'installation_locations_v1',
+  'entity_name_commands_v1',
+  'zone_config_weather_source_v1',
+  'zone_config_stage_started_on_v1',
+  'watermark_v1',
+  'chameleon_config_commands_v1',
+  'device_soil_depth_commands_v1',
+];
+
+function reportedSyncCapabilities(loads) {
+  const capabilities = SYNC_CAPABILITY_BASE.concat(['conditional_irrigation_v1', 'zone_apply_versioned_v1']);
+  const drop = (name) => { const at = capabilities.indexOf(name); if (at >= 0) capabilities.splice(at, 1); };
+  const conditional = loads && loads.conditionalIrrigation;
+  if (!conditional || !conditional.ok) drop('conditional_irrigation_v1');
+  const zoneCommands = loads && loads.zoneCommands;
+  if (!zoneCommands || !zoneCommands.ok || typeof zoneCommands.value.applyLegacyZoneCommand !== 'function') drop('zone_apply_versioned_v1');
+  return capabilities;
+}
+
 module.exports = {
   normalizeInstallationUuid,
   newInstallationUuid,
@@ -77,7 +107,8 @@ module.exports = {
   verifierVersion,
   verifierSubject,
   assertMatchingInstallation,
-  canonicalWritesAllowed
+  canonicalWritesAllowed,
+  reportedSyncCapabilities
 };
 
 // Account-link lifecycle. Request credentials belong to one message; the
@@ -105,8 +136,7 @@ const gatewayDeviceEuiConfidence = String(flow.get('al_gateway_device_eui_confid
 const localUserId = Number(msg.authUserId || flow.get('al_local_user_id') || 0);
 const localUsername = String(msg.authUsername || flow.get('al_local_username') || '').trim();
 const edgeBuildVersion = String(env.get('FIRMWARE_VERSION') || env.get('IMAGE_VERSION') || '').trim() || null;
-const syncCapabilities = ['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1', 'conditional_irrigation_v1'];
-if (!replicationLoad.ok) { const at = syncCapabilities.indexOf('conditional_irrigation_v1'); if (at >= 0) syncCapabilities.splice(at, 1); }
+const syncCapabilities = reportedSyncCapabilities({ conditionalIrrigation: replicationLoad, zoneCommands: osiLib.require('zone-commands') });
 if (!serverUrl) {
   msg.statusCode = 400;
   msg.payload = { message: 'Server URL is not configured' };

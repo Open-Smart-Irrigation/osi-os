@@ -535,17 +535,31 @@ test('both command types are in the registry and in the fallback table, on both 
 });
 
 // The scheduling branch appends conditional_irrigation_v1 (the conditional irrigation replication
-// contract) to the same static list in all three builders.
+// contract) to the same list in all three builders. All three build it through the installation
+// helper's reportedSyncCapabilities: the link request from the build stage, the flows builders
+// through their guarded installation local.
 test('all three capability builders advertise entity_name_commands_v1 and both zone capabilities, on both profiles', () => {
+  const CAPABILITY_BASE = ['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1', 'conditional_irrigation_v1'];
   for (const profile of PROFILES) {
     const flows = loadFlows(profile);
+    const helper = require(path.join(
+      ROOT,
+      `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
+    ));
+    assert.deepEqual(
+      helper.reportedSyncCapabilities({ conditionalIrrigation: { ok: true, value: {} } }),
+      CAPABILITY_BASE,
+      profile + ' shared builder advertises the canonical base'
+    );
     for (const id of ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build']) {
       // The link request is built by the installation helper's build stage.
       const source = id === 'al-link-build-req' ? linkBuilderSource(flows, profile) : flows.find((n) => n.id === id).func;
       assert.match(
         source,
-        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1', 'conditional_irrigation_v1'\];/,
-        profile + ' ' + id
+        id === 'al-link-build-req'
+          ? /const syncCapabilities = reportedSyncCapabilities\(\{ conditionalIrrigation: replicationLoad, zoneCommands: osiLib\.require\('zone-commands'\) \}\);/
+          : /const syncCapabilities = installation\.reportedSyncCapabilities\(\{ conditionalIrrigation: osiLib\.require\('osi-irrigation-policy'\), zoneCommands: osiLib\.require\('zone-commands'\) \}\);/,
+        profile + ' ' + id + ' builds the list through the shared builder'
       );
     }
   }
