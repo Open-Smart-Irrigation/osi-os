@@ -581,6 +581,55 @@ async function conditionalLegacySchedule(context) {
   }
 }
 
+const LEGACY_ZONE_COMMAND_TYPES = new Set(['UPSERT_ZONE', 'UPSERT_ZONE_CONFIG', 'UPSERT_ZONE_LOCATION', 'DELETE_ZONE']);
+
+// E3: osi-zone-commands applies the legacy zone commands itself: it reads the stored row and
+// writes in one transaction, so nothing lands between the version check and the write. Every
+// outcome (applied, replayed, CONFLICT) is answered on output 3 (MQTT); a SUCCESS is also a
+// command-ledger row and a REST ACK row, committed with the write, as for the S2120 unclaim.
+// None reaches Build UPDATE SQL. A missing helper or a failed transaction sends
+// nothing on any output: no write, no ACK, and the command stays leased and comes back.
+async function legacyZoneCommandApply(context, command, dbLoad, ledger) {
+  const { msg, node, env, osiLib } = context;
+  const zoneLoad = osiLib.require('zone-commands');
+  if (!zoneLoad.ok || typeof zoneLoad.value.applyLegacyZoneCommand !== 'function') {
+    node.error('legacy zone command guard unavailable: ' + String(zoneLoad.error || 'applyLegacyZoneCommand missing'), msg);
+    return [null, null, null];
+  }
+  const ackGateway = String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase();
+  let db = null;
+  try {
+    db = new dbLoad.value.Database('/data/db/farming.db');
+    const outcome = await zoneLoad.value.applyLegacyZoneCommand(db, command, {
+      // Build UPDATE SQL's own gateway expression, for the zone's gateway_device_eui default.
+      gateway_device_eui: String(env.get('DEVICE_EUI') || 'UNKNOWN').toUpperCase(),
+      // A SUCCESS is recorded in the command ledger with its REST ACK row, so an exact
+      // retry of the delivery is answered from the ledger.
+      ledger,
+      envelope: command._pendingCommandEnvelope,
+      command_type_recognized: msg._commandTypeRecognized === true,
+    });
+    for (const warning of outcome.warnings || []) node.warn(warning);
+    if (!outcome.ack) {
+      node.error('legacy zone command was not handled: ' + String(outcome.decision), msg);
+      return [null, null, null];
+    }
+    if (outcome.decision === 'conflict') {
+      node.warn('legacy zone command ' + String(command.commandId) + ' not applied: ' + outcome.reason
+        + ' (command version ' + outcome.requested + ', stored ' + outcome.current + ')');
+    }
+    return [null, null, { topic: 'devices/' + ackGateway + '/command_ack', payload: JSON.stringify(outcome.ack), qos: 1 }];
+  } catch (error) {
+    node.error('legacy zone command failed closed without write or ACK: ' + String(error && error.message || error), msg);
+    return [null, null, null];
+  } finally {
+    if (db) {
+      try { await new Promise((resolve) => db.close(() => resolve())); }
+      catch (closeError) { node.warn('legacy zone command DB close failed: ' + String(closeError && closeError.message || closeError)); }
+    }
+  }
+}
+
 async function conditionalLifecycleCommand(context) {
   const { msg, node, flow, global, env, osiDb, osiLib, crypto, chirpstack } = context;
 
@@ -600,6 +649,11 @@ async function conditionalLifecycleCommand(context) {
   } catch (parseError) {
     node.error('lifecycle command parse failed closed: ' + String(parseError && parseError.message || parseError), msg);
     return [null, null];
+  }
+  // E3: the legacy zone commands are applied by osi-zone-commands, version-checked, and never
+  // reach Build UPDATE SQL; the type is that node's own expression, so it would take that branch.
+  if (LEGACY_ZONE_COMMAND_TYPES.has(String(command.commandType || command.command_type || command.action || '').toUpperCase())) {
+    return legacyZoneCommandApply(context, command, dbLoad, ledgerLoad.value);
   }
   const envelope = command._pendingCommandEnvelope;
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return [msg, null];
