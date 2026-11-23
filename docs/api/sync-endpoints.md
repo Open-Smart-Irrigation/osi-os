@@ -27,7 +27,13 @@ with an empty `DEVICE_MQTT_PASSWORD`) sends none of these except
 `/auth/local-sync`, which links it. `osi-cloud-http` refuses every request
 whose path contains `api/v1/sync/`, `api/v2/journal/` or `auth/refresh-sync`,
 also under a base path, with error code `gateway_unlinked`, and the cloud
-MQTT guards drop every message. One route stays open on purpose: support
+MQTT guards drop every message. A linked gateway refuses the same requests
+at send time while a link, an unlink or an identity change waits for the
+Node-RED restart (account journal, queued account restart request or
+identity sentinel), with `account_restart_pending`, and with
+`account_gate_unavailable` when that check cannot be loaded or run. The
+http nodes report these as transport failures (status 0), for example in
+`lastHistorySyncError` or a journal replication error. One route stays open on purpose: support
 work requests (`/api/v1/support/edge/work-requests`), which the farmer starts
 and which carry only the support request. Unlinking requires an enabled
 gateway admin; on a gateway without an enabled admin, the enabled, linked

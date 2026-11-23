@@ -816,4 +816,81 @@ for (const profile of PROFILES) {
   });
 }
 
+// Send-gate edges (#766): the window between the unlink commit and the
+// restart request, a gate read error, and a gate that cannot be loaded.
+function captureWarnings() {
+  const original = console.warn;
+  const lines = [];
+  console.warn = (...args) => { lines.push(args.join(' ')); };
+  return { lines, restore() { console.warn = original; } };
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: between the unlink commit and the restart request, the account journal alone holds restricted sends`, async () => {
+    const f = fixture(profile);
+    f.osiCloudHttp.useAccountWorkFsForTests(f.io.fs);
+    try {
+      processStarted(true);
+      seedTwoLinkedUsers(f);
+      const flowStore = linkedFlowStore();
+      const { result } = await runNode(f, 'al-unlink-db', { _unlinkAuth: { userId: 902, username: 'second' } }, flowStore);
+      assert.ok(result[0], 'the unlink committed');
+      assert.ok(f.io.files.has(JOURNAL), 'the account journal is in place');
+      assert.ok(![...f.io.files.keys()].some((file) => file.startsWith(RESTART_DIR)), 'no restart request is published yet');
+      const before = cloud.sent.length;
+      await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands', headers: { Authorization: 'Bearer token-first' } }), { code: 'account_restart_pending' });
+      assert.deepEqual(cloud.sent.slice(before), []);
+    } finally {
+      f.osiCloudHttp.useAccountWorkFsForTests(null);
+      f.cleanup();
+    }
+  });
+
+  test(`${profile}: the send gate fails closed and warns when it cannot read the account state`, async () => {
+    const f = fixture(profile);
+    const failingFs = Object.assign({}, f.io.fs, {
+      readdirSync() { throw Object.assign(new Error('fixture read failure'), { code: 'EIO' }); },
+    });
+    f.osiCloudHttp.useAccountWorkFsForTests(failingFs);
+    const warnings = captureWarnings();
+    try {
+      processStarted(true);
+      const before = cloud.sent.length;
+      await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands' }), { code: 'account_restart_pending' });
+      assert.deepEqual(cloud.sent.slice(before), []);
+      assert.equal(warnings.lines.filter((line) => /osi-cloud-http: .*unreadable/.test(line)).length, 1, 'one warning names the unreadable state: ' + JSON.stringify(warnings.lines));
+    } finally {
+      warnings.restore();
+      f.osiCloudHttp.useAccountWorkFsForTests(null);
+      f.cleanup();
+    }
+  });
+
+  test(`${profile}: a send gate that cannot be loaded or run refuses with account_gate_unavailable and warns`, async () => {
+    const f = fixture(profile);
+    const warnings = captureWarnings();
+    try {
+      processStarted(true);
+      const before = cloud.sent.length;
+      for (const [label, loader] of [
+        ['helper missing', () => { throw new Error('fixture: cannot find module'); }],
+        ['gate not exported', () => ({})],
+        ['gate throws', () => ({ gatewayWorkBlocked() { throw new Error('fixture: gate failed'); } })],
+      ]) {
+        f.osiCloudHttp.useAccountGateLoaderForTests(loader);
+        await assert.rejects(f.osiCloudHttp.requestJsonIpv4({ method: 'GET', url: cloud.url + '/api/v1/sync/gateways/X/pending-commands' }), { code: 'account_gate_unavailable' }, label);
+      }
+      assert.deepEqual(cloud.sent.slice(before), [], 'nothing reached the cloud');
+      assert.equal(warnings.lines.filter((line) => /^osi-cloud-http: account-work gate (could not be loaded|failed)/.test(line)).length, 3, JSON.stringify(warnings.lines));
+      // The link route never consults the gate.
+      await f.osiCloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/auth/local-sync', payload: {} });
+      assert.deepEqual(cloud.sent.slice(before).map((r) => r.path), ['/auth/local-sync']);
+    } finally {
+      f.osiCloudHttp.useAccountGateLoaderForTests(null);
+      warnings.restore();
+      f.cleanup();
+    }
+  });
+}
+
 module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, GATEWAY_EUI, cloud, processStarted };
