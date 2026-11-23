@@ -389,10 +389,39 @@ for (const profile of PROFILES) {
     () => pending('UPSERT_ZONE_LOCATION', 6, { latitude: null, longitude: null, syncVersion: 6 }),
     () => pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-23T00:00:00.000Z' }),
     () => pending('DELETE_ZONE', 6, { syncVersion: 6 }),
+    // The remaining shapes give every written field, in each key spelling the
+    // node reads, at least one non-default value. Timestamps are written in a form
+    // the clock normaliser leaves alone, so a dropped field cannot hide behind it.
+    () => pending('UPSERT_ZONE_CONFIG', 6, { soilType: 'silt', calibrationKey: 'pear', areaM2: 33, irrigation_method: 'pivot',
+      weatherSource: 'Bad Value!', phenologicalStage: 'default', stageStartedOn: '2026-03-01', notes: 'invalid provider',
+      syncVersion: 6 }),
+    () => pending('UPSERT_ZONE_CONFIG', 6, { weather_source: 'Not-Valid', variety: 'gala', calibrationKey: 'quince',
+      calibration_key: 'medlar', soilType: 'peat', soil_type: 'chalk', irrigationMethod: 'drip', irrigation_method: 'flood',
+      phenologicalStage: 'initial', phenological_stage: 'veraison', syncVersion: 6 }),
+    () => pending('UPSERT_ZONE', 6, { name: '', phenological_stage: 'veraison', calibration_key: 'grape', variety: 'syrah',
+      deleted_at: '2026-11-23 10:00:00', weather_source: 'provider_d', user: { cloudUserId: 42 }, syncVersion: 6 }),
+    () => pending('UPSERT_ZONE', 6, { name: 'snake gateway', gatewayDeviceEui: undefined,
+      gateway_device_eui: '0016C001F1000003', longitude: '-1.25', stage_started_on: '', user: { username: 'farmer', cloudUserId: 1 },
+      syncVersion: 6 }),
+    () => pending('DELETE_ZONE', 6, { syncVersion: 6, deletedAt: '2026-11-23 10:00:00' }),
+  ];
+
+  // Shapes the drift test covers but the adapter path cannot carry with the
+  // legacy ACK assertions: a command version only in syncVersion, and a command
+  // type only in `action`.
+  const DRIFT_ONLY = [
+    () => { const c = pending('UPSERT_ZONE', 6, { ...FULL_ZONE, syncVersion: 8 }); delete c.appliedSyncVersion; return c; },
+    () => { const c = pending('UPSERT_ZONE_CONFIG', 6, { notes: 'version from syncVersion', syncVersion: 8 }); delete c.appliedSyncVersion; return c; },
+    () => { const c = pending('UPSERT_ZONE_LOCATION', 6, { latitude: 2, longitude: 3, syncVersion: 'x' }); delete c.appliedSyncVersion; return c; },
+    () => { const c = pending('DELETE_ZONE', 6, { syncVersion: 9 }); delete c.appliedSyncVersion; return c; },
+    () => { const c = pending('UPSERT_ZONE_LOCATION', 6, { latitude: 4, longitude: 5, action: 'UPSERT_ZONE_LOCATION' });
+      delete c.commandType; delete c.command_type; return c; },
+    () => { const c = pending('UPSERT_ZONE', 6, { name: 'snake zone uuid', zone_uuid: ZONE_UUID, user: { username: 'farmer' } });
+      delete c.zoneUuid; return c; },
   ];
 
   test(`${profile}: osi-zone-commands builds the statement Build UPDATE SQL builds, for every command shape`, async () => {
-    for (const make of NEWER) {
+    for (const make of [...NEWER, ...DRIFT_ONLY]) {
       const command = make();
       const built = await run(profile, BUILD_SQL, fixture(), { payload: command });
       const warnings = [];
@@ -422,7 +451,10 @@ for (const profile of PROFILES) {
         };
         assert.deepEqual(pick(fullZone(guarded)), pick(fullZone(direct)), `${command.commandType}: same row as today`);
         assert.deepEqual(outbox(guarded), outbox(direct), `${command.commandType}: same outbox as today`);
-        assert.equal(fullZone(guarded).sync_version, 6);
+        // An UPSERT_ZONE naming a user the gateway does not have inserts and updates
+        // nothing, as Build UPDATE SQL does; every other shape writes version 6.
+        const noUser = command.user && command.user.cloudUserId === 42;
+        assert.equal(fullZone(guarded).sync_version, noUser ? 5 : 6);
       } finally {
         guarded.close();
         direct.close();

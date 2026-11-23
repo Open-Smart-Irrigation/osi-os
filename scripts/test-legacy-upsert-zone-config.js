@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 'use strict';
 
-// Legacy UPSERT_ZONE_CONFIG and UPSERT_ZONE branches of node 4f4a765f36cee6f3
-// ("Build UPDATE SQL") and the zone stage start date (spec
-// docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md, B5). Builds
-// the statement with the shipped function-node source and runs it against a
-// seeded database, so the assertions are about the row, not the SQL string.
+// Legacy UPSERT_ZONE_CONFIG and UPSERT_ZONE statements and the zone stage start
+// date (spec docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md,
+// B5). Since E3 these commands are written by osi-zone-commands' copy of the zone
+// branches of "Build UPDATE SQL" (node 4f4a765f36cee6f3). Each case builds the
+// statement with both, asserts they agree, and runs the live copy's statement
+// against a seeded database, so the assertions are about the row, not the SQL
+// string.
 // The stage-date rules: controller rulings cloud/sync I7 (a change to unset
 // clears) and plan review E2 I2 (another set stage without a date starts today).
 //
@@ -16,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
-const { executeFunction, loadNode } = require('./lib/scoped-access-harness');
+const { buildLegacyZoneStatement } = require('./lib/legacy-zone-statement');
 const { normalizeStage } = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-crop-kc');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -38,15 +40,12 @@ function fixture({ stage = 'development', startedOn = '2026-04-20', withZone = t
   return db;
 }
 
+// The live statement: osi-zone-commands' copy, asserted equal to Build UPDATE
+// SQL's own (scripts/lib/legacy-zone-statement.js), executed on the database.
 async function apply(db, cmd) {
-  const run = await executeFunction(loadNode('4f4a765f36cee6f3'), {
-    msg: { payload: { zoneUuid: ZONE_UUID, syncVersion: 9, ...cmd } },
-    env: { DEVICE_EUI: GATEWAY },
-    db,
-  });
-  assert.equal(typeof run.result.topic, 'string', 'the node must build a statement');
-  db.exec(run.result.topic);
-  return run;
+  const { statement, warnings } = await buildLegacyZoneStatement({ zoneUuid: ZONE_UUID, syncVersion: 9, ...cmd }, { env: { DEVICE_EUI: GATEWAY } });
+  db.exec(statement);
+  return { result: { topic: statement }, warnings };
 }
 
 function row(db) {

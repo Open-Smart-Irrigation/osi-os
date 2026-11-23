@@ -26,6 +26,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const { executeFunction, loadNode, makeAuthHeader, facadeDb } = require('./lib/scoped-access-harness');
+const { buildLegacyZoneStatement } = require('./lib/legacy-zone-statement');
 const { SEED_DB_RELATIVE_PATHS } = require('./seed-db-paths');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -270,18 +271,15 @@ test('the zone list returns weather_source and the gateway default', async () =>
   }
 });
 
+// The live statement: osi-zone-commands' copy, asserted equal to Build UPDATE
+// SQL's own (scripts/lib/legacy-zone-statement.js), executed on the database.
 async function legacyCommand(db, cmd) {
-  const run = await executeFunction(loadNode('4f4a765f36cee6f3'), {
-    msg: { payload: { zoneUuid: ZONE_UUID, syncVersion: 9, ...cmd } },
-    env: { DEVICE_EUI: GATEWAY },
-    db,
-  });
-  assert.equal(typeof run.result.topic, 'string', 'the node must build a statement');
-  db.exec(run.result.topic);
-  return run;
+  const { statement, warnings } = await buildLegacyZoneStatement({ zoneUuid: ZONE_UUID, syncVersion: 9, ...cmd }, { env: { DEVICE_EUI: GATEWAY } });
+  db.exec(statement);
+  return { result: { topic: statement }, warnings };
 }
 
-test('Build UPDATE SQL: UPSERT_ZONE_CONFIG stores weatherSource or weather_source, null as auto', async () => {
+test('legacy zone statement (osi-zone-commands = Build UPDATE SQL): UPSERT_ZONE_CONFIG stores weatherSource or weather_source, null as auto', async () => {
   const db = seededMemory();
   try {
     await legacyCommand(db, { commandType: 'UPSERT_ZONE_CONFIG', weatherSource: 'MeteoSwiss' });
@@ -295,7 +293,7 @@ test('Build UPDATE SQL: UPSERT_ZONE_CONFIG stores weatherSource or weather_sourc
   }
 });
 
-test('Build UPDATE SQL: an invalid provider leaves the column, warns once, and applies the rest', async () => {
+test('legacy zone statement (osi-zone-commands = Build UPDATE SQL): an invalid provider leaves the column, warns once, and applies the rest', async () => {
   const db = seededMemory();
   try {
     db.exec("UPDATE irrigation_zones SET weather_source = 'meteoswiss' WHERE id = 11");
@@ -311,7 +309,7 @@ test('Build UPDATE SQL: an invalid provider leaves the column, warns once, and a
   }
 });
 
-test('Build UPDATE SQL: legacy UPSERT_ZONE inserts auto when absent and keeps the stored value on conflict', async () => {
+test('legacy zone statement (osi-zone-commands = Build UPDATE SQL): legacy UPSERT_ZONE inserts auto when absent and keeps the stored value on conflict', async () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec(SEED);
