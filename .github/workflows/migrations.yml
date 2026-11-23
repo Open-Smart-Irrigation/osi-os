@@ -143,6 +143,7 @@ jobs:
       - run: node scripts/verify-boot-ddl-interpolation.js
       - run: node --test scripts/verify-boot-ddl-interpolation.test.js scripts/test-upsert-sync-versioning.js
       - run: node scripts/test-valve-schedule-sync-triggers.js
+      - run: node scripts/test-schedule-insert-outbox-trigger.js
       - run: node scripts/test-valve-settings-sync-triggers.js
       - run: node --test scripts/test-strega-reconciliation-observed-events.js scripts/test-valve-actuation-bootstrap.js
       - name: Conditional irrigation schema rehearsals

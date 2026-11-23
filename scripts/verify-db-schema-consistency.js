@@ -1567,6 +1567,16 @@ const requiredTriggerSqlFragments = {
     "'sync_version', new.sync_version",
     "'user', json_object(",
   ],
+  trg_sync_schedules_outbox_ai: [
+    'after insert on irrigation_schedules',
+    "where peer_node = 'cloud' and linked = 1",
+    'coalesce(new.sync_version, 0) > 0',
+    'new.response_mode is not null',
+    "'schedule_upserted'",
+    "'threshold_kpa', new.threshold_kpa",
+    "'response_mode', new.response_mode",
+    "'sync_version', new.sync_version",
+  ],
   trg_sentek_device_outbox_payload_ai: [
     "new.aggregate_type = 'device'",
     "'$.sdi12_channel_layout_json'",

@@ -29,6 +29,10 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   ['trg_sync_valve_schedules_outbox_au', '0077__conditional_irrigation_sync.sql'],
   ['trg_sync_irrigation_policies_outbox_ai', '0077__conditional_irrigation_sync.sql'],
   ['trg_sync_irrigation_policies_outbox_au', '0077__conditional_irrigation_sync.sql'],
+  // 0081__schedule_insert_outbox_trigger.sql (E5): the insert twin of the
+  // boot-managed trg_sync_schedules_outbox_au. Seed DB + deploy-time
+  // migration runner delivery, never the frozen sync-init-fn boot DDL.
+  ['trg_sync_schedules_outbox_ai', '0081__schedule_insert_outbox_trigger.sql'],
   // 0025__valve_settings_sync_triggers.sql (cloud full-parity Task P2-E1) —
   // same story again: seed DB + deploy-time migration runner delivery.
   ['trg_sync_valve_settings_outbox_ai', '0025__valve_settings_sync_triggers.sql'],
