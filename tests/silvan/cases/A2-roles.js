@@ -72,9 +72,11 @@ exports.run = async (ctx) => {
   }
 
   // ---- 1. admin routes: source-level proof, not a live admin account --------
-  // There is no way to mint a role='admin' account through the public API while
-  // scoped access is off (auth-db-insert only assigns the schema default
-  // 'researcher' on that path) -- so this reads the DEPLOYED node source
+  // Reboot's role gate is never probed live, and no fresh admin can be minted
+  // on this already-provisioned gateway (bootstrap closed at the first
+  // account, osi-os#468; only a FRESH zero-user gateway stores role='admin'
+  // on first registration with scoped access off since K1 R2 / osi-os#770)
+  // -- so this reads the DEPLOYED node source
   // (read-only, over the SSH tunnel that already MUST point at Silvan) and
   // classifies its SHAPE, rather than assuming what it does.
   let deployedFuncs = null;
@@ -122,19 +124,19 @@ exports.run = async (ctx) => {
       adminUsersGet.status === 404, { status: adminUsersGet.status });
     ev.note('Admin account found for cross-check: ' + existingAdmin.username + '.');
   } else {
-    ev.note('No role=admin account exists on this gateway, and the default (unscoped) register path always ' +
-      'assigns the schema default \'researcher\' -- there is currently no way to create one through the public ' +
-      'API without first flipping OSI_SCOPED_ACCESS on (out of scope here). The 404-for-everyone assertions ' +
-      'above are the closest available proof that the gate does not discriminate by role.');
+    ev.note('No role=admin account exists on this gateway, and none can be created through the public API ' +
+      'here: bootstrap is closed (#468), and only a FRESH zero-user gateway stores role=\'admin\' on first ' +
+      'registration (K1 R2, #770). The 404-for-everyone assertions above are the closest available proof ' +
+      'that the gate does not discriminate by role.');
   }
 
   // ---- 3. reboot/fan/settings: any authenticated user succeeds today -------
   // GET /api/system/stats and the fan no-op below use the harness's OWN account
-  // (schema-default 'researcher', never elevated) to demonstrate what a naive
+  // (a 'researcher' from a pre-R2 bootstrap, never elevated) to demonstrate what a naive
   // reading of "role gates" would expect to be admin-only. That is the
   // documented, current, scoped-only contract -- not a bug this case is hiding.
   const stats = await rest.get('/api/system/stats');
-  ctx.expectStatus('a non-admin (researcher-by-default) account can read /api/system/stats today', stats, 200);
+  ctx.expectStatus('a non-admin (pre-R2 researcher) account can read /api/system/stats today', stats, 200);
 
   if (stats.body && stats.body.fan_available) {
     const before = Number(stats.body.fan_value);

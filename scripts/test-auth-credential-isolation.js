@@ -569,7 +569,7 @@ test('#468 flag off: the first account on a fresh gateway can still self-registe
     assert.equal(out.inserted, true, 'first-run bootstrap must keep working with the flag off');
     const rows = await userRows(helper);
     assert.deepEqual(rows.map((r) => r.username), ['first_owner']);
-    assert.equal(rows[0].role, 'researcher', 'flag-off role semantics are unchanged (D05)');
+    assert.equal(rows[0].role, 'admin', 'K1 R2 (#770): flag-off bootstrap stores a real admin');
   } finally {
     cleanup();
   }

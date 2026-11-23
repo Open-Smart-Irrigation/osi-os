@@ -84,10 +84,10 @@ function fixture(profile = 'bcm2712', { backfillPending = false } = {}) {
   const secret = crypto.randomBytes(32).toString('hex');
   const env = on => ({ AUTH_TOKEN_SECRET: secret, DEVICE_EUI: gateway, LINK_GATEWAY_DEVICE_EUI: gateway, OSI_SCOPED_ACCESS: on ? '1' : '0' });
   const node = id => { const n = flows.find(n => n.id === id); assert.ok(n, id); return n; };
-  async function invoke(id, msg, on, overrides = {}) {
+  async function invoke(id, msg, on, overrides = {}, globals) {
     const out = await executeFunction(node(id), {
       msg, db, flowState, env: env(on), osiLibModules: { installation, scope },
-      libOverrides: { osiDb: helper, ...overrides }
+      libOverrides: { osiDb: helper, ...overrides }, ...(globals ? { globals } : {})
     });
     Object.assign(flowState, out.flowState);
     return out.result;

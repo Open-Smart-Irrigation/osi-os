@@ -8,10 +8,11 @@
 // Why this exists instead of just calling the routes: POST /api/system/reboot
 // cannot safely be probed for its role gate (calling it succeeds by actually
 // rebooting the gateway), and there is no way to mint a second gateway
-// account with role='admin' while scoped access is off (the public register
-// route only ever assigns the schema default 'researcher' in that mode --
-// verified 2026-09-17 against auth-db-insert in flows.json; the
-// first-registrant-becomes-admin path only runs when OSI_SCOPED_ACCESS='1').
+// account with role='admin' while scoped access is off on an ALREADY-
+// provisioned gateway (bootstrap closed at the first account, osi-os#468;
+// since K1 R2 / osi-os#770 only a FRESH zero-user gateway's first
+// registration stores 'admin' with the flag off -- verified 2026-09-17
+// against auth-db-insert in flows.json, re-verified for R2 on 2026-11-23).
 // Reading the deployed source and classifying its SHAPE proves the contract
 // without ever exercising the dangerous side effect.
 //
