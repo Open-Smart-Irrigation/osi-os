@@ -1731,6 +1731,8 @@ export interface AccountLinkStatus {
   serverUsername: string | null;
   linkedAt: string | null;
   serverUrl?: string | null;
+  /** True only for an enabled gateway admin; the gateway refuses anyone else's unlink. */
+  canUnlink?: boolean;
 }
 
 export interface AccountLinkResult {

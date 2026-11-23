@@ -1030,11 +1030,35 @@ module.exports.recoverAccountConfig = recoverAccountConfig;
 
 // Both normal finalization and startup use the same receipt/publication rule.
 async function recoverAccountConfigOnStart({osiDb, fs, cp, warn}) {
-  if (!fs || !fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) return;
-  const db = new osiDb.Database('/data/db/farming.db');
-  try { await recoverAccountConfig(db, {fs, cp, warn}); }
-  catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
-  finally { await db.close(); }
+  if (fs && fs.existsSync(ACCOUNT_CONFIG_JOURNAL)) {
+    const db = new osiDb.Database('/data/db/farming.db');
+    try { await recoverAccountConfig(db, {fs, cp, warn}); }
+    catch (error) { warn('Account-link configuration recovery is pending; retry link or disconnect'); }
+    finally { await db.close(); }
+  }
+  await warnLinkWithoutPassword({osiDb, fs, warn});
+}
+
+// #766: a process without an MQTT password reports nothing to the cloud. If
+// the database still records the cloud peer as linked, say so once at start:
+// the account page would show a link that no longer reports. Stale users rows
+// left by an older unlink do not trigger this; only the peer record does.
+async function warnLinkWithoutPassword({osiDb, fs, warn}) {
+  if (cloudHttp.gatewayLinked() || (fs && fs.existsSync(ACCOUNT_CONFIG_JOURNAL))) return;
+  let db = null;
+  try {
+    db = new osiDb.Database('/data/db/farming.db');
+    const peer = await db.get("SELECT linked FROM sync_link_state WHERE peer_node='cloud' LIMIT 1", []);
+    if (peer && Number(peer.linked) === 1) {
+      warn('The database records a cloud link, but no MQTT password is in UCI; cloud reporting stays off until the gateway is linked again');
+    }
+  } catch (error) {
+    warn('Cloud link check at start failed: ' + String(error && error.message ? error.message : error));
+  } finally {
+    if (db) {
+      try { await db.close(); } catch (error) { warn('Cloud link check DB close failed: ' + String(error && error.message ? error.message : error)); }
+    }
+  }
 }
 module.exports.publishAccountRestart = publishAccountRestart;
 module.exports.recoverAccountConfigOnStart = recoverAccountConfigOnStart;
@@ -1216,10 +1240,47 @@ function accountCloudMessage({msg, node, global}) {
   if (!cloudHttp.gatewayLinked()) {
     if (!unlinkedDropReported) {
       unlinkedDropReported = true;
-      node.warn('Gateway is not linked to a cloud account; cloud MQTT messages are dropped');
+      node.warn('No MQTT password in UCI: the gateway is not linked, so cloud MQTT messages are dropped');
     }
     return null;
   }
   return gatewayWorkBlocked({fs: global.get('fs'), warn: text => node.warn(text)}) ? null : msg;
 }
 module.exports.accountCloudMessage = accountCloudMessage;
+
+// GET /api/account-link/status response from the caller's users row (the
+// decode node selects the whole row). canUnlink mirrors the unlink route's
+// admin guard (account-unlink-admin-write-guard, scoped access on or off), so
+// the page shows the disconnect control only to an enabled admin. The edge
+// holds no proof of the cloud gateway owner (authority contract K1, "Gateway
+// owner"), so ownership alone does not admit anyone.
+function accountLinkStatusResponse({msg}) {
+  const result = msg.payload;
+  if (!Array.isArray(result) || result.length === 0) {
+    msg.statusCode = 401;
+    msg.payload = { message: 'User not found' };
+    return msg;
+  }
+  const user = result[0];
+  const linked = user.auth_mode === 'server';
+  const offlineVerifier = String(user.server_offline_verifier || '').trim();
+  const offlineVerifierVersion = Number(user.server_offline_verifier_version || 0) || 0;
+  const linkedAuthPackageValid = linked && !!offlineVerifier && offlineVerifierVersion >= 1;
+  const linkedAuthRepairRequired = linked && !linkedAuthPackageValid;
+  msg.statusCode = 200;
+  msg.payload = {
+    linked: linked,
+    serverUsername: user.server_username || null,
+    linkedAt: user.server_linked_at || null,
+    serverUrl: user.server_url || null,
+    linkedAuthPackageValid: linkedAuthPackageValid,
+    linkedAuthRepairRequired: linkedAuthRepairRequired,
+    linkedAuthSyncStatus: linkedAuthRepairRequired ? 'repair_required' : (user.last_auth_sync_status || null),
+    offlineVerifierVersion: linked ? offlineVerifierVersion : 0,
+    lastAuthSyncAt: user.last_auth_sync_at || null,
+    lastAuthSyncError: user.last_auth_sync_error || null,
+    canUnlink: user.role === 'admin' && !user.disabled_at,
+  };
+  return msg;
+}
+module.exports.accountLinkStatusResponse = accountLinkStatusResponse;

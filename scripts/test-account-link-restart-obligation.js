@@ -11,6 +11,9 @@ const root = path.resolve(__dirname, '..');
 const journalPath = '/data/db/osi-account-link-config.json';
 const requestDir = '/var/run/osi-node-red-restart-requests';
 const testRef = process.env.OSI_ACCOUNT_LINK_TEST_REF;
+// These fixtures model a linked gateway; node-red.init exports its MQTT
+// password to Node-RED (#766). Tests of the unlinked case set it themselves.
+if (process.env.DEVICE_MQTT_PASSWORD === undefined) process.env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
 
 function source(file) {
   return testRef ? cp.execFileSync('git', ['show', testRef + ':' + file], {cwd:root, encoding:'utf8', maxBuffer:20*1024*1024}) : fs.readFileSync(path.join(root,file),'utf8');

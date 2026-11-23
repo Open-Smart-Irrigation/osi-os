@@ -14,10 +14,14 @@ function gatewayLinked(env = process.env) {
   return String((env && env.DEVICE_MQTT_PASSWORD) || '').trim() !== '';
 }
 
-// Requests that carry gateway data or keep a gateway session alive. Linking
-// (/auth/local-sync) and support work requests stay open to an unlinked
-// gateway.
-const LINKED_ONLY_PATHS = [/^\/api\/v1\/sync\//, /^\/api\/v2\/journal\//, /^\/auth\/refresh-sync(?:\/|$)/];
+// Requests that carry gateway data or keep a gateway session alive. Matched
+// as a path segment anywhere in the request path, so a cloud reached under a
+// base path (https://host/osi/api/v1/sync/...) is gated the same way.
+// Two routes stay open to an unlinked gateway: linking (/auth/local-sync),
+// and support work requests (/api/v1/support/edge/work-requests), which the
+// farmer starts and which carry only the support request itself. Support is
+// the one deliberate exception to "an unlinked gateway sends nothing".
+const LINKED_ONLY_PATHS = [/(?:^|\/)api\/v1\/sync\//, /(?:^|\/)api\/v2\/journal\//, /(?:^|\/)auth\/refresh-sync(?:\/|$)/];
 
 function linkedOnlyPath(pathname) {
   return LINKED_ONLY_PATHS.some((pattern) => pattern.test(String(pathname || '')));

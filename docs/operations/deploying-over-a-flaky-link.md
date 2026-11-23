@@ -78,6 +78,11 @@ instead of quietly omitting the file from the bundle.
 
 ## Running it
 
+Before a release that carries the #766 change reaches a linked gateway, run
+the MQTT password presence check in the deploy runbook
+(`osi-live-ops-runbook`, `references/deploy.md`) on the gateway. On
+`MISSING`, do not deploy; escalate.
+
 ```bash
 # 1. Build and package the React GUI (same as the tunnel flow — not built by
 #    deploy-bundle.sh itself; frontend builds OOM this workstation)

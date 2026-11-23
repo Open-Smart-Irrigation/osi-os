@@ -629,38 +629,43 @@ earlier, and 0.9 builds without it). On those gateways an unlink
 
 From the fix on, unlink clears every account row, the gateway refuses cloud
 sync requests and MQTT messages while unlinked, and `node-red.init` removes
-the credentials and turns the broker's auto-connect off. Updating the
+the credentials and exports the broker's auto-connect as off. Updating the
 gateway is the lasting repair; this procedure is the manual fallback.
 
 **Check first** (read-only; prints no secret):
 
 ```sh
 uci -q get osi-server.cloud.mqtt_password >/dev/null && echo "STOP: mqtt_password is set (still linked?)" || echo "mqtt_password absent"
-node -e 'const fs=require("fs"); const id=JSON.parse(fs.readFileSync("/srv/node-red/flows.json","utf8")).find(n=>n.name==="OSI Cloud Broker").id; const c=JSON.parse(fs.readFileSync("/srv/node-red/flows_cred.json","utf8")); console.log("cloud broker entry:", c[id] ? "present" : "absent", "| other entries:", Object.keys(c).filter(k=>k!==id).length)'
-sqlite3 -readonly /data/db/farming.db "SELECT COUNT(*) FROM users WHERE server_url IS NOT NULL OR server_sync_token IS NOT NULL OR auth_mode <> 'local'"
+node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync("/srv/node-red/flows_cred.json","utf8")); if (Object.prototype.hasOwnProperty.call(c,"$")) { console.log("STOP: flows_cred.json is encrypted; this procedure cannot read it"); process.exit(1); } const id=JSON.parse(fs.readFileSync("/srv/node-red/flows.json","utf8")).find(n=>n.name==="OSI Cloud Broker").id; console.log("cloud broker entry:", c[id] ? "present" : "absent", "| other entries:", Object.keys(c).filter(k=>k!==id).length)'
+sqlite3 -readonly /data/db/farming.db "SELECT username FROM users WHERE server_url IS NOT NULL OR server_sync_token IS NOT NULL OR auth_mode <> 'local'"
 logread | grep "OSI Cloud Broker" | tail -2
 ```
 
 Go on only if the account page (or `GET /api/account-link/status`) shows the
 gateway unlinked and `mqtt_password` is absent. Step 2 applies when the
-cloud broker entry is present; step 3 when the `users` count is above 0. Other credential entries (another broker's) stay
-as they are.
+cloud broker entry is present. Step 3 applies when the `users` query lists an
+account. Other credential entries (another broker's) stay as they are.
+
+A `STOP: flows_cred.json is encrypted` line means Node-RED saved the file
+with a credential key, which happens only after a deploy from the Node-RED
+editor (field repair). This procedure does not handle that file; escalate.
 
 1. Take the pre-repair backup (script above). It copies `flows_cred.json`,
    which holds the old device password: delete the backup once step 5 has
    passed.
 
-2. Remove only the cloud broker entry. The script writes a temporary file in
-   the same directory with mode 0600, flushes it and renames it over the
-   original, so a power cut leaves the old or the new file, never a partial
-   one:
+2. Remove only the cloud broker entry. The script refuses an encrypted file,
+   then writes a temporary file in the same directory with mode 0600, flushes
+   it and renames it over the original, so a power cut leaves the old or the
+   new file, never a partial one:
 
    ```sh
    node -e '
      const fs = require("fs"), path = require("path");
-     const id = JSON.parse(fs.readFileSync("/srv/node-red/flows.json", "utf8")).find(n => n.name === "OSI Cloud Broker").id;
      const file = fs.realpathSync("/srv/node-red/flows_cred.json");
      const creds = JSON.parse(fs.readFileSync(file, "utf8"));
+     if (Object.prototype.hasOwnProperty.call(creds, "$")) { console.log("STOP: flows_cred.json is encrypted; nothing changed"); process.exit(1); }
+     const id = JSON.parse(fs.readFileSync("/srv/node-red/flows.json", "utf8")).find(n => n.name === "OSI Cloud Broker").id;
      if (!creds[id]) { console.log("no cloud broker entry; nothing to do"); process.exit(0); }
      delete creds[id];
      const tmp = file + ".unlink-" + process.pid;
@@ -672,19 +677,19 @@ as they are.
    '
    ```
 
-3. Clear the link on every remaining account row. Each account keeps its own
-   local password and signs in locally afterwards:
-
-   ```sh
-   sqlite3 -cmd ".timeout 5000" /data/db/farming.db "UPDATE users SET auth_mode='local', server_username=NULL, server_password_hash=NULL, server_offline_verifier=NULL, server_offline_verifier_version=0, server_linked_at=NULL, server_url=NULL, server_sync_token=NULL, server_sync_token_expires_at=NULL, cloud_user_id=NULL, last_auth_sync_at=NULL, last_auth_sync_status=NULL, last_auth_sync_error=NULL WHERE auth_mode <> 'local' OR server_url IS NOT NULL OR server_sync_token IS NOT NULL; SELECT changes();"
-   ```
+3. For each account the `users` query listed, the farmer signs in as that
+   account on the gateway's account page and presses the disconnect button.
+   That is the shipped unlink: it clears the account's link and its
+   linked-login data through the supported writer. This runbook has no
+   manual procedure for the offline verifier (rule 4), so do not clear these
+   rows by hand. The account then signs in with its local password.
 
 4. Restart Node-RED so it drops the connection: `/etc/init.d/node-red restart`.
 
 5. Verify:
    - On the gateway: `ls -l /srv/node-red/flows_cred.json` shows
      `-rw-------` root. The "Check first" listing shows the cloud broker
-     entry absent, and the `users` count is 0.
+     entry absent, and the `users` query lists no account.
      `logread | grep "OSI Cloud Broker" | tail -3` shows no new
      `Connected to broker` after the restart.
    - In the cloud, as the account the gateway was linked to: the gateway's
@@ -695,18 +700,16 @@ Expected after the restart: the broker node keeps trying about every 15 s and
 logs `Connection failed to broker` each time (about 40 lines in 10 minutes)
 until the gateway is linked again or updated to firmware with the fix.
 
-Undo: restore `flows_cred.json` and `farming.db` from the backup (the
-backup script's restore notes), then restart Node-RED. Linking the gateway
-again from the account page writes fresh credentials and link fields either
-way.
+Undo: restore `flows_cred.json` from the backup, then restart Node-RED.
+Linking the gateway again from the account page writes fresh credentials and
+link fields either way.
 
 The cloud still lists the gateway under the account after this procedure.
 To remove it there, unlink it in the cloud as well.
 
 Tested so far: steps 1, 2, 4 and 5 on a 0.8.4 test board (23 Nov 2026), where
 "last seen" stayed put for the 10 minutes after the restart and a reboot
-before step 2 had not stopped the reporting. Step 3 has not run on a device;
-its UPDATE was checked against the bundled 0.7.0 and 0.8.0 database schemas.
+before step 2 had not stopped the reporting. Step 3 uses the shipped unlink.
 
 ### ChirpStack v4 has no plain REST API
 

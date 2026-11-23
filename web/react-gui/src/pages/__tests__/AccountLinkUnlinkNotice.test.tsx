@@ -45,7 +45,7 @@ const renderPage = () => render(<MemoryRouter><AccountLink /></MemoryRouter>);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getStatus.mockResolvedValue({ linked: true, serverUsername: 'farmer', linkedAt: '2026-07-01T00:00:00.000Z' });
+  mocks.getStatus.mockResolvedValue({ linked: true, serverUsername: 'farmer', linkedAt: '2026-07-01T00:00:00.000Z', canUnlink: true });
   mocks.getSyncState.mockResolvedValue(null);
   mocks.unlink.mockResolvedValue({});
 });
@@ -55,6 +55,24 @@ async function unlinkFromPage() {
   fireEvent.click(await screen.findByRole('button', { name: en.unlink.button }));
   fireEvent.click(screen.getByRole('button', { name: en.unlink.button }));
 }
+
+describe('AccountLink unlink control', () => {
+  it.each([
+    ['a caller who is not an enabled admin', false],
+    ['a status from an older gateway without canUnlink', undefined],
+  ])('hides the disconnect button for %s', async (_label, canUnlink) => {
+    mocks.getStatus.mockResolvedValue({ linked: true, serverUsername: 'farmer', linkedAt: '2026-07-01T00:00:00.000Z', canUnlink });
+    renderPage();
+    expect(await screen.findByText(en.unlink.adminOnly)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: en.unlink.button })).not.toBeInTheDocument();
+  });
+
+  it('shows the disconnect button to an admin', async () => {
+    renderPage();
+    expect(await screen.findByRole('button', { name: en.unlink.button })).toBeInTheDocument();
+    expect(screen.queryByText(en.unlink.adminOnly)).not.toBeInTheDocument();
+  });
+});
 
 describe('AccountLink unlink notice', () => {
   it('the English resource carries the exact notice', () => {

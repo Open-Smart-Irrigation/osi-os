@@ -35,7 +35,8 @@
     "button": "Gyamu ku OSI Server",
     "confirm": "Oli mukakafu? Oluvannyuma lw'okugyamu, oteekwa okozesa ekigambo kyo ky'okulinda eky'omu bitundu ekya mazima.",
     "success": "Bagyiddwa ku OSI Server",
-    "stoppedReporting": "This gateway stopped sending data. To remove it from your cloud account too, unlink it in the cloud."
+    "stoppedReporting": "This gateway stopped sending data. To remove it from your cloud account too, unlink it in the cloud.",
+    "adminOnly": "Only a gateway admin can disconnect this gateway from OSI Server."
   },
   "errors": {
     "networkError": "Teyinziddwa kutuuka ku OSI Server. Kebera endabirwamu n'okuteekateeka kwo kw'omukutu.",

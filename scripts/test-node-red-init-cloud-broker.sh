@@ -211,18 +211,28 @@ grep -q "cloud MQTT broker wss://\*\*\*@broker.example.net/mqtt source=mqtt_brok
 
 # ---------------------------------------------------------------------------
 # Part 3 (#766): an unlinked gateway gets no cloud broker. Its credentials
-# leave flows_cred.json (other entries stay, mode 0600), auto-connect goes
-# off, and the exported URL never resolves. Relinking restores all three.
+# leave flows_cred.json (other entries stay, mode 0600), the exported
+# OSI_CLOUD_BROKER_AUTOCONNECT is false and the exported URL never resolves.
+# Relinking restores all three. No start rewrites the shipped flows.json, so
+# the payload keeps its recorded flows_sha256 and stays a rollback target.
 # ---------------------------------------------------------------------------
 UNLINKED_URL="wss://unlinked.invalid/mqtt"
+AUTOCONNECT_PLACEHOLDER='${OSI_CLOUD_BROKER_AUTOCONNECT}'
 CRED="$SANDBOX/srv/node-red/flows_cred.json"
+SHIPPED_FLOWS="conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json"
 
-autoconnect_field() {
+exported_autoconnect() {
+    sed -n 's/^OSI_CLOUD_BROKER_AUTOCONNECT=//p' "$SANDBOX/env.log"
+}
+shipped_autoconnect() {
     node -e '
 const flows = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 const node = flows.find((n) => n && n.id === process.argv[2]);
 process.stdout.write(node ? String(node.autoConnect) : "<missing>");
-' "$SANDBOX/srv/node-red/flows.json" "$BROKER_NODE_ID"
+' "$SHIPPED_FLOWS" "$BROKER_NODE_ID"
+}
+flows_hash() {
+    sha256sum "$SANDBOX/srv/node-red/flows.json" | cut -d' ' -f1
 }
 cred_keys() {
     node -e '
@@ -238,51 +248,63 @@ write_creds() {
     chmod 644 "$CRED"
 }
 
-write_flows "$PLACEHOLDER"
+assert_eq "$AUTOCONNECT_PLACEHOLDER" "$(shipped_autoconnect)" "shipped flows.json reads auto-connect from the environment"
+
+# The shipped flows.json, after its first start on this gateway (which
+# settles the client id), is what a deploy records in flows_sha256.
+mkdir -p "$SANDBOX/srv/node-red"
+cp "$SHIPPED_FLOWS" "$SANDBOX/srv/node-red/flows.json"
+run_start "wss://broker.example.net/mqtt" "cloud.example.org" "linked-secret"
+assert_eq "true" "$(exported_autoconnect)" "linked: auto-connect exported true"
+RECORDED="$(flows_hash)"
+
 write_creds
 run_start "wss://broker.example.net/mqtt" "cloud.example.org" ""
 assert_eq "$UNLINKED_URL" "$(exported_url)" "unlinked: exports the name that never resolves, not the default cloud"
 grep -q "cloud MQTT broker $UNLINKED_URL source=unlinked" "$SANDBOX/logger.log" \
     || fail "unlinked start logs source=unlinked: $(cat "$SANDBOX/logger.log")"
-assert_eq "false" "$(autoconnect_field)" "unlinked: cloud broker auto-connect is off"
+assert_eq "false" "$(exported_autoconnect)" "unlinked: auto-connect exported false"
 assert_eq "agroscope-mqtt-broker{password,user}" "$(cred_keys)" "unlinked: cloud broker credentials removed, other entries kept"
 assert_eq "600" "$(cred_mode)" "unlinked: credential file mode 0600"
 grep -q "^DEVICE_MQTT_PASSWORD=$" "$SANDBOX/env.log" || fail "unlinked: DEVICE_MQTT_PASSWORD exported empty"
 if grep -q "old-secret" "$SANDBOX/logger.log" "$SANDBOX/env.log"; then fail "the old password must not appear in logs or env"; fi
+assert_eq "$RECORDED" "$(flows_hash)" "unlink leaves the flows.json bytes unchanged"
 
-# A restart while still unlinked changes nothing more.
-cp "$CRED" "$SANDBOX/cred.before"; cp "$SANDBOX/srv/node-red/flows.json" "$SANDBOX/flows.before"
+# A blank password counts as unlinked, as in osi-cloud-http.
+run_start "" "" "   "
+assert_eq "false" "$(exported_autoconnect)" "blank password: unlinked"
+assert_eq "$UNLINKED_URL" "$(exported_url)" "blank password: unlinked URL"
+
+# A restart while still unlinked changes nothing.
+cp "$CRED" "$SANDBOX/cred.before"
 run_start "" "" ""
 cmp -s "$CRED" "$SANDBOX/cred.before" || fail "unlinked restart rewrites flows_cred.json"
-cmp -s "$SANDBOX/srv/node-red/flows.json" "$SANDBOX/flows.before" || fail "unlinked restart rewrites flows.json"
+assert_eq "$RECORDED" "$(flows_hash)" "unlinked restart leaves the flows.json bytes unchanged"
 
-# A deploy ships flows.json with auto-connect on and may restore an old
-# credential file; the next start removes both again.
-write_flows "$PLACEHOLDER"
-node -e '
-const fs = require("fs"); const f = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-f.find((n) => n.id === process.argv[2]).autoConnect = true; fs.writeFileSync(process.argv[1], JSON.stringify(f));
-' "$SANDBOX/srv/node-red/flows.json" "$BROKER_NODE_ID"
+# A deploy may restore an old credential file; the next start removes it again.
 write_creds
 run_start "" "" ""
-assert_eq "false" "$(autoconnect_field)" "unlinked after a deploy: auto-connect off again"
 assert_eq "agroscope-mqtt-broker{password,user}" "$(cred_keys)" "unlinked after a deploy: cloud credentials removed again"
-
-# An older flows.json with the default literal is pointed away from the cloud.
-write_flows "$DEFAULT_URL"
-run_start "" "" ""
-assert_eq "$UNLINKED_URL" "$(broker_field)" "unlinked, older flows.json literal: replaced by the unlinked name"
+assert_eq "$RECORDED" "$(flows_hash)" "unlinked after a deploy: flows.json bytes unchanged"
 
 # Relink: credentials, auto-connect and the broker URL come back.
-write_flows "$PLACEHOLDER"
-run_start "" "" ""
 run_start "wss://broker.example.net/mqtt" "cloud.example.org" "new-secret"
 assert_eq "wss://broker.example.net/mqtt" "$(exported_url)" "relinked: exports the linked broker URL"
-assert_eq "true" "$(autoconnect_field)" "relinked: auto-connect back on"
+assert_eq "true" "$(exported_autoconnect)" "relinked: auto-connect exported true"
 assert_eq "agroscope-mqtt-broker{password,user} $BROKER_NODE_ID{password,user}" "$(cred_keys)" "relinked: cloud broker credentials written"
 node -e '
 const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]];
 if (c.password !== "new-secret" || c.user !== "0016C001F1000001") process.exit(1);
 ' "$CRED" "$BROKER_NODE_ID" || fail "relinked: credentials carry the new password"
+assert_eq "$RECORDED" "$(flows_hash)" "relink leaves the flows.json bytes unchanged"
+
+# An older flows.json (a rollback payload) with the default literal is not
+# rewritten while unlinked; the guard and the removed credentials cover it.
+write_flows "$DEFAULT_URL"
+run_start "" "" "linked-secret"
+OLDER="$(flows_hash)"
+run_start "" "" ""
+assert_eq "$DEFAULT_URL" "$(broker_field)" "unlinked, older flows.json literal: left as it is"
+assert_eq "$OLDER" "$(flows_hash)" "unlinked, older flows.json: bytes unchanged"
 
 printf 'PASS: node-red.init cloud broker URL resolution and export\n'

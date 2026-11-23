@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 // Issue #766 in the shipped Node-RED runtime (3.1.15, the release-smoke
-// fixture): with the cloud broker node as node-red.init leaves it on an
-// unlinked gateway (auto-connect off, no credentials in flows_cred.json) and
-// the process started unlinked (DEVICE_MQTT_PASSWORD empty), nothing reaches
-// the broker: no CONNECT and no PUBLISH. The linked case is the positive
-// control.
+// fixture). The shipped cloud broker node reads auto-connect from
+// "${OSI_CLOUD_BROKER_AUTOCONNECT}"; node-red.init exports "false" on an
+// unlinked gateway, removes the credentials from flows_cred.json and leaves
+// DEVICE_MQTT_PASSWORD empty. Node-RED substitutes the variable into the
+// config node, so nothing reaches the broker: no CONNECT and no PUBLISH. The
+// linked case ("true") is the positive control.
 //
 // The broker node, the heartbeat guard and its MQTT output are the shipped
 // nodes of each profile. Two test-only changes: the broker URL points at a
@@ -31,13 +32,15 @@ const OUT_ID = 'd769e9face3844d5';
 const EUI = '0016C001F1000001';
 const MESSAGES = 5;
 
+const AUTOCONNECT_PLACEHOLDER = '${OSI_CLOUD_BROKER_AUTOCONNECT}';
 const CASES = {
   // What node-red.init leaves on an unlinked gateway.
-  unlinked: { password: '', autoConnect: false, creds: false },
-  // An unlinked gateway on the old init: credentials and auto-connect kept.
-  // The guard alone still keeps every message off the broker.
-  'unlinked-old-init': { password: '', autoConnect: true, creds: true },
-  linked: { password: 'fixture-mqtt', autoConnect: true, creds: true },
+  unlinked: { password: '', autoConnect: 'false', creds: false },
+  // An unlinked gateway on an init that exports no auto-connect value and
+  // keeps the credentials: the placeholder stays unresolved, which the broker
+  // node reads as true. The guard alone still keeps every message off.
+  'unlinked-old-init': { password: '', autoConnect: undefined, creds: true },
+  linked: { password: 'fixture-mqtt', autoConnect: 'true', creds: true },
 };
 
 async function child(profile, name) {
@@ -64,8 +67,8 @@ async function child(profile, name) {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ private: true, dependencies: { 'osi-lib': 'file:osi-lib' } }));
 
   const broker = pick(BROKER_ID);
-  assert.equal(broker.autoConnect, true, 'shipped flows.json connects by default; node-red.init turns it off when unlinked');
-  Object.assign(broker, { broker: brokerUrl, port: '', protocolVersion: '4', clientid: 'device_' + EUI, autoConnect: scenario.autoConnect });
+  assert.equal(broker.autoConnect, AUTOCONNECT_PLACEHOLDER, 'shipped flows.json reads auto-connect from the environment');
+  Object.assign(broker, { broker: brokerUrl, port: '', protocolVersion: '4', clientid: 'device_' + EUI });
   delete broker.credentials;
   const tab = pick(pick(OUT_ID).z);
   const inject = { id: 'test-inject', type: 'inject', z: tab.id, name: 'test', props: [{ p: 'payload' }], repeat: '', once: false, topic: '', payload: '', payloadType: 'date', wires: [[GUARD_ID]] };
@@ -74,6 +77,8 @@ async function child(profile, name) {
   fs.writeFileSync(path.join(dir, 'flows_cred.json'), JSON.stringify(scenario.creds ? { [BROKER_ID]: { user: EUI, password: 'old-secret' } } : {}));
 
   process.env.DEVICE_MQTT_PASSWORD = scenario.password;
+  if (scenario.autoConnect === undefined) delete process.env.OSI_CLOUD_BROKER_AUTOCONNECT;
+  else process.env.OSI_CLOUD_BROKER_AUTOCONNECT = scenario.autoConnect;
   process.env.DEVICE_EUI = EUI;
   process.env.OSI_LIB_BASE = path.join(share, 'node-red');
   const RED = fixtureRequire('node-red');
@@ -98,13 +103,15 @@ async function child(profile, name) {
     await sleep(200);
   }
   await sleep(2000);
+  const brokerNode = RED.nodes.getNode(BROKER_ID);
+  const resolved = String(brokerNode && brokerNode.autoConnect);
   await RED.stop();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
   await new Promise((resolve) => aedes.close(resolve));
   await new Promise((resolve) => brokerServer.close(resolve));
   fs.rmSync(dir, { recursive: true, force: true });
-  return { nodeRed: fixtureRequire('node-red/package.json').version, connects: seen.connects, publishes: seen.publishes };
+  return { nodeRed: fixtureRequire('node-red/package.json').version, autoConnect: resolved, connects: seen.connects, publishes: seen.publishes };
 }
 
 function runChild(profile, name) {
@@ -126,11 +133,14 @@ if (process.argv[2] === '--child') {
     assert.ok(linked.connects.includes('auth:' + EUI), `${profile} linked: connects with the gateway credentials ${JSON.stringify(linked)}`);
     assert.equal(linked.publishes.filter((t) => t.endsWith('/heartbeat')).length, MESSAGES, `${profile} linked: every heartbeat arrives`);
 
+    assert.equal(linked.autoConnect, 'true', `${profile} linked: the broker node resolved auto-connect to true`);
     const unlinked = runChild(profile, 'unlinked');
+    assert.equal(unlinked.autoConnect, 'false', `${profile} unlinked: Node-RED substituted "false" into the config node`);
     assert.deepEqual(unlinked.connects, [], `${profile} unlinked: autoConnect false opens no connection`);
     assert.deepEqual(unlinked.publishes, [], `${profile} unlinked: no message reaches the broker`);
 
     const oldInit = runChild(profile, 'unlinked-old-init');
+    assert.equal(oldInit.autoConnect, 'true', `${profile} unresolved placeholder reads as auto-connect on`);
     assert.deepEqual(oldInit.publishes, [], `${profile} unlinked, old init: the guard drops every message`);
     console.log(`${profile}: linked ${linked.connects.length} connect events / ${linked.publishes.length} publishes; unlinked 0 / 0; old init ${oldInit.connects.length} connect events / 0 publishes`);
   }

@@ -341,7 +341,11 @@ test('the gate refuses only linked-only paths, and only while unlinked', () => {
   for (const p of ['/api/v1/sync/edge/events', '/api/v1/sync/gateways/X/pending-commands', '/api/v1/sync/chameleon/calibrations/lookup', '/api/v2/journal/gateways/X/entries', '/auth/refresh-sync']) {
     assert.equal(cloudHttp.linkedOnlyPath(p), true, p);
   }
-  for (const p of ['/auth/local-sync', '/auth/local-sync/conditional-irrigation-v1', '/api/v1/support/edge/work-requests', '/auth/refresh-synced']) {
+  // A cloud reached under a base path is gated the same way.
+  for (const p of ['/osi/api/v1/sync/edge/events', '/a/b/api/v2/journal/gateways/X/entries', '/osi/auth/refresh-sync']) {
+    assert.equal(cloudHttp.linkedOnlyPath(p), true, p);
+  }
+  for (const p of ['/auth/local-sync', '/auth/local-sync/conditional-irrigation-v1', '/osi/auth/local-sync', '/api/v1/support/edge/work-requests', '/auth/refresh-synced', '/api/v1/syncx/edge', '/xapi/v1/sync/edge']) {
     assert.equal(cloudHttp.linkedOnlyPath(p), false, p);
   }
   assert.equal(cloudHttp.gatewayLinked({ DEVICE_MQTT_PASSWORD: 'x' }), true);
@@ -357,6 +361,7 @@ test('an unlinked process still reaches the link and support routes', async () =
   await cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/auth/local-sync', payload: {} });
   await cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/support/edge/work-requests', payload: {} });
   await assert.rejects(cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/sync/edge/events', payload: {} }), { code: 'gateway_unlinked' });
+  await assert.rejects(cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/osi/api/v1/sync/edge/events', payload: {} }), { code: 'gateway_unlinked' });
   assert.deepEqual(cloud.sent.slice(before).map((r) => r.path), ['/auth/local-sync', '/api/v1/support/edge/work-requests']);
 });
 
@@ -435,6 +440,132 @@ for (const profile of PROFILES) {
       assert.ok(relinked.sent.some((r) => r.path.startsWith('/api/v1/sync/')), 'relinked: sync reaches the cloud again');
       const mqtt = await cloudGuards(f, linkedFlowStore());
       assert.deepEqual(mqtt.passed, mqtt.guards, 'relinked: cloud MQTT passes again');
+    } finally { f.cleanup(); }
+  });
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: start warns when the database records a link but the process has no MQTT password`, async () => {
+    const f = fixture(profile);
+    try {
+      const helper = require(path.join(profileDir(profile), 'node-red/osi-installation-helper/index.js'));
+      const startWarnings = async (linked) => {
+        processStarted(linked);
+        const warnings = [];
+        await helper.recoverAccountConfigOnStart({ osiDb: f.osiDb, fs: f.io.fs, cp: f.io.cp, warn: (t) => warnings.push(t) });
+        return warnings.filter((t) => /no MQTT password is in UCI/.test(t));
+      };
+      seedTwoLinkedUsers(f);
+      assert.equal((await startWarnings(false)).length, 1, 'peer linked, process unlinked: one warning');
+      assert.equal((await startWarnings(true)).length, 0, 'peer linked, process linked: no warning');
+      // A gateway unlinked by the old code: peer cleared, a stale account row left.
+      sql(f, "UPDATE sync_link_state SET linked=0 WHERE peer_node='cloud'");
+      assert.equal((await startWarnings(false)).length, 0, 'stale account rows alone do not warn');
+    } finally { f.cleanup(); }
+  });
+}
+
+test('settings.js never refills DEVICE_MQTT_PASSWORD from the env file', () => {
+  const source = fs.readFileSync(path.join(root, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js'), 'utf8');
+  const literal = source.match(/const protectedKeys = new Set\((\[[\s\S]*?\])\);/);
+  assert.ok(literal, 'protectedKeys set found');
+  const keys = vm.runInNewContext(literal[1]);
+  assert.ok(keys.includes('DEVICE_MQTT_PASSWORD'));
+});
+
+// Unlinking is a gateway system command: only an enabled gateway admin may do
+// it, with scoped access off or on. The edge has no proof of the cloud gateway
+// owner, so the account that linked the gateway is admitted only as an admin.
+const SECRET = 'fixture-auth-secret';
+function bearer(userId, username) {
+  const crypto = require('node:crypto');
+  const b64 = (v) => Buffer.from(v).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const payload = b64(JSON.stringify({ userId, username, exp: Date.now() + 3600000 }));
+  return 'Bearer ' + payload + '.' + b64(crypto.createHmac('sha256', SECRET).update(payload).digest());
+}
+
+// Runs DELETE /api/account-link from its first function node along the
+// success port to the database stage, as Node-RED would.
+async function unlinkRoute(f, flowStore, authorization, scoped) {
+  const env = { AUTH_TOKEN_SECRET: SECRET, OSI_SCOPED_ACCESS: scoped ? '1' : '' };
+  let id = findNode(f.flows, 'al-unlink-in').wires[0][0];
+  let msg = { req: { headers: { authorization } }, payload: {} };
+  for (let hops = 0; hops < 8; hops++) {
+    const { result } = await runNode(f, id, msg, flowStore, env);
+    const outputs = Array.isArray(result) ? result : [result];
+    if (!outputs[0]) return { refusedAt: id, response: outputs.find(Boolean) };
+    msg = outputs[0];
+    if (id === 'al-unlink-db') return { unlinked: true };
+    id = findNode(f.flows, id).wires[0].find((next) => findNode(f.flows, next).type === 'function');
+  }
+  throw new Error('unlink route did not reach its database stage');
+}
+
+const UNLINK_CALLERS = [
+  // [label, id, username, role, disabled, linked account, allowed]
+  ['enabled admin', 911, 'admin1', 'admin', false, false, true],
+  ['admin who linked the gateway (cloud owner)', 912, 'owner', 'admin', false, true, true],
+  ['member (researcher)', 913, 'member', 'researcher', false, false, false],
+  ['viewer', 914, 'viewer', 'viewer', false, false, false],
+  ['disabled admin', 915, 'admin2', 'admin', true, false, false],
+  ['member who linked the gateway (cloud owner, not admin)', 916, 'linker', 'researcher', false, true, false],
+];
+
+for (const profile of PROFILES) {
+  for (const scoped of [false, true]) {
+    for (const [label, id, username, role, disabled, linkedAccount, allowed] of UNLINK_CALLERS) {
+      test(`${profile} scoped ${scoped ? 'on' : 'off'}: unlink by ${label} is ${allowed ? 'allowed' : 'refused with 403'}`, async () => {
+        const f = fixture(profile);
+        const previous = process.env.OSI_SCOPED_ACCESS;
+        process.env.OSI_SCOPED_ACCESS = scoped ? '1' : '';
+        try {
+          processStarted(true);
+          seedTwoLinkedUsers(f);
+          for (const [, uid, name, r, off, linkedRow] of UNLINK_CALLERS) {
+            sql(f, `INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at,auth_mode,server_url,server_sync_token,server_linked_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+              uid, name, 'hash-' + uid, '2026-01-01T00:00:00Z', 'uuid-' + uid, r, off ? '2026-02-01T00:00:00Z' : null,
+              linkedRow ? 'server' : 'local', linkedRow ? cloud.url : null, linkedRow ? 'token-' + uid : null, linkedRow ? '2026-03-01T00:00:00Z' : null);
+          }
+          const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(id, username), scoped);
+          const peer = sql(f, "SELECT linked FROM sync_link_state WHERE peer_node='cloud'")[0];
+          if (allowed) {
+            assert.equal(outcome.unlinked, true, JSON.stringify(outcome));
+            assert.equal(peer.linked, 0, 'the gateway is unlinked');
+          } else {
+            assert.equal(outcome.response && outcome.response.statusCode, 403, JSON.stringify(outcome));
+            // The payload comes from the function sandbox: compare its content.
+            assert.deepEqual(JSON.parse(JSON.stringify(outcome.response.payload)), { message: 'Forbidden', code: 'forbidden' });
+            assert.equal(peer.linked, 1, 'a refused caller leaves the link in place');
+            assert.equal(f.io.config.get('osi-server.cloud.mqtt_password'), 'old-mqtt', 'a refused caller leaves the MQTT password in place');
+          }
+        } finally {
+          if (previous === undefined) delete process.env.OSI_SCOPED_ACCESS; else process.env.OSI_SCOPED_ACCESS = previous;
+          f.cleanup();
+        }
+      });
+    }
+  }
+
+  test(`${profile}: account-link status reports canUnlink only for an enabled admin`, async () => {
+    const f = fixture(profile);
+    try {
+      for (const [, uid, name, r, off] of UNLINK_CALLERS) {
+        sql(f, 'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role,disabled_at) VALUES(?,?,?,?,?,?,?)',
+          uid, name, 'hash-' + uid, '2026-01-01T00:00:00Z', 'uuid-' + uid, r, off ? '2026-02-01T00:00:00Z' : null);
+      }
+      for (const [label, uid, name, , , , allowed] of UNLINK_CALLERS) {
+        let id = findNode(f.flows, 'al-status-in').wires[0][0];
+        let msg = { req: { headers: { authorization: bearer(uid, name) } } };
+        for (let hops = 0; hops < 4 && id; hops++) {
+          const { result } = await runNode(f, id, msg, new Map(), { AUTH_TOKEN_SECRET: SECRET });
+          msg = (Array.isArray(result) ? result : [result]).find(Boolean);
+          const node = findNode(f.flows, id);
+          id = (node.wires[0] || []).find((next) => findNode(f.flows, next).type === 'function');
+        }
+        assert.equal(msg.statusCode, 200, label + ': ' + JSON.stringify(msg.payload));
+        assert.equal(msg.payload.canUnlink, allowed, label);
+        assert.equal(Object.keys(msg.payload).some((k) => /password|verifier$|token/i.test(k)), false, 'no secret in the status payload');
+      }
     } finally { f.cleanup(); }
   });
 }

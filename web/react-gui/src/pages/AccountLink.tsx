@@ -70,12 +70,13 @@ export const AccountLink: React.FC = () => {
       });
       setResult(res);
       setUnlinkedHere(false);
-      setStatus({
+      setStatus((previous) => ({
         linked: true,
         serverUsername: res.serverUsername,
         linkedAt: new Date().toISOString(),
         serverUrl,
-      });
+        canUnlink: previous?.canUnlink,
+      }));
     } catch (err: any) {
       const status = err.response?.status;
       if (status === 401) {
@@ -95,7 +96,7 @@ export const AccountLink: React.FC = () => {
     setUnlinking(true);
     try {
       await accountLinkAPI.unlink();
-      setStatus({ linked: false, serverUsername: null, linkedAt: null });
+      setStatus((previous) => ({ linked: false, serverUsername: null, linkedAt: null, canUnlink: previous?.canUnlink }));
       setUnlinkedHere(true);
       setResult(null);
       setForceSyncResult(null);
@@ -144,6 +145,7 @@ export const AccountLink: React.FC = () => {
         serverUsername: res.serverUsername,
         linkedAt: new Date().toISOString(),
         serverUrl: status.serverUrl,
+        canUnlink: status.canUnlink,
       });
       await refreshSyncState();
     } catch (err: any) {
@@ -425,7 +427,9 @@ export const AccountLink: React.FC = () => {
                 </div>
               )}
 
-              {showUnlinkConfirm ? (
+              {status.canUnlink !== true ? (
+                <p className="text-[var(--text-secondary)] text-sm">{t('unlink.adminOnly')}</p>
+              ) : showUnlinkConfirm ? (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <p className="text-yellow-800 font-semibold mb-3">{t('unlink.confirm')}</p>
                   <div className="flex gap-3">

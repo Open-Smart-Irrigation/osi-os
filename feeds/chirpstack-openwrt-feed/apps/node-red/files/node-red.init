@@ -167,7 +167,10 @@ OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
 # resolves (RFC 6761 .invalid), instead of the default cloud. An empty URL
 # would not do: Node-RED 3.1 turns an empty broker into mqtt://localhost:1883,
 # the gateway's own broker. start_service() also removes the broker's
-# credentials and turns off its auto-connect.
+# credentials and exports OSI_CLOUD_BROKER_AUTOCONNECT=false, which the
+# "OSI Cloud Broker" node reads as "${OSI_CLOUD_BROKER_AUTOCONNECT}". Link and
+# unlink never rewrite flows.json: its bytes stay equal to the payload's
+# recorded flows_sha256, so a deploy still trusts it as a rollback target.
 OSI_UNLINKED_CLOUD_BROKER_URL="wss://unlinked.invalid/mqtt"
 
 # Describes why a configured value was rejected without printing it: the
@@ -469,20 +472,27 @@ start_service() {
     link_gateway_device_eui="$(normalize_runtime_eui "$link_gateway_device_eui")"
     local device_type=$(uci -q get osi-server.cloud.device_type 2>/dev/null || echo "GATEWAY")
     local mqtt_password=$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")
+    # Same rule as osi-cloud-http's gatewayLinked(): blank counts as unlinked.
+    case "$mqtt_password" in *[![:space:]]*) ;; *) mqtt_password="" ;; esac
+    local cloud_broker_autoconnect="false"
     local mqtt_broker_url=$(uci -q get osi-server.cloud.mqtt_broker_url 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
     if [ -n "$mqtt_password" ]; then
+        cloud_broker_autoconnect="true"
         resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
     else
         CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
         CLOUD_BROKER_URL_SOURCE="unlinked"
     fi
     logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
-    # Only a URL that came from UCI (or the unlinked name) may replace a
-    # literal in an older flows.json; with nothing usable configured that
-    # literal stays.
+    # Only a URL that came from UCI may replace a literal in an older
+    # flows.json (a rollback payload); with nothing usable configured, or
+    # when unlinked, that literal stays and flows.json is not rewritten.
     local cloud_broker_patch_url=""
-    [ "$CLOUD_BROKER_URL_SOURCE" = "default" ] || cloud_broker_patch_url="$CLOUD_BROKER_URL"
+    case "$CLOUD_BROKER_URL_SOURCE" in
+        default|unlinked) ;;
+        *) cloud_broker_patch_url="$CLOUD_BROKER_URL" ;;
+    esac
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
     local journal_photo_cache_bytes=$(uci -q get osi-server.cloud.journal_photo_cache_bytes 2>/dev/null || echo "4294967296")
     local journal_min_free_bytes=$(uci -q get osi-server.cloud.journal_min_free_bytes 2>/dev/null || echo "4294967296")
@@ -940,15 +950,6 @@ try {
     cloudBroker.clientid = `device_${deviceEui}`;
     flowsChanged = true;
   }
-  // An unlinked gateway never opens the cloud connection (#766); a link
-  // stores the password and turns auto-connect back on at the next start.
-  // Node-RED treats a missing autoConnect as true, so a linked start only
-  // undoes an earlier false.
-  const cloudAutoConnect = Boolean(deviceMqttPassword);
-  if (cloudBroker && (cloudAutoConnect ? cloudBroker.autoConnect === false : cloudBroker.autoConnect !== false)) {
-    cloudBroker.autoConnect = cloudAutoConnect;
-    flowsChanged = true;
-  }
   // Current flows carry the env placeholder and Node-RED substitutes
   // OSI_CLOUD_BROKER_URL at start: leave it alone. An older flows.json with a
   // literal URL (a rollback payload) gets the URL resolve_cloud_broker_url()
@@ -1033,6 +1034,7 @@ NODE
         DEVICE_MQTT_PASSWORD="$mqtt_password" \
         OSI_SERVER_HOST="$server_host" \
         OSI_CLOUD_BROKER_URL="$CLOUD_BROKER_URL" \
+        OSI_CLOUD_BROKER_AUTOCONNECT="$cloud_broker_autoconnect" \
         ALLOW_PRIVATE_SERVER_URLS="$allow_private_server_urls" \
         JOURNAL_PHOTO_CACHE_BYTES="$journal_photo_cache_bytes" \
         JOURNAL_MIN_FREE_BYTES="$journal_min_free_bytes" \

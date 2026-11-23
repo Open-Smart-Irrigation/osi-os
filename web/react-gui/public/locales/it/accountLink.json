@@ -35,7 +35,8 @@
     "button": "Disconnetti da OSI Server",
     "confirm": "Sei sicuro? Dopo la disconnessione, devi usare la tua password locale originale.",
     "success": "Disconnesso da OSI Server",
-    "stoppedReporting": "Questo gateway ha smesso di inviare dati. Per rimuoverlo anche dal tuo account cloud, scollegalo nel cloud."
+    "stoppedReporting": "Questo gateway ha smesso di inviare dati. Per rimuoverlo anche dal tuo account cloud, scollegalo nel cloud.",
+    "adminOnly": "Solo un amministratore del gateway può disconnetterlo da OSI Server."
   },
   "errors": {
     "networkError": "Impossibile raggiungere OSI Server. Controlla l'URL e la connessione Internet.",
