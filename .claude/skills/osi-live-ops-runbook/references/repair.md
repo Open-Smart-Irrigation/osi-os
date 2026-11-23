@@ -676,7 +676,7 @@ as they are.
    local password and signs in locally afterwards:
 
    ```sh
-   sqlite3 /data/db/farming.db "PRAGMA busy_timeout=5000; UPDATE users SET auth_mode='local', server_username=NULL, server_password_hash=NULL, server_offline_verifier=NULL, server_offline_verifier_version=0, server_linked_at=NULL, server_url=NULL, server_sync_token=NULL, server_sync_token_expires_at=NULL, cloud_user_id=NULL, last_auth_sync_at=NULL, last_auth_sync_status=NULL, last_auth_sync_error=NULL WHERE auth_mode <> 'local' OR server_url IS NOT NULL OR server_sync_token IS NOT NULL; SELECT changes();"
+   sqlite3 -cmd ".timeout 5000" /data/db/farming.db "UPDATE users SET auth_mode='local', server_username=NULL, server_password_hash=NULL, server_offline_verifier=NULL, server_offline_verifier_version=0, server_linked_at=NULL, server_url=NULL, server_sync_token=NULL, server_sync_token_expires_at=NULL, cloud_user_id=NULL, last_auth_sync_at=NULL, last_auth_sync_status=NULL, last_auth_sync_error=NULL WHERE auth_mode <> 'local' OR server_url IS NOT NULL OR server_sync_token IS NOT NULL; SELECT changes();"
    ```
 
 4. Restart Node-RED so it drops the connection: `/etc/init.d/node-red restart`.
@@ -702,6 +702,11 @@ way.
 
 The cloud still lists the gateway under the account after this procedure.
 To remove it there, unlink it in the cloud as well.
+
+Tested so far: steps 1, 2, 4 and 5 on a 0.8.4 test board (23 Nov 2026), where
+"last seen" stayed put for the 10 minutes after the restart and a reboot
+before step 2 had not stopped the reporting. Step 3 has not run on a device;
+its UPDATE was checked against the bundled 0.7.0 and 0.8.0 database schemas.
 
 ### ChirpStack v4 has no plain REST API
 

@@ -143,11 +143,13 @@ const cloud = { sent: [], url: '' };
 let cloudServer;
 test.before(async () => {
   cloudServer = http.createServer((req, res) => {
-    req.resume();
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       cloud.sent.push({ method: req.method, path: req.url });
-      res.writeHead(503, { 'content-type': 'application/json' });
-      res.end('{"message":"fixture cloud"}');
+      const answer = cloud.respond && cloud.respond(req, Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(answer ? answer.status : 503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(answer ? answer.body : { message: 'fixture cloud' }));
     });
   });
   await new Promise((resolve) => cloudServer.listen(0, '127.0.0.1', resolve));
@@ -357,5 +359,84 @@ test('an unlinked process still reaches the link and support routes', async () =
   await assert.rejects(cloudHttp.requestJsonIpv4({ method: 'POST', url: cloud.url + '/api/v1/sync/edge/events', payload: {} }), { code: 'gateway_unlinked' });
   assert.deepEqual(cloud.sent.slice(before).map((r) => r.path), ['/auth/local-sync', '/api/v1/support/edge/work-requests']);
 });
+
+// Follows the success port of the shipped link chain, from the request
+// builder to the restart request, as Node-RED would.
+const LINK_CHAIN_END = 'al-link-restart-node-red';
+async function linkAs(f, userId, username, cloudUserId) {
+  const flowStore = new Map([
+    ['al_local_username', username], ['al_local_user_id', userId], ['al_action', 'link'],
+    ['al_server_url', cloud.url], ['al_server_username', username + '@cloud'], ['al_server_password', 'fixture-password'],
+    ['al_gateway_device_eui', GATEWAY_EUI], ['al_gateway_device_eui_confidence', 'authoritative'],
+  ]);
+  cloud.respond = (req) => (req.url.startsWith('/auth/local-sync') ? {
+    status: 200,
+    body: {
+      username: username + '@cloud', userId: cloudUserId, token: 'token-' + username,
+      offlineVerifier: 'verifier-' + username, offlineVerifierVersion: 2, syncTokenExpiresAt: 1900000000000,
+      mqttPassword: 'mqtt-' + username, mqttBrokerUrl: 'wss://cloud.example.org/mqtt', installationUuid: f.installationUuid,
+      capabilities: [],
+    },
+  } : null);
+  const sentBefore = cloud.sent.length;
+  try {
+    let id = 'al-link-build-req';
+    let msg = { authUserId: userId, authUsername: username };
+    const path = [];
+    for (let hops = 0; hops < 12; hops++) {
+      path.push(id);
+      const { result, warnings } = await runNode(f, id, msg, flowStore, { ALLOW_PRIVATE_SERVER_URLS: '1' });
+      const outputs = Array.isArray(result) ? result : [result];
+      if (!outputs[0]) {
+        const failure = outputs.find(Boolean);
+        throw new Error('link stopped at ' + id + ': ' + JSON.stringify(failure && failure.payload) + ' ' + warnings.join('; '));
+      }
+      msg = outputs[0];
+      if (id === LINK_CHAIN_END) break;
+      id = findNode(f.flows, id).wires[0].find((next) => findNode(f.flows, next).type === 'function');
+    }
+    assert.equal(path.at(-1), LINK_CHAIN_END, 'link reached its restart request: ' + path.join(' > '));
+    assert.ok(cloud.sent.slice(sentBefore).some((r) => r.method === 'POST' && r.path.startsWith('/auth/local-sync')),
+      'the link request went out through osi-cloud-http');
+  } finally {
+    cloud.respond = null;
+  }
+  // The daemon restarts Node-RED, which starts linked.
+  for (const file of [...f.io.files.keys()]) if (file.startsWith(RESTART_DIR)) f.io.files.delete(file);
+  assert.equal(f.io.config.get('osi-server.cloud.mqtt_password'), 'mqtt-' + username, 'link stores the MQTT password node-red.init exports');
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: two local accounts link through the shipped nodes; one unlink stops all reporting; a relink restores it`, async () => {
+    const f = fixture(profile);
+    try {
+      sql(f, "INSERT INTO users(id,username,password_hash,created_at,user_uuid,auth_mode) VALUES(901,'first','hash-1','2026-01-01T00:00:00Z','u-first','local'),(902,'second','hash-2','2026-01-01T00:00:00Z','u-second','local')");
+      processStarted(false);
+      await linkAs(f, 901, 'first', 11);
+      processStarted(true);
+      await linkAs(f, 902, 'second', 11);
+      const linkedRows = sql(f, "SELECT id FROM users WHERE id IN (901,902) AND server_url IS NOT NULL AND server_sync_token IS NOT NULL ORDER BY id");
+      assert.deepEqual(linkedRows.map((r) => r.id), [901, 902], 'the shipped link path leaves both accounts linked');
+
+      sql(f, "INSERT INTO sync_outbox(event_uuid,aggregate_type,aggregate_key,op,payload_json,sync_version,occurred_at,gateway_device_eui) VALUES('evt-766','ZONE','zone-766','ZONE_UPDATED','{}',1,'2026-03-01T00:00:00Z',?)", GATEWAY_EUI);
+      const linked = await restRequests(f, linkedFlowStore());
+      assert.ok(linked.sent.some((r) => r.path.startsWith('/api/v1/sync/')), 'linked: sync reaches the cloud');
+
+      await unlinkAs(f, linkedFlowStore(), 902, 'second');
+      assert.equal(f.io.config.get('osi-server.cloud.mqtt_password'), '', 'unlink empties the MQTT password');
+      processStarted(false);
+      const unlinked = await restRequests(f, new Map());
+      assert.deepEqual(unlinked.sent, [], 'unlinked: nothing reaches the cloud ' + JSON.stringify(unlinked.emitted));
+      assert.deepEqual((await cloudGuards(f, new Map())).passed, [], 'unlinked: cloud MQTT dropped');
+
+      await linkAs(f, 901, 'first', 11);
+      processStarted(true);
+      const relinked = await restRequests(f, linkedFlowStore());
+      assert.ok(relinked.sent.some((r) => r.path.startsWith('/api/v1/sync/')), 'relinked: sync reaches the cloud again');
+      const mqtt = await cloudGuards(f, linkedFlowStore());
+      assert.deepEqual(mqtt.passed, mqtt.guards, 'relinked: cloud MQTT passes again');
+    } finally { f.cleanup(); }
+  });
+}
 
 module.exports = { fixture, seedTwoLinkedUsers, runNode, restRequests, unlinkAs, linkedFlowStore, sql, REST_BUILDERS, GATEWAY_EUI, cloud, processStarted };
