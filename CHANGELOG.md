@@ -20,9 +20,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   upgrade to 0.9 renumbers the ledger row and applies the 0.9 migrations
   in between.
 - A cloud zone delete applied on the gateway before the upgrade, whose
-  confirmation never reached the cloud, may show "could not confirm" in
-  the cloud if the cloud sends it again after the upgrade. The zone stays
-  deleted on the gateway.
+  confirmation never reached the cloud: if the cloud sends it again after
+  the upgrade, the cloud may report the resent delete as not applied. The
+  gateway has deleted the zone.
 
 ### Fixed
 - A zone deleted on the gateway no longer comes back when the cloud sends

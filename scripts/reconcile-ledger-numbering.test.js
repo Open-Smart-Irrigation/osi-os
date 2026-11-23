@@ -608,8 +608,10 @@ function buildDeviceMigrationsDir(root, lineage, throughVersion, extra = {}) {
 
 async function tableDigest(runner, table, orderBy) {
   const rows = await runner.all(`SELECT * FROM ${table} ORDER BY ${orderBy}`);
-  // Migration 0081 adds a receipt key, not historical measurement data.
-  // Require its NULL default before comparing every pre-existing value.
+  // Main's migration 0081 adds a receipt key (uplink_key), not historical
+  // measurement data; require its NULL default before comparing every
+  // pre-existing value. On the 0.8.4 line 0081 is the schedule trigger and no
+  // uplink_key column exists, so this branch does not run here.
   for (const row of rows) {
     if (Object.prototype.hasOwnProperty.call(row, 'uplink_key')) {
       assert.equal(row.uplink_key, null, 'historical receipt keys must remain NULL');

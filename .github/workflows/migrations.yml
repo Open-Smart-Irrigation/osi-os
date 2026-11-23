@@ -144,6 +144,17 @@ jobs:
           node scripts/verify-migrations.js
           node scripts/verify-no-stray-ddl.js
           node scripts/verify-flows-size-ratchet.js
+      - name: 0.8.4 line's 0081 is main's 0084, byte for byte
+        # reconcile-ledger-numbering remaps ledger row 81 to 84 on the way to
+        # 0.9 only for an identical file; any edit leaves gateways repair_required.
+        run: |
+          set -euo pipefail
+          pinned=a3afa737568ff779d459b99a884c88cf779ccec4bf977ef6b5dc7d270b143073
+          actual=$(sha256sum database/migrations/ordered/0081__schedule_insert_outbox_trigger.sql | cut -d' ' -f1)
+          main=$(git show origin/main:database/migrations/ordered/CHECKSUMS.json | node -e 'const m=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(m["0084__schedule_insert_outbox_trigger.sql"]||"")')
+          echo "0081 sha256 $actual; pinned $pinned; main 0084 $main"
+          test "$actual" = "$pinned"
+          test "$main" = "$pinned"
       - run: node scripts/verify-seed-replay.js
       # The bundled seed must ship stamped at head, or every fresh install
       # falls into baseline-existing-db's reference-chain rebuild on the Pi.
