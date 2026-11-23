@@ -1,6 +1,7 @@
 'use strict';
-// Execute schedule-save SQL against the real seed to retain NEW-9's first-save
-// versus subsequent-edit outbox behavior. No gateway DB or native addon is used.
+// Execute schedule-save SQL against the real seed to pin the outbox behaviour
+// of the three saves: the create emits its insert event (0084) and each later
+// save adds one more. No gateway DB or native addon is used.
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');

@@ -13,7 +13,13 @@
         "created_at": "2026-05-10T06:05:00.000Z",
         "updated_at": "2026-05-10T06:05:00.000Z"
       },
-      "events": []
+      "events": [
+        {
+          "op": "SCHEDULE_UPSERTED",
+          "payload_json": "{\"contract_version\":1,\"zone_uuid\":\"synthetic-zone\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30.0,\"enabled\":1,\"duration_minutes\":20,\"response_mode\":\"fixed\",\"sync_version\":1,\"deleted_at\":null,\"last_applied_at\":null}",
+          "sync_version": 1
+        }
+      ]
     },
     {
       "row": {
@@ -29,6 +35,11 @@
         "updated_at": "2026-05-10T06:05:00.000Z"
       },
       "events": [
+        {
+          "op": "SCHEDULE_UPSERTED",
+          "payload_json": "{\"contract_version\":1,\"zone_uuid\":\"synthetic-zone\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30.0,\"enabled\":1,\"duration_minutes\":20,\"response_mode\":\"fixed\",\"sync_version\":1,\"deleted_at\":null,\"last_applied_at\":null}",
+          "sync_version": 1
+        },
         {
           "op": "SCHEDULE_UPSERTED",
           "payload_json": "{\"contract_version\":1,\"zone_uuid\":\"synthetic-zone\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30.0,\"enabled\":1,\"duration_minutes\":20,\"response_mode\":\"fixed\",\"sync_version\":5,\"deleted_at\":null,\"last_applied_at\":null}",
@@ -50,6 +61,11 @@
         "updated_at": "2026-05-10T06:05:00.000Z"
       },
       "events": [
+        {
+          "op": "SCHEDULE_UPSERTED",
+          "payload_json": "{\"contract_version\":1,\"zone_uuid\":\"synthetic-zone\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30.0,\"enabled\":1,\"duration_minutes\":20,\"response_mode\":\"fixed\",\"sync_version\":1,\"deleted_at\":null,\"last_applied_at\":null}",
+          "sync_version": 1
+        },
         {
           "op": "SCHEDULE_UPSERTED",
           "payload_json": "{\"contract_version\":1,\"zone_uuid\":\"synthetic-zone\",\"trigger_metric\":\"SWT_1\",\"threshold_kpa\":30.0,\"enabled\":1,\"duration_minutes\":20,\"response_mode\":\"fixed\",\"sync_version\":5,\"deleted_at\":null,\"last_applied_at\":null}",

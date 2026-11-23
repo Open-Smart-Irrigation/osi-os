@@ -33,7 +33,7 @@ async function main() {
     else assert.deepStrictEqual(saved, expected.$persistence, 'frozen persistence');
     assert.deepStrictEqual(await persistence(flows, profile), saved, 'shipped persistence');
     if(staged) assert.deepStrictEqual(await persistence(staged, profile), saved, 'adapter persistence');
-    assert.deepStrictEqual(saved.map(row => row.events.length), [0, 1, 2], 'NEW-9 first save emits no event; edit and disable do');
+    assert.deepStrictEqual(saved.map(row => row.events.length), [1, 2, 3], 'first save emits its insert event (0084); edit and disable add one each');
     for (const c of cases()) {
       const original = legacy.find(n => n.id === c.id);
       const before = await execute(original.func, c, profile);
