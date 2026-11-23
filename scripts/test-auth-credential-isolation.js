@@ -53,10 +53,18 @@ const bcryptjs = require(bcryptjsPath);
 const cryptoModule = require('node:crypto');
 const scopeHelper = require(scopeHelperPath);
 const installationHelper = require(installationHelperPath);
+const localPasswordReset = require(path.join(
+  root,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-local-password-reset/index.js'
+));
+// local-password-reset serves local sign-in in Process Result (staged in
+// scripts/fixtures/local-signin); without a database helper here it signs
+// in and only skips its optional reads and writes.
 const osiLib = {
   require(name) {
     if (name === 'scope') return { ok: true, value: scopeHelper };
     if (name === 'installation') return { ok: true, value: installationHelper };
+    if (name === 'local-password-reset') return { ok: true, value: localPasswordReset };
     return { ok: false, error: `unexpected helper ${name}` };
   },
 };

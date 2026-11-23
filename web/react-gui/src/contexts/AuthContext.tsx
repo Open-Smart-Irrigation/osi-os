@@ -24,7 +24,7 @@ import {
   type AuthSessionSnapshot,
   type SessionIdentity,
 } from '../services/authSession';
-import type { LoginRequest, RegisterRequest } from '../types/farming';
+import type { LoginRequest, LoginResponse, RegisterRequest } from '../types/farming';
 
 /** Who the session belongs to. `principalId` stays null until U02. */
 export interface AuthPrincipalSnapshot {
@@ -32,11 +32,20 @@ export interface AuthPrincipalSnapshot {
   readonly username: string | null;
 }
 
+/**
+ * A sign-in either opened the session or stopped because the account must
+ * set a new password first. The session stays closed in that case; the
+ * Login page asks for the new password and signs in again with it.
+ */
+export type LoginOutcome =
+  | { status: 'signed-in'; response: LoginResponse }
+  | { status: 'password-change-required'; response: LoginResponse };
+
 interface AuthContextType {
   isAuthenticated: boolean;
   token: string | null;
   username: string | null;
-  login: (credentials: LoginRequest) => Promise<void>;
+  login: (credentials: LoginRequest) => Promise<LoginOutcome>;
   register: (credentials: RegisterRequest) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -93,11 +102,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const login = useCallback(async (credentials: LoginRequest) => {
+  const login = useCallback(async (credentials: LoginRequest): Promise<LoginOutcome> => {
     const operation = beginAuthOperation();
     const response = await authAPI.login(credentials);
     if (!isLatestAuthOperation(operation)) throw new AuthOperationSupersededError();
+    if (response.passwordChangeRequired === true) {
+      return { status: 'password-change-required', response };
+    }
     beginAuthSession(response.token, credentials.username);
+    return { status: 'signed-in', response };
   }, []);
 
   const register = useCallback(async (credentials: RegisterRequest) => {

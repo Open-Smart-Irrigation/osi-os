@@ -322,10 +322,21 @@ export interface Sdi12Profile {
 export interface LoginRequest {
   username: string;
   password: string;
+  /** Sent only while the gateway asks this account to set a new password. */
+  newPassword?: string;
 }
+
+/** Outcome of a new password sent with a sign-in request. */
+export type PasswordChangeOutcome = 'changed' | 'rejected' | 'failed';
 
 export interface LoginResponse {
   token: string;
+  /** The account must set a new password before normal use. */
+  passwordChangeRequired?: boolean;
+  passwordChange?: PasswordChangeOutcome;
+  /** Set with passwordChange 'rejected': password_too_short, password_too_long or password_unchanged. */
+  passwordChangeError?: string;
+  passwordChangeMessage?: string;
 }
 
 export interface RegisterRequest {

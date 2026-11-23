@@ -209,7 +209,7 @@ describe('api session binding (#378)', () => {
       return 'defer';
     });
 
-    let bobLogin: Promise<void> = Promise.resolve();
+    let bobLogin: Promise<unknown> = Promise.resolve();
     act(() => {
       bobLogin = auth().login({ username: 'bob', password: 'synthetic-password' });
     });
