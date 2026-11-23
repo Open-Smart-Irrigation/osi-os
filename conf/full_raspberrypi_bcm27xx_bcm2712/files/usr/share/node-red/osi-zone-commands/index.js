@@ -1382,8 +1382,13 @@ function legacyRequestedVersion(cmd) {
 
 // Copied verbatim from "Build UPDATE SQL" (flows.json node 4f4a765f36cee6f3): its
 // helpers and its four zone branches, with `msg.topic = X; return msg;` turned into
-// `return X;`. The node keeps its copy; scripts/test-legacy-zone-command-versions.js
-// asserts both build the same statement, so the two cannot drift apart unnoticed.
+// `return X;`. This copy is the one that runs; the node's branches are no longer
+// reached but are kept. Tests build the statement with both and assert the same SQL
+// and warnings, for the command shapes they hold: the drift test in
+// scripts/test-legacy-zone-command-versions.js (every written field, in each key
+// spelling the node reads) and every case of test-legacy-upsert-zone-config,
+// test-legacy-upsert-zone-name and test-zone-weather-source. A change to either copy
+// on an input none of those shapes uses would not be caught.
 function legacyZoneStatement(cmd, context) {
   var commandType = legacyZoneCommandType(cmd);
   var now = context.now;

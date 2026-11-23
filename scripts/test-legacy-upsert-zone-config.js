@@ -176,3 +176,31 @@ test('legacy UPSERT_ZONE: inserts the valid date or NULL; on conflict a supplied
     db.close();
   }
 });
+
+// Every field UPSERT_ZONE_CONFIG writes, in each key spelling it reads; a snake_case
+// key wins over its camelCase twin, as the node's later assignment does.
+test('UPSERT_ZONE_CONFIG: writes each field from its camelCase and snake_case keys', async () => {
+  const fields = 'crop_type, variety, soil_type, irrigation_method, notes, timezone, phenological_stage, calibration_key, '
+    + 'area_m2, irrigation_efficiency_pct, scheduling_mode, prediction_card_enabled, weather_source';
+  const read = (db) => ({ ...db.prepare(`SELECT ${fields} FROM irrigation_zones WHERE zone_uuid = ?`).get(ZONE_UUID) });
+  const camel = fixture();
+  const snake = fixture();
+  try {
+    await apply(camel, { ...CONFIG, cropType: 'maize', variety: 'white', soilType: 'clay', irrigationMethod: 'drip', notes: 'camel',
+      timezone: 'Africa/Kampala', phenologicalStage: 'mid_season', calibrationKey: 'maize', areaM2: 40, irrigationEfficiencyPct: 70,
+      schedulingMode: 'server_preferred', predictionCardEnabled: true, weatherSource: 'provider_a' });
+    assert.deepEqual(read(camel), { crop_type: 'maize', variety: 'white', soil_type: 'clay', irrigation_method: 'drip', notes: 'camel',
+      timezone: 'Africa/Kampala', phenological_stage: 'mid_season', calibration_key: 'maize', area_m2: 40, irrigation_efficiency_pct: 70,
+      scheduling_mode: 'server_preferred', prediction_card_enabled: 1, weather_source: 'provider_a' });
+    await apply(snake, { ...CONFIG, crop_type: 'beans', cropType: 'ignored', soil_type: 'sand', soilType: 'ignored',
+      irrigation_method: 'flood', irrigationMethod: 'ignored', phenological_stage: 'late_season', phenologicalStage: 'initial',
+      calibration_key: 'beans', calibrationKey: 'ignored', area_m2: 50, irrigation_efficiency_pct: 60, scheduling_mode: 'bogus',
+      prediction_card_enabled: 0, weather_source: 'Not Valid!' });
+    assert.deepEqual(read(snake), { crop_type: 'beans', variety: null, soil_type: 'sand', irrigation_method: 'flood', notes: null,
+      timezone: 'UTC', phenological_stage: 'late_season', calibration_key: 'beans', area_m2: 50, irrigation_efficiency_pct: 60,
+      scheduling_mode: 'local', prediction_card_enabled: 0, weather_source: 'auto' }, 'an invalid weather_source keeps the stored provider');
+  } finally {
+    camel.close();
+    snake.close();
+  }
+});
