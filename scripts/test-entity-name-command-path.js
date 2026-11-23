@@ -558,7 +558,7 @@ test('all three capability builders advertise entity_name_commands_v1 and both z
         source,
         id === 'al-link-build-req'
           ? /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/
-          : /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/,
+          : /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/,
         profile + ' ' + id + ' builds the list through the shared builder'
       );
     }

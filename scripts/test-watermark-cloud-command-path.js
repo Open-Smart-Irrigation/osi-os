@@ -92,7 +92,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   const linkSource = linkBuilderSource(profileFlows, profile);
   assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${profile} link request builds the list through the shared builder`);
   for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
-    assert.match(profileById[id].func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${profile} ${id} builds the list through the shared builder`);
+    assert.match(profileById[id].func, /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/, `${profile} ${id} builds the list through the shared builder`);
   }
   const base = sharedCapabilityBaseFrom(profile);
   assert.ok(Array.isArray(base) && base.includes('watermark_v1'), `${profile} canonical capability base carries the WATERMARK tokens`);

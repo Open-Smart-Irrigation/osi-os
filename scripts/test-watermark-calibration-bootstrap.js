@@ -23,7 +23,7 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
   assert.match(node.func, /NULLIF\(trim\(\(SELECT gateway_device_eui FROM sync_link_state/);
   assert.ok(node.func.indexOf('devices') < node.func.indexOf('watermark_calibrations'), `${id} emits calibration after devices`);
   assert.doesNotMatch(node.func, /watermark_readings/, `${id} does not ship raw watermark readings`);
-  assert.match(node.func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${id} builds the capability list through the shared builder`);
+  assert.match(node.func, /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/, `${id} builds the capability list through the shared builder`);
 }
 
 // The link request is built by the installation helper's build stage, which

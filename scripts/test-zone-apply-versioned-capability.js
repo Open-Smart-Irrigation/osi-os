@@ -281,7 +281,7 @@ for (const profile of PROFILES) {
       assert.ok(node, `${profile}: ${id} exists`);
       assert.match(
         node.func,
-        /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/,
+        /const syncCapabilities = installation\.reportedSyncCapabilities\(osiLib\.require\);/,
         `${profile}: ${id} delegates to reportedSyncCapabilities`
       );
       assert.match(node.func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile}: ${id} keeps the journal-only capability push`);

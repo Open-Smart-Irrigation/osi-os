@@ -2240,7 +2240,7 @@ expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command 
 // tokens themselves are pinned in SYNC_CAPABILITY_BASE above.
 expectIncludesForEach(
   ['Build Cloud Bootstrap', 'Run Force Sync'],
-  'const syncCapabilities = installation.reportedSyncCapabilities((name) => osiLib.require(name));',
+  'const syncCapabilities = installation.reportedSyncCapabilities(osiLib.require);',
   'builds the advertised list through the shared capability builder'
 );
 expectIncludesById('sync-bootstrap-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in bootstrap');
