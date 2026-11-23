@@ -115,6 +115,24 @@ nothing invoked). If reconciliation refuses, the deploy aborts (existing
 `run_schema_migration || exit 1` semantics) rather than proceeding onto an
 unreconciled ledger.
 
+A remap that moves a row upward leaves the applied versions out of order:
+`…,80,84` with 81 to 83 pending (#759). Everything downstream works on the
+applied set, not on `MAX(version)`. The runner's drift grace path
+(`isBootOwnedTriggerBodyDrift`) compares the live schema with reference(applied
+set) from `baseline-existing-db.js`'s `buildReferenceForApplied`:
+reference(P) for the contiguous applied prefix 1..P, plus the applied versions
+above P applied on a private copy, memoized per corpus and applied set. An
+in-order ledger gets reference(head) exactly as before. The gateway may have
+run an out-of-order version before lower ones, so the builder refuses
+(`ERR_REFERENCE_ORDER`) when an out-of-order version creates, drops or alters
+an object that any lower version also touches; the comparator also compares an
+index's predicate, key order, direction, collation and expression text. `applyPending`'s pending
+set is the corpus minus the applied set, as is `boot-owned-fingerprints.js`'s,
+and `bootSchemaDecision` reads "cut during its migration" as the set relation
+from ⊆ db ⊂ target. Before the remap commits, `--planned-schema-out <file>`
+writes the ledger it will commit, so `deploy.sh`'s `restore_as_found` accepts a
+cut reconcile as "as found": the remap changes ledger rows only.
+
 `node scripts/verify-head-cli.js <db>` is a thin, read-only CLI wrapper over
 `lib/osi-migrate`'s `verifyHead` (previously test-only) — use it to check
 whether a device's ledger honestly matches main's expected head without

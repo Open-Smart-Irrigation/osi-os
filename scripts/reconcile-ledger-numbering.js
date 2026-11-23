@@ -458,6 +458,29 @@ async function applyRemap(runner, rows) {
   return { remapped: remapped.length };
 }
 
+// The "<head>|<v:c,v:c,...>" string deploy.sh's schema_compatibility_metadata
+// will read once applyRemap commits <rows>: the applied rows, each remapped row
+// at its target version and checksum (inserted 'applied'), ordered by version.
+function plannedSchemaMetadata(rows) {
+  const applied = [];
+  for (const r of rows) {
+    if (r.decision === 'remap') applied.push({ version: r.target.version, checksum: r.target.checksum });
+    else if (r.status === 'applied') applied.push({ version: r.version, checksum: r.checksum });
+  }
+  applied.sort((a, b) => a.version - b.version);
+  const head = applied.length ? applied[applied.length - 1].version : 0;
+  return `${head}|${applied.map((r) => `${r.version}:${r.checksum}`).join(',')}`;
+}
+
+// #759: written before the remap commits, so a deploy cut while this tool
+// still runs (restamp, self-check) can tell that the only change to the
+// database is this ledger rewrite and return to the payload it found.
+function writePlannedSchema(file, rows) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${plannedSchemaMetadata(rows)}\n`);
+  fs.renameSync(tmp, file);
+}
+
 // Orchestrates one full reconcile run against a real DB path: read ledger,
 // classify, and — only in apply mode, and only if nothing refused — back up,
 // remap, re-stamp fingerprints, and self-check with
@@ -470,9 +493,10 @@ async function runReconcile({
   backupDir = null,
   apply = false,
   writersStopped = false,
+  plannedSchemaOut = null,
   log = console.error,
 } = {}) {
-  if (!dbPath) throw new Error('usage: reconcile-ledger-numbering.js <db> [--migrations-dir <dir>] [--backup-dir <dir>] [--report|--apply]');
+  if (!dbPath) throw new Error('usage: reconcile-ledger-numbering.js <db> [--migrations-dir <dir>] [--backup-dir <dir>] [--planned-schema-out <file>] [--report|--apply]');
   if (!fs.existsSync(dbPath)) {
     throw new Error(`refusing: database file does not exist: ${dbPath}`);
   }
@@ -511,6 +535,7 @@ async function runReconcile({
     const backupPath = offDeviceBackup(dbPath, backupDir);
     log(`[reconcile] persistent pre-reconciliation backup: ${backupPath} (fsync'd, integrity ok)`);
 
+    if (plannedSchemaOut) writePlannedSchema(plannedSchemaOut, rows);
     const { remapped } = await applyRemap(runner, rows);
     log(`[reconcile] remapped ${remapped} ledger row(s)`);
     await syncFingerprints(runner);
@@ -611,6 +636,7 @@ function parseArgs(argv) {
     migrationsDir: DEFAULT_MIGRATIONS_DIR,
     fixturesDir: DEFAULT_FIXTURES_DIR,
     backupDir: null,
+    plannedSchemaOut: null,
     apply: false,
     clearRepairRequired: false,
     json: false,
@@ -620,6 +646,7 @@ function parseArgs(argv) {
     if (a === '--migrations-dir') opts.migrationsDir = path.resolve(argv[++i] || '');
     else if (a === '--fixtures-dir') opts.fixturesDir = path.resolve(argv[++i] || '');
     else if (a === '--backup-dir') opts.backupDir = argv[++i];
+    else if (a === '--planned-schema-out') opts.plannedSchemaOut = argv[++i];
     else if (a === '--apply') opts.apply = true;
     else if (a === '--report') opts.apply = false;
     else if (a === '--clear-repair-required') opts.clearRepairRequired = true;
@@ -661,6 +688,7 @@ module.exports = {
   resolveStructuralProofs,
   classifyLedger,
   applyRemap,
+  plannedSchemaMetadata,
   verifyReconciliationConsistency,
   runReconcile,
   clearRepairRequired,

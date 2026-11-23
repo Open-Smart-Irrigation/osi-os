@@ -175,6 +175,7 @@ ${extractFunction('command_ledger_none_live')}
 ${extractFunction('hold_for_unloadable_command_ledger')}
 ${extractFunction('check_fetched_manifest')}
 ${extractFunction('check_fetched_js_files')}
+${extractFunction('check_fetched_runner_checksums')}
 
 osi_schema_decision() {
 ${extractSchemaDecisionFragment()}

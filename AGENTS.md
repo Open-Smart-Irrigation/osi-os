@@ -80,6 +80,8 @@ and tags free of customer-specific history.
   `repair_required` whose checksum already matches main; it never clears one
   that still disagrees. Never hand-edit `schema_migrations` outside these two
   sanctioned tools. Rehearse on a copy with `scripts/rehearse-ledger-cutover.js`.
+  A deploy cut after the renumber is answered with the same release's deploy
+  again, never an older release (#759).
   Long form: `osi-live-ops-runbook`, "Foreign-numbered ledger recovery".
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
   artifacts. Current `node-red.init` does not read identity from that file, and

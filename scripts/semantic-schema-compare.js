@@ -55,6 +55,34 @@ async function snapshotForeignKeys(runner, tableName) {
     ].join('|'));
 }
 
+// The key-column list and the partial-index predicate of a CREATE INDEX
+// statement, normalized (#762): PRAGMA index_xinfo reports neither a WHERE
+// clause nor an expression's text, so two indexes differing only there
+// compared equal.
+function indexSqlShape(sql) {
+  const n = normalizeSqlClause(sql);
+  const open = n.indexOf('(');
+  if (open === -1) return { columns: '', where: '' };
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < n.length; i += 1) {
+    const ch = n[i];
+    if (ch === "'") {
+      const end = n.indexOf("'", i + 1);
+      i = end === -1 ? n.length : end;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) { close = i; break; }
+    }
+  }
+  if (close === -1) return { columns: n.slice(open + 1), where: '' };
+  const rest = n.slice(close + 1).trim();
+  return { columns: n.slice(open + 1, close), where: rest.startsWith('where') ? rest.slice(5).trim() : rest };
+}
+
 async function snapshotSchema(runner) {
   const master = await runner.all(
     "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name");
@@ -86,10 +114,13 @@ async function snapshotSchema(runner) {
       const xinfo = await runner.all(`PRAGMA index_xinfo(${q(row.name)})`);
       const list = await runner.all(`PRAGMA index_list(${q(row.tbl_name)})`);
       const meta = list.find((x) => x.name === row.name) || {};
-      const cols = xinfo.filter((x) => x.key === 1)
-        .sort((a, b) => a.seqno - b.seqno)
-        .map((x) => (x.name || `expr${x.seqno}`).toLowerCase());
-      snap.indexes[row.name] = `table=${row.tbl_name.toLowerCase()}|unique=${meta.unique ? 1 : 0}|cols=${cols.join(',')}`;
+      const keys = xinfo.filter((x) => x.key === 1).sort((a, b) => a.seqno - b.seqno);
+      // Each key column with its direction and collation, in index order (#762).
+      const cols = keys.map((x) => `${(x.name || `expr${x.seqno}`).toLowerCase()}:${x.desc ? 'desc' : 'asc'}:${String(x.coll || '').toLowerCase()}`);
+      const shape = indexSqlShape(row.sql);
+      // An expression key column has no name; its text decides the index.
+      const exprText = keys.some((x) => x.cid === -2) ? `|exprs=${shape.columns}` : '';
+      snap.indexes[row.name] = `table=${row.tbl_name.toLowerCase()}|unique=${meta.unique ? 1 : 0}|cols=${cols.join(',')}${exprText}|where=${shape.where}`;
     } else if (row.type === 'trigger') {
       snap.triggers[row.name] = normalizeSqlClause(row.sql);
     } else if (row.type === 'view') {
@@ -219,6 +250,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  indexSqlShape,
   snapshotSchema,
   compareSchemas,
   extractChecks,

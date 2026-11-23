@@ -2057,7 +2057,22 @@ restore_as_found() {
     [ -n "${PRE_STOP_SCHEMA:-}" ] || return 1
     raf_schema="$(schema_compatibility_metadata 2>/dev/null || true)"
     raf_active="$(swap_call currentStamp 2>/dev/null || true)"
+    # A ledger numbering reconciliation cut part way (#759) has either not
+    # committed (the schema as found), or committed exactly the ledger it
+    # announced: ledger rows only, nothing the old payload reads.
+    if [ -n "$raf_schema" ] && [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] \
+        && [ -n "${RECONCILE_PLANNED_SCHEMA:-}" ] && [ -f "$RECONCILE_PLANNED_SCHEMA" ] \
+        && [ "$raf_schema" = "$(cat "$RECONCILE_PLANNED_SCHEMA" 2>/dev/null)" ]; then
+        echo "NOTE: the ledger numbering reconciliation renumbered ledger rows only; the schema the previous payload ran on is unchanged" >&2
+        PRE_STOP_SCHEMA="$raf_schema"
+    fi
     if [ "$raf_schema" != "$PRE_STOP_SCHEMA" ] || [ "$raf_active" != "${PRE_STOP_ACTIVE:-}" ]; then
+        return 1
+    fi
+    # A ledger that still reads proves nothing about the pages behind it (a
+    # file cut while it was being copied back, #762): check them first.
+    if [ "$(sqlite3 -readonly "$DB_PATH" 'PRAGMA quick_check' 2>/dev/null)" != ok ]; then
+        echo "ERROR: the database fails PRAGMA quick_check; not returning to the payload as found" >&2
         return 1
     fi
     if [ "${PRE_STOP_RUNNING:-0}" != "1" ]; then
@@ -2679,6 +2694,51 @@ check_fetched_manifest() {
     ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$1" "$2" "$3"
 }
 
+# Fails, naming the file, when a fetched runner file's bytes differ from the
+# SHA-256 that scripts/deploy-runner-checksums.json (fetched from the same
+# source) records for it. A download cut short can still parse: a prefix
+# that ends between two statements loses module.exports or a CLI block
+# without a syntax error (#762).
+check_fetched_runner_checksums() {
+    node -e '
+        const crypto = require("crypto");
+        const fs = require("fs");
+        const path = require("path");
+        const [manifestFile, root, ...files] = process.argv.slice(1);
+        let manifest;
+        try {
+            manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+            if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("not an object");
+        } catch (error) {
+            console.error("ERROR: " + manifestFile + " is unreadable (truncated or altered download): " + error.message);
+            process.exit(1);
+        }
+        let failed = false;
+        for (const file of files) {
+            const rel = path.relative(root, file);
+            const expected = manifest[rel];
+            if (typeof expected !== "string") {
+                console.error("ERROR: " + file + " has no checksum in deploy-runner-checksums.json");
+                failed = true;
+                continue;
+            }
+            let actual;
+            try {
+                actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+            } catch (error) {
+                console.error("ERROR: " + file + " is missing (" + (error.code || error.message) + ")");
+                failed = true;
+                continue;
+            }
+            if (actual !== expected) {
+                console.error("ERROR: " + file + " does not match its checksum (truncated or altered download)");
+                failed = true;
+            }
+        }
+        process.exit(failed ? 1 : 0);
+    ' "$TMP_DIR/scripts/deploy-runner-checksums.json" "$TMP_DIR" "$@"
+}
+
 # Fails, naming the file, when a fetched JavaScript file is missing, empty or
 # does not parse as a CommonJS module (a truncated download usually does not).
 check_fetched_js_files() {
@@ -2718,6 +2778,9 @@ fetch_migration_runner() {
         return 1
     fi
 
+    fetch_required "Migration runner checksums" \
+        "scripts/deploy-runner-checksums.json" \
+        "$TMP_DIR/scripts/deploy-runner-checksums.json" || return 1
     fetch_required "Migration manifest parser" \
         "lib/osi-migrate/migration-manifest.js" \
         "$TMP_DIR/lib/osi-migrate/migration-manifest.js" || return 1
@@ -2725,6 +2788,7 @@ fetch_migration_runner() {
         "lib/osi-migrate/migrations-loader.js" \
         "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
     check_fetched_js_files "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+    check_fetched_runner_checksums "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
 
     fetch_required "Migration checksum manifest" \
         "database/migrations/ordered/CHECKSUMS.json" \
@@ -2774,6 +2838,7 @@ fetch_migration_runner() {
         set -- "$@" "$TMP_DIR/lib/osi-migrate/$module"
     done
     check_fetched_js_files "$@" || return 1
+    check_fetched_runner_checksums "$@" || return 1
     MIGRATION_RUNNER_AVAILABLE=1
 }
 
@@ -2786,6 +2851,7 @@ fetch_reconciliation_assets() {
     fetch_required "Ledger numbering reconciliation tool" \
         "scripts/reconcile-ledger-numbering.js" \
         "$TMP_DIR/scripts/reconcile-ledger-numbering.js" || return 1
+    check_fetched_runner_checksums "$TMP_DIR/scripts/reconcile-ledger-numbering.js" || return 1
 
     lineage_fixtures_dir="$TMP_DIR/scripts/fixtures/lineages"
     mkdir -p "$lineage_fixtures_dir" || return 1
@@ -3022,16 +3088,29 @@ run_schema_migration() {
                 echo "ERROR: could not fetch the ledger numbering reconciliation assets; aborting schema migration" >&2
                 return 1
             fi
+            # #759: the reconcile rewrites ledger rows only (no DDL), so the
+            # schema the old payload ran on is unchanged. It writes the ledger
+            # it is about to commit to RECONCILE_PLANNED_SCHEMA first; a deploy
+            # cut or refused while it runs accepts that ledger as "as found"
+            # (restore_as_found), and so does one cut or refused after it,
+            # before the first migration commits.
+            RECONCILE_PLANNED_SCHEMA="$TMP_DIR/reconcile-planned-schema"
+            rm -f "$RECONCILE_PLANNED_SCHEMA"
             if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
                 --migrations-dir "$migrations_dir" \
                 --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
                 --backup-dir "$backup_dir" \
+                --planned-schema-out "$RECONCILE_PLANNED_SCHEMA" \
                 --apply
             then
                 echo "ERROR: ledger numbering reconciliation refused or failed; aborting schema migration" >&2
                 return 1
             fi
             echo "OK: ledger numbering reconciliation applied"
+            # reconcile as-found begin
+            PRE_STOP_SCHEMA="$(schema_compatibility_metadata 2>/dev/null || true)"
+            RECONCILE_PLANNED_SCHEMA=""
+            # reconcile as-found end
         fi
     else
         if ! node "$TMP_DIR/scripts/repair-sync-outbox-v2.js" "$DB_PATH"; then

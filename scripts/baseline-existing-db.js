@@ -147,6 +147,125 @@ async function buildReference(migrationsDir, n, scratchRoot, runnerOptions = {})
   return state.byVersion.get(n).dbPath;
 }
 
+// reference(applied set) (#759): a DB with exactly the migrations of
+// <appliedVersions> applied, for a ledger that is not a contiguous prefix of
+// the corpus. A foreign-numbered gateway whose ledger was renumbered has, for
+// example, 1..80 and 84 applied (84 ran first, under the old line's own
+// number) and then 81 once the main deploy starts filling the gap; its applied
+// head is 84, yet 82 and 83 never ran. reference(84) would contain them, so it
+// cannot describe that database.
+//
+// Built as reference(P), P being the end of the corpus's leading run whose
+// versions are all applied (the shared chain's cached copy, never modified),
+// plus the applied versions above P, applied by the runner on a private copy
+// in version order. When the applied set is a contiguous prefix this is
+// buildReference(P) itself, so an in-order ledger gets exactly the reference
+// it always had. STRICT, like buildReference: an applied version with no
+// migration file, or no applied prefix at all, throws.
+//
+// Memoized per chain (corpus and runner mode) and applied set: the result is
+// a pure function of both, and a deploy reaches it at most twice (the drift
+// preflight and verifyHead).
+const appliedSetReferences = new Map();
+
+function appliedReferencePlan(entries, appliedVersions) {
+  const versions = [...new Set(Array.from(appliedVersions, Number))].sort((a, b) => a - b);
+  const known = new Set(entries.map((m) => m.version));
+  for (const v of versions) {
+    if (!Number.isInteger(v) || !known.has(v)) throw new TypeError(`applied version ${v} has no migration file`);
+  }
+  const applied = new Set(versions);
+  let prefixHead = 0;
+  for (const m of entries) {
+    if (!applied.has(m.version)) break;
+    prefixHead = m.version;
+  }
+  if (prefixHead === 0) throw new TypeError('the applied set has no applied prefix to build a reference from');
+  return { versions, prefixHead, extras: versions.filter((v) => v > prefixHead) };
+}
+
+// The schema objects a migration creates, drops or alters, as "<type> <name>"
+// ("column <table>.<column>" for ADD/DROP/RENAME COLUMN). Comments and string
+// literals are blanked first, so a trigger body that only reads a table does
+// not name it.
+function migrationObjectNames(sql) {
+  const src = String(sql)
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:[^']|'')*'/g, "''");
+  const id = '["`\\[]?([A-Za-z0-9_]+)["`\\]]?';
+  const names = new Set();
+  const created = new RegExp(`\\b(?:CREATE|DROP)\\s+(?:TEMP(?:ORARY)?\\s+)?(?:UNIQUE\\s+)?(TABLE|INDEX|TRIGGER|VIEW)\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?${id}`, 'gi');
+  for (const m of src.matchAll(created)) names.add(`${m[1].toLowerCase()} ${m[2].toLowerCase()}`);
+  const altered = new RegExp(`\\bALTER\\s+TABLE\\s+${id}\\s+(ADD|DROP|RENAME)\\s+(?:COLUMN\\s+)?(TO\\s+)?${id}(?:\\s+TO\\s+${id})?`, 'gi');
+  for (const m of src.matchAll(altered)) {
+    const table = m[1].toLowerCase();
+    if (m[2].toUpperCase() === 'RENAME' && m[3]) {
+      names.add(`table ${table}`);
+      names.add(`table ${m[4].toLowerCase()}`);
+    } else {
+      names.add(`column ${table}.${m[4].toLowerCase()}`);
+      if (m[5]) names.add(`column ${table}.${m[5].toLowerCase()}`);
+    }
+  }
+  return names;
+}
+
+// The reference applies the out-of-order versions after the prefix, in
+// version order; the gateway may have run them before versions below them
+// (#762). The two orders give the same schema unless two of those migrations
+// touch the same object. The ledger keeps no reliable history of the order,
+// so every out-of-order version is checked against every lower version of
+// the corpus, and a shared object refuses: the reference cannot then be
+// proven to be what the gateway ran.
+function assertOrderIndependent(entries, extras) {
+  const names = new Map(entries.map((m) => [m.version, migrationObjectNames(m.sql)]));
+  for (const extra of extras) {
+    const own = names.get(extra);
+    for (const m of entries) {
+      if (m.version >= extra) break;
+      const shared = [...own].filter((n) => names.get(m.version).has(n));
+      if (shared.length) {
+        const e = new Error(`applied migration ${extra} ran out of version order and touches ${shared.join(', ')}, as migration ${m.version} does; the reference cannot follow the order the gateway ran them in`);
+        e.code = 'ERR_REFERENCE_ORDER';
+        throw e;
+      }
+    }
+  }
+}
+
+async function buildReferenceForApplied(migrationsDir, appliedVersions, scratchRoot, runnerOptions = {}) {
+  const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
+  const plan = appliedReferencePlan(state.entries, appliedVersions);
+  if (plan.extras.length === 0) return buildReference(migrationsDir, plan.prefixHead, scratchRoot, runnerOptions);
+  assertOrderIndependent(state.entries, plan.extras);
+  const key = `${state.dir}\0${plan.versions.join(',')}`;
+  let pending = appliedSetReferences.get(key);
+  if (!pending) {
+    pending = (async () => {
+      await ensureReferenceUpTo(state, plan.prefixHead);
+      const dir = fs.mkdtempSync(path.join(state.dir, 'applied-'));
+      const dbPath = path.join(dir, 'reference.db');
+      fs.copyFileSync(state.byVersion.get(plan.prefixHead).dbPath, dbPath);
+      const subset = path.join(dir, 'migrations');
+      const applied = new Set(plan.versions);
+      const runner = state.runnerFactory(dbPath);
+      try {
+        const corpus = materializeMigrations(subset, state.entries.filter((m) => applied.has(m.version))
+          .map((m) => ({ corpus: state.corpus, name: m.name })));
+        await applyPending(runner, { migrationsDir: subset, corpus, appVersion: 'stage0-reference', writersStopped: true });
+      } finally {
+        await runner.close();
+        fs.rmSync(subset, { recursive: true, force: true });
+      }
+      return dbPath;
+    })();
+    appliedSetReferences.set(key, pending);
+    pending.catch(() => appliedSetReferences.delete(key));
+  }
+  return pending;
+}
+
 function summarize(diffs) {
   return diffs.map((d) => `${d.class}:${d.kind}:${d.name}`).join(', ') || 'none';
 }
@@ -263,4 +382,4 @@ if (require.main === module) {
   })().catch((e) => { console.error(`[baseline] FAILED: ${e.message}`); process.exit(2); });
 }
 
-module.exports = { runBaseline, buildReference, referenceSnapshot, parseArgs, APP_VERSION };
+module.exports = { runBaseline, buildReference, buildReferenceForApplied, appliedReferencePlan, migrationObjectNames, assertOrderIndependent, referenceSnapshot, parseArgs, APP_VERSION };

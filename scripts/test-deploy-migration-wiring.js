@@ -242,7 +242,8 @@ test('deploy migration wiring: a main-numbered gateway (checksums already match)
   // Only the actual `node .../reconcile-ledger-numbering.js` invocation runs at
   // deploy time, and THAT one must be gated.
   const invocationMentions = reconcileMentions.filter((idx) => idx > mismatchIdx && idx < mismatchFiIdx);
-  assert.equal(reconcileMentions.length, 3, 'reconcile-ledger-numbering.js must be referenced exactly 3 times: fetch source, fetch dest, invocation');
+  // Plus a fourth in fetch_reconciliation_assets: its checksum check (#762).
+  assert.equal(reconcileMentions.length, 4, 'reconcile-ledger-numbering.js must be referenced exactly 4 times: fetch source, fetch dest, checksum check, invocation');
   assert.equal(invocationMentions.length, 1, 'exactly one (the invocation) must fall inside the checksum-mismatch branch');
 });
 

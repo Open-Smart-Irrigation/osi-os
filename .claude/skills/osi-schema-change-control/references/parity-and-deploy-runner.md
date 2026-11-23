@@ -59,7 +59,12 @@ on an existing DB, it now uses one path: `run_schema_migration()`.
    `database/migrations/ordered/CHECKSUMS.json` instead of carrying inline DDL.
 2. It fetches the Stage 0 pre-baseline helpers and the required
    `lib/osi-migrate` modules into `$TMP_DIR`, so the on-device script runs the
-   same ledgered code as CI.
+   same ledgered code as CI. Before Node-RED stops it checks every fetched
+   runner file against `scripts/deploy-runner-checksums.json`: a download cut
+   between two statements still parses (#762). After changing any of those
+   files, run `node scripts/deploy-runner-checksums.js --write`; CI fails on a
+   stale list, and a new fetched runner file goes into the list in
+   `scripts/deploy-runner-checksums.js`.
 3. It ensures the `sqlite3` CLI exists (`opkg install sqlite3-cli` if needed),
    stops Node-RED before any live DB write, chains its restart with the existing
    cleanup trap, waits up to 30 seconds for the process to exit, checkpoints WAL,

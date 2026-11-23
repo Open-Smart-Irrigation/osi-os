@@ -1840,10 +1840,19 @@ function readCompatibility(root, stamp) {
   }
 }
 
-// True when ledger <a> is a proper prefix of ledger <b> ("v:c,v:c,...").
-function properPrefix(a, b) {
-  if (a === b) return false;
-  return a === '' ? b !== '' : b.startsWith(`${a},`);
+// True when every "v:c" entry of ledger <a> ("v:c,v:c,...") is in ledger <b>
+// and <b> has more (#759). On an in-order ledger this is the proper-prefix
+// relation the boot used before. After a ledger renumber
+// it is not: the database can hold ...,80,84 with 81 to 83 still pending, so
+// "between the start and the target" is a set relation, entries compared by
+// version and checksum both.
+function properSubset(a, b) {
+  const entries = (ledger) => new Set(String(ledger).split(',').filter(Boolean));
+  const left = entries(a);
+  const right = entries(b);
+  if (left.size >= right.size) return false;
+  for (const entry of left) if (!right.has(entry)) return false;
+  return true;
 }
 
 // A candidate the boot may switch to: complete, with its modules sealed where
@@ -1913,8 +1922,10 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
   }
   // A retry cut before its first commit starts at the live ledger, ahead of
   // the active payload's: an interrupted upgrade too.
-  const interrupted = others.find((record) => properPrefix(dbLedger, record.schema_ledger) &&
-    (properPrefix(record.from_ledger, dbLedger) || (record.from_ledger === dbLedger && activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger))));
+  // Set relations (from ⊆ db ⊂ target), not prefixes: a renumbered ledger
+  // (#759) fills its gap below an already applied version.
+  const interrupted = others.find((record) => properSubset(dbLedger, record.schema_ledger) &&
+    (properSubset(record.from_ledger, dbLedger) || (record.from_ledger === dbLedger && activeCompat && properSubset(activeCompat.schema_ledger, dbLedger))));
   // (g) as ruled after the old-boot matrix: hold only where the retry
   // provably cannot finish once the old payload has started. That is when a
   // pending migration's new body for an object the old boot node recreates is
@@ -1946,7 +1957,7 @@ function bootSchemaDecision(root, guiRoot, dbHead, dbLedger, storedFingerprints 
   }
   // No usable record, but the database is ahead of the active payload's
   // schema: nothing proves a retry can finish after the old payload starts.
-  if (activeCompat && properPrefix(activeCompat.schema_ledger, dbLedger)) {
+  if (activeCompat && properSubset(activeCompat.schema_ledger, dbLedger)) {
     return holdFor('no readable pending-switch record proves the retry can finish', '', '');
   }
   if (activeCompat) {
@@ -2056,6 +2067,7 @@ module.exports = {
   clearOtherPendingSwitches,
   readCompatibility,
   bootSchemaDecision,
+  properSubset,
   owedCheckPlan,
   writeCompatibility,
   compatibilityExists,
