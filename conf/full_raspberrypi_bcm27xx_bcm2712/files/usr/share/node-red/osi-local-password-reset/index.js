@@ -318,7 +318,107 @@ async function verifyLocalLogin(options) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// One-time refresh of local sessions (called from settings.js at Node-RED
+// start, before any request is served).
+//
+// Tokens issued before this update carry no sign-in step claim. When an
+// account still needs the step (users.id 1 on a value that is not bcrypt, or a
+// pending record), the local session secret is replaced once, so every earlier
+// local session ends and the next sign-in issues a token under the new rules.
+// The secret signs local browser/API sessions only; the cloud link, the offline
+// verifier, passwords and MQTT do not use it.
+//
+// A marker next to the secret records that the check ran, whatever its result,
+// so the refresh never repeats. A check that cannot read the database writes no
+// marker and runs again at the next start. A secret configured in the
+// environment (AUTH_TOKEN_SECRET / JWT_SECRET) cannot be replaced here: the
+// refresh logs that and records the marker. It runs beside start-up and
+// holds nothing back (the database may be slow to answer); it never rejects.
+
+const SESSION_REFRESH_MARKER = '/data/db/osi_session_refresh_v1';
+const SESSION_SECRET_PATHS = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];
+const AFFECTED_USERS_SQL = "SELECT count(*) FROM users WHERE id=" + FIRST_ACCOUNT_ID +
+  " AND COALESCE(auth_mode,'local')<>'server' AND COALESCE(substr(password_hash,1,2),'')<>'$2';";
+const HAS_SETTINGS_SQL = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='app_settings';";
+const PENDING_SQL = "SELECT count(*) FROM app_settings WHERE key='" + CHANGE_KEY_PREFIX + FIRST_ACCOUNT_ID + "';";
+
+function readCount(execFile, dbPath, sql) {
+  return new Promise((resolve, reject) => {
+    execFile('sqlite3', ['-readonly', '-cmd', '.timeout 2000', dbPath, sql], { encoding: 'utf8', timeout: 60000 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error('sqlite3 query failed: ' + (String(stderr || '').trim() || errorText(error))));
+        return;
+      }
+      const value = Number(String(stdout || '').trim());
+      if (!Number.isInteger(value) || value < 0) {
+        reject(new Error('unexpected sqlite3 output: ' + String(stdout).slice(0, 80)));
+        return;
+      }
+      resolve(value);
+    });
+  });
+}
+
+function writeFileAtomic(fs, filePath, content, mode) {
+  const temporary = filePath + '.tmp-' + String(process.pid);
+  fs.writeFileSync(temporary, content, { mode });
+  fs.renameSync(temporary, filePath);
+}
+
+// Resolves to { status, message }: status is 'done' (marker already present),
+// 'rotated', 'not_needed', 'configured_secret', 'no_secret' or 'retry'.
+async function refreshSessionsOnce(options) {
+  const { fs, execFile, crypto, env = {}, now = new Date().toISOString() } = options;
+  const warn = typeof options.warn === 'function' ? options.warn : function() {};
+  const markerPath = options.markerPath || SESSION_REFRESH_MARKER;
+  const secretPaths = options.secretPaths || SESSION_SECRET_PATHS;
+  const dbPath = options.dbPath || FARMING_DB;
+  try {
+    if (fs.existsSync(markerPath)) return { status: 'done', message: '' };
+    let affected;
+    try {
+      affected = (await readCount(execFile, dbPath, AFFECTED_USERS_SQL)) > 0;
+      if (!affected && (await readCount(execFile, dbPath, HAS_SETTINGS_SQL)) > 0) {
+        affected = (await readCount(execFile, dbPath, PENDING_SQL)) > 0;
+      }
+    } catch (error) {
+      warn('session refresh check did not run; it is tried again at the next start: ' + errorText(error));
+      return { status: 'retry', message: '' };
+    }
+    let status = 'not_needed';
+    if (affected) {
+      const configured = String(env.AUTH_TOKEN_SECRET || env.JWT_SECRET || '').trim();
+      const inUse = secretPaths.find((secretPath) => {
+        try {
+          return String(fs.readFileSync(secretPath, 'utf8') || '').trim() !== '';
+        } catch (error) {
+          if (!error || error.code !== 'ENOENT') warn('session secret read failed for ' + secretPath + ': ' + errorText(error));
+          return false;
+        }
+      });
+      if (configured) {
+        status = 'configured_secret';
+        warn('local sessions were not refreshed: the session secret is set in the environment');
+      } else if (!inUse) {
+        status = 'no_secret';
+      } else {
+        writeFileAtomic(fs, inUse, crypto.randomBytes(48).toString('hex') + '\n', 0o600);
+        status = 'rotated';
+      }
+    }
+    writeFileAtomic(fs, markerPath, JSON.stringify({ version: 1, status, at: now }) + '\n', 0o600);
+    return { status, message: status === 'rotated' ? 'local sessions refreshed once after the sign-in update' : '' };
+  } catch (error) {
+    warn('session refresh failed; it is tried again at the next start: ' + errorText(error));
+    return { status: 'retry', message: '' };
+  }
+}
+
 module.exports = {
+  refreshSessionsOnce,
+  SESSION_REFRESH_MARKER,
+  SESSION_SECRET_PATHS,
   signInType,
   resetLocalPassword,
   isBcryptValue,

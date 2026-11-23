@@ -229,7 +229,7 @@ const ORDINARY_CLAIMS = ['userId', 'username', 'iat', 'exp'];
 const SETTINGS_PATH = path.join(ROOT, 'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js');
 function signInGate() {
   const original = console.error;
-  console.error = (line, ...rest) => { if (!String(line).startsWith('[osi-db-startup]')) original(line, ...rest); };
+  console.error = (line, ...rest) => { if (!/^\[osi-(db-startup|sign-in)\]/.test(String(line))) original(line, ...rest); };
   try {
     delete require.cache[SETTINGS_PATH];
     return require(SETTINGS_PATH).httpNodeMiddleware;

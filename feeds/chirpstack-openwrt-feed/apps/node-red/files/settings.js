@@ -49,6 +49,27 @@ try {
     console.error('[osi-db-startup] ERROR farm database start-up check did not run: ' + (error && error.message ? error.message : error));
 }
 
+// One-time refresh of local sessions after the sign-in update
+// (osi-local-password-reset refreshSessionsOnce: it replaces the local session
+// secret once, only when an account still needs the sign-in step, and records a
+// marker in /data/db). It runs beside start-up, like the database check above,
+// and never stops or delays Node-RED starting.
+try {
+    require('/srv/node-red/osi-local-password-reset').refreshSessionsOnce({
+        fs,
+        execFile: require('child_process').execFile,
+        crypto: require('crypto'),
+        env: process.env,
+        warn: (message) => console.warn('[osi-sign-in] ' + message),
+    }).then((refresh) => {
+        if (refresh && refresh.message) console.log('[osi-sign-in] ' + refresh.message);
+    }).catch((error) => {
+        console.error('[osi-sign-in] ERROR session refresh failed: ' + (error && error.message ? error.message : error));
+    });
+} catch (error) {
+    console.error('[osi-sign-in] ERROR session refresh did not run: ' + (error && error.message ? error.message : error));
+}
+
 // Sign-in step gate (httpNodeMiddleware, runs before every HTTP-in route).
 // A token issued while its account must set a new password carries the
 // claim mustChangePassword (osi-local-password-reset TOKEN_CLAIM). Such a

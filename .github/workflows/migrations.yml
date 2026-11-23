@@ -314,6 +314,7 @@ jobs:
           node scripts/local-signin-handoff.js
           node --test scripts/test-local-signin.js
           node --test scripts/test-sign-in-step-gate.js
+          node --test scripts/test-session-refresh.js
       - name: Scoped-access read suite (account-wide reads, preserved gates)
         run: node --test scripts/test-scoped-access-reads.js
       - name: Session required on the sensor export, litres and reference-tree routes (both flag states)

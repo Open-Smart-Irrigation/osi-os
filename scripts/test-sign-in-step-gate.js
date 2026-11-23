@@ -24,7 +24,7 @@ function loadSettings() {
   // that one known line out of the test output.
   const original = console.error;
   console.error = (line, ...rest) => {
-    if (!String(line).startsWith('[osi-db-startup]')) original(line, ...rest);
+    if (!/^\[osi-(db-startup|sign-in)\]/.test(String(line))) original(line, ...rest);
   };
   try {
     delete require.cache[SETTINGS_PATH];
