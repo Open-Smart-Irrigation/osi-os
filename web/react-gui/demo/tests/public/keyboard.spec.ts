@@ -1,5 +1,6 @@
 import {expect, test, type Locator, type Page} from '@playwright/test';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 
 test.setTimeout(240_000);
 
@@ -53,10 +54,16 @@ for (const language of languages) {
     await expect(page.locator('#guide-panel')).toBeVisible();
     await expect(page.locator('#guide-intro')).toBeVisible();
     await expect(page.locator('#guide-next')).toBeFocused();
-    await page.keyboard.press('Enter');
-    for (let index = 0; index < 3; index += 1) {
+    // A ready guide step moves focus to its target inside the app frame, and in Firefox a plain
+    // focus() on the host button does not take it back, so an Enter could land in the app
+    // instead. Focus the host window and Next before each Enter, and confirm the step copy.
+    const copy = JSON.parse(readFileSync(resolve('demo/public/locales', `${language.code}.json`), 'utf8')) as Record<string, string>;
+    for (const step of [copy.stepInspect, copy.stepAdvice, copy.stepHistory, copy.stepIrrigation]) {
       await expect(page.locator('#guide-next')).toBeEnabled({timeout: 10_000});
-      await page.locator('#guide-next').press('Enter');
+      await page.evaluate(() => {window.focus(); document.querySelector<HTMLElement>('#guide-next')!.focus();});
+      await expect(page.locator('#guide-next')).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#guide-step-copy')).toHaveText(step);
     }
     await expect(page.locator('#guide-next')).toBeEnabled({timeout: 10_000});
     const valve = app.getByTestId('valve-actions').first().locator('..');
