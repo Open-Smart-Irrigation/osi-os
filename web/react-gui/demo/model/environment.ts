@@ -40,9 +40,38 @@ export function hasValidWeatherLocation(zone: IrrigationZone): boolean {
     && Math.abs(Number(zone.latitude)) <= 90 && Math.abs(Number(zone.longitude)) <= 180;
 }
 
-function weather(date: string, provider: 'open_meteo' | 'meteoswiss' | null) {
+/** Daily weather input for one zone and local date. `et0` must come from a real ET0 calculation. */
+export type DailyWeatherInput = {et0: number; rain: number; maxTemp: number; meanRhPct?: number; windSpeedMps?: number;
+  et0Source?: string; et0Tier?: string;
+  /** Optional forecast rain per local hour 0-23 of the date; replaces the fixed four-hour pattern when present. */
+  hourlyRainMm?: readonly number[]};
+/** `now` is the simulator time of the call, so a source can tell past days from forecast days.
+ * Contract for a host source: a pure, deterministic function of (date, zone, now) that returns null for a date it
+ * cannot supply and never throws for a date it can; numbers are finite, `rain` and every `hourlyRainMm` value are
+ * millimetres of at least 0, and `hourlyRainMm` is indexed by local wall-clock hour for a zone whose UTC offset is a
+ * whole number of hours (forecast rows sit on whole UTC hours). It never calls back into the simulator. A source that
+ * breaks this contract is a host bug: values are used as given, and an exception reaches the caller of the simulator
+ * call that asked for the weather, including `reset()` and `resetEnvironmentRecords()`, which are not transactional. */
+export type WeatherSource = (date: string, zone: IrrigationZone, now: number) => DailyWeatherInput | null;
+let weatherSource: WeatherSource | null = null;
+/** Replace the illustrative daily series (null restores it). The active source is module state; each Simulator
+ * sets its own source for the duration of every public entry point and restores the previous one afterwards, so
+ * simulators sharing a realm do not see each other's and direct calls outside a Simulator see no source. */
+export function setWeatherSource(source: WeatherSource | null): void { weatherSource = source; }
+/** The source currently in effect (null: the illustrative series). */
+export function getWeatherSource(): WeatherSource | null { return weatherSource; }
+const hourFormatters = new Map<string, Intl.DateTimeFormat>();
+/** Local wall-clock hour 0-23 of an instant. One cached formatter per time zone. */
+function localHour(at: number, timezone: string): number {
+  let format = hourFormatters.get(timezone);
+  if (!format) { format = new Intl.DateTimeFormat('en-CA', {timeZone: timezone, hour: '2-digit', hourCycle: 'h23'}); hourFormatters.set(timezone, format); }
+  return Number(format.formatToParts(new Date(at)).find(part => part.type === 'hour')?.value);
+}
+
+function weather(date: string, provider: 'open_meteo' | 'meteoswiss' | null, zone: IrrigationZone, now: number): DailyWeatherInput | null {
   const dayNumber = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
   if (!provider) return null;
+  if (weatherSource) return weatherSource(date, zone, now);
   // These are date-keyed fictional provider input records. Provider modes use
   // distinct deterministic fixture series; they never claim fetched data.
   const et0 = round(Math.max(1.2, provider === 'meteoswiss'
@@ -62,7 +91,7 @@ function recordFor(zone: IrrigationZone, date: string, timezone: string, now: nu
   if (existing && date < today && (!hasValidWeatherLocation(zone) || selectedWeatherProvider(zone) === null)) return structuredClone(existing);
   const hasLocation = hasValidWeatherLocation(zone);
   const provider = hasLocation ? selectedWeatherProvider(zone) : null;
-  const input = weather(date, provider);
+  const input = weather(date, provider, zone, now);
   const kc = input ? cropCoefficient(zone, date) : null;
   const dayStart = localMidnight(date, timezone), dayEnd = localMidnight(shiftDate(date, 1), timezone);
   const firstUtcHour = Math.floor(dayStart / 3600000) * 3600000;
@@ -77,11 +106,12 @@ function recordFor(zone: IrrigationZone, date: string, timezone: string, now: nu
   const record: RetainedEnvironmentRecord = {date, provider, timezone, sampleAt: date < today ? dayStart + 12 * 3600000 : Math.min(now, dayStart + 12 * 3600000),
     dayStart, dayEnd, hourly, values: {et0_mm: input?.et0 ?? null,
     etc_mm: input && kc ? round(input.et0 * kc.kc) : null, forecast_rain_mm: input?.rain ?? null,
-    air_temperature_c: input?.maxTemp ?? null, relative_humidity_pct: input ? 62 : null,
-    et0_source: provider ? `${provider}_hourly_sum` : null, et0_tier: provider ? 'provider_hourly_sum' : null,
+    air_temperature_c: input?.maxTemp ?? null, relative_humidity_pct: input ? input.meanRhPct ?? 62 : null,
+    et0_source: input ? input.et0Source ?? `${provider}_hourly_sum` : null, et0_tier: input ? input.et0Tier ?? 'provider_hourly_sum' : null,
     location_key: locationKey, source_provider: provider, source_captured_at: iso(now),
-    hours_present: hourly.length, expected_hours: expectedHours, coverage_pct: provider && expectedHours > 0 ? 100 : null,
-    null_reason: provider ? null : hasLocation ? 'no_source' : 'no_location'}, provenance: {cropType: zone.crop_type ?? null,
+    // A provider whose weather source has no data for the date covers none of its hours (the app's 'no_source').
+    hours_present: hourly.length, expected_hours: expectedHours, coverage_pct: provider && expectedHours > 0 ? (input ? 100 : 0) : null,
+    null_reason: provider ? (input ? null : 'no_source') : hasLocation ? 'no_source' : 'no_location'}, provenance: {cropType: zone.crop_type ?? null,
       stage: kc?.stage ?? null, stageStartedOn: zone.stage_started_on ?? null, areaM2: Number.isFinite(zone.area_m2) ? Number(zone.area_m2) : null,
       efficiencyPct: Number.isFinite(zone.irrigation_efficiency_pct) ? Number(zone.irrigation_efficiency_pct) : null,
       kc: kc?.kc ?? null, kcSource: kc?.source ?? null, capturedAt: iso(now)}};
@@ -131,8 +161,7 @@ export function syntheticEnvironmentTimeline(zone: IrrigationZone, from: number,
 
 function syntheticDays(zone: IrrigationZone, measured: WaterDay[], now: number, timezone: string,
   retained?: Map<string, RetainedEnvironmentRecord>) {
-  const dateKey = (value: number) => new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(value));
-  const currentDate = dateKey(now);
+  const currentDate = localDateKey(now, timezone);
   const byDate = new Map(measured.map(day => [day.date, day]));
   const current = new Date(`${currentDate}T12:00:00Z`);
   const days = Array.from({length: 7}, (_, index) => {
@@ -156,7 +185,9 @@ function syntheticDays(zone: IrrigationZone, measured: WaterDay[], now: number, 
       irrigationNetMm: net, totalWaterMm: total,
       demandMm: demand, demandSource: demand === null ? null : date < currentDate ? 'calculated' as const : 'forecast' as const,
       et0Mm: et0, et0Source: et0 === null || date === currentDate ? null : String(input.et0_source),
-      et0Tier: et0 === null || date === currentDate ? null : 'provider_hourly_sum' as const,
+      // The tier comes from the record. A tier outside WaterDay['et0Tier'] (a weather source may name its own) is emitted as
+      // null; the record and et0Source keep the source's own value.
+      et0Tier: et0 === null || date === currentDate ? null : knownEt0Tier(input.et0_tier ?? 'provider_hourly_sum'),
       sourceProvider: record.provider, sourceCapturedAt: input.source_captured_at as string, locationKey: input.location_key as string | null,
       sourceAvailable: et0 !== null, coveragePct: date === currentDate ? null : input.coverage_pct as number | null,
       kc, kcSource: record.provenance.kcSource, cropType: record.provenance.cropType,
@@ -201,11 +232,11 @@ export function buildEnvironmentSummary(zone: IrrigationZone, devices: Device[],
   const {days, currentDate} = syntheticDays(zone, measuredDays, now, timezone, retained);
   const current = days.find(day => day.date === currentDate)!;
   const provider = hasIllustrativeWeatherSource(zone) ? selectedWeatherProvider(zone) : null;
-  const currentWeather = provider ? weather(currentDate, provider) : null;
+  const currentWeather = provider ? weather(currentDate, provider, zone, now) : null;
   const fullForecast = buildForecast(zone, currentDate, now, timezone, provider, retained);
-  const forecast = fullForecast ? {...fullForecast, hourly: fullForecast.hourly.filter(row => {
-    const at = Date.parse(row.time); return at >= now && at < now + 24 * 3600000;
-  }).slice(0, 24)} : null;
+  // Same window as totalNext24hMm: with a weather source the end-stamped (now, now + 24 h], so the rows sum to the total.
+  const forecast = fullForecast ? {...fullForecast, hourly: fullForecast.hourly.filter(row => { const at = Date.parse(row.time);
+    return weatherSource !== null ? at > now && at <= now + 24 * 3600000 : at >= now && at < now + 24 * 3600000; }).slice(0, 24)} : null;
   const availability = provider !== null && currentWeather !== null;
   current.forecastRainMm = forecast?.daily.find(row => row.date === currentDate)?.rainMm ?? null;
   const summary: ZoneEnvironmentSummary = {
@@ -221,7 +252,7 @@ export function buildEnvironmentSummary(zone: IrrigationZone, devices: Device[],
       cacheStatus: availability ? 'live' : 'miss', observedAt: availability ? iso(now) : null,
       expiresAt: availability ? iso(now + 15 * 60_000) : null,
       current: availability && currentWeather ? {description: 'Weather conditions', weatherCode: null, airTemperatureC: currentWeather.maxTemp,
-        relativeHumidityPct: 62, pressureHpa: null, windSpeedMps: 1.1, windDirectionDeg: null,
+        relativeHumidityPct: currentWeather.meanRhPct ?? 62, pressureHpa: null, windSpeedMps: currentWeather.windSpeedMps ?? 1.1, windDirectionDeg: null,
         cloudCoverPct: null, rainMm: currentWeather.rain, precipitationProbabilityPct: currentWeather.rain > 0 ? 40 : 10} : null},
     agronomic: {...base.agronomic, preferredSource: availability ? `Illustrative ${provider}` : 'unavailable', current: availability && currentWeather ? {thermodynamicSource: 'illustrative',
       evapotranspirationSource: 'Weather data', cropCoefficientSource: 'Crop coefficient',
@@ -238,34 +269,57 @@ export function buildForecast(zone: IrrigationZone, currentDate: string, now: nu
   provider: 'open_meteo' | 'meteoswiss' | null, retained?: Map<string, RetainedEnvironmentRecord>) {
   if (!provider || !hasIllustrativeWeatherSource(zone)) return null;
   const firstHour = Math.floor(now / 3600000) * 3600000 + 3600000;
-  const hourly = Array.from({length: 72}, (_, index) => {
-    const at = firstHour + index * 3600000;
-    const date = localDateKey(at, timezone), hour = new Date(at).getUTCHours();
-    const daily = weather(date, provider)!;
+  // With a weather source the rows are end-stamped like the edge's Open-Meteo path (osi-zone-env sumRain, basis
+  // 'end'): a row at T carries the hour [T - 1 h, T), so its date, daily input and rain come from T - 1 h. Without a
+  // source every row keeps the illustrative layout.
+  const endStamped = weatherSource !== null;
+  const dailyInputs = new Map<string, DailyWeatherInput | null>();
+  const dailyInput = (date: string) => {
+    if (!dailyInputs.has(date)) dailyInputs.set(date, weather(date, provider, zone, now));
+    return dailyInputs.get(date) ?? null;
+  };
+  const describedHour = (at: number) => endStamped ? at - 3600000 : at;
+  const hours = Array.from({length: 72}, (_, index) => {
+    const at = firstHour + index * 3600000, described = describedHour(at);
+    const date = localDateKey(described, timezone), hour = new Date(at).getUTCHours();
+    const daily = dailyInput(date);
+    if (!daily) return null;
     const dayNumber = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
     const rainStartHour = (dayNumber + (provider === 'meteoswiss' ? 5 : 0)) % 24;
-    const rainOffset = (hour - rainStartHour + 24) % 24;
+    const rainOffset = (new Date(described).getUTCHours() - rainStartHour + 24) % 24;
     const wet = daily.rain > 0 && rainOffset < 4;
-    return {time: iso(at), rainMm: wet ? 0.4 : 0, rainProbabilityPct: wet ? 45 : 8,
-      tempC: round(daily.maxTemp - Math.abs(hour - 14) * 0.35), windSpeedMps: 1.1};
+    // A source's hourly rain is indexed by the local wall-clock hour (0-23) of the hour it describes, so a DST
+    // change does not shift it; without a value for this hour the fixed four-hour pattern spreads the day's rain.
+    const sourceRain = daily.hourlyRainMm?.[localHour(described, timezone)];
+    const rainMm = typeof sourceRain === 'number' && Number.isFinite(sourceRain) ? round(sourceRain) : wet ? round(daily.rain / 4) : 0;
+    return {time: iso(at), rainMm, rainProbabilityPct: rainMm > 0 ? 45 : 8,
+      tempC: round(daily.maxTemp - Math.abs(hour - 14) * 0.35), windSpeedMps: daily.windSpeedMps ?? 1.1};
   });
+  // A weather source may have no data for a forecast date; the forecast is then unavailable rather than partial.
+  if (hours.some(row => row === null)) return null;
+  const hourly = hours as Array<NonNullable<(typeof hours)[number]>>;
   const daily = [0, 1, 2].map(offset => {
     const date = shiftDate(currentDate, offset);
     const record = recordFor(zone, date, timezone, now, retained);
-    const dayHours = hourly.filter(row => localDateKey(Date.parse(row.time), timezone) === date);
+    const dayHours = hourly.filter(row => localDateKey(describedHour(Date.parse(row.time)), timezone) === date);
     const rain = Number(dayHours.reduce((sum, row) => sum + (row.rainMm ?? 0), 0).toFixed(2));
     const temperatures = dayHours.flatMap(row => row.tempC == null ? [] : [row.tempC]);
     return {date, description: 'Weather conditions', weatherCode: null,
       maxTempC: temperatures.length ? Math.max(...temperatures) : null,
       minTempC: temperatures.length ? Math.min(...temperatures) : null, rainMm: rain,
-      rainProbabilityPct: dayHours.length ? (rain > 0 ? 45 : 8) : null, windSpeedMps: 1.1,
+      rainProbabilityPct: dayHours.length ? (rain > 0 ? 45 : 8) : null, windSpeedMps: dailyInput(date)?.windSpeedMps ?? 1.1,
       et0MmDay: typeof record.values.et0_mm === 'number' ? record.values.et0_mm : null,
       etcMmDay: typeof record.values.etc_mm === 'number' ? record.values.etc_mm : null};
   });
-  const next24 = hourly.filter(row => Date.parse(row.time) >= now && Date.parse(row.time) < now + 24 * 3600000).slice(0, 24);
-  // Native Open-Meteo points are end-stamped: a point exactly at the horizon
-  // is included in the rolling total (osi-zone-env/index.js sumRain).
-  const next72 = hourly.filter(row => Date.parse(row.time) >= now && Date.parse(row.time) <= now + 72 * 3600000);
+  // Native Open-Meteo points are end-stamped (osi-zone-env/index.js sumRain): with a source the rolling 24-hour
+  // total takes rows with now < T <= now + 24 h. Without a source the illustrative window [now, now + 24 h) stays.
+  const next24 = endStamped
+    ? hourly.filter(row => Date.parse(row.time) > now && Date.parse(row.time) <= now + 24 * 3600000).slice(0, 24)
+    : hourly.filter(row => Date.parse(row.time) >= now && Date.parse(row.time) < now + 24 * 3600000).slice(0, 24);
+  // A point exactly at the horizon is included in the rolling total (osi-zone-env/index.js sumRain). With a source,
+  // as for next24, a row at now carries the hour that ended at now and is left out.
+  const next72 = hourly.filter(row => (endStamped ? Date.parse(row.time) > now : Date.parse(row.time) >= now)
+    && Date.parse(row.time) <= now + 72 * 3600000);
   // osi-zone-env treats Open-Meteo hourly points as end-stamped and reports
   // nextRainEta only within its native next-24-hour forward window.
   const rainHours = hourly.filter(row => Date.parse(row.time) > now
@@ -275,4 +329,10 @@ export function buildForecast(zone: IrrigationZone, currentDate: string, now: nu
     totalNext72hMm: Number(next72.reduce((sum, row) => sum + (row.rainMm ?? 0), 0).toFixed(2)),
     maxHourlyRainMm: max, maxHourlyRainAt: max > 0 ? hourly.find(row => row.rainMm === max)?.time ?? null : null,
     nextRainEta: rainHours[0]?.time ?? null, rainHoursNext24h: next24.filter(row => (row.rainMm ?? 0) > 0.05).length, daily, hourly};
+}
+
+/** The ET0 tiers WaterDay declares; a weather source may store another tier in its records, which the summary emits as null. */
+const KNOWN_ET0_TIERS: ReadonlySet<string> = new Set(['station_fao56', 'provider_hourly_sum', 'hargreaves_station', 'open_meteo_daily']);
+function knownEt0Tier(value: unknown): WaterDay['et0Tier'] {
+  return typeof value === 'string' && KNOWN_ET0_TIERS.has(value) ? value as NonNullable<WaterDay['et0Tier']> : null;
 }

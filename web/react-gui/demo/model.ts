@@ -4,7 +4,7 @@ import type { Device, IrrigationZone, IrrigationSchedule } from '../src/types/fa
 import type { IrrigationActuation, UpdateSystemSettingsRequest } from '../src/services/api';
 import { DEMO_EPOCH, PUBLIC_EPOCH, VALVE_EUI, SPARE_EUI, environmentFixture, iso } from './fixtures';
 import {SimulationClock, MAX_JUMP_MS} from './model/clock';
-import {applyDendroBaseline, ReadingLedger, sampleIntervalMs, type ReadingValues} from './model/readings';
+import {applyDendroBaseline, ReadingLedger, sampleIntervalMs, type ReadingSource, type ReadingValues} from './model/readings';
 import {SimulatorState, makeDevice, type SimulatorMode, type ActiveCommand} from './model/state';
 import {configureZone, createZone, deleteZone, normalizedName, renameZone} from './model/farm';
 import {createDevice, DEVICE_CATALOG} from './model/devices';
@@ -23,7 +23,7 @@ import {DemoError} from './errors';
 import {createJournalState, handleJournalRoute, type JournalState} from './model/journal';
 import {handleAnalysisRoute} from './model/analysis';
 import {handleHistoryRoute} from './model/history';
-import {buildEnvironmentSummary, hasValidWeatherLocation, seedCompletedEnvironmentRecords, selectedWeatherProvider} from './model/environment';
+import {buildEnvironmentSummary, hasValidWeatherLocation, getWeatherSource, seedCompletedEnvironmentRecords, selectedWeatherProvider, setWeatherSource, type WeatherSource} from './model/environment';
 import {resolveWaterAction} from './model/water-action';
 import {handleNetworkRoute} from './model/network';
 export { DEMO_EPOCH, PUBLIC_EPOCH, VALVE_EUI, SPARE_EUI };
@@ -60,16 +60,38 @@ const CHAMELEON_CALIBRATION_FIXTURES = new Map<string, {sensorId: string}>([
 function localDayStart(at: number, timezone: string): number {
   return localCalendarDayStart(localCalendarDate(at, timezone), timezone);
 }
+// Intl.DateTimeFormat construction is expensive; keep one formatter per time zone and options shape.
+function cachedFormatter(cache: Map<string, Intl.DateTimeFormat>, timezone: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let format = cache.get(timezone);
+  if (!format) { format = new Intl.DateTimeFormat('en-CA', {...options, timeZone: timezone}); cache.set(timezone, format); }
+  return format;
+}
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+const minuteFormatters = new Map<string, Intl.DateTimeFormat>();
+const clockFormatters = new Map<string, Intl.DateTimeFormat>();
 function localCalendarDate(at: number, timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(at));
+  return cachedFormatter(dateFormatters, timezone, {year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(at));
 }
 function shiftCalendarDate(date: string, days: number): string {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
-function localCalendarDayStart(localDate: string, timezone: string): number {
+const DAY_START_CACHE_LIMIT = 1024;
+const dayStartCache = new Map<string, number>();
+/** Local midnight of a calendar date, memoised per (timezone, date). Bounded at 1,024 entries with FIFO eviction
+ * (the oldest inserted entry goes first; a hit does not refresh its position). Exported for tests. */
+export function localCalendarDayStart(localDate: string, timezone: string): number {
+  const key = `${timezone}|${localDate}`, cached = dayStartCache.get(key);
+  if (cached !== undefined) return cached;
+  const value = uncachedLocalCalendarDayStart(localDate, timezone);
+  if (dayStartCache.size >= DAY_START_CACHE_LIMIT) dayStartCache.delete(dayStartCache.keys().next().value!);
+  dayStartCache.set(key, value);
+  return value;
+}
+/** The unmemoised minute scan behind localCalendarDayStart. Exported for tests. */
+export function uncachedLocalCalendarDayStart(localDate: string, timezone: string): number {
   const start = Date.parse(`${localDate}T00:00:00Z`) - 18 * 60 * 60 * 1000;
-  const format = new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+  const format = cachedFormatter(minuteFormatters, timezone, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
   for (let time = start; time <= start + 48 * 60 * 60 * 1000; time += 60000) {
     const parts = Object.fromEntries(format.formatToParts(new Date(time)).map(part => [part.type, part.value]));
     if (`${parts.year}-${parts.month}-${parts.day}` === localDate && parts.hour === '00' && parts.minute === '00') return time;
@@ -81,6 +103,17 @@ function nameOf(value: unknown): string {
   const result = normalizeEntityName(value);
   return result.ok ? result.name : fail(400, result.reason);
 }
+export type SimulatorOptions = {
+  mode?: SimulatorMode;
+  /** Public mode: replaces the synthetic uplink values; the simulator still owns flow integration and daily totals. */
+  readingSource?: ReadingSource;
+  /** Public mode: false starts with no fictional 90-day history and gives new devices none. Default true. */
+  fictionalHistory?: boolean;
+  /** Public mode: replaces the illustrative daily weather series for ET0, demand and forecast. Each simulator keeps
+   * its own source, sets it for the duration of every public entry point and restores the previous one afterwards,
+   * so several simulators can share one realm and nest calls into each other. */
+  weatherSource?: WeatherSource;
+};
 export class Simulator {
   active = true;
   speed = 1;
@@ -96,22 +129,36 @@ export class Simulator {
   private completedEnvironmentKeys = new Map<number, string>();
   private presentationWaterSeed = new Map<string, {rain_mm_today?: number | null; flow_liters_today?: number | null}>();
   onDailyTrigger?: (at: number) => void;
-  constructor(options: {mode?: SimulatorMode} = {}) {
+  private readonly readingOptions: {source?: ReadingSource; fictionalHistory?: boolean};
+  private readonly weatherSourceOption: WeatherSource | null;
+  constructor(options: SimulatorOptions = {}) {
     this.mode = options.mode ?? 'presentation';
+    this.readingOptions = {source: options.readingSource, fictionalHistory: options.fictionalHistory};
+    this.weatherSourceOption = options.weatherSource ?? null;
     this.state = new SimulatorState(this.mode);
     if (this.mode === 'presentation') for (const device of this.state.devices) {
       this.presentationWaterSeed.set(device.deveui, {rain_mm_today: device.latest_data.rain_mm_today, flow_liters_today: device.latest_data.flow_liters_today});
     }
     this.clock = new SimulationClock(this.state.now);
-    this.readings = new ReadingLedger(this.state.devices, this.mode === 'public');
-    this.refreshCompletedEnvironmentRecords();
-    if (this.mode === 'public') this.syncSeedSnapshots();
-    if (this.mode === 'public') {
-      this.onDailyTrigger = at => evaluateAutomaticTriggers(this.triggerPort(at), at);
-      this.setupPublicClock();
-    }
+    this.readings = new ReadingLedger(this.state.devices, this.mode === 'public', this.readingOptions);
+    this.withWeatherSource(() => {
+      this.refreshCompletedEnvironmentRecords();
+      if (this.mode === 'public') this.syncSeedSnapshots();
+      if (this.mode === 'public') {
+        this.onDailyTrigger = at => evaluateAutomaticTriggers(this.triggerPort(at), at);
+        this.setupPublicClock();
+      }
+    });
   }
   get now() { return this.clock.now; }
+  /** The environment module holds one active weather source per realm. Every public entry point that can reach it
+   * runs inside this scope: this simulator's own source (null: the illustrative series) is set for the call and the
+   * previous one is restored afterwards, also when the call throws or a source calls into another simulator. */
+  private withWeatherSource<T>(run: () => T): T {
+    const previous = getWeatherSource();
+    setWeatherSource(this.weatherSourceOption);
+    try { return run(); } finally { setWeatherSource(previous); }
+  }
   get zones() { return this.state.zones; }
   set zones(value: IrrigationZone[]) { this.state.zones = value; }
   get devices() { return this.state.devices; }
@@ -148,19 +195,26 @@ export class Simulator {
     this.clock.schedule(at, () => {
       const device = this.devices.find(d => d.deveui === eui);
       if (!device) return;
-      if (this.mode === 'public' && device.type_id === 'DRAGINO_LSN50') {
-        for (const command of this.state.activeCommands.values()) {
-          if (command.flow_device_eui === eui) this.integrateFlow(command, at);
-        }
-      }
-      const sampledValues = applyDendroBaseline(device, this.readings.sampleValues(device, at), at);
-      const values = this.withDailyWaterTotals(device, sampledValues, at);
-      this.readings.append(eui, at, values);
-      const merged = this.readings.latestSample(eui)?.values ?? values;
-      device.latest_data = this.snapshotLatestData(device, merged, at);
-      device.last_seen = iso(at);
-      this.scheduleSample(eui, at + this.intervalFor(device));
+      // The next uplink is queued even when this one throws (for example a host reading source), so one failure does
+      // not end the device's sampling; the error still reaches the caller.
+      try { this.sampleDevice(device, at); } finally { this.scheduleSample(eui, at + this.intervalFor(device)); }
     }, {id: `sample:${eui}:${at}`, meaningful: false, entity, generation, priority: 4});
+  }
+  /** One uplink: integrate active flow on a meter, sample, derive daily totals, append, refresh latest_data.
+   * `sampled` holds values already taken for this instant (the creation uplink); without it the uplink samples here. */
+  private sampleDevice(device: Device, at: number, sampled?: ReadingValues) {
+    const eui = device.deveui;
+    if (this.mode === 'public' && device.type_id === 'DRAGINO_LSN50') {
+      for (const command of this.state.activeCommands.values()) {
+        if (command.flow_device_eui === eui) this.integrateFlow(command, at);
+      }
+    }
+    const sampledValues = applyDendroBaseline(device, sampled ?? this.readings.sampleValues(device, at), at);
+    const values = this.withDailyWaterTotals(device, sampledValues, at);
+    this.readings.append(eui, at, values);
+    const merged = this.readings.latestSample(eui)?.values ?? values;
+    device.latest_data = this.snapshotLatestData(device, merged, at);
+    device.last_seen = iso(at);
   }
   private snapshotLatestData(device: Device, merged: ReadingValues, at: number): Device['latest_data'] {
     const retainedRain = !('rain_day' in merged) && device.latest_data.rain_day ? {
@@ -205,7 +259,7 @@ export class Simulator {
     return {timezone: zone?.timezone ?? this.state.settings.gatewayTimezone ?? 'UTC',
       basis: weatherZone ? 'weather_station_zone' : directZone ? 'zone' : 'unassigned_default'};
   }
-  private withDailyWaterTotals(device: Device, values: ReadingValues, at: number, includeCurrentRain = true): ReadingValues {
+  private withDailyWaterTotals(device: Device, values: ReadingValues, at: number, includeCurrent = true): ReadingValues {
     const hasRain = 'rain_mm_delta' in values;
     const hasFlow = device.type_id === 'DRAGINO_LSN50' && 'flow_liters_delta' in values;
     if (!hasRain && !hasFlow) return values;
@@ -216,14 +270,24 @@ export class Simulator {
     if (hasRain) {
       const previous = this.readings.aggregate(device.deveui, 'rain_mm_delta', from, at) ?? 0;
       const delta = typeof values.rain_mm_delta === 'number' && Number.isFinite(values.rain_mm_delta) ? values.rain_mm_delta : null;
-      totals.rain_mm_today = delta === null ? null : Number((previous + (includeCurrentRain ? delta : 0)).toFixed(2));
+      totals.rain_mm_today = delta === null ? null : Number((previous + (includeCurrent ? delta : 0)).toFixed(2));
       totals.rain_day = localCalendarDate(at, timezone);
       totals.rain_day_timezone = timezone;
       totals.rain_day_timezone_basis = rainContext.basis;
     }
     if (hasFlow) {
       const flowFrom = localDayStart(at, this.state.settings.gatewayTimezone);
-      totals.flow_liters_today = this.readings.aggregate(device.deveui, 'flow_liters_delta', flowFrom, at);
+      const previous = this.readings.aggregate(device.deveui, 'flow_liters_delta', flowFrom, at);
+      // Without a reading source the total is the stored aggregate, exactly as before the hook (the synthetic
+      // default never adds the current uplink's litres).
+      // With one, the uplink being built is not in the ledger yet, so its own litres are added (a measurement even
+      // when 0: a creation or local midnight uplink with no flow reports 0 L today, not unknown). A valve-run sample
+      // at the same instant already holds the observed litres and keeps them when the uplink merges
+      // (ReadingLedger.append), and a sample that is already stored (seed snapshots) is counted by the aggregate.
+      const delta = values.flow_liters_delta;
+      const measured = this.readingOptions.source !== undefined && includeCurrent && typeof delta === 'number'
+        && Number.isFinite(delta) && delta >= 0 && !this.readings.hasObservedFlowAt(device.deveui, at);
+      totals.flow_liters_today = measured ? Number(((previous ?? 0) + (delta as number)).toFixed(2)) : previous;
     }
     return {...values, ...totals};
   }
@@ -239,7 +303,7 @@ export class Simulator {
   }
   private nextDailyTriggerAt(): number {
     const timezone = this.state.settings.gatewayTimezone;
-    const formatter = new Intl.DateTimeFormat('en-CA', {timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+    const formatter = cachedFormatter(clockFormatters, timezone, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     const start = Math.floor(this.now / 60000) * 60000 + 60000;
     for (let at = start; at <= this.now + 48 * 60 * 60 * 1000; at += 60000) {
       const parts = formatter.formatToParts(new Date(at));
@@ -308,34 +372,53 @@ export class Simulator {
     this.devices = this.devices.filter(device => device.deveui !== eui);
   }
   reset() {
-    this.active = true; this.speed = 1;
-    this.state = new SimulatorState(this.mode);
-    this.journal = createJournalState();
-    this.clock.reset(this.state.now);
-    this.readings = new ReadingLedger(this.devices, this.mode === 'public');
-    this.completedEnvironmentKeys.clear();
-    this.refreshCompletedEnvironmentRecords();
-    if (this.mode === 'public') this.syncSeedSnapshots();
-    this.lastIntegratedAt.clear(); this.flowByZone.clear(); this.flowByCommand.clear();
-    this.estimatedFlowIntervals = [];
-    if (this.mode === 'public') this.setupPublicClock();
+    this.withWeatherSource(() => {
+      this.active = true; this.speed = 1;
+      this.state = new SimulatorState(this.mode);
+      this.journal = createJournalState();
+      this.clock.reset(this.state.now);
+      this.readings = new ReadingLedger(this.devices, this.mode === 'public', this.readingOptions);
+      this.completedEnvironmentKeys.clear();
+      this.refreshCompletedEnvironmentRecords();
+      if (this.mode === 'public') this.syncSeedSnapshots();
+      this.lastIntegratedAt.clear(); this.flowByZone.clear(); this.flowByCommand.clear();
+      this.estimatedFlowIntervals = [];
+      if (this.mode === 'public') this.setupPublicClock();
+    });
+  }
+  /** Rebuild the retained completed-day environment records from the current zone configuration. A host that
+   * reconfigures zones directly (location, time zone, weather source) calls this afterwards: the records and the
+   * per-zone refresh keys are cleared, then the completed days are seeded again under this simulator's weather
+   * source, so no record keeps an earlier configuration and the next entry point does not re-seed. */
+  resetEnvironmentRecords(): void {
+    this.withWeatherSource(() => {
+      this.state.environmentRecords.clear();
+      this.completedEnvironmentKeys.clear();
+      this.refreshCompletedEnvironmentRecords();
+    });
   }
   advance(realMilliseconds: number): boolean {
     if (!this.active || !Number.isFinite(realMilliseconds) || realMilliseconds <= 0) return false;
-    const before = this.clock.revision;
-    this.clock.advanceTo(this.now + realMilliseconds * this.speed);
-    this.refreshCompletedEnvironmentRecords();
-    return this.clock.revision !== before;
+    return this.withWeatherSource(() => {
+      const before = this.clock.revision;
+      this.clock.advanceTo(this.now + realMilliseconds * this.speed);
+      this.refreshCompletedEnvironmentRecords();
+      return this.clock.revision !== before;
+    });
   }
   advanceTo(targetMs: number) {
-    this.clock.advanceTo(targetMs);
-    this.refreshCompletedEnvironmentRecords();
+    this.withWeatherSource(() => {
+      this.clock.advanceTo(targetMs);
+      this.refreshCompletedEnvironmentRecords();
+    });
   }
   jumpToNextEvent(): boolean {
-    const at = this.clock.nextEventAt(MAX_JUMP_MS);
-    if (at === null) return false;
-    this.advanceTo(at);
-    return true;
+    return this.withWeatherSource(() => {
+      const at = this.clock.nextEventAt(MAX_JUMP_MS);
+      if (at === null) return false;
+      this.advanceTo(at);
+      return true;
+    });
   }
   nextEventDescriptor(): {at: number | null; kind: 'valve-close' | 'schedule-start' | 'report' | null} {
     const event = this.clock.nextEvent(MAX_JUMP_MS);
@@ -604,7 +687,7 @@ export class Simulator {
   request(method: string, path: string, body: unknown = {}): unknown {
     // Preserve the original data-only helper's JSON-string convenience. The real Axios
     // adapter already decodes JSON media types and must not parse text/plain a second time.
-    const response = this.requestResponse(method, path, this.decodeJsonBody(body));
+    const response = this.withWeatherSource(() => this.requestResponse(method, path, this.decodeJsonBody(body)));
     if (response.status < 200 || response.status >= 300) {
       const data = response.data && typeof response.data === 'object' ? response.data as Record<string, unknown> : {};
       const code = typeof data.error === 'string' ? data.error : 'request_failed';
@@ -613,6 +696,9 @@ export class Simulator {
     return response.data;
   }
   requestResponse(method: string, path: string, body: unknown = {}): DemoResponse {
+    return this.withWeatherSource(() => this.scopedRequestResponse(method, path, body));
+  }
+  private scopedRequestResponse(method: string, path: string, body: unknown): DemoResponse {
     if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return fail(403, 'blocked');
     const url = new URL(path, 'http://demo.invalid');
     if (url.origin !== 'http://demo.invalid') return fail(403, 'blocked');
@@ -1214,11 +1300,16 @@ export class Simulator {
       let device: Device;
       try { device = this.mode === 'public' ? createDevice(eui, body.name, body.type_id, zoneId, this.now, body.strega_generation) : makeDevice(eui, nameOf(body.name), zoneId); }
       catch (error) { return fail(Number((error as {status?: number}).status ?? 422), (error as Error).message); }
-      this.devices.push(device);
       if (this.mode === 'public') {
+        // With a reading source the creation uplink comes from the source, so latest_data never shows fixture values.
+        // The source is called first, before any state changes, so a source that throws leaves no device, no history
+        // and no sample behind.
+        const creation = this.readingOptions.source ? this.readings.sampleValues(device, this.now) : undefined;
         this.readings.seedNewDevice(device, this.now);
-        this.scheduleSample(eui, this.now + sampleIntervalMs());
+        if (creation) this.sampleDevice(device, this.now, creation);
       }
+      this.devices.push(device);
+      if (this.mode === 'public') this.scheduleSample(eui, this.now + sampleIntervalMs());
       return device;
     }
     const removeDeviceMatch = path.match(/^\/api\/devices\/([^/]+)$/);

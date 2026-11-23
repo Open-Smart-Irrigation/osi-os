@@ -7,8 +7,16 @@ const bucketSeconds: Record<Exclude<AggregationLevel, 'raw'>, number> = {'15m': 
 const latestChannels = new Set(['rain_mm_today', 'rain_count_cumulative', 'rain_gauge_cumulative_mm', 'flow_liters_today', 'flow_count_cumulative', 'valve_1_pulse', 'valve_2_pulse']);
 const sumChannels = new Set(['rain_mm_delta', 'rain_tips_delta', 'flow_liters_delta', 'flow_pulses_delta']);
 const localMidnightCache = new Map<string, number>();
-const dateParts = (at: number, timezone: string) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone: timezone,
-  year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date(at)).map(part => [part.type, part.value]));
+const datePartFormatters = new Map<string, Intl.DateTimeFormat>();
+function datePartFormatter(timezone: string): Intl.DateTimeFormat {
+  let format = datePartFormatters.get(timezone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-CA', {timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit'});
+    datePartFormatters.set(timezone, format);
+  }
+  return format;
+}
+const dateParts = (at: number, timezone: string) => Object.fromEntries(datePartFormatter(timezone).formatToParts(new Date(at)).map(part => [part.type, part.value]));
 export function localDateKey(at: number, timezone: string): string {
   const p = dateParts(at, timezone); return `${p.year}-${p.month}-${p.day}`;
 }
