@@ -361,6 +361,41 @@ release branch and merge it through a pull request, so the CI workflows from
 the pre-flight run on the release commit. The feed GUI is tracked in git;
 `git add -A` on its directory also stages the deleted old hashed assets:
 
+**A release cut on a release line** opens its pull request into a
+`release/<LINE>` branch (for example `release/v0.8.4` into `release/0.8.4`)
+instead of `main`. GitHub starts a `pull_request` or `push` workflow only when
+the target branch matches the workflow's `branches:` filter, and most
+workflows list only `main` and `master`. Without the edit below, the release
+pull request runs a handful of checks and skips the rest; the v0.8.4 release
+pull request (#757) had to add `release/0.8.4` to the triggers. Before the
+commit below, add the line branch to both filters of every workflow in
+`.github/workflows/` that should gate it, then list each event filter that
+still lacks it:
+
+```bash
+LINE=release/<LINE>
+# edit each file: branches: [ main, master, 'release/<LINE>' ] under push and pull_request
+for f in .github/workflows/*.yml; do
+  for ev in push pull_request; do
+    awk -v ev="$ev" -v line="$LINE" '
+      /^on:/ {on=1; next}
+      on && /^[^ #]/ {on=0}
+      on && $0 ~ "^  " ev ":" {inev=1; next}
+      on && /^  [a-z_]+:/ {inev=0}
+      inev && /branches:/ {found=1; if (index($0, line)) ok=1}
+      END {exit !(found && ok)}' "$f" || echo "$f: $ev lacks $LINE"
+  done
+done
+```
+
+The check expects the one-line `branches: [ ... ]` form the workflows use.
+Leave a workflow out only on purpose, such as one filtered by `paths:` to
+parts of the tree the line does not change, or one that runs only on pull
+requests. The `git add` below stages `.github/workflows`; on a release from
+`main` that path has no changes. Before you merge, compare the checks on the
+pull request with the pre-flight list; a workflow that is missing there did
+not run.
+
 ```bash
 git switch -c release/v<NEW>
 git add web/react-gui/src/pages/Login.tsx \
@@ -382,35 +417,14 @@ git add web/react-gui/src/pages/Login.tsx \
         .claude/skills/osi-config-and-flags/references/uci-and-identity.md \
         .claude/skills/osi-config-and-flags/references/runtime-and-flags.md \
         README.md \
-        CHANGELOG.md
+        CHANGELOG.md \
+        .github/workflows
 git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
 git status --short    # nothing left unstaged
 git commit -m "release: OSI OS v<NEW>"
 git push origin release/v<NEW>
 gh pr create --title "release: OSI OS v<NEW>" --body "Version bump and changelog for v<NEW>."
 ```
-
-**A release cut on a release line** opens its pull request into a
-`release/<LINE>` branch (for example `release/v0.8.4` into `release/0.8.4`)
-instead of `main`. GitHub starts a `pull_request` or `push` workflow only when
-the target branch matches the workflow's `branches:` filter, and most
-workflows list only `main` and `master`. Without the edit below, the release
-pull request runs a handful of checks and skips the rest; the v0.8.4 release
-pull request (#757) had to add `release/0.8.4` to the triggers. In the release
-commit, add the line branch to both filters of every workflow in
-`.github/workflows/` that should gate it, then list the files that still lack
-it:
-
-```bash
-LINE=release/<LINE>
-# edit each file: branches: [ main, master, 'release/<LINE>' ] under push and pull_request
-grep -L -F "'$LINE'" .github/workflows/*.yml
-```
-
-Leave a workflow out only on purpose, such as one filtered by `paths:` to
-parts of the tree the line does not change. Before you merge, compare the
-checks on the pull request with the pre-flight list; a workflow that is
-missing there did not run.
 
 After the merge, re-run the CI check from the pre-flight against the merge
 commit. Before creating a tag, manually start **Release Runtime Smoke** on
@@ -423,6 +437,10 @@ blocks it. A green
 ordinary push or PR run permits listed failures and does not satisfy this
 pre-tag requirement. If `main` moves, select and check the release commit
 again before tagging; do not use a successful run from another commit.
+On a release line the merge lands on `release/<LINE>`, not `main`: start the
+run on that branch instead (`gh workflow run release-smoke.yml --ref
+release/<LINE>`) and apply the same `headSha` check to the line's merge
+commit.
 
 Only after that strict hosted run is green, tag its commit and push only
 the tag:
