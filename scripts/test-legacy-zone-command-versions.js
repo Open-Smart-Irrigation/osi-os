@@ -30,6 +30,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const { executeFunction, loadNode, profilePaths } = require('./lib/scoped-access-harness');
+const { withFixedClock } = require('./lib/legacy-zone-statement');
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -176,6 +177,9 @@ function zone(db) {
   return { ...db.prepare('SELECT name, sync_version, area_m2, notes, irrigation_efficiency_pct, latitude, longitude, '
     + 'deleted_at FROM irrigation_zones WHERE zone_uuid = ?').get(ZONE_UUID) };
 }
+function wholeZone(db) {
+  return { ...db.prepare('SELECT * FROM irrigation_zones WHERE zone_uuid = ?').get(ZONE_UUID) };
+}
 function fullZone(db) {
   const row = { ...db.prepare('SELECT * FROM irrigation_zones WHERE zone_uuid = ?').get(ZONE_UUID) };
   delete row.updated_at;
@@ -225,10 +229,6 @@ function assertSuccess(out, command) {
     reason: null,
     detail: null,
   });
-}
-
-function normaliseClock(sql) {
-  return String(sql).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<now>');
 }
 
 for (const profile of PROFILES) {
@@ -525,13 +525,16 @@ for (const profile of PROFILES) {
   test(`${profile}: osi-zone-commands builds the statement Build UPDATE SQL builds, for every command shape`, async () => {
     for (const make of [...NEWER, ...DRIFT_ONLY]) {
       const command = make();
-      const built = await run(profile, BUILD_SQL, fixture(), { payload: command });
-      const warnings = [];
-      const statement = zoneCommands.legacyZoneStatement(command, {
-        now: new Date().toISOString(), gateway: GATEWAY, warn: (m) => warnings.push(m),
+      // One fixed instant for both builders, so their timestamps and stage dates must match too.
+      await withFixedClock(Date.now(), async () => {
+        const built = await run(profile, BUILD_SQL, fixture(), { payload: command });
+        const warnings = [];
+        const statement = zoneCommands.legacyZoneStatement(command, {
+          now: new Date().toISOString(), gateway: GATEWAY, warn: (m) => warnings.push(m),
+        });
+        assert.equal(statement, built.result.topic, `${command.commandType}: same statement`);
+        assert.deepEqual(warnings, built.warnings, `${command.commandType}: same warnings`);
       });
-      assert.equal(normaliseClock(statement), normaliseClock(built.result.topic), `${command.commandType}: same statement`);
-      assert.deepEqual(warnings, built.warnings, `${command.commandType}: same warnings`);
     }
   });
 
@@ -541,17 +544,16 @@ for (const profile of PROFILES) {
       const guarded = fixture();
       const direct = fixture();
       try {
-        const out = await deliver(profile, guarded, command);
+        // Both writers at one fixed instant: the rows must match column for column,
+        // updated_at and a DELETE_ZONE's deleted_at included.
+        const at = Date.now();
+        const out = await withFixedClock(at, () => deliver(profile, guarded, command));
         assertSuccess(out, command);
-        const built = await run(profile, BUILD_SQL, direct, { payload: command });
-        direct.exec(built.result.topic);
-        // created_at and a DELETE_ZONE's deleted_at come from each writer's own clock.
-        const pick = (row) => {
-          const { created_at: _c, ...rest } = row;
-          if (rest.deleted_at && !command.deletedAt) rest.deleted_at = normaliseClock(rest.deleted_at);
-          return rest;
-        };
-        assert.deepEqual(pick(fullZone(guarded)), pick(fullZone(direct)), `${command.commandType}: same row as today`);
+        await withFixedClock(at, async () => {
+          const built = await run(profile, BUILD_SQL, direct, { payload: command });
+          direct.exec(built.result.topic);
+        });
+        assert.deepEqual(wholeZone(guarded), wholeZone(direct), `${command.commandType}: same row as today`);
         assert.deepEqual(outbox(guarded), outbox(direct), `${command.commandType}: same outbox as today`);
         // An UPSERT_ZONE naming a user the gateway does not have inserts and updates
         // nothing, as Build UPDATE SQL does; every other shape writes version 6.
@@ -587,13 +589,14 @@ for (const profile of PROFILES) {
         pending('UPSERT_ZONE_LOCATION', 9, { latitude: 0.35, longitude: 32.58, syncVersion: 9 }),
         pending('DELETE_ZONE', 10, { syncVersion: 10 }),
       ]) {
-        const first = await deliver(profile, db, command);
+        const first = await withFixedClock(Date.parse('2026-11-23T10:00:00.000Z'), () => deliver(profile, db, command));
         assertSuccess(first, command);
-        const applied = fullZone(db);
+        const applied = wholeZone(db);
         const events = outbox(db);
-        const again = await deliver(profile, db, command);
+        // An hour later: any write, even of updated_at alone, would show.
+        const again = await withFixedClock(Date.parse('2026-11-23T11:00:00.000Z'), () => deliver(profile, db, command));
         assert.deepEqual(again.ack, first.ack, `${command.commandType}: the replay gets the same ACK`);
-        assert.deepEqual(fullZone(db), applied, `${command.commandType}: the replay is not written again`);
+        assert.deepEqual(wholeZone(db), applied, `${command.commandType}: the replay is not written again, updated_at included`);
         assert.deepEqual(outbox(db), events, `${command.commandType}: the replay emits no event`);
       }
     } finally {
