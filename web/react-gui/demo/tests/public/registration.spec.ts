@@ -1,5 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
-import {clickHeaderControl} from './header';
+import {clickHeaderControl} from '../header';
 
 test.setTimeout(120_000);
 

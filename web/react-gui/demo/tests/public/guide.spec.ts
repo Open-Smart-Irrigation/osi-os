@@ -1,6 +1,6 @@
 import {expect, test, type Locator, type Page} from '@playwright/test';
 import {mkdir} from 'node:fs/promises';
-import {openSettingsFromHeader} from './header';
+import {openSettingsFromHeader} from '../header';
 
 test.setTimeout(120_000);
 
@@ -145,8 +145,8 @@ test('guide skip target is fresh, locale-aware, reset clears it and close restor
   await app.getByLabel('Fuseau horaire de la passerelle').fill('Europe/Zurich');
   await app.getByRole('button', {name: 'Enregistrer', exact: true}).click();
   await expect(app.getByText('Fuseau horaire enregistré', {exact: true})).toBeVisible();
-  const zoneTime = await page.locator('#skip-event [data-skip-time]').innerText();
-  expect(zoneTime).not.toBe(kampalaTime);
+  // The host relabels the skip target after the app's settings response reaches it by postMessage.
+  await expect.poll(() => page.locator('#skip-event [data-skip-time]').innerText()).not.toBe(kampalaTime);
   const eventAtBeforeJump = await page.locator('#skip-event').getAttribute('data-event-at');
   expect(eventAtBeforeJump).not.toBeNull();
   await page.locator('#skip-event').click();

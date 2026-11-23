@@ -1,5 +1,5 @@
 import {expect, test, type Page} from '@playwright/test';
-import {clickHeaderControl, openSettingsFromHeader} from './header';
+import {clickHeaderControl, openSettingsFromHeader} from '../header';
 
 type Monitor = {
   pageErrors: string[];

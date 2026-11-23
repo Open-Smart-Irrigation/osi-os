@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {clickHeaderControl} from './header';
 
 test.beforeEach(async({page})=>{await page.goto('/');});
 
@@ -17,7 +18,7 @@ test('expanded valve device keeps a readable title and translated actions keep w
 
 test('create form has padding, initial focus and feedback; collapsed zone can be deleted',async({page})=>{
   const app=page.frameLocator('#app');
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add zone',exact:true}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:'Add zone',exact:true}).click();
   await expect(app.getByLabel('Zone Name')).toBeFocused();
   expect(await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).evaluate(el=>parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
   await app.getByLabel('Zone Name').fill('Polish trial');await app.getByRole('button',{name:'Create Irrigation Zone',exact:true}).click();
@@ -32,7 +33,7 @@ test('create form has padding, initial focus and feedback; collapsed zone can be
 test('demo account actions preserve the session and give dismissible feedback',async({page})=>{
   const app=page.frameLocator('#app');
   for(const action of ['Log out','OSI Server']) {
-    await app.getByRole('button',{name:/Account/}).click();await app.getByRole('menuitem',{name:action,exact:true}).click();
+    await clickHeaderControl(app,app.getByRole('button',{name:/Account/}));await app.getByRole('menuitem',{name:action,exact:true}).click();
     await expect(app.getByRole('heading',{name:'OSI OS',exact:true})).toBeVisible();
     await expect(page.locator('#host-notice')).toContainText('not simulated');
     await page.getByRole('button',{name:'Dismiss notice',exact:true}).click();await expect(page.locator('#host-notice')).toBeEmpty();

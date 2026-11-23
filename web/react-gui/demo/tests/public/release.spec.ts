@@ -2,7 +2,7 @@ import {expect, test, type Locator, type Page} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {PUBLIC_EPOCH} from '../../fixtures';
 import {expectSwtThreshold, setCustomSwtThreshold} from './swt-threshold';
-import {clickHeaderControl, openSettingsFromHeader} from './header';
+import {clickHeaderControl, openSettingsFromHeader} from '../header';
 
 test.setTimeout(120_000);
 
@@ -140,7 +140,8 @@ async function advanceUntilOnceSent(page: Page, app: ReturnType<Page['frameLocat
     const row = dialog.getByRole('listitem').filter({hasText: label});
     const dispatch = await row.innerText();
     await dialog.getByRole('button', {name: 'Close'}).click();
-    if (/Dispatch: Sent to the radio network/i.test(dispatch)) return;
+    // Main (#672) shows a fired one-time plan as "Fired", or "Valve reported open" once the valve confirms it.
+    if (/\b(?:Fired|Valve reported open)\b/.test(dispatch)) return;
     await advanceNextEvent(page);
   }
   throw new Error(`No event sent the one-time plan ${label} within 40 simulation events`);
@@ -405,7 +406,7 @@ test('plan-roundtrip saves WEEKLY and ONCE plans, fires, and retains a valid pla
   const recent = app.locator('section').filter({has: app.getByRole('heading', {name: 'Recent irrigations', exact: true})});
   await expect(recent.getByRole('listitem').filter({hasText: /Scheduled \(on valve\)/i}).first()).toBeVisible();
   await valve.getByRole('button', {name: 'Schedule', exact: true}).click();
-  await expect(app.getByRole('dialog').getByRole('listitem').filter({hasText: 'Release once'})).toContainText(/Dispatch: Sent to the radio network/i);
+  await expect(app.getByRole('dialog').getByRole('listitem').filter({hasText: 'Release once'})).toContainText(/\b(?:Fired|Valve reported open)\b/);
   await app.getByRole('dialog').getByRole('button', {name: 'Close'}).click();
   expectOrdinaryFlowClean(monitor);
 });

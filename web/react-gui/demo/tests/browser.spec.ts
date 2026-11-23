@@ -1,4 +1,5 @@
 import {test, expect} from '@playwright/test';
+import {clickHeaderControl, openSettingsFromHeader} from './header';
 let pageErrors: string[] = [];
 let outsideRequests: string[] = [];
 test.beforeEach(async ({page}) => {
@@ -28,7 +29,7 @@ test('real app starts with fictional farm, two zones, offline translations', asy
 
 test('zone creation, assignment, removal and language preserve existing farm', async ({page}) => {
   await page.goto('/'); const app = page.frameLocator('#app');
-  await app.getByRole('button', {name: /^Add/}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));
   await app.getByRole('menuitem', {name: /Zone/}).click();
   await app.getByLabel('Zone Name').fill('Temporary bed');
   // Change language while a real form remains mounted, preserving its value.
@@ -183,7 +184,7 @@ test('reveal slide departure pauses clock, return retains state and keyboard sta
   await page.goto('/demo/reveal.html');await page.getByRole('button',{name:'next slide'}).click();
   const host=page.frameLocator('#osi-demo'),app=host.frameLocator('#app');
   await expect(app.getByRole('button',{name:'English'})).toBeVisible();
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:/Zone/}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:/Zone/}).click();
   await app.getByLabel('Zone Name').fill('Trial');await app.getByLabel('Zone Name').press('Space');await app.getByLabel('Zone Name').press('ArrowLeft');
   await expect(page).toHaveURL(/#\/1$/);await expect(app.getByLabel('Zone Name')).toHaveValue('Trial ');
   await app.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -201,7 +202,7 @@ test('reveal slide departure pauses clock, return retains state and keyboard sta
 
 test('existing device registration and SWT trigger configuration', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
-  await app.getByRole('button',{name:/^Add/}).click();await app.getByRole('menuitem',{name:'Add device',exact:true}).click();
+  await clickHeaderControl(app,app.getByRole('button',{name:/^Add/}));await app.getByRole('menuitem',{name:'Add device',exact:true}).click();
   await app.getByLabel('Device Name',{exact:true}).fill('Practice probe');await app.getByLabel('DevEUI',{exact:true}).fill('00000000000000B0');
   await app.getByRole('dialog').getByRole('button',{name:'Add Device',exact:true}).click();
   await expect(app.getByText('Practice probe',{exact:true})).toBeVisible();
@@ -239,20 +240,17 @@ test('all shipped languages work offline and preserve the open zone', async ({pa
 });
 
 
-test('native language button fills the dashboard slot below Add beside Account', async ({page}) => {
+test('native language button stays in the app header beside the collapsed menu', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
   await expect(app.locator('.demo-language')).toHaveCount(0);
   await expect(app.getByText('MUARIK · Simulated farm',{exact:true})).toHaveCount(0);
   const header=app.getByRole('banner');
-  const add=await header.getByRole('button',{name:'Add',exact:true}).boundingBox();
-  const language=await header.getByRole('button',{name:'English',exact:true}).boundingBox();
-  const account=await header.getByRole('button',{name:'Account',exact:true}).boundingBox();
-  expect(language!.x).toBeCloseTo(add!.x,0);
-  expect(language!.y).toBeGreaterThan(add!.y+add!.height);
-  expect(language!.y).toBeCloseTo(account!.y,0);
-  expect(language!.width).toBeCloseTo(account!.width,0);
-  expect(language!.height).toBeCloseTo(account!.height,0);
-  expect(language!.x+language!.width).toBeLessThan(account!.x);
+  // Main's shared header (#695) keeps Add and Account in the Menu panel at phone width; the language button stays outside it.
+  const language=header.getByRole('button',{name:'English',exact:true});
+  await expect(language).toBeVisible();
+  await clickHeaderControl(app,header.getByRole('button',{name:'Account',exact:true}));
+  await expect(header.getByRole('button',{name:'Add',exact:true})).toBeVisible();
+  await expect(language).toBeVisible();
 });
 
 
@@ -293,7 +291,7 @@ test('valve text and compact tooltip work in every language, with unclipped iden
 
 test('settings hides all explicitly experimental module controls', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
-  await app.getByRole('link',{name:'Settings',exact:true}).click();
+  await openSettingsFromHeader(app,'Settings');
   await expect(app.locator('[data-experimental-module="true"]')).toHaveCount(5);
   for(const label of ['Prediction advisory','Data view','Network','Gateway','Field journal']) {
     await expect(app.getByRole('group',{name:label,exact:true})).toHaveCount(0);
@@ -359,7 +357,7 @@ test('long translations wrap across all languages, including Luganda settings', 
     }
     current=label;
   }
-  await app.getByRole('link',{name:'Settings',exact:true}).click();
+  await openSettingsFromHeader(app,'Settings');
   await app.getByRole('button',{name:'English',exact:true}).click();
   await app.getByRole('menuitem',{name:'Luganda',exact:true}).click();
   await expectTextToFit();

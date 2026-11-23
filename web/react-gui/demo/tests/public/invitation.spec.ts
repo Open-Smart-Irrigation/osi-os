@@ -1,6 +1,6 @@
 import {expect, test} from '@playwright/test';
 import {expectSwtThreshold} from './swt-threshold';
-import {openSettingsFromHeader} from './header';
+import {openSettingsFromHeader} from '../header';
 
 const preview = '/website-demo/preview.html';
 const invitation = '#osi-simulator-invitation';
