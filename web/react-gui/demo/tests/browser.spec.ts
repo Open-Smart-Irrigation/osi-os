@@ -240,17 +240,36 @@ test('all shipped languages work offline and preserve the open zone', async ({pa
 });
 
 
-test('native language button stays in the app header beside the collapsed menu', async ({page}) => {
+test('native language button stays in the app header outside the collapsed menu', async ({page}) => {
   await page.goto('/');const app=page.frameLocator('#app');
   await expect(app.locator('.demo-language')).toHaveCount(0);
   await expect(app.getByText('MUARIK · Simulated farm',{exact:true})).toHaveCount(0);
+  // Main's shared header (#695) collapses Add and Account into a Menu panel below the sm
+  // breakpoint. Pin the app frame to phone width so the collapsed layout is the one under test.
+  await page.locator('#app').evaluate(frame=>{(frame as HTMLIFrameElement).style.width='390px';});
   const header=app.getByRole('banner');
-  // Main's shared header (#695) keeps Add and Account in the Menu panel at phone width; the language button stays outside it.
+  const menu=header.getByRole('button',{name:'Menu',exact:true});
+  await expect(menu).toBeVisible();
+  await expect(menu).toHaveAttribute('aria-expanded','false');
+  const panelId=await menu.getAttribute('aria-controls');
+  expect(panelId,'the Menu button names the panel it controls').toBeTruthy();
+  const panel=header.locator(`[id="${panelId}"]`);
+  const add=header.getByRole('button',{name:'Add',exact:true});
+  const account=header.getByRole('button',{name:'Account',exact:true});
   const language=header.getByRole('button',{name:'English',exact:true});
+  const languageInPanel=panel.getByRole('button',{name:'English',exact:true});
+  await expect(panel).toBeHidden();
+  await expect(add).toBeHidden();
+  await expect(account).toBeHidden();
   await expect(language).toBeVisible();
-  await clickHeaderControl(app,header.getByRole('button',{name:'Account',exact:true}));
-  await expect(header.getByRole('button',{name:'Add',exact:true})).toBeVisible();
+  await expect(languageInPanel).toHaveCount(0);
+  await menu.click();
+  await expect(menu).toHaveAttribute('aria-expanded','true');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('button',{name:'Add',exact:true})).toBeVisible();
+  await expect(panel.getByRole('button',{name:'Account',exact:true})).toBeVisible();
   await expect(language).toBeVisible();
+  await expect(languageInPanel).toHaveCount(0);
 });
 
 
