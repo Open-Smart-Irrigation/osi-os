@@ -5,9 +5,8 @@
 // apply (osi-zone-commands applyLegacyZoneCommand) only while that module is
 // loadable, following the conditional_irrigation_v1 drop rule. Pins the shared
 // builder (osi-installation-helper reportedSyncCapabilities), the real
-// account-link build stage that sends the link request, and the handoff state
-// of the two flows.json builders (sync-bootstrap-build, sync-force-build),
-// on both profiles.
+// account-link build stage that sends the link request, and the shipped
+// sync-bootstrap-build / sync-force-build bodies, on both profiles.
 //
 // Run: node --test scripts/test-zone-apply-versioned-capability.js
 
@@ -190,6 +189,10 @@ async function runLinkBuild(profile, modules) {
   sharedBuildMsg.set(profile, msg);
   msg.authUserId = 1;
   msg.authUsername = 'edgeuser';
+  // The clear stage that releases the operation between runs also nulls the
+  // al_* keys it snapshotted onto this message; drop the snapshot so each
+  // build re-reads the fresh flow state above.
+  delete msg._alState;
   try {
     const request = await share.installation.accountLinkStage('build', {
       msg,
@@ -204,6 +207,19 @@ async function runLinkBuild(profile, modules) {
     assert.equal(request[1], null);
     return { payload: request[0].payload, url: request[0].url, warnings };
   } finally {
+    // A successful build keeps the account operation claimed in the helper
+    // module (release happens at clear/finalize); gatewayWorkBlocked refuses
+    // the sync nodes while a claim is live, so release it through the shipped
+    // clear stage before the flows-side tests run in this process.
+    await share.installation.accountLinkStage('clear', {
+      msg,
+      node: { warn: () => {}, error: () => {}, status: () => {}, log: () => {} },
+      flow: { get: (key) => flowState.get(key), set: (key, value) => flowState.set(key, value) },
+      env: { get: () => '' },
+      global: { get: (key) => (key === 'fs' || key === 'cp' ? accountGatewayIo()[key] : undefined) },
+      osiDb: db.helper,
+      osiLib: installationOsiLib(profile, modules),
+    });
     db.cleanup();
   }
 }
@@ -258,20 +274,129 @@ for (const profile of PROFILES) {
     );
   });
 
-  test(`${profile}: the shared builder differs from the flows builders only by the pending zone wiring`, () => {
-    const { installation, zoneCommands, flows } = profileShare(profile);
-    const shared = installation.reportedSyncCapabilities(loader({ 'osi-irrigation-policy': {}, 'zone-commands': zoneCommands }));
+  test(`${profile}: both flows builders build the list through the shared builder`, () => {
+    const { flows } = profileShare(profile);
     for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
       const node = flows().find((candidate) => candidate.id === id);
       assert.ok(node, `${profile}: ${id} exists`);
-      const match = String(node.func).match(/const syncCapabilities = \[([^\]]*)\];/);
-      assert.ok(match, `${profile}: ${id} still builds its inline capability base`);
-      const inline = [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
-      assert.deepEqual(
-        shared.filter((capability) => capability !== 'zone_apply_versioned_v1'),
-        inline,
-        `${profile}: ${id} and the shared builder agree apart from zone_apply_versioned_v1`
+      assert.match(
+        node.func,
+        /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/,
+        `${profile}: ${id} delegates to reportedSyncCapabilities`
       );
+      assert.match(node.func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile}: ${id} keeps the journal-only capability push`);
     }
+  });
+}
+
+// --- Flows side: the shipped sync-bootstrap-build and sync-force-build bodies
+// (executed as in scripts/test-sync-without-conditional-helper.js against a
+// seeded SQLite fixture) report the capability with the module and drop it
+// without.
+const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
+const GATEWAY = 'AABBCCDDEEFF0042';
+
+function flowsFixture() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(SEED);
+  raw.prepare("INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role,auth_mode,server_url,server_sync_token,cloud_user_id) VALUES(1,'owner','hash',?,?,?,'admin','server','https://cloud.test.invalid','sync-token',7)").run(NOW, NOW, OWNER);
+  raw.prepare("INSERT OR REPLACE INTO installation_identity(singleton_id, installation_uuid, current_gateway_device_eui, previous_gateway_device_euis_json, recovery_state, created_at, updated_at) VALUES(1, ?, ?, '[]', 'ACTIVE', ?, ?)").run(INSTALLATION, GATEWAY, NOW, NOW);
+  raw.prepare("INSERT INTO sync_link_state(peer_node,linked,server_url,cloud_user_id,gateway_device_eui,installation_uuid,updated_at) VALUES('cloud',1,'https://cloud.test.invalid',7,?,?,?)").run(GATEWAY, INSTALLATION, NOW);
+  return { Database: require('./lib/queued-db-fixture').osiDbFor(raw).Database };
+}
+
+function flowsRuntime(helpers) {
+  const warnings = [];
+  const errors = [];
+  const flowState = {};
+  return {
+    warnings,
+    errors,
+    flowState,
+    node: { warn: (text) => warnings.push(String(text)), error: (text) => errors.push(String(text)), status: () => {}, log: () => {} },
+    flow: { get: (key) => flowState[key], set: (key, value) => { flowState[key] = value; } },
+    env: { get: (key) => ({ DEVICE_EUI: GATEWAY, DEVICE_EUI_SOURCE: 'test', DEVICE_EUI_CONFIDENCE: 'active', FIRMWARE_VERSION: 'test-build', OSI_SCOPED_ACCESS: '0' }[key] || '') },
+    global: { get: (key) => (key === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined) },
+    osiLib: {
+      require(name) {
+        if (Object.prototype.hasOwnProperty.call(helpers, name)) return { ok: true, value: helpers[name] };
+        return { ok: false, error: 'module not installed: ' + name };
+      },
+    },
+  };
+}
+
+function flowHelpers(profile, withZoneCommands) {
+  const share = profileShare(profile);
+  const nodeRed = (dir) => require(path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/${dir}/index.js`));
+  const helpers = {
+    installation: share.installation,
+    'osi-irrigation-policy': share.replication,
+    'history-sync': nodeRed('osi-history-sync-helper'),
+    'osi-valve-control': nodeRed('osi-valve-control'),
+    scope: nodeRed('osi-scope-helper'),
+    'rejection-recovery': nodeRed('osi-rejection-recovery'),
+  };
+  if (withZoneCommands) helpers['zone-commands'] = share.zoneCommands;
+  return helpers;
+}
+
+function fakeCloud(calls) {
+  return { requestJsonIpv4: async (request) => {
+    calls.push(request);
+    if (request.url.endsWith('/auth/refresh-sync')) return { statusCode: 200, payload: { token: 'sync-token' } };
+    if (/\/api\/v1\/sync\/edge\/bootstrap/.test(request.url)) return { statusCode: 200, payload: { success: true, applied: 1, skipped: 0 } };
+    if (/\/api\/v1\/sync\/edge\/events/.test(request.url)) return { statusCode: 200, payload: { results: [] } };
+    if (request.url.includes('/pending-commands')) return { statusCode: 200, payload: { commands: [] } };
+    throw new Error('unexpected request ' + request.url);
+  } };
+}
+
+async function runFlowNode(profile, id, rt, msg, cloud) {
+  const node = profileShare(profile).flows().find((candidate) => candidate.id === id);
+  assert.ok(node, `${profile}: ${id} exists`);
+  const names = ['msg', 'node', 'flow', 'env', 'global', ...node.libs.map((lib) => lib.var)];
+  const values = [msg, rt.node, rt.flow, rt.env, rt.global, ...node.libs.map((lib) => (lib.var === 'osiCloudHttp' ? cloud : { crypto, osiDb: { Database: flowsFixture().Database }, osiLib: rt.osiLib }[lib.var]))];
+  return new Function(...names, node.func)(...values);
+}
+
+async function bootstrapCapabilities(profile, withZoneCommands) {
+  const rt = flowsRuntime(flowHelpers(profile, withZoneCommands));
+  const built = await runFlowNode(profile, 'sync-bootstrap-build', rt, {});
+  assert.ok(built && built.payload, 'the bootstrap builds a request: ' + JSON.stringify({ warnings: rt.warnings, errors: rt.errors }));
+  assert.match(built.url, /\/api\/v1\/sync\/edge\/bootstrap$/);
+  return { capabilities: built.payload.gatewayIdentity.syncCapabilities, rt };
+}
+
+async function forceSyncBootstrapCapabilities(profile, withZoneCommands) {
+  const rt = flowsRuntime(flowHelpers(profile, withZoneCommands));
+  const calls = [];
+  const forced = await runFlowNode(profile, 'sync-force-build', rt, { _forceSyncInternal: true, _forceSyncUserId: 1, _forceSyncUsername: 'owner' }, fakeCloud(calls));
+  assert.ok(Array.isArray(forced), 'force sync answers: ' + JSON.stringify({ warnings: rt.warnings, errors: rt.errors }));
+  assert.equal(rt.errors.length, 0, rt.errors.join('\n'));
+  const bootstraps = calls.filter((request) => /\/api\/v1\/sync\/edge\/bootstrap$/.test(request.url));
+  assert.ok(bootstraps.length > 0, 'force sync bootstraps');
+  return { capabilities: bootstraps[0].payload.gatewayIdentity.syncCapabilities, rt };
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: the bootstrap report includes zone_apply_versioned_v1 when osi-zone-commands loads`, async () => {
+    const out = await bootstrapCapabilities(profile, true);
+    assert.deepEqual(out.capabilities, CAPABILITY_BASE.concat(['conditional_irrigation_v1', 'zone_apply_versioned_v1']));
+  });
+
+  test(`${profile}: the bootstrap report omits zone_apply_versioned_v1 when osi-zone-commands cannot load`, async () => {
+    const out = await bootstrapCapabilities(profile, false);
+    assert.deepEqual(out.capabilities, CAPABILITY_BASE.concat(['conditional_irrigation_v1']));
+  });
+
+  test(`${profile}: the force-sync bootstrap report includes zone_apply_versioned_v1 when osi-zone-commands loads`, async () => {
+    const out = await forceSyncBootstrapCapabilities(profile, true);
+    assert.deepEqual(out.capabilities, CAPABILITY_BASE.concat(['conditional_irrigation_v1', 'zone_apply_versioned_v1']));
+  });
+
+  test(`${profile}: the force-sync bootstrap report omits zone_apply_versioned_v1 when osi-zone-commands cannot load`, async () => {
+    const out = await forceSyncBootstrapCapabilities(profile, false);
+    assert.deepEqual(out.capabilities, CAPABILITY_BASE.concat(['conditional_irrigation_v1']));
   });
 }

@@ -535,35 +535,32 @@ test('both command types are in the registry and in the fallback table, on both 
 });
 
 // The scheduling branch appends conditional_irrigation_v1 (the conditional irrigation replication
-// contract) to the same static list in all three builders. The link request builds the list in
-// the installation helper's reportedSyncCapabilities; the flows builders carry the same base
-// inline until they adopt the shared builder.
+// contract) to the same list in all three builders. All three build it through the installation
+// helper's reportedSyncCapabilities: the link request from the build stage, the flows builders
+// through their guarded installation local.
 test('all three capability builders advertise entity_name_commands_v1 and both zone capabilities, on both profiles', () => {
   const CAPABILITY_BASE = ['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1', 'conditional_irrigation_v1'];
-  const inlineBase = new RegExp('const syncCapabilities = \\[' + CAPABILITY_BASE.map((capability) => "'" + capability + "'").join(', ') + '\\];');
   for (const profile of PROFILES) {
     const flows = loadFlows(profile);
+    const helper = require(path.join(
+      ROOT,
+      `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
+    ));
+    assert.deepEqual(
+      helper.reportedSyncCapabilities((name) => (name === 'osi-irrigation-policy' ? { ok: true, value: {} } : { ok: false })),
+      CAPABILITY_BASE,
+      profile + ' shared builder advertises the canonical base'
+    );
     for (const id of ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build']) {
       // The link request is built by the installation helper's build stage.
       const source = id === 'al-link-build-req' ? linkBuilderSource(flows, profile) : flows.find((n) => n.id === id).func;
-      if (id === 'al-link-build-req') {
-        assert.match(
-          source,
-          /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/,
-          profile + ' link request builds the list through the shared builder'
-        );
-        const helper = require(path.join(
-          ROOT,
-          `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-installation-helper/index.js`
-        ));
-        assert.deepEqual(
-          helper.reportedSyncCapabilities((name) => (name === 'osi-irrigation-policy' ? { ok: true, value: {} } : { ok: false })),
-          CAPABILITY_BASE,
-          profile + ' shared builder advertises the same base as the flows builders'
-        );
-        continue;
-      }
-      assert.match(source, inlineBase, profile + ' ' + id);
+      assert.match(
+        source,
+        id === 'al-link-build-req'
+          ? /const syncCapabilities = reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/
+          : /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/,
+        profile + ' ' + id + ' builds the list through the shared builder'
+      );
     }
   }
 });

@@ -2235,35 +2235,13 @@ expectIncludesById('cmd-type-registry', 'UPSERT_DEVICE_NAME:', 'allows cloud dev
 expectIncludesById('cmd-type-registry', 'UPSERT_ZONE_NAME:', 'allows cloud zone rename commands through the pending-command guard');
 expectIncludes('Reject Indefinite Open', 'UPSERT_DEVICE_NAME:', 'fallback command registry allows device rename commands before startup registry loads');
 expectIncludes('Reject Indefinite Open', 'UPSERT_ZONE_NAME:', 'fallback command registry allows zone rename commands before startup registry loads');
+// The flows builders delegate to the installation helper's shared
+// reportedSyncCapabilities list (as does the link request's build stage); the
+// tokens themselves are pinned in SYNC_CAPABILITY_BASE above.
 expectIncludesForEach(
   ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'entity_name_commands_v1'",
-  'advertises the entity-name command capability to the cloud'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'zone_config_weather_source_v1'",
-  'advertises that zone commands may carry weather_source'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'zone_config_stage_started_on_v1'",
-  'advertises that zone commands may carry stage_started_on'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'watermark_v1'",
-  'advertises the WATERMARK calibration capability'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'chameleon_config_commands_v1'",
-  'advertises the protected Chameleon capability'
-);
-expectIncludesForEach(
-  ['Build Cloud Bootstrap', 'Run Force Sync'],
-  "'device_soil_depth_commands_v1'",
-  'advertises the protected soil-depth capability'
+  'const syncCapabilities = installation.reportedSyncCapabilities((name) => osiLib.require(name));',
+  'builds the advertised list through the shared capability builder'
 );
 expectIncludesById('sync-bootstrap-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in bootstrap');
 expectIncludesById('sync-force-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in force sync');

@@ -23,7 +23,7 @@ for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
   assert.match(node.func, /NULLIF\(trim\(\(SELECT gateway_device_eui FROM sync_link_state/);
   assert.ok(node.func.indexOf('devices') < node.func.indexOf('watermark_calibrations'), `${id} emits calibration after devices`);
   assert.doesNotMatch(node.func, /watermark_readings/, `${id} does not ship raw watermark readings`);
-  for (const cap of expectedCaps) assert.match(node.func, new RegExp(cap), `${id} advertises ${cap}`);
+  assert.match(node.func, /const syncCapabilities = installation\.reportedSyncCapabilities\(\(name\) => osiLib\.require\(name\)\);/, `${id} builds the capability list through the shared builder`);
 }
 
 // The link request is built by the installation helper's build stage, which
@@ -35,11 +35,6 @@ assert.match(linkSource, /const syncCapabilities = reportedSyncCapabilities\(\(n
 const installation = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'));
 const linkCapabilities = installation.reportedSyncCapabilities(() => ({ ok: false }));
 for (const cap of expectedCaps) assert.ok(linkCapabilities.includes(cap), `link advertises ${cap}`);
-const capabilityLists = flows
-  .filter((node) => /sync-bootstrap-build|sync-force-build/.test(node.id + ' ' + node.name))
-  .map((node) => [...node.func.matchAll(/['"]([a-z][a-z0-9_]+_v1)['"]/g)].map((m) => m[1]).filter((v) => expectedCaps.includes(v)));
-assert.ok(capabilityLists.length >= 2, 'both flows builders expose capability tokens');
-for (const list of capabilityLists) assert.deepEqual(list, expectedCaps, 'capability order is stable');
 assert.deepEqual(linkCapabilities.filter((v) => expectedCaps.includes(v)), expectedCaps, 'link capability order is stable');
 
 // Execute both shipped builders against one real SQLite fixture. The child
