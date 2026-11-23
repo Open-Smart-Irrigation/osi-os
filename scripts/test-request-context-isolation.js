@@ -1838,21 +1838,23 @@ for (const order of ['cloud first', 'cloud paused']) {
 }
 
 // Generic cloud ACK (Build Schedule ACK): a command routed without its own id must
-// not borrow the id of another command routed after it.
+// not borrow the id of another command routed after it. The vehicle is a device
+// flags command, which still goes through Build UPDATE SQL; legacy zone commands
+// are applied and answered by osi-zone-commands (E3) and no longer reach it.
 test('cloud command ACK: a command without commandId does not borrow a later command id', async () => {
   await withRuntime({ scoped: false }, async (rt) => {
-    const zone = (uuid, name, commandId) => ({
+    const flags = (deviceEui, commandId) => ({
       payload: Object.assign({
-        commandType: 'UPSERT_ZONE',
-        zoneUuid: uuid,
-        name,
+        commandType: 'UPSERT_DEVICE_FLAGS',
+        deviceEui,
+        dendroEnabled: true,
         appliedSyncVersion: 7,
-        aggregateType: 'ZONE',
-        aggregateKey: uuid,
+        aggregateType: 'DEVICE',
+        aggregateKey: deviceEui,
       }, commandId === undefined ? {} : { commandId }),
     });
-    rt.inject('A', ID.routeCommand, zone('z-cloud-a', 'Cloud A'));
-    rt.inject('B', ID.routeCommand, zone('z-cloud-b', 'Cloud B', 77));
+    rt.inject('A', ID.routeCommand, flags('A840410000000001'));
+    rt.inject('B', ID.routeCommand, flags('A840410000000002', 77));
     await rt.runUntil('A', ID.cloudUpdateDb);
     await rt.run('B');
     await rt.run('A');
@@ -1863,7 +1865,7 @@ test('cloud command ACK: a command without commandId does not borrow a later com
     assert.equal(ack('B')[0].commandId, 77);
     assert.equal(ack('A').length, 1);
     assert.equal(ack('A')[0].commandId, null, 'A must not carry B\'s command id');
-    assert.equal(ack('A')[0].aggregateKey, 'z-cloud-a');
+    assert.equal(ack('A')[0].aggregateKey, 'A840410000000001');
   });
 });
 

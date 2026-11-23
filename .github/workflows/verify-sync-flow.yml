@@ -430,6 +430,10 @@ jobs:
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
         run: node --test scripts/test-stage-started-on-migration.js scripts/test-legacy-upsert-zone-config.js
+      # E3: legacy cloud zone commands are written only at a newer version; a stale
+      # or tombstone-crossing one is answered CONFLICT, through the shipped nodes, both profiles.
+      - name: Legacy zone command version guard
+        run: node --test scripts/test-legacy-zone-command-versions.js
       # Daily agronomy parity: the daily record's migration-owned outbox triggers
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync

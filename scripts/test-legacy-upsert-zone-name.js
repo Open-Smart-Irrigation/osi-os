@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
-// Legacy UPSERT_ZONE branch of node 4f4a765f36cee6f3 ("Build UPDATE SQL").
-// Builds the statement with the shipped function-node source and then runs it
-// against a seeded database, so the assertions are about the row, not the SQL
-// string.
+// Legacy UPSERT_ZONE name handling. Since E3 the command is written by
+// osi-zone-commands' copy of the UPSERT_ZONE branch of node 4f4a765f36cee6f3
+// ("Build UPDATE SQL"). Each case builds the statement with both, asserts they
+// agree, and runs the live copy's statement against a seeded database, so the
+// assertions are about the row, not the SQL string.
 //
 // Run: node --test scripts/test-legacy-upsert-zone-name.js
 
@@ -14,6 +15,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const { executeFunction, loadNode } = require('./lib/scoped-access-harness');
+const { buildLegacyZoneStatement } = require('./lib/legacy-zone-statement');
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -46,15 +48,12 @@ function command(name) {
   return cmd;
 }
 
+// The live statement: osi-zone-commands' copy, asserted equal to Build UPDATE
+// SQL's own (scripts/lib/legacy-zone-statement.js), executed on the database.
 async function buildAndApply(db, name) {
-  const run = await executeFunction(loadNode('4f4a765f36cee6f3'), {
-    msg: { payload: command(name) },
-    env: { DEVICE_EUI: GATEWAY },
-    db,
-  });
-  assert.equal(typeof run.result.topic, 'string', 'the node must build a statement');
-  db.exec(run.result.topic);
-  return run;
+  const { statement, warnings } = await buildLegacyZoneStatement(command(name), { env: { DEVICE_EUI: GATEWAY } });
+  db.exec(statement);
+  return { result: { topic: statement }, warnings };
 }
 
 test('a valid name is written, exactly as today', async () => {
