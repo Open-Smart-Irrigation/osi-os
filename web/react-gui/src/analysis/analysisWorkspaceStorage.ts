@@ -14,6 +14,7 @@ function legacyAliasesFor(keyOrAlias: string): string[] {
 }
 
 const KEY = 'osi.analysis.workspace.v1';
+const BASIC_KEY = 'osi.analysis.timeline.v1';
 const SHA256_K = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -125,9 +126,9 @@ function legacySeriesIdMap(catalogEntries: AnalysisCatalogEntry[]): Map<string, 
   return legacyIds;
 }
 
-export function loadWorkspace(): AnalysisWorkspaceState | null {
+export function loadWorkspace(expandedViewsEnabled = true): AnalysisWorkspaceState | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = (expandedViewsEnabled ? null : localStorage.getItem(BASIC_KEY)) ?? localStorage.getItem(KEY);
     if (!raw) return null;
     return fromViewJson(JSON.parse(raw));
   } catch {
@@ -135,9 +136,9 @@ export function loadWorkspace(): AnalysisWorkspaceState | null {
   }
 }
 
-export function saveWorkspace(state: AnalysisWorkspaceState): void {
+export function saveWorkspace(state: AnalysisWorkspaceState, expandedViewsEnabled = true): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(toViewJson(state)));
+    localStorage.setItem(expandedViewsEnabled ? KEY : BASIC_KEY, JSON.stringify(toViewJson(state)));
   } catch {
     /* ignore quota / serialization errors */
   }

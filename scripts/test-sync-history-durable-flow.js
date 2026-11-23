@@ -17,6 +17,7 @@ const mirrorPath = path.join(
 const canonicalText = fs.readFileSync(canonicalPath, 'utf8');
 assert.strictEqual(canonicalText, fs.readFileSync(mirrorPath, 'utf8'));
 const flows = JSON.parse(canonicalText);
+const historySource = fs.readFileSync(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/index.js'), 'utf8');
 
 function node(id) {
   const value = flows.find((candidate) => candidate.id === id);
@@ -39,7 +40,7 @@ for (const fragment of [
   'helper.snapshotHighQuery(',
   'helper.batchQuery(',
   'helper.prepareRow(',
-  'sync_history_dirty_keys',
+  'helper.loadDirtyRows(',
   "state === 'shadow'",
   "phase: phase",
   'snapshot_high_key',
@@ -56,7 +57,7 @@ for (const fragment of [
   'shadow_completed_at',
   'durable_enabled_at',
   'backfill_completed_at',
-  "status='done'",
+  'helper.completeDirtyBatch(',
   'helper.segmentQuery(',
   'helper.buildSegment(',
   'sync_history_segments',
@@ -80,14 +81,24 @@ assert.ok((manifestMarkNode.libs || []).some(
   (lib) => lib.var === 'osiLib' && lib.module === 'osi-lib'
 ));
 for (const fragment of [
-  'repairRequested',
-  'helper.segmentQuery(',
-  'sync_history_dirty_keys',
-  "change_kind='repair'"
+  'helper.queueManifestRepairs('
 ]) {
   includes(manifestMark, fragment, 'Mark History Manifest ACK');
 }
 excludes(manifestMark.toUpperCase(), 'DELETE FROM', 'Mark History Manifest ACK');
+// Cover the delegated SQL too. This scans the whole helper, including functions
+// called by queueManifestRepairs; dynamic table names also fail the allowlist.
+const cursorCleanupSql = "DELETE FROM app_settings WHERE key IN (SELECT key FROM app_settings WHERE key>='history_repair_cursor:' AND key<'history_repair_cursor;' ORDER BY key LIMIT 32)";
+includes(historySource, cursorCleanupSql, 'bounded legacy cursor metadata cleanup');
+// Exempt only this exact, prefix-scoped, bounded metadata statement. Any other
+// app_settings deletion and every source-history deletion remain forbidden.
+for (const deletion of historySource.replace(cursorCleanupSql, '').matchAll(/\bDELETE\s+FROM\s+(\S+)/gi)) {
+  assert.strictEqual(deletion[1], 'sync_history_quarantine', 'history helper may delete only synthetic repair quarantine markers');
+}
+
+for (const fragment of ['repairRequested', 'segmentQuery(', 'sync_history_dirty_keys', "change_kind='repair'", "status='done'", 'history_repair_segment:']) {
+  includes(historySource, fragment, 'history sync helper');
+}
 
 const seed = fs.readFileSync(path.join(root, 'database/seed-blank.sql'), 'utf8');
 for (const legacyTrigger of [

@@ -29,6 +29,18 @@ function fixture(t) {
   class Database {
     all(sql,params,cb) { try { cb(null,farming.prepare(sql).all(...params)); } catch(e) { cb(e); } }
     run(sql,params,cb) { try { farming.prepare(sql).run(...params); cb(null); } catch(e) { cb(e); } }
+    async transaction(executor) {
+      farming.exec('BEGIN IMMEDIATE');
+      try {
+        const value = await executor({
+          all: async (sql, params = []) => farming.prepare(sql).all(...params),
+          get: async (sql, params = []) => farming.prepare(sql).get(...params),
+          run: async (sql, params = []) => farming.prepare(sql).run(...params)
+        });
+        farming.exec('COMMIT');
+        return value;
+      } catch (error) { farming.exec('ROLLBACK'); throw error; }
+    }
     close(cb) { if(cb)cb(); }
   }
   const source = { all:async(sql,params=[])=>{ reads++; return radio.prepare(sql).all(...params); },bridgeDirty:async()=>{} };
@@ -38,7 +50,9 @@ function fixture(t) {
       if (n === 'history-sync') return {ok:true,value:helper};
       if (n === 'osi-valve-control') return {ok:true,value:valveControl};
       return {ok:true,value:{getSharedStore:async()=>source}};
-    }},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)}};
+    }},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)},
+      // History transport checks the real account guard (EB2): no journal, queued account request or identity sentinel.
+      global:{get:k=>k==='fs'?{existsSync:()=>false,readdirSync:()=>[]}:undefined}};
     return vm.runInNewContext('(async function(){'+flows.find(n=>n.id===id).func+'})',context)();
   }
   return {farming,radio,memory,warnings,invoke,reads:()=>reads};

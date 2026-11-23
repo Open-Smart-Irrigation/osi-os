@@ -4,7 +4,13 @@ import { cleanup, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
+  useTranslation: () => ({
+    t: (k: string) => k,
+    i18n: { language: 'en', changeLanguage: vi.fn() },
+  }),
+}));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ username: 'farmer' }) }));
 vi.mock('../../analysis/useAnalysisCatalog', () => ({
   useAnalysisCatalog: () => ({ catalog: { channels: [] }, isLoading: false, error: undefined }),

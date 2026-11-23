@@ -1,11 +1,11 @@
 'use strict';
 // A real gRPC boundary: the shipped osi-chirpstack-helper serializes requests.
-const grpc = require('@grpc/grpc-js');
-const { DeviceServiceService } = require('@chirpstack/chirpstack-api/api/device_grpc_pb');
-const pb = require('@chirpstack/chirpstack-api/api/device_pb');
-const { Empty } = require('google-protobuf/google/protobuf/empty_pb');
 const { randomUUID } = require('node:crypto');
-exports.start = async function (state) {
+exports.start = async function (state,load=require) {
+  const grpc = load('@grpc/grpc-js');
+  const { DeviceServiceService } = load('@chirpstack/chirpstack-api/api/device_grpc_pb');
+  const pb = load('@chirpstack/chirpstack-api/api/device_pb');
+  const { Empty } = load('google-protobuf/google/protobuf/empty_pb');
   const server = new grpc.Server();
   server.addService(DeviceServiceService, {
     enqueue(call, callback) {
@@ -15,7 +15,9 @@ exports.start = async function (state) {
       (state.cs.queue[eui] ||= []).push(item);
       state.cs.calls.push({ fn:'enqueue', eui, port:item.getFPort(), hex:Buffer.from(item.getData_asU8()).toString('hex'), id:item.getId(),expiresAt:item.getExpiresAt()?.toDate().toISOString()||null });
       const response = new pb.EnqueueDeviceQueueItemResponse(); response.setId(item.getId());
-      callback(null,response);
+      // A case may model a slow network server; the default answers at once.
+      if (state.cs.latencyMs) setTimeout(() => callback(null, response), state.cs.latencyMs);
+      else callback(null,response);
     },
     getQueue(call,callback) {
       const response=new pb.GetDeviceQueueItemsResponse();response.setResultList(state.cs.queue[call.request.getDevEui().toUpperCase()]||[]);callback(null,response);

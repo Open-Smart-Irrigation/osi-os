@@ -173,10 +173,10 @@ test('Add Device accepts full native clipboard pastes into empty and selected cr
   const state: FixtureState = { unknownApi: [], externalRequests: [], addRequests: [] };
   await installLocalBoundary(page, state);
   await page.goto('/gui/#/dashboard', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Open Smart Irrigation', level: 1, exact: true })).toBeVisible();
   await expect(page.locator('#irrigation-zone-7')).toBeVisible();
   await page.locator('header').getByRole('button', { name: /Add/ }).click();
-  await page.getByRole('menuitem', { name: 'Add Device', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Add device', exact: true }).click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
@@ -201,7 +201,7 @@ test('Zone Device registration accepts full native clipboard pastes into empty a
   const state: FixtureState = { unknownApi: [], externalRequests: [], addRequests: [] };
   await installLocalBoundary(page, state);
   await page.goto('/gui/#/dashboard', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Open Smart Irrigation Dashboard' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Open Smart Irrigation', level: 1, exact: true })).toBeVisible();
   const zone = page.locator('#irrigation-zone-7');
   await expect(zone).toBeVisible({ timeout: 20_000 });
   await zone.getByRole('button', { name: /Device/ }).click();

@@ -1,4 +1,7 @@
 import '@testing-library/jest-dom/vitest';
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import en from '../../../../public/locales/en/devices.json';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,7 +59,8 @@ function offsetRows(field: 'speed' | 'gust' | 'direction', count: number): Senso
 }
 
 describe('WindMonitor', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.use(initReactI18next).init({ lng: 'en', defaultNS: 'devices', resources: { en: { devices: en } }, interpolation: { escapeValue: false } });
     windRoseChartShouldThrow.current = false;
     vi.mocked(sensorAPI.getHistory).mockReset();
     vi.mocked(sensorAPI.getHistory).mockImplementation((_deveui, field, hours) => {

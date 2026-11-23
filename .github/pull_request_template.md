@@ -25,6 +25,14 @@
 - [ ] Stale docs/AGENTS.md touched by this change corrected in the same PR
 - [ ] Follow-ups I chose not to do are **filed as issues** and linked below
 
+## Test accounting
+
+<!-- Principle 6. Fill in all three lines; write "none" where nothing applies. -->
+
+- Tests added:
+- Tests removed:
+- Core time before and after: <!-- From the core receipt; `core: none yet` until the repository's core runner is merged -->
+
 ## Verification evidence
 
 <!-- Paste the actual gate outputs / test counts. "It works" without output is

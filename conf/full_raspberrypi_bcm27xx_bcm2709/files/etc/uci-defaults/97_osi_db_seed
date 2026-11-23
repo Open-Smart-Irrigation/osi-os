@@ -13,6 +13,13 @@ if [ ! -f "$SEED_SRC" ]; then
     exit 0
 fi
 
+for suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+    if [ -e "$DATA_DB$suffix" ] || [ -L "$DATA_DB$suffix" ]; then
+        logger -t osi-db-seed "HELD: database recovery in progress. Refusing to seed $DATA_DB."
+        exit 1
+    fi
+done
+
 if [ -f "$DATA_DB" ]; then
     logger -t osi-db-seed "$DATA_DB already exists, skipping seed"
     exit 0
@@ -21,14 +28,67 @@ fi
 # Refuse to seed if SQLite sidecar files exist (indicates a partially-written
 # or journal-active database that we must not clobber).
 for sidecar in "$DATA_DB-wal" "$DATA_DB-shm" "$DATA_DB-journal"; do
-    if [ -f "$sidecar" ]; then
+    if [ -e "$sidecar" ] || [ -L "$sidecar" ]; then
         logger -t osi-db-seed "sidecar $sidecar exists, refusing to seed"
         exit 1
     fi
 done
 
 mkdir -p "$DATA_DIR" || { logger -t osi-db-seed "cannot create $DATA_DIR"; exit 1; }
-cp "$SEED_SRC" "$DATA_DB" || { logger -t osi-db-seed "copy failed"; exit 1; }
+# A complete, synced new inode becomes visible in one step. linkSync refuses
+# an existing target, even if it appeared after the checks above.
+if ! node - "$SEED_SRC" "$DATA_DB" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
+const [source, target] = process.argv.slice(2);
+const dir = path.dirname(target);
+const dataRoot = path.dirname(dir);
+function syncDirectory(directory) {
+  const fd = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+// Commit the directory entries before publishing the seed, including if a
+// previous attempt created them and failed before syncing them.
+syncDirectory(dataRoot);
+syncDirectory(path.dirname(dataRoot));
+const temporary = path.join(dir, '.farming-seed-' + randomUUID());
+fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
+try {
+  const fd = fs.openSync(temporary, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const parent = fs.openSync(dir, 'r');
+  try {
+    for (const suffix of ['.osi-recovery', '.legacy-device-fk-repair.lock', '.legacy-device-fk-writer-hold', '-wal', '-shm', '-journal']) {
+      if (fs.lstatSync(target + suffix, { throwIfNoEntry: false })) throw new Error('recovery evidence appeared before factory seeding: ' + suffix);
+    }
+    fs.linkSync(temporary, target);
+    try {
+      fs.fsyncSync(parent);
+    } catch (error) {
+      fs.unlinkSync(target);
+      fs.fsyncSync(parent);
+      throw error;
+    }
+  } finally {
+    fs.closeSync(parent);
+  }
+} finally {
+  fs.unlinkSync(temporary);
+}
+NODE
+then
+    logger -t osi-db-seed "atomic seed failed"
+    exit 1
+fi
 
 logger -t osi-db-seed "seeded $DATA_DB from $SEED_SRC"
 exit 0

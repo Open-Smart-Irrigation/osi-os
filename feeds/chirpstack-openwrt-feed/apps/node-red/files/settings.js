@@ -1,5 +1,9 @@
 const fs = require('fs');
 
+if (process.env.OSI_NODE_RED_STARTUP_WARNING) {
+    console.warn('[node-red.init] ' + process.env.OSI_NODE_RED_STARTUP_WARNING);
+}
+
 // Runtime config precedence:
 // 1. node-red.init exports UCI values first.
 // 2. node-red.init falls back per key to /srv/node-red/.chirpstack.env.
@@ -34,6 +38,16 @@ function loadChirpstackEnvFile(filePath) {
 }
 
 loadChirpstackEnvFile(chirpstackEnvPath);
+
+// Read-only check of the farm database (NEW-15), started here in a child
+// process beside the flows, which do not wait for it. It reports only. If it
+// cannot load, Node-RED still starts and osi-db-helper starts the check at
+// its first connection.
+try {
+    require('/srv/node-red/osi-db-helper/startup').check();
+} catch (error) {
+    console.error('[osi-db-startup] ERROR farm database start-up check did not run: ' + (error && error.message ? error.message : error));
+}
 
 module.exports = {
     flowFile: "flows.json",

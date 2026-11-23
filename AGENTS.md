@@ -12,6 +12,8 @@ Binding rules come first in this file; reference detail lives in the docs and sk
 
 ## Architecture
 
+Fresh full images pin newly formatted overlays to ext4 for online growth. Existing media is never converted; growth on F2FS is a logged no-op. Policy, shipped-image findings and physical qualification: [image filesystem growth](docs/operations/image-rootfs-growth.md).
+
 ```
 Pi (edge)
   ├── Node-RED  (:1880, LAN-reachable)  — REST API, scheduler, sync orchestration
@@ -84,6 +86,7 @@ and tags free of customer-specific history.
   `settings.js` protects identity keys, but operators should still remove stale
   identity lines during repair so no future or manual env-file path can revive
   them. Canonical EUI is uppercase and comes from the helper / UCI path.
+- **Legacy `devices_old` catalog recovery:** deploy and migration preflights refuse these references. Only `scripts/repair-legacy-device-fk.js` may record the durable `.osi-recovery` writer hold and perform the offline, backed-up, verified-copy atomic replacement and computed fingerprint refresh; never patch `sqlite_master`. Procedure: [Legacy device foreign-key repair](.claude/skills/osi-live-ops-runbook/references/repair.md#legacy-device-foreign-key-repair).
 
 ---
 
@@ -298,6 +301,8 @@ There is no plugin registry (ADR [2026-05-28](docs/adr/2026-05-28-static-device-
 
 ## Device catalog
 
+Dendrometer provider observations are collected with their irrigation effect off by default. The per-gateway operator gate and the distinction between stored observations and control inputs are specified in [dendrometer provider control](docs/development/dendro-provider-control.md).
+
 Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (ChirpStack app `Sensors`); `STREGA_VALVE`, `MILESIGHT_UC512` (`Actuators`); `RAK10701_FIELD_TESTER` (`Field Tester`). Profiles, sensors, SWT canonicalization, unified SWT estimates, LoRain onboarding and interval-rain aggregation, STREGA timed irrigation and valve control (schedules pushed only on user change or explicit re-send, never on a timer): `osi-agronomy-sensors-reference`, "Device catalog (edge reference)". Rules that bind every change:
 
 - `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes; derive pF only for display or export through the shared conversion in [matric-potential/v1.md](docs/contracts/matric-potential/v1.md); aggregate kPa before deriving pF; preserve calculated doubles and round display strings only.
@@ -312,10 +317,10 @@ Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`
 
 | What | Path |
 |------|------|
-| Node-RED flows | `/srv/node-red/flows.json` (symlink into `payloads/<stamp>/`; copy with `cp -L`) |
+| Node-RED flows | `/srv/node-red/flows.json` (symlink through `payloads/active` into `payloads/<stamp>/`; copy with `cp -L`) |
 | SQLite database | `/data/db/farming.db` |
-| React GUI | `/usr/lib/node-red/gui/` (symlink into `payloads/<stamp>/gui`) |
-| Helper modules | `/srv/node-red/osi-*` (after the first deploy, symlinks into `payloads/<stamp>/modules/`, switched with flows; the command-ledger pair stays a real directory) |
+| React GUI | `/usr/lib/node-red/gui/` (symlink through `payloads/active` into `payloads/<stamp>/gui`) |
+| Helper modules | `/srv/node-red/osi-*` (after the first deploy, symlinks through `payloads/active` into `payloads/<stamp>/modules/`, switched with flows by one rename of `payloads/active`; the command-ledger pair stays a real directory) |
 | Node-RED settings | `/srv/node-red/settings.js` |
 | MQTT credentials | `/srv/node-red/flows_cred.json` |
 | UCI identity | `osi-server.cloud.*` (`uci show osi-server`) |

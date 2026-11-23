@@ -6,7 +6,7 @@
 #
 # This is a POSIX sh test driver. CI runs it in two lanes whose /bin/sh is
 # dash or BusyBox ash (.github/workflows/deploy-bundle-shells.yml); it starts
-# deploy-offline.sh, and that script starts its detached watcher, with the
+# deploy-offline.sh, whose Node supervisor starts the deploy child with the
 # lane's sh. Prerequisites: node, tar, sha256sum, wget, setsid, awk, df,
 # tail, date, mktemp and ordinary shell utilities. Ports 18761-18764 on
 # 127.0.0.1 must be free; an occupied port is a setup failure.
@@ -39,9 +39,13 @@ if (!['cleanup', 'audit', 'pid', 'delay-live', 'delay-gone'].includes(mode) || !
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function classify(args) {
   const exe = path.basename(args[0] || '');
-  if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/deploy-local-server.js'))) return 'server';
-  if (['node', 'nodejs'].includes(exe) && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/fixture-delay.js'))) return 'delay';
-  if (['sh', 'dash', 'ash', 'busybox', 'setsid'].includes(exe) && args.some(a => a.includes(prefix) && a.includes('/deploy.sh'))) return 'watcher-or-stub';
+  const isNode = exe === path.basename(process.execPath) || ['node', 'nodejs'].includes(exe);
+  if (isNode && args[1]?.endsWith('/deploy-offline-runtime.js') && args[2] === 'supervise') {
+    try { if (typeof JSON.parse(args[3]).extract === 'string' && JSON.parse(args[3]).extract.startsWith(prefix)) return 'server'; } catch { return null; }
+  }
+  if (isNode && args.some(a => a.startsWith(prefix) && a.endsWith('/scripts/fixture-delay.js'))) return 'delay';
+  if (args[0]?.startsWith(prefix) && args[0].endsWith('/deploy.sh') && args[1] === '-s') return 'watcher-or-stub';
+  if (['sh', 'dash', 'ash', 'busybox', 'setsid'].includes(exe) && args.some(a => a.includes(prefix)) && args.some(a => a.includes('/deploy.sh'))) return 'watcher-or-stub';
   if (exe === 'tail' && args.some(a => a.startsWith(logPrefix) && a.endsWith('.log'))) return 'log-tail';
   return null;
 }
@@ -165,7 +169,10 @@ async function sweep() {
       if (quiet === 3) break; // three scans 250 ms apart; catches watcher forks
     } else {
       quiet = 0;
-      if (mode === 'cleanup') for (const item of live) signal(item, Date.now() - started < 2000 ? 'SIGTERM' : 'SIGKILL');
+      // Signal the identified delay before its supervisor forwards a group
+      // signal. The control must prove it found that child independently.
+      const ordered = [...live].sort((a, b) => Number(b.kind === 'delay') - Number(a.kind === 'delay'));
+      if (mode === 'cleanup') for (const item of ordered) signal(item, Date.now() - started < 2000 ? 'SIGTERM' : 'SIGKILL');
     }
     await pause(250);
   }
@@ -188,7 +195,10 @@ if (mode === 'pid') {
   if (!/^[1-9][0-9]*$/.test(pid)) process.exit(1);
   const live = read(pid, true);
   if (errors.length) { for (const error of errors) console.error(error); process.exit(1); }
-  if (live && (live.kind !== 'server' || !live.args.includes(expected))) process.exit(1);
+  if (live) {
+    const argv = live.args.split('\0');
+    if (live.kind !== 'server' || argv[2] !== 'supervise' || JSON.parse(argv[3]).extract !== extract) process.exit(1);
+  }
   console.log(`fixture PID ${pid}: ${live ? `server startticks ${live.start}` : 'already exited'}`);
 } else if (mode === 'delay-live' || mode === 'delay-gone') {
   try {
@@ -239,6 +249,11 @@ build_bundle() {
     RANDOM_SEED=$((RANDOM_SEED + 1))
     mkdir -p "$fixture/scripts"
     cp "$server_js" "$fixture/scripts/deploy-local-server.js"
+    cp "$script_dir/deploy-bundle-manifest.js" "$fixture/scripts/deploy-bundle-manifest.js"
+    mkdir "$fixture/gui-input"
+    printf 'fixture GUI\n' > "$fixture/gui-input/index.html"
+    tar czf "$fixture/react_gui.tar.gz" -C "$fixture/gui-input" .
+    rm -r "$fixture/gui-input"
     cat > "$fixture/deploy.sh" <<EOF
 #!/bin/sh
 set -eu
@@ -249,10 +264,16 @@ echo "stub deploy.sh starting against \$base"
 wget -q -O /dev/null --spider "\$base/deploy.sh?fixture_stub=\$STUB_REQUEST_TAG"
 echo "stub deploy.sh confirmed local server reachable"
 if [ "\${STUB_DELAY_SECONDS:-0}" -gt 0 ]; then
-    node "\$(dirname "\$0")/scripts/fixture-delay.js" "\$STUB_DELAY_SECONDS"
+    node "\$(dirname "\$2")/scripts/fixture-delay.js" "\$STUB_DELAY_SECONDS"
 fi
 exit $exit_code
 EOF
+    # Exercise the same result formatter as deploy.sh, without gateway work.
+    sed -n '/^# deploy outcome begin$/,/^# deploy outcome end$/p' "$script_dir/../deploy.sh" > "$fixture/outcome.sh"
+    # Prepend the formatter and install its exit trap before the stub body.
+    { printf '#!/bin/sh\n'; cat "$fixture/outcome.sh"; printf 'DEPLOY_COMPLETED=1\nPROBE_OK=0\nDEPLOY_STAMP=fixture\ntrap '\''write_deploy_outcome $?'\'' EXIT\n'; cat "$fixture/deploy.sh"; } > "$fixture/deploy.new"
+    mv "$fixture/deploy.new" "$fixture/deploy.sh"
+    rm "$fixture/outcome.sh"
     cat > "$fixture/scripts/fixture-delay.js" <<'NODE'
 'use strict';
 const fs = require('node:fs');
@@ -274,6 +295,7 @@ if (process.env.STUB_DELAY_NO_MARKER === '1') {
 }
 setTimeout(() => {}, seconds * 1000);
 NODE
+    node "$script_dir/deploy-bundle-manifest.js" create "$fixture" fixture
     tar czf "$bundle_out" -C "$fixture" .
     sha256sum "$bundle_out" | awk '{print $1"  bundle.tar.gz"}' > "$bundle_out.sha256"
 }
@@ -526,7 +548,7 @@ echo "OK"
 echo "=== sha256 mismatch is rejected ==="
 build_bundle 0 "$work/bad.tar.gz"
 printf 'deadbeef  bundle.tar.gz\n' > "$work/bad.tar.gz.sha256"
-if sh "$offline" "$work/bad.tar.gz" 2>"$work/err.log"; then
+if DEPLOY_OFFLINE_TMP_ROOT="$work/tmp" DEPLOY_OFFLINE_LOG_DIR="$work/data" DEPLOY_OFFLINE_TS=bad sh "$offline" "$work/bad.tar.gz" 2>"$work/err.log"; then
     echo "expected sha256 mismatch to fail" >&2
     exit 1
 fi

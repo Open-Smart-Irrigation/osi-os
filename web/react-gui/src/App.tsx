@@ -19,7 +19,9 @@ import { NetworkPage } from './pages/NetworkPage';
 import { AnalysisRoute } from './pages/AnalysisRoute';
 import { isPublicSimulatorBuild } from './utils/publicSimulatorDeviceDefaults';
 
-const MobileTensionHistoryRoute = import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'
+import { MOBILE_HISTORY_INTERNAL_ENABLED } from './history/mobileHistoryInternalGate';
+
+const MobileTensionHistoryRoute = MOBILE_HISTORY_INTERNAL_ENABLED
   ? lazy(() => import('./pages/MobileTensionHistoryRoute').then((module) => ({ default: module.MobileTensionHistoryRoute })))
   : null;
 

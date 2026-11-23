@@ -1,3 +1,4 @@
+import { analysisSourceKey } from '../../analysis/types';
 import { useId, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -34,10 +35,6 @@ function isWeatherChannel(channel: AnalysisCatalogEntry): boolean {
   return channel.sourceKind !== 'device';
 }
 
-function fallbackSourceKey(channel: AnalysisCatalogEntry): string {
-  return `${channel.hubEui ?? ''}|${channel.zoneId ?? 'unassigned'}|${channel.sourceKind}:${channel.cardType}:${channel.sourceKey}`;
-}
-
 function sourceGroupName(group: SourceGroup): string | null {
   return group.source?.name ?? group.name;
 }
@@ -62,7 +59,7 @@ function groupChannels(channels: AnalysisCatalogEntry[], sources: DeviceSource[]
   const addChannel = (channel: AnalysisCatalogEntry) => {
     const source = channel.deviceSourceId ? sourceById.get(channel.deviceSourceId) ?? null : null;
     const weather = isWeatherChannel(channel);
-    const key = channel.deviceSourceId ?? fallbackSourceKey(channel);
+    const key = analysisSourceKey(channel);
     let sourceGroup = sourceGroups.get(key);
     if (!sourceGroup) {
       sourceGroup = { key, name: channel.deviceName, source, channels: [], weather };
@@ -138,7 +135,7 @@ export function AnalysisSeriesTray({ channels, sources, gatewayModules, selected
   return (
     <section className="analysis-series-tray flex flex-col gap-1 text-sm" aria-label={t('analysis.tray.label')}>
       <div className="flex items-center justify-between px-1">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('analysis.tray.title')}</h2>
+        <h2 className="text-sm font-semibold text-[var(--text-tertiary)]">{t('analysis.tray.title')}</h2>
         <span className="rounded-full bg-[var(--card)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">{selectedIds.length}</span>
       </div>
       <input type="search" role="searchbox" placeholder={t('analysis.tray.search')} value={query} onChange={(e) => setQuery(e.target.value)} className="mb-1 w-full rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)] outline-none transition focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]" />

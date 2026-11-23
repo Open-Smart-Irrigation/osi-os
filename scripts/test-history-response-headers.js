@@ -23,7 +23,7 @@ const EXPRESS_SRI = 'sha512-28HqgMZAmih1Czt9ny7qr6ek2qddF4FclbMzwhCREB6OFfH+rXAn
 const FIXED_NOW = '2026-07-03T12:00:00.000Z';
 const SITE = '0016C001F1000001';
 const SECRET = 'history-response-fixture-secret';
-const CSV_BODY = 'timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value\n' +
+const CSV_BODY = '\uFEFFtimestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value\n' +
   '2026-07-01T00:15:00.000Z,0016C001F1000001,Coast,Rain - Rainfall this interval,environment,environment-src-d1506631a773,rain_mm_delta,,,mm,1.5\n';
 const CSV_NAME = 'zone-13-2026-07-01_2026-07-01-raw.csv';
 const CORS = {

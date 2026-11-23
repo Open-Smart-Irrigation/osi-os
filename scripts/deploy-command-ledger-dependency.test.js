@@ -294,6 +294,7 @@ test('the deploy script uses a pinned staged dependency installer and seed insta
     ['COMMAND_LEDGER_PACKAGE_SHA256', path.join(LEDGER, 'package.json')],
     ['COMMAND_LEDGER_INDEX_SHA256', path.join(LEDGER, 'index.js')],
     ['COMMAND_LEDGER_BINDING_SHA256', path.join(BINDING, 'canonicalization.js')],
+    ['DEPLOY_GUI_ARCHIVE_SHA256', path.join(ROOT, 'scripts/deploy-archive.js')],
   ]) {
     const match = new RegExp(`${name}="([0-9a-f]{64})"`).exec(DEPLOY);
     assert.ok(match, `missing independent ${name} pin`);
@@ -636,8 +637,11 @@ ${['command_ledger_live_hashes', 'report_command_ledger_activation_failure', 'ke
   'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
 ${shellFunction('check_fetched_manifest')}
 ${shellFunction('check_fetched_js_files')}
+${deployFragment('# deploy outcome begin\n', '# deploy outcome end')}
 ${identity}
 ${payload}
+DAMAGED_DB_DOC=docs/operations/damaged-farm-database.md
+${shellFunction('check_live_db_readonly')}
 ${shellFunction('checkpoint_live_db')}
 ${shellFunction('ensure_sqlite3_cli')}
 ${shellFunction('restart_node_red').replaceAll(initPath, '"$NODE_RED_INIT"')}
@@ -733,6 +737,10 @@ fi
 case "$1" in
   *migrate-cli.js)
     case " $* " in *" --prune-only "*) exit 0 ;; esac
+    if [ -n "\${HARNESS_MIGRATION_RC:-}" ]; then
+      echo '[migrate] injected failure'
+      exit "$HARNESS_MIGRATION_RC"
+    fi
     if [ "\${HARNESS_MIGRATION_COMMITS:-0}" = 1 ]; then
       sqlite3 "$2" "INSERT INTO schema_migrations VALUES (13, 'new', 'applied');" || exit 1
       echo '[migrate] applied: [13]'
@@ -950,6 +958,54 @@ test('a failing activation after a committed migration holds services on the pre
     assert.equal(result.nodeRed, '0');
     assert.equal(result.identityd, '0');
     assert.deepEqual(result.liveLedger, oldPairHashes());
+  });
+});
+
+// Round-three N1: these two holds stop both services before they are
+// declared, so the receipt says `hold` and points at DEPLOY-HELD.
+function readOutcome(root) {
+  const file = path.join(root, 'outcome');
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+test('an unloadable command-ledger hold proves both stops and reports hold', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE, { DEPLOY_OUTCOME_FILE: path.join(root, 'outcome') });
+    assertHeldWithoutDisable(result);
+    assert.equal(result.identityd, '0');
+    const outcome = readOutcome(root);
+    assert.match(outcome, /^verdict=hold$/m, harnessOutput(result) + outcome);
+    assert.match(outcome, /^reason_code=services_held$/m);
+    assert.match(outcome, /^service_state=stopped$/m);
+    assert.match(outcome, /^identityd_state=stopped$/m);
+  });
+});
+
+test('a failed migration whose restore also failed proves both stops and reports hold', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':', { HARNESS_MIGRATION_RC: '3', DEPLOY_OUTCOME_FILE: path.join(root, 'outcome') });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /migration failed and backup restore integrity check failed; leaving Node-RED and identityd stopped/, harnessOutput(result));
+    assert.equal(result.nodeRed, '0');
+    assert.equal(result.identityd, '0');
+    const outcome = readOutcome(root);
+    assert.match(outcome, /^verdict=hold$/m, harnessOutput(result) + outcome);
+    assert.match(outcome, /^reason_code=services_held$/m);
+    assert.match(outcome, /^service_state=stopped$/m);
+    assert.match(outcome, /^identityd_state=stopped$/m);
+  });
+});
+
+test('a hold whose Node-RED stop cannot be proven again reports incomplete-recovery', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, // The migration's stop wait succeeds; the proof at the hold does not.
+      'wait_for_node_red_stop() { [ -z "${HARNESS_STOPPED_ONCE:-}" ] || return 1; HARNESS_STOPPED_ONCE=1; }',
+      { HARNESS_MIGRATION_RC: '3', DEPLOY_OUTCOME_FILE: path.join(root, 'outcome') });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    const outcome = readOutcome(root);
+    assert.match(outcome, /^verdict=incomplete-recovery$/m, harnessOutput(result) + outcome);
+    assert.match(outcome, /^service_state=unknown$/m);
   });
 });
 

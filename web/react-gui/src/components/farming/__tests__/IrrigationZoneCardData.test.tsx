@@ -215,6 +215,17 @@ describe('IrrigationZoneCard Data entry', () => {
     );
   });
 
+  it.each([390, 768])('links a narrow desktop browser at %i px to legacy zone History', (width) => {
+    vi.mocked(isDesktopBrowser).mockReturnValue(true);
+    vi.stubGlobal('innerWidth', width);
+    try {
+      renderCard();
+      expect(screen.getByRole('link', { name: 'Data' })).toHaveAttribute('href', '/history/zones/12');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('hides the zone-card Data link on desktop browsers', () => {
     vi.mocked(isDesktopBrowser).mockReturnValue(true);
     renderCard();

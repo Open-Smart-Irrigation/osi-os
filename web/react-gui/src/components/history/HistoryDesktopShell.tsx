@@ -26,6 +26,7 @@ interface HistoryDesktopShellProps {
   workspace: HistoryWorkspace;
   workspaces: HistoryWorkspaceRecord[];
   activeWorkspaceId: number | null;
+  expandedViewsEnabled: boolean;
   comparisonEnabled: boolean;
   workspacesEnabled: boolean;
   panelCapWarning: boolean;
@@ -55,6 +56,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
   workspace,
   workspaces,
   activeWorkspaceId,
+  expandedViewsEnabled,
   comparisonEnabled,
   workspacesEnabled,
   panelCapWarning,
@@ -90,7 +92,9 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
     workspace.enabledOverlays[cardId] ?? [];
 
   return (
-    <div className="hidden min-h-[42rem] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] lg:grid lg:grid-cols-[18rem_minmax(0,1fr)_18rem]">
+    <div className={`hidden min-h-[42rem] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] lg:grid ${
+      expandedViewsEnabled ? 'lg:grid-cols-[18rem_minmax(0,1fr)_18rem]' : 'lg:grid-cols-[18rem_minmax(0,1fr)]'
+    }`}>
       <HistorySidebar
         zones={zones}
         selectedZoneId={selectedZoneId}
@@ -101,6 +105,7 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         workspacesEnabled={workspacesEnabled}
+        showWorkspaces={expandedViewsEnabled}
         onTogglePinned={onTogglePinned}
         onLoadWorkspace={onLoadWorkspace}
         onSaveWorkspace={onSaveWorkspace}
@@ -109,81 +114,83 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
       />
 
       <main className="min-w-0 p-4">
-        <div className="mb-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-                {t('history.desktop.toolbarTitle')}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-tertiary)]">
-                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
-                  {viewport.range.label}
-                </span>
-                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
-                  {t('history.cardFrame.aggregationBadge', { aggregation: viewport.aggregation })}
-                </span>
-                <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
-                  {t('history.desktop.maxPanels', { count: maxPanelsByPlatform.edge })}
-                </span>
+        {expandedViewsEnabled && (
+          <div className="mb-4 rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {t('history.desktop.toolbarTitle')}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[var(--text-tertiary)]">
+                  <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                    {viewport.range.label}
+                  </span>
+                  <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                    {t('history.cardFrame.aggregationBadge', { aggregation: viewport.aggregation })}
+                  </span>
+                  <span className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1">
+                    {t('history.desktop.maxPanels', { count: maxPanelsByPlatform.edge })}
+                  </span>
+                </div>
               </div>
+              {comparisonEnabled && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={workspace.layout === 'single'}
+                    onClick={() => onWorkspaceLayoutChange('single')}
+                    className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                      workspace.layout === 'single'
+                        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
+                        : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
+                    }`}
+                  >
+                    {t('history.desktop.singleMode')}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={workspace.layout === 'stacked'}
+                    onClick={() => onWorkspaceLayoutChange('stacked')}
+                    className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                      workspace.layout === 'stacked'
+                        ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
+                        : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
+                    }`}
+                  >
+                    {t('history.desktop.comparisonMode')}
+                  </button>
+                </div>
+              )}
             </div>
-            {comparisonEnabled && (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  aria-pressed={workspace.layout === 'single'}
-                  onClick={() => onWorkspaceLayoutChange('single')}
-                  className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                    workspace.layout === 'single'
-                      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
-                      : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
-                  }`}
-                >
-                  {t('history.desktop.singleMode')}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={workspace.layout === 'stacked'}
-                  onClick={() => onWorkspaceLayoutChange('stacked')}
-                  className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                    workspace.layout === 'stacked'
-                      ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
-                      : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
-                  }`}
-                >
-                  {t('history.desktop.comparisonMode')}
-                </button>
+            {comparisonEnabled && workspace.layout === 'stacked' && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {cards.map((card) => (
+                  <button
+                    key={card.cardId}
+                    type="button"
+                    aria-pressed={selectedCards.has(card.cardId)}
+                    onClick={() => onToggleComparisonCard(card.cardId, !selectedCards.has(card.cardId))}
+                    className={`rounded-md border px-2 py-1.5 text-xs font-semibold ${
+                      selectedCards.has(card.cardId)
+                        ? 'border-[var(--primary)] bg-[var(--secondary-bg)] text-[var(--text)]'
+                        : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--secondary-bg)]'
+                    }`}
+                  >
+                    {selectedCards.has(card.cardId)
+                      ? t('history.desktop.removePanel')
+                      : t('history.desktop.addPanel', { title: card.title })}
+                  </button>
+                ))}
               </div>
             )}
+            {showPanelLimitWarning && (
+              <p className="mt-3 rounded-md border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-3 py-2 text-xs font-semibold text-[var(--warning-text)]">
+                {t('history.desktop.panelLimitWarning', { count: maxPanelsByPlatform.edge })}
+              </p>
+            )}
           </div>
-          {comparisonEnabled && workspace.layout === 'stacked' && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {cards.map((card) => (
-                <button
-                  key={card.cardId}
-                  type="button"
-                  aria-pressed={selectedCards.has(card.cardId)}
-                  onClick={() => onToggleComparisonCard(card.cardId, !selectedCards.has(card.cardId))}
-                  className={`rounded-md border px-2 py-1.5 text-xs font-semibold ${
-                    selectedCards.has(card.cardId)
-                      ? 'border-[var(--primary)] bg-[var(--secondary-bg)] text-[var(--text)]'
-                      : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--secondary-bg)]'
-                  }`}
-                >
-                  {selectedCards.has(card.cardId)
-                    ? t('history.desktop.removePanel')
-                    : t('history.desktop.addPanel', { title: card.title })}
-                </button>
-              ))}
-            </div>
-          )}
-          {showPanelLimitWarning && (
-            <p className="mt-3 rounded-md border border-[var(--warning-bg)] bg-[var(--warning-bg)] px-3 py-2 text-xs font-semibold text-[var(--warning-text)]">
-              {t('history.desktop.panelLimitWarning', { count: maxPanelsByPlatform.edge })}
-            </p>
-          )}
-        </div>
-        {workspace.layout === 'stacked' ? (
+        )}
+        {expandedViewsEnabled && workspace.layout === 'stacked' ? (
           <div className="space-y-4">
             {resolvedPanels.panels.map((panel) => (
               <div key={panel.cardId} data-testid="history-comparison-panel">
@@ -223,15 +230,16 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
           </div>
         ) : (
           <HistoryCardFrame
+            expandedViewsEnabled={expandedViewsEnabled}
             card={selectedCard}
             scope={selectedZoneId === null ? null : { type: 'zone', zoneId: selectedZoneId }}
             viewport={viewport}
             onViewportChange={onViewportChange}
             selectedView={selectedCard ? selectedViewForCard(selectedCard) : undefined}
             onViewModeChange={onCardViewModeChange}
-            overlays={selectedCard ? overlaysForCard(selectedCard.cardId) : []}
+            overlays={expandedViewsEnabled && selectedCard ? overlaysForCard(selectedCard.cardId) : []}
             onOverlaysChange={onCardOverlaysChange}
-            advancedOverlaySettings={selectedCard ? workspace.advancedOverlaySettings[selectedCard.cardId] : undefined}
+            advancedOverlaySettings={expandedViewsEnabled && selectedCard ? workspace.advancedOverlaySettings[selectedCard.cardId] : undefined}
             onAdvancedOverlaySettingsChange={onAdvancedOverlaySettingsChange}
             collapsed={selectedCard ? workspace.collapsedPanels.includes(selectedCard.cardId) : false}
             onCollapsedChange={onPanelCollapsedChange}
@@ -241,19 +249,21 @@ export const HistoryDesktopShell: React.FC<HistoryDesktopShellProps> = ({
         )}
       </main>
 
-      <aside className="border-l border-[var(--border)] bg-[var(--surface)] p-4">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-          {t('history.desktop.inspectorTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-[var(--text-tertiary)]">
-          {t('history.desktop.inspectorPlaceholder')}
-        </p>
-        <p className="mt-4 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm font-semibold text-[var(--text)]">
-          {selectedTimestamp
-            ? t('history.desktop.selectedTimestamp', { timestamp: selectedTimestamp })
-            : t('history.desktop.selectedTimestampNone')}
-        </p>
-      </aside>
+      {expandedViewsEnabled && (
+        <aside className="border-l border-[var(--border)] bg-[var(--surface)] p-4">
+          <h2 className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
+            {t('history.desktop.inspectorTitle')}
+          </h2>
+          <p className="mt-3 text-sm text-[var(--text-tertiary)]">
+            {t('history.desktop.inspectorPlaceholder')}
+          </p>
+          <p className="mt-4 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm font-semibold text-[var(--text)]">
+            {selectedTimestamp
+              ? t('history.desktop.selectedTimestamp', { timestamp: selectedTimestamp })
+              : t('history.desktop.selectedTimestampNone')}
+          </p>
+        </aside>
+      )}
     </div>
   );
 };

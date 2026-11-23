@@ -11,18 +11,20 @@ import {
 import { HistoryExportSheet } from '../components/history/mobile/HistoryExportSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
 import type { VisibleInterval } from '../components/history/mobile/MobileSoilUplotHistory';
-const MobileSoilUplotHistory = lazy(() => import('../components/history/mobile/MobileSoilUplotHistory').then((module) => ({ default: module.MobileSoilUplotHistory })));
+import { MOBILE_HISTORY_INTERNAL_ENABLED } from '../history/mobileHistoryInternalGate';
+
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
-import { clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
+import { calendarMonthForRange, calendarMonthRange, clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
 import { coarserRecoveryAggregation, filterHistoryDataSources, historyRecoveryCapabilities, historySourceChoiceLabel } from '../history/sourceSelection';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
-import { useIsDesktop } from '../history/useIsDesktop';
+import { useDesktopData } from '../history/useDesktopData';
+import { EXPANDED_DATA_VIEWS_ENABLED } from '../history/expandedDataViews';
 import { isMobileSoilUplotEnabled } from '../history/mobileSoilUplot';
 import { useOrientation } from '../history/useOrientation';
 import {
@@ -40,11 +42,13 @@ import type {
   HistoryCardSummary,
   HistoryCardSummaryResponse,
   HistoryRangeLabel,
-  HistoryRangeSelection,
   HistoryViewMode,
 } from '../history/types';
 import type { IrrigationZone } from '../types/farming';
 
+const MobileSoilUplotHistory = MOBILE_HISTORY_INTERNAL_ENABLED
+  ? lazy(() => import('../components/history/mobile/MobileSoilUplotHistory').then((module) => ({ default: module.MobileSoilUplotHistory })))
+  : null;
 const zonesFetcher = () => irrigationZonesAPI.getAll();
 const DETAIL_PULL_REFRESH_THRESHOLD_PX = 96;
 const DETAIL_PULL_REFRESH_MAX_HORIZONTAL_PX = 48;
@@ -110,9 +114,10 @@ type DetailRouteScope =
 function selectableViewsForCard(card: HistoryCardSummary | null): HistoryViewMode[] {
   if (!card) return [];
   const definition = historyCardDefinitionsByType[card.cardType];
-  const allowedViews = new Set<HistoryViewMode>(definition.views);
+  const views = definition.views.filter((view) => EXPANDED_DATA_VIEWS_ENABLED || view !== 'advanced');
+  const allowedViews = new Set<HistoryViewMode>(views);
   const filtered = card.views.filter((view) => allowedViews.has(view));
-  return filtered.length > 0 ? filtered : [...definition.views];
+  return filtered.length > 0 ? filtered : views;
 }
 
 function primaryViewModes(views: readonly HistoryViewMode[]): HistoryViewMode[] {
@@ -123,7 +128,7 @@ function defaultPrimaryViewForCard(card: HistoryCardSummary | null): HistoryView
   if (!card) return 'line-chart';
   const selectableViews = selectableViewsForCard(card);
   if (card.defaultView !== 'advanced' && selectableViews.includes(card.defaultView)) return card.defaultView;
-  return primaryViewModes(selectableViews)[0] ?? card.defaultView;
+  return primaryViewModes(selectableViews)[0] ?? 'line-chart';
 }
 
 function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string {
@@ -133,36 +138,6 @@ function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string
 
 function formatAggregationLabel(t: HistoryTranslate, aggregation: string): string {
   return t(`history.metadata.aggregation.${aggregation}`);
-}
-
-function monthRangeFromViewport(range: HistoryRangeSelection, monthOffset: number): HistoryRangeSelection {
-  const baseMs = Date.parse(range.to ?? range.from ?? '');
-  const baseDate = Number.isFinite(baseMs) ? new Date(baseMs) : new Date();
-  const monthStart = new Date(Date.UTC(
-    baseDate.getUTCFullYear(),
-    baseDate.getUTCMonth() + monthOffset,
-    1,
-    0,
-    0,
-    0,
-    0,
-  ));
-  const nextMonthStart = new Date(Date.UTC(
-    baseDate.getUTCFullYear(),
-    baseDate.getUTCMonth() + monthOffset + 1,
-    1,
-    0,
-    0,
-    0,
-    0,
-  ));
-
-  return {
-    label: 'custom',
-    from: monthStart.toISOString(),
-    to: new Date(nextMonthStart.getTime() - 1).toISOString(),
-    timezone: range.timezone,
-  };
 }
 
 function isPullRefreshPointerType(pointerType: string): boolean {
@@ -334,13 +309,13 @@ const HistoryDetailError: React.FC<{
 export const HistoryCardDetailPage: React.FC = () => {
   const { zoneId: rawZoneId, gatewayEui: rawGatewayEui, cardId: rawCardId } = useParams();
   const navigate = useNavigate();
-  const { t: translate } = useTranslation('history');
+  const { t: translate, i18n } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const pullStartRef = useRef<PullRefreshStart | null>(null);
   const featureFlags = useFeatureFlags();
   const orientation = useOrientation();
   const isLandscape = orientation === 'landscape';
-  const isDesktop = useIsDesktop();
+  const isDesktop = useDesktopData();
   const zoneId = Number(rawZoneId);
   const gatewayEui = typeof rawGatewayEui === 'string' && rawGatewayEui.trim() ? rawGatewayEui : null;
   const cardId = decodeRouteCardId(rawCardId);
@@ -434,13 +409,15 @@ export const HistoryCardDetailPage: React.FC = () => {
     defaultRange,
     displayCard ? `${displayCard.cardId}:${defaultRange}` : defaultRange,
   );
+  const canUseMobileSoilChart = isMobileSoilUplotEnabled({
+    buildEnabled: MOBILE_HISTORY_INTERNAL_ENABLED,
+    historyUxReady: featureFlags.isReady,
+    historyUxEnabled: featureFlags.historyEnabled,
+    isMobile: !isDesktop,
+    cardType: displayCard?.cardType,
+  });
   const selectedView = useMemo(() => {
     const selectableViews = selectableViewsForCard(displayCard);
-    const canStartMobileSoilChart = import.meta.env.VITE_HISTORY_UPLOT_SOIL_ENABLED === 'true'
-      && featureFlags.isReady
-      && featureFlags.historyEnabled
-      && !isDesktop
-      && displayCard?.cardType === 'soil';
     if (
       displayCard
       && userSelectedView?.cardId === displayCard.cardId
@@ -448,8 +425,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     ) {
       return userSelectedView.view;
     }
-    return canStartMobileSoilChart ? 'line-chart' : defaultPrimaryViewForCard(displayCard);
-  }, [displayCard, featureFlags.historyEnabled, featureFlags.isReady, isDesktop, userSelectedView]);
+    return canUseMobileSoilChart ? 'line-chart' : defaultPrimaryViewForCard(displayCard);
+  }, [canUseMobileSoilChart, displayCard, userSelectedView]);
   const shouldRenderAdvanced = selectedView === 'advanced';
   const sourceOptions = useMemo(() => sourceOptionsForCard(displayCard), [displayCard]);
   const allSourceKeys = useMemo(() => sourceOptions.map((source) => source.key), [sourceOptions]);
@@ -465,12 +442,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const mobileSourceKey = selectedSourceKey ?? (sourceOptions.length === 0 && displayCard?.sourceDevices?.length === 1
     ? (typeof displayCard.sourceDevices[0]?.sourceKey === 'string' && displayCard.sourceDevices[0].sourceKey.trim() ? displayCard.sourceDevices[0].sourceKey.trim() : null)
     : null);
-  const useMobileSoilUplot = isMobileSoilUplotEnabled({
-    historyUxReady: featureFlags.isReady,
-    historyUxEnabled: featureFlags.historyEnabled,
-    isMobile: !isDesktop,
-    cardType: displayCard?.cardType,
-  }) && selectedView === 'line-chart' && displayCard?.availability.available === true;
+  const useMobileSoilUplot = canUseMobileSoilChart && selectedView === 'line-chart' && displayCard?.availability.available === true;
   const requiresCalendarSource = (selectedView === 'calendar' || selectedView === 'soil-profile') && sourceOptions.length > 1 && selectedSourceKey === null;
   const exportDefaultChannels = useMemo(() => {
     if (!displayCard) return [];
@@ -507,11 +479,16 @@ export const HistoryCardDetailPage: React.FC = () => {
     const caption = formatWindowCaption(chartWindow.fromMs, chartWindow.toMs);
     return caption === '-' ? fallback : caption;
   }, [chartWindow, t, timeViewport.viewport.range.label]);
+  const calendarTimezone = resolvedZone?.timezone || timeViewport.viewport.range.timezone;
+  const requestedCalendarMonth = useMemo(
+    () => calendarMonthForRange({ ...timeViewport.viewport.range, timezone: calendarTimezone }, calendarMonthOffset),
+    [calendarMonthOffset, calendarTimezone, timeViewport.viewport.range],
+  );
   const requestRange = useMemo(
     () => (selectedView === 'calendar'
-      ? monthRangeFromViewport(timeViewport.viewport.range, calendarMonthOffset)
+      ? calendarMonthRange(requestedCalendarMonth, calendarTimezone)
       : timeViewport.viewport.range),
-    [calendarMonthOffset, selectedView, timeViewport.viewport.range],
+    [requestedCalendarMonth, calendarTimezone, selectedView, timeViewport.viewport.range],
   );
   const singleDeviceName = useMemo(() => {
     if (!displayCard) return null;
@@ -567,8 +544,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     return new Map((Array.isArray(days) ? days : []).map((day) => [day.date, day]));
   }, [cardData.data?.calendar?.days]);
   const calendarMonthLabel = useMemo(
-    () => formatHistoryCalendarMonthLabel(cardData.data?.calendar),
-    [cardData.data?.calendar],
+    () => formatHistoryCalendarMonthLabel(cardData.data?.calendar, requestedCalendarMonth, i18n?.resolvedLanguage || i18n?.language),
+    [cardData.data?.calendar, requestedCalendarMonth, i18n?.resolvedLanguage, i18n?.language],
   );
   const sourceChoiceText = t('history.sourceFilter.chooseOne', { defaultValue: 'Choose one source' });
   const viewModeLabel = detailViewModeLabel(t, selectedView, visibleRangeLabel, calendarMonthLabel);
@@ -664,8 +641,8 @@ export const HistoryCardDetailPage: React.FC = () => {
 
   const handleMonthSwipe = useCallback((delta: -1 | 1) => {
     const baseIso = timeViewport.viewport.range.to ?? timeViewport.viewport.range.from;
-    setCalendarMonthOffset((offset) => clampCalendarMonthOffset(baseIso, offset, delta));
-  }, [timeViewport.viewport.range.to, timeViewport.viewport.range.from]);
+    setCalendarMonthOffset((offset) => clampCalendarMonthOffset(baseIso, offset, delta, Date.now(), calendarTimezone));
+  }, [timeViewport.viewport.range.to, timeViewport.viewport.range.from, calendarTimezone]);
 
   const isVisualizationEvent = useCallback((target: EventTarget | null): boolean => {
     return target instanceof Element && Boolean(target.closest(HISTORY_VISUALIZATION_SURFACE_SELECTOR));
@@ -798,6 +775,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-[var(--bg)]">
         <HistoryDesktopDetail
+          expandedViewsEnabled={EXPANDED_DATA_VIEWS_ENABLED}
           cards={desktopCards}
           selectedCard={desktopSelectedCard}
           zoneName={resolvedZone?.name ?? null}
@@ -875,7 +853,7 @@ export const HistoryCardDetailPage: React.FC = () => {
               {singleDeviceName}
             </div>
           )}
-          {useMobileSoilUplot && resolvedScope && displayCard ? (
+          {MobileSoilUplotHistory && useMobileSoilUplot && resolvedScope && displayCard ? (
             <Suspense fallback={<div className="min-h-[420px]" role="status" aria-label={t('mobileUplot.loading')} />}>
               <MobileSoilUplotHistory scope={resolvedScope} cardId={displayCard.cardId} sourceKey={mobileSourceKey} visibleIntervalReaderRef={mobileVisibleIntervalRef} />
             </Suspense>
@@ -920,6 +898,7 @@ export const HistoryCardDetailPage: React.FC = () => {
               window={chartWindow}
               onInspectDate={handleInspectDate}
               selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
+              requestedCalendarMonth={requestedCalendarMonth}
             />
           )}
         </HistoryVisualizationSurface>

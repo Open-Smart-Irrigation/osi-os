@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AnalysisCatalogEntry, AnalysisSeries } from '../../analysis/types';
 import { toTidyCsv } from '../../analysis/csv';
@@ -44,6 +44,7 @@ export function AnalysisExportMenu({
 }: AnalysisExportMenuProps) {
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
+  const disclosure = useRef<HTMLDetailsElement>(null);
   const disabled = series.length === 0;
   // Version 1 stays the default for saved scripts; version 2 adds timezone, period
   // bounds, quality, coverage and sample count (owner decision D3).
@@ -75,8 +76,20 @@ export function AnalysisExportMenu({
   };
 
   return (
-    <div className="analysis-export-menu">
-    <div className="flex flex-wrap items-start gap-2">
+    <div className="analysis-export-menu max-w-full shrink-0">
+    <details ref={disclosure} className="relative min-w-32 max-w-full" onKeyDown={(event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (disclosure.current) {
+          disclosure.current.open = false;
+          disclosure.current.querySelector('summary')?.focus();
+        }
+      }
+    }}>
+      <summary className="cursor-pointer rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
+        {t('analysis.export.label')}
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 flex w-72 max-w-[calc(100vw-4rem)] flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
       {/* The quality-columns switch belongs to this CSV only; the all-zones export is the gateway's own file. */}
       <div role="group" aria-label={t('analysis.export.csv')} className="flex flex-col gap-1">
         <button
@@ -114,7 +127,8 @@ export function AnalysisExportMenu({
       >
         {t(allZonesPending ? 'analysis.export.allZonesCsvBusy' : 'analysis.export.allZonesCsv')}
       </button>
-    </div>
+      </div>
+    </details>
     {allZonesError && (
       <p role="alert" className="mt-2 text-sm text-[var(--warn-text)]">
         {t(allZonesError)}

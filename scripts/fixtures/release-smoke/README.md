@@ -2,17 +2,20 @@
 
 This suite starts the shipped flows in Node-RED and drives their HTTP API.
 A green PR result permits only the exact failures in `known-failures.json`.
-It does not permit a release while that list has entries.
+It does not permit a release while either deployed runtime's list has entries.
 
-From the repository root, with Node 22 and the `sqlite3` CLI installed
-(on the maintainer workstation, run suites serially through `osi-heavy` and
-set `TMPDIR` to a disk-backed scratch directory):
+From the repository root, with the Node version pinned in the workflow
+and the `sqlite3` CLI installed (run suites serially through the campaign's
+resource wrapper and set `TMPDIR` to your assigned scratch directory):
 
 ```bash
 npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
 node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
 node scripts/test-release-smoke-controls.js
 node scripts/test-release-smoke.js
+npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
+node scripts/test-release-smoke.js --runtime=stock
+node scripts/test-release-smoke-controls.js --runtime=stock
 node scripts/test-release-smoke.js --release
 ```
 
@@ -21,6 +24,90 @@ release verdict on the withdrawn baseline. The runner prints its evidence
 directory: `results.json` contains assertions and observations, `runtime.log`
 contains each completed case, and `seed.log` records the seed/migration build.
 GitHub retains these logs and the summary as an artifact for seven days.
+
+## Candidate emulator runs
+
+Before sending the real-device sheet to Phil, run the full Pi 4 and Pi 5
+acceptance suites locally through `osi-heavy`. Match each green receipt to
+the candidate revision and that board's image checksum. Hosted Release Runtime
+Smoke runs the emulator host tests. VM acceptance takes place on the build
+workstation at the candidate stage.
+[Pi 4 runbook](../../../docs/build/raspi4-emulator-acceptance.md) · [Pi 5 runbook](../../../docs/build/raspi5-emulator-acceptance.md).
+
+## Two deployed runtimes
+
+The shared version declarations are the three workflow-level `OSI_SMOKE_*_VERSION`
+keys in `.github/workflows/release-smoke.yml`. Both jobs and the runner read them.
+The runner checks the selected Node-RED manifest, lock and installed version
+against its key, and checks the process Node version before starting.
+
+The default image job remains `release-runtime-smoke` (Node-RED 3.1.15).
+`release-stock-runtime-smoke` adds Node-RED 4.0.9 under the same Node 20.18.3
+without changing the ruleset. Its separate firmware fixture contains no
+SQLite package. Before network fencing, the runner copies the shipped user
+manifest, lock and local helpers into its fresh user directory and runs the
+same `npm install --omit=dev --no-fund --no-audit` as `deploy.sh`. It rejects
+any changed locked version or added unlocked package. On the measured clean
+install this resolves SQLite node 1.1.1 and sqlite3 5.1.7; npm honors the lock.
+Every runtime run repeats that install and records its log.
+
+Both layouts record resolved package versions and the actual mapped native
+addon in `results.json` and the startup `runtime.json`. The stock run requires that one addon to reside in
+its user directory, with no firmware SQLite. The field-tester package is
+installed from the deploy lock but excluded from palette discovery because
+the suite uses the same outer field-tester stand-in in both runtimes.
+No product function, helper, wiring or function sandbox is replaced.
+
+The [216-case comparison](../release-smoke-stock/baseline-103e4c54.md) on main
+`103e4c54` contains five paired runs per runtime. The five known failures
+match exactly throughout. The image fixture has no unexpected failure;
+the stock runtime has one F-7 actuator-log BUSY failure in five runs. Its
+finished database has two log rows for three accepted opens. That failure
+stays unexpected and red; no case is weakened or added to a list.
+The other four stock runs pass 211 cases with five known failures.
+
+Six obsolete entries passed before removal from the stock list, all fixed
+by #648 (F-1/F-2/F-4). Both runtime lists now contain five entries. The
+[machine-readable report](../release-smoke-stock/baseline-103e4c54.json)
+records every case and run, including the initial stale-list refusal.
+Runtime execution takes 26.7–28.2 seconds, excluding install and seed build.
+
+**Pool setting:** the unchanged harness currently pins libuv to 2, while
+the product uses the default 4. F-7 owns the single product setting in the
+installed init script and the harness reader. This PR must rebase onto that
+change and repeat the comparison when it merges; it does not choose a
+second setting. These are provisional measurements under the current pin.
+
+| Flow dependency | Image fixture | Stock user install |
+| --- | --- | --- |
+| SQLite node / sqlite3 | 1.1.1 / 5.1.7 | 1.1.1 / 5.1.7 |
+| ChirpStack API / gRPC | 4.12.1 / 1.14.3 | 4.12.1 / 1.14.3 |
+| bcryptjs / google-protobuf | 3.0.3 / 3.21.4 | 3.0.3 / 3.21.4 |
+| protobufjs / proto-loader | 7.6.6 / 0.8.1 | 7.5.4 / 0.8.0 |
+| Node-RED MQTT node's client | 4.3.7 | 5.7.0 |
+| Node-RED HTTP node's got | 12.6.0 | 12.6.1 |
+| `device event` | stand-in on both runtimes; real version on the stock base not checked | same |
+| `field_tester_service` | stand-in on both runtimes; real version on the stock base not checked | same |
+
+The runtime's Express (4.21.2), HTTP parser (1.20.3), cronosjs (1.7.1)
+and WebSocket module (7.5.10) resolve identically. JSONata differs
+(1.8.7 versus 2.0.5), but the shipped flows have no JSONata configuration. The ChirpStack API 4.12.1 client against the stock
+base's ChirpStack 4.16.2 server remains a builder/device compatibility
+question; these tests use the local DeviceService stand-in.
+
+Comparing both `10-function.js` files finds no removed, renamed or added
+top-level sandbox name or function wrapper binding. The 4.0.9 code wraps
+`RED.util.getSetting` to bind the requesting node; no shipped function uses
+that method. The allowed-name list in `verify-flows-sandbox.js` therefore
+needs no change. Node-RED 4 also replaces `util.isArray` with `Array.isArray`;
+that does not add a function global.
+
+`--strict`, `--release` and the release-list gate refuse any nonempty list
+across **both** runtimes, even if the selected runtime's own list is empty.
+A tag run is red while the stock list has entries. Ordinary PR/branch runs
+permit only each runtime's exact listed failures. Releases must wait for
+both jobs on the release commit and on the tag; an optional ruleset check
+is not a release waiver. A missing or unreadable runtime list fails closed.
 
 ## What runs
 
@@ -60,12 +147,14 @@ checked after the sweep, whether or not its node is a function. Before
 boot it also compares both maintained image profiles, including every file
 under `usr/share/node-red`, rather than only a hardcoded helper list.
 
-The fixture lock supplies third-party modules rather than the image's
-vendored dependency tree. The direct versions agree for SQLite, bcryptjs,
-gRPC, ChirpStack API and protobuf; transitive versions can differ (for
-example protobufjs 7.6.6 here versus 7.5.4 in the baseline image, and
-proto-loader 0.8.1 versus 0.8.0). Scratch helper dependencies are discovered
-from directories rather than the shipped package manifest. Runtime module
+The image fixture lock supplies third-party modules rather than the image's
+vendored dependency tree. It uses SQLite node 1.1.1; the factory feed pins
+1.1.0. Their `sqlite.js` sources are byte-identical (checked against the
+feed's SHA-256-pinned tarball), but this does not qualify image packaging.
+Other direct versions agree for sqlite3, bcryptjs, gRPC, ChirpStack API and
+protobuf; transitive versions differ as recorded above. Image scratch
+helpers are discovered from directories; the stock install consumes the
+shipped manifest and lock. Runtime module
 installation is disabled; GUI static serving and provisioned credential
 encryption are not exercised. Matching flow/helper bytes and the Node-RED
 version does not establish image dependency, packaging or native ABI parity.
@@ -148,42 +237,40 @@ is a maintainer action. This change does not edit the ruleset or rename an
 existing required check. Manual workflow dispatches and `v*` tag runs enforce
 the empty-list gate after the suite; the release procedure also runs
 `node scripts/test-release-smoke.js --release` before tagging or publishing.
-A manual strict hosted run must succeed on the exact release merge SHA
+A manual strict hosted run of both runtime jobs must succeed on the exact release merge SHA
 before tag creation, and the tag's own run must succeed before image builds;
 see [the release procedure](../../../docs/versioning-workflow.md).
 
 ## Known to fail on the baseline
 
-On payload baseline `88f6e84bb`, strict mode reports 200 passed, 0 unexpected
-failures and 11 known failing cases, then exits 1. The original list had 26
-entries. The untouched-list run proved 17 cases now pass before those entries
+No case is known to fail on main base `d464fb30` with #643, on either the
+image or stock runtime. `dendro-weather-transport` (NEW-1) passes with
+5.4 mm rain, provider VPD and no weather warning. Both known-failure lists
+are empty and byte-identical. F-13/F-14 were removed by #649 and F-7 by #656;
+#643 removes only NEW-1. Provider observations remain separate from
+irrigation control, which is off by default.
+
+The archived `baseline-88f6e84bb.txt` retains its historical filename; its
+header records the earlier `b0a5e3cf` base and candidate flow checksum.
+
+On payload baseline `88f6e84bb`, strict mode reported 200 passed, 0 unexpected
+failures and 11 known failing cases, then exited 1. The original list had 26
+entries. The untouched-list run proved 17 cases passed before those entries
 were removed; six other entries lost their obsolete HTTP-timeout allowances.
-The council follow-up adds a deterministic competing-writer scheduler case
-under F-7 and reaches the existing NEW-1 in a populated dendrometer weather
+The council follow-up added a deterministic competing-writer scheduler case
+under F-7 and reached the existing NEW-1 in a populated dendrometer weather
 case, expanding the list from 9 to 11 without a new finding ID.
-See [the per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
+See [the historical per-case mapping and stage-1 assessment](baseline-mapping-88f6e84bb.md)
 for each merged fix, the single finding behind every remaining case, and the
 assertions that need changing or strengthening for stage 1.
 
-The checked-in output of that baseline is `baseline-88f6e84bb.txt`.
-
 The valve fix (valve control as in v0.8.1, #648) removed the six F-1, F-2 and
 F-4 cases from the list, changed their assertions and added five cases that
-retry at once. With it, strict mode reports 211 passed, 0 unexpected failures
-and 5 known failing cases, then exits 1; that output is
+retry at once. With it, strict mode reported 211 passed, 0 unexpected failures
+and 5 known failing cases, then exited 1; that output is
 `after-valve-fix-648.txt`, and the mapping document says what each changed
-case asserts. Each line below names one remaining case; the JSON file carries
-its exact signatures.
-
-- F-14: `startup-node-errors`.
-
-- F-13: `no-token:POST /api/account-link`.
-
-- F-13: `no-token:POST /api/sync/force`.
-
-- F-7: `scheduler-irrigates`.
-
-- NEW-1: `dendro-weather-transport`.
+case asserts. F-7 left both runtime lists with #656; #643 removes the last
+entry, NEW-1. Both current lists are empty.
 
 ## What a green run does not show
 

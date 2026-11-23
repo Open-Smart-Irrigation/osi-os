@@ -7,16 +7,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.3] — 2026-11-19
+
+### Upgrade notes
+- **A gateway installed from an OSI OS image takes this release by script.**
+  The guidance published after 0.8.2 kept such a gateway on its version
+  until this release, because the script upgrade stopped at the payload
+  switch and left the gateway stopped (#647). This release's `deploy.sh` converts the image's GUI
+  directory and completes the switch (#636).
+- **The deploy checks the farm database before replacing settings or
+  switching payloads.** It runs `PRAGMA integrity_check` on a read-only
+  connection while Node-RED is still running. The check reads every page
+  once. In a workstation test limited to 300 reads per second, the check took
+  about a minute and a half for a 113 MiB database; it has not yet been timed
+  on a gateway. A damaged database is refused and left byte for
+  byte as it was. Copy it with its side files first, then follow
+  [docs/operations/damaged-farm-database.md](docs/operations/damaged-farm-database.md)
+  on the owner's word; there is no automatic repair (#651, #659).
+- **Set a root password.** `deploy.sh` now warns when root has no password.
+  It only warns and changes nothing. Set one with `passwd`, as README Path B
+  Step 1 describes, before the gateway joins any other network (#659).
+- **The payload layout changes at the first deploy of this release.**
+  `/srv/node-red/payloads/active` is a link to the active payload, and the
+  flows, the GUI and every helper module link through it, so one rename
+  switches them together. Copy them with `cp -L`. The state of the active
+  payload is in `/srv/node-red/payload-state.json` (`healthy`, `unverified`
+  or `held`) and in the heartbeat's `health_state`. A deploy whose last line
+  starts `HELD:` keeps Node-RED stopped, after a reboot too, until the deploy
+  is run again or the restore command on that line is used; run the deploy
+  again first (#636).
+- **ChirpStack version.** The images ship the CGOS 4.7.1-generation set:
+  chirpstack 4.12.1, concentratord 4.4.8 and mqtt-forwarder 4.3.2. Field
+  gateways that run stock CGOS 4.10.1 have chirpstack 4.16.2 instead; a script
+  deploy does not change ChirpStack's version. Images use SQLite in WAL mode
+  with a 5 s busy wait from this release on. Field gateways upgraded by script
+  keep ChirpStack's previous setting until the one-time switch script
+  (`scripts/pi/chirpstack-sqlite-wal.sh`, released separately) is run on them.
+  Moving the images to the 4.10.1 set (4.16.2 or later) is planned for the
+  next patch.
+
+### Known limits
+- A gateway with foreign-key orphans in its database refuses the upgrade
+  cleanly and stays on its version; contact support.
+- A deploy that ends `UNVERIFIED:` did not see the flows start. If Node-RED
+  is waiting on missing node types, the flows stay stopped until an operator
+  acts. Treat UNVERIFIED as a stop and read the Node-RED log before leaving
+  the gateway (#636).
+- In this release, a valve opened locally on the gateway shows as "cloud
+  command" in the irrigation history.
+- Do not upgrade a gateway in use by flashing an image: an image erases the
+  farm's data. Upgrade it by script (`deploy.sh`, or the bundle path over a
+  flaky link). Images are for new gateways and deliberate resets (#646).
+- A magnet or local manual open inside the confirmation window can be
+  mistaken for the delivered one-time open: the valve's report does not say
+  what opened it (#672).
+- A partial close is logged like a partial open, so a one-time watering with
+  a partial close in its window ends as "Not confirmed — check the valve" even
+  if it ran. It never shows a false delivery (#672).
+
 ### Added
 - Edge keeps every complete SDI-12 transmission, with the original LoRaWAN
   application events, in a local archive table before normalization
   (migration 0080). The archive is local-only and has no retention rule yet
   (#625); it stops inserting when the database filesystem has less than 1 GiB
-  free, and the normal reading write is never blocked by it.
+  free, and the normal reading write is never blocked by it (#626).
 
 ### Fixed
 - **Valves are no longer blocked after an open, a timed close, flushing, a
-  power cut or an upgrade: valve control decides as in 0.8.1.** 0.8.2 refused
+  power cut or an upgrade: valve control decides as in 0.8.1 (#648).** 0.8.2 refused
   a new open (`valve_busy`) while an earlier command of that valve was
   unresolved, and for the shipped hardware that state never ended: after one
   open whose OPEN report was not received, after "close for N minutes", a
@@ -43,8 +103,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - The cancel of an ordinary open works as in 0.8.1: the open is taken out
     of the queue, settings and a CLOSE are queued again. The whole-queue flush
     of 0.8.2 applies where conditional irrigation is involved. One addition:
-    a cancel that names no open while several are active (the control panel
-    never names one) reads the queue and takes the one active open whose
+    a cancel that names no open while several are active (the control panel's
+    first request names none) reads the queue and takes the one active open whose
     queue id is still listed unsent there. 0.8.1 refused it as ambiguous and
     the valve ran the open. With none or several still queued it is refused
     as before, and the answer says why (`ambiguity`).
@@ -71,15 +131,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     Frames a 0.8.2 gateway queued before the upgrade keep the 31-minute expiry
     0.8.2 gave them.
     A time-bounded protection for ordinary commands is a later project.
+- Local valve commands are answered once, whatever the wiring. A manual
+  CLOSE, a timed open or close, and the five STREGA settings requests
+  (interval, timed action, magnet, partial opening, flushing) sent their
+  frame but got no HTTP answer, so the caller timed out and saw "could not
+  send" for a command the gateway had accepted (#632). When the valve-control
+  module did not load, a valve command now gets 503
+  `valve_control_unavailable` at once instead of hanging; no frame is sent
+  (#635).
+- After a valve command times out, the gateway GUI says that no answer has
+  arrived yet and that the command may have reached the valve. It no longer
+  says "Could not send" or "Failed to open valve" and invites a second press.
+  Open, close and the five STREGA control requests now wait 30 s; Cancel
+  still waits 10 s. After a timed-out command that opens, every
+  opening command for that valve (open, timed or partial open, flushing, and
+  a one-time schedule that would start inside the hold) is held until the
+  next valve reading or 60 s, whichever comes first. CLOSE is never held. The
+  hold covers only the browser tab that saw the timeout (#639).
+- The gateway GUI's cancel works while several opens of a valve are active.
+  The gateway refuses an unnamed cancel there (`ambiguous_actuation`); the
+  GUI showed only "action failed", and the queued opens went out at the
+  valve's next report. Both cancel buttons now read the valve list once
+  after that refusal and send the cancel again, naming the valve's active
+  run. When no run can be named, the refusal's own message is shown (#661).
+- The valve's commanded state (`devices.target_state`) is written when the
+  radio transport accepts a command: OPEN for a timed open, CLOSED for a
+  close. A manual open never set it. A timed open's OPEN turns CLOSED when
+  the valve reports closed, after a cancel that proves the open never left
+  the gateway, or 30 minutes after the open's window when no report comes.
+  When the timed-open target is resolved to CLOSED, that resolution reaches
+  the cloud as a device event (#617).
+- Assigning a device to a zone or removing it, deleting a device or a zone,
+  and the conditional-irrigation lifecycle steps no longer fail in the
+  gateway's Node-RED on an undeclared `crypto`: the nine function nodes
+  involved now declare it. A new check in the sync-flow workflow refuses a
+  function node that uses a name the Node-RED sandbox does not provide
+  (#631).
 - **A rejected API token no longer marks the gateway `degraded` until
-  Node-RED restarts (#462).** Record Error counted every 401 from a token
+  Node-RED restarts (#462, #614).** Record Error counted every 401 from a token
   guard as a gateway error, and `health_state` stays `degraded` while that
   counter is above zero, so one unauthenticated request or a browser with
   an expired token degraded the gateway until the next restart. Tagged token
   rejections are no longer counted in `errors_total`; they still appear as
   a rate-limited warning in the gateway log. Other errors count as before.
 - The Kiwi/Clover `Process Data` node no longer logs
-  `Unexpected payload structure` for every LSN50 uplink (#466).
+  `Unexpected payload structure` for every LSN50 uplink (#466, #619).
 - Journal V2: a mutation the cloud refuses with a 4xx no longer blocks the
   mutations of other journal records. A refusal receipt marks it rejected and
   it is not retried automatically; any other refusal holds it and retries it
@@ -88,7 +184,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rejected one, so they reach the cloud in the order they were made. Behind a
   rejected mutation they stay queued and unsent until an operator resolves it
   (#612). 401, 403, 408, 429 and 5xx answers keep stopping the tick, and so
-  does any 4xx refusal of a cutover barrier (#447).
+  does any 4xx refusal of a cutover barrier (#447, #620).
 - `deploy.sh` no longer refuses every deploy on a legacy-capture marker whose
   capture was pruned. It moves the marker aside and captures the live flows,
   GUI and helper modules afresh. Before any capture it now checks that they
@@ -97,7 +193,122 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   captured such a set as the rollback target. The same refusal follows a
   sysupgrade with a v0.8.1 or older image on a gateway deployed with helper
   modules in the payload, because those images copy their helpers over the
-  module links. Both checks run before any live file is replaced (#466).
+  module links. Both checks run before any live file is replaced (#466, #618).
+- Saving the valve settings dialog no longer detaches a valve from its
+  zone's flow calibration. Save, even after changing only the valve
+  generation, stored the zone's measured rate as the valve's own estimated
+  rate. The dialog now sends the flow rate only when it was edited, shows
+  "Using the zone calibration: … L/min" for a valve without a rate of its
+  own, and is titled "Settings for" the valve's name (#613).
+- With scoped access on (`OSI_SCOPED_ACCESS=1`), valve schedule and settings
+  requests are checked as valve commands are: the caller's current account,
+  role and zone access first, then device ownership. A disabled account, a
+  viewer, or an owner whose zone access was revoked is refused, and the valve
+  list shows only the caller's own valves it can still reach. A zone grant
+  does not let a member operate another account's valve. An owner's valve in
+  no zone is left out of the list and answers 404 on the per-valve routes.
+  With scoped access off nothing changes (#630).
+- The sensor flag routes (`PUT /api/devices/:deveui/dendro`, `/temp`,
+  `/rain-gauge` and `/flow-meter`) answered 200 even when they changed no
+  row. With scoped access on, a member granted the device's zone now sets the
+  flag on a device another account claimed; before, the write was dropped.
+  A request that changes no row answers 404 (#616).
+- `POST /api/account-link` and `POST /api/sync/force` answer 401 when the
+  request carries no token. An unconfigured SQLite node in the dendrometer
+  flow, which did nothing and logged an error at every start, is removed
+  (#649).
+- **Overlapping valve commands no longer damage the farm database.** On a
+  factory image the flows and the database helper loaded two copies of
+  SQLite, each with its own locks on `farming.db`. Five opens and three
+  one-time schedule saves 1.5 s apart left the file malformed on 0.8.0,
+  0.8.1 and 0.8.2, and scheduled opens then stopped firing. The helper now
+  uses the SQLite module the flows loaded. A second loaded copy is reported
+  as `sqlite_module_conflict` in the heartbeat's `health_state` and in the
+  log, and the gateway keeps irrigating. At each start a read-only check
+  (`PRAGMA quick_check`) runs beside the flows and reports a damaged,
+  missing or unreadable database in `health_state`. It repairs nothing; see
+  the upgrade note on damaged databases (#651).
+- Writes from the flows are no longer lost while the database is busy. Two
+  statements could run at once on the flows' shared connection, and a write
+  waiting for the lock was dropped while the gateway stalled for up to 10 s.
+  In a test runtime, three valves due at once lost about 30 actuator-log rows
+  in 50 runs, and the scheduler lost its own `last_triggered_at` writes. The
+  connection now runs one statement at a time, its busy wait is the intended
+  5 s (it was 1 s), and a scheduler or actuator-log write that still fails
+  leaves one log line naming the node (#656).
+- **A deploy cut off at any step leaves the old payload or the new one
+  complete, never a mix.** A dropped SSH session, a power cut or a kill
+  during the switch could leave flows from the new release running with the
+  GUI and helper modules of the old one. The switch is now one rename of
+  `payloads/active`, and an interrupted switch is finished at the next deploy
+  or boot. With it:
+  - a retry after a cut first runs the health check the cut skipped;
+  - a start is failed only on an observed error. A healthy upgrade whose
+    start line had already left the gateway log was rolled back or held; it
+    now stays running, recorded `unverified` (see Known limits);
+  - every deploy after the first stopped at the clock hook, because neither
+    gateway base has `stat`. The deploy now checks, before any change, that
+    every command it runs exists;
+  - only one deploy runs at a time, and a hang-up from a dying SSH session
+    ends the deploy through its normal exit path;
+  - on a gateway installed from an image, the first switch no longer fails on
+    the image's GUI directory (#636).
+- **A fresh gateway on a stock ChirpStack Gateway OS base, installed as
+  README Path B describes, completes its first deploy.** It stopped at
+  "Journal media configuration" (`uci: Entry not found`) with the new
+  `settings.js` and init script in place and no working API, because nothing
+  created `/etc/config/osi-server`. The deploy now creates it from the image's
+  own defaults. Gateway-state checks now run before the settings and init
+  scripts are replaced. Installing a missing SQLite command or repairing its
+  native module can happen earlier; the ChirpStack credential-file check still
+  runs after those files are replaced. On images, the first-boot Tailscale join no longer fails for a
+  key that contains the letters s, p, a, c or e, which the base's `tr`
+  deleted from the key (#659).
+- Dendrometer analytics fetches provider rain and VPD again; the fetch had
+  failed in the Node-RED function sandbox since 0.6.0. The observations are
+  stored with the analysis but do not change irrigation by default: provider
+  VPD does not adjust stress, and provider rain does not suppress irrigation.
+  They act only when the gateway's `app_settings` key
+  `dendro_provider_irrigation_enabled` is exactly `1`. Enable it per gateway
+  only with the owner's approval (#643).
+- ChirpStack in new images refuses valve commands and drops radio uplinks
+  with "database is locked" far less often under load. Its SQLite database
+  now runs in WAL mode with a 5 s busy wait; before, a rollback journal and a
+  1 s wait let uplink handling and API calls lock each other out. In a Pi 4
+  test at three uplinks per second, failed uplinks fell from 27.2 % to 2.5 %.
+  Gateways upgraded by script keep the old setting; see the ChirpStack
+  version upgrade note (#670).
+- A sensor reading, valve report or command acknowledgement that arrived
+  while sync was writing could be lost. When such a transaction meets another
+  node's manual transaction, the database helper now releases its queue and
+  retries it, up to 10 attempts over 4.5 s. This is a mitigation: a plain
+  write that lands inside another node's manual transaction can still be
+  rolled back with it. Converting those transactions follows in a later
+  release (#671).
+- A valve command sent while the database was busy no longer stays
+  "attempted" without an error. The writes around sending are retried on a
+  locked database within a 9 s deadline per command. A command that
+  ChirpStack accepted is never reported as failed, and it is never sent
+  twice. When the lock is held longer than 5 s before the frame is queued,
+  the command is still refused with 503; no frame was sent, and pressing
+  again is safe (#669, #675).
+- A scheduled one-time watering whose sending could not be confirmed no
+  longer stays "planned" silently. The gateway GUI shows "Sent, waiting for
+  the valve's confirmation (until …)". The deadline follows the valve's own
+  reporting interval: twice the interval plus 5 min, at least 15 min and at
+  most 3 h. When the valve reports open, the GUI says "Valve reported open".
+  Without proof the watering ends "Not confirmed — check the valve", and it
+  is never resent automatically. Fired one-time schedules no longer cost a
+  database transaction every minute (#672).
+- The ChirpStack backup and restore buttons now verify that ChirpStack has
+  stopped and check every copy. A backup set is published only when it is
+  complete. A restore validates the backup before it touches the live
+  database and never deletes the live database. A failed restore is undone,
+  or it leaves the services stopped and prints the recovery steps (#674).
+- Factory images now carry the current dashboard: the committed feed copy of
+  the GUI is rebuilt from `web/react-gui` (it was last refreshed for v0.8.2's
+  release commit, so images built since lacked later GUI fixes, including the
+  valve-cancel retry). Script upgrades were not affected.
 
 ---
 

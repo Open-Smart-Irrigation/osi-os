@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
+const { installationOsiLib } = require('./lib/installation-osi-lib');
 
 const FLOWS_PATH = path.resolve(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
@@ -73,6 +74,8 @@ function execute(node, msg, sqliteDb, opts) {
   const context = {
     msg, flow, env, global: globalCtx,
     osiDb: makeOsiDb(sqliteDb),
+    // Builders gate on the real installation helper (gatewayWorkBlocked), as on a gateway.
+    osiLib: installationOsiLib('bcm27xx_bcm2712'),
     node: { warn(m) { warnings.push(String(m)); }, error(m) { warnings.push(String(m)); }, status() {} },
     console, Date, Number, String, Array, Object, Map, Set, Boolean, Math, JSON, Promise,
     parseInt, parseFloat,
@@ -157,7 +160,7 @@ async function testBuildBatchCorrelation() {
   const node = nodeById('command-ack-build-batch');
   const { resultPromise } = execute(node, {}, db, {
     env: { DEVICE_EUI: 'AABBCCDDEEFF0011', DEVICE_EUI_CONFIDENCE: 'confirmed' },
-    global: { fs: { existsSync: () => false } },
+    global: { fs: { existsSync: () => false, readdirSync: () => [] } },
     flowState: { sync_state: {} },
   });
   const out = await resultPromise;
@@ -583,7 +586,7 @@ function buildBatch(db, flowState) {
   db.prepare("INSERT INTO users (server_url, server_sync_token, server_linked_at) VALUES ('https://cloud.example', 'tok', '2026-01-01')").run();
   return execute(nodeById('command-ack-build-batch'), {}, db, {
     env: { DEVICE_EUI: '0016C001F1000001', DEVICE_EUI_CONFIDENCE: 'confirmed' },
-    global: { fs: { existsSync: () => false } },
+    global: { fs: { existsSync: () => false, readdirSync: () => [] } },
     flowState: flowState || { sync_state: {} },
   });
 }

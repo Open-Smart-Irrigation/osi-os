@@ -860,6 +860,7 @@ function createProvisioningClientFromEnv(env) {
 }
 
 module.exports = {
+  grpcDeadlineMs,
   createClient,
   createProvisioningClientFromEnv,
   updateDeviceName,

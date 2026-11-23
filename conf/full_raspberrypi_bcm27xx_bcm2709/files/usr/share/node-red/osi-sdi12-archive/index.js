@@ -4,15 +4,30 @@
 // Canonical telemetry remains the responsibility of osi-device-writer.
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 
 const MAX_ASCII = 1500;
 const MAX_JSON_BYTES = 256 * 1024;
-// The archive has no retention rule yet. Below this much free space on the
-// database filesystem it stops inserting so it cannot fill the gateway disk.
-const ARCHIVE_MIN_FREE_BYTES = 1073741824;
+// Both maintained profiles support 16 GB-class cards and larger media.
+const MIB = 1024 ** 2;
+const ARCHIVE_MIN_FREE_BYTES = 1024 * MIB;
+const PRESSURE_RECOVERY_BYTES = ARCHIVE_MIN_FREE_BYTES + 64 * MIB;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RETENTION_MS = 365 * DAY_MS;
+const PRESSURE_MIN_AGE_MS = 30 * DAY_MS;
+const EMERGENCY_FREE_BYTES = 16 * MIB;
+const PRESSURE_EPISODE_CAP = 32;
+const PRESSURE_KEY = 'sdi12_archive_pressure_v1';
+// One bounded WAL write per tick. Each row can hold two 256 KiB JSON fields.
+const RETENTION_BATCH_SIZE = 8;
+const ORDERED_ROWS = 'FROM sdi12_transmissions INDEXED BY idx_sdi12_transmissions_receipt_time';
+const RECEIPT_ORDER = 'ORDER BY received_at, id';
+const READ_PRESSURE = 'SELECT value FROM app_settings WHERE key = ?';
+const CLEAR_PRESSURE = 'DELETE FROM app_settings WHERE key = ? AND value IS ?';
 const DISK_WARN_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_DB_PATH = '/data/db/farming.db';
 const lastDiskWarnAt = new Map();
+let maintenanceRunning = false;
 
 function warnClassification(warn, message) {
   if (typeof warn !== 'function') return false;
@@ -36,6 +51,13 @@ function warnDiskOncePerHour(kind, warn, message, nowMs) {
   return warnClassification(warn, message);
 }
 
+function filesystemFreeBytes(dbPath, statfs) {
+  const { bavail, bsize } = statfs(path.dirname(dbPath));
+  const bytes = Number(bavail) * Number(bsize);
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || !(bsize > 0)) throw new Error('unusable statfs result');
+  return bytes;
+}
+
 // Returns true when archiving may proceed. A failing probe never stops the archive.
 function hasFreeSpace(options, warn, nowMs) {
   const opts = options || {};
@@ -43,9 +65,7 @@ function hasFreeSpace(options, warn, nowMs) {
   let freeBytes;
   try {
     const statfs = typeof opts.statfs === 'function' ? opts.statfs : fs.statfsSync;
-    const stats = statfs(path.dirname(dbPath));
-    freeBytes = Number(stats.bavail) * Number(stats.bsize);
-    if (!Number.isFinite(freeBytes) || freeBytes < 0) throw new Error('unusable statfs result');
+    freeBytes = filesystemFreeBytes(dbPath, statfs);
   } catch (error) {
     warnDiskOncePerHour('probe', warn,
       'SDI12 archive disk probe failed: ' + String(error && error.message ? error.message : error), nowMs);
@@ -77,9 +97,25 @@ function classifyNormalization(config, loadNormalizer, warn) {
   }
 }
 
-async function record(db, info, row, nowMs, loadNormalizer, warn, options) {
+function receiptClock(now, clock) {
+  const { clockStatus, readRuntimeClock } = require('../osi-irrigation-policy/clock');
+  return clockStatus({ ...(clock || readRuntimeClock)(), now });
+}
+
+async function capture(info, nowMs, warn, options, save) {
   if (!info || info.quarantineOnly || info.fPort !== 2
       || !info.decoded || typeof info.decoded.data_sum !== 'string') return false;
+  const clockMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const time = receiptClock(clockMs, options?.clock);
+  if (!time.trusted) {
+    warnDiskOncePerHour('capture_clock', warn, 'SDI12 archive skipped: untrusted clock (' + time.reason + ')', performance.now());
+    return { archived: false, reason: 'untrusted_clock' };
+  }
+  if (!hasFreeSpace(options, warn, clockMs)) return { archived: false, reason: 'low_disk' };
+  return save(new Date(clockMs).toISOString());
+}
+
+async function insertRecord(db, info, row, receivedAt, loadNormalizer, warn) {
   const deveui = String(info.deveui || '').trim().toUpperCase();
   if (!deveui) throw new Error('SDI12 archive requires a device identity');
   const raw = info.decoded.data_sum;
@@ -111,22 +147,26 @@ async function record(db, info, row, nowMs, loadNormalizer, warn, options) {
   if (Buffer.byteLength(framesJson) > MAX_JSON_BYTES || Buffer.byteLength(contextJson) > MAX_JSON_BYTES) {
     throw new Error('SDI12 archive JSON exceeds 256 KiB');
   }
-  const clockMs = Number.isFinite(nowMs) ? nowMs : Date.now();
-  if (!hasFreeSpace(options, warn, clockMs)) return { archived: false, reason: 'low_disk' };
-  const receivedAt = new Date(clockMs).toISOString();
+  const uplinkKey = require('../osi-uplink-dedup-guard/durable').sdi12Key(info);
   await db.run(
     'INSERT INTO sdi12_transmissions ' +
-    '(deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    '(deveui, recorded_at, received_at, payload_version, raw_ascii, frames_json, context_json' + (uplinkKey ? ', uplink_key' : '') + ') ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?' + (uplinkKey ? ', ?' : '') + ')'
+      + (uplinkKey ? ' ON CONFLICT(deveui, uplink_key) WHERE uplink_key IS NOT NULL DO NOTHING' : ''),
     [deveui, typeof info.recordedAt === 'string' ? info.recordedAt : null, receivedAt,
       Number.isInteger(info.decoded.Payver) ? info.decoded.Payver : null,
-      raw, framesJson, contextJson]
+      raw, framesJson, contextJson].concat(uplinkKey ? [uplinkKey] : [])
   );
   return true;
 }
 
+function record(db, info, row, nowMs, loadNormalizer, warn, options) {
+  return capture(info, nowMs, warn, options, receivedAt => insertRecord(db, info, row, receivedAt, loadNormalizer, warn));
+}
+
 function store(dbApi, info, row, nowMs, loadNormalizer, warn, options) {
-  return dbApi.isolatedFarmingTransaction(tx => record(tx, info, row, nowMs, loadNormalizer, warn, options));
+  return capture(info, nowMs, warn, options, receivedAt =>
+    dbApi.isolatedFarmingTransaction(tx => insertRecord(tx, info, row, receivedAt, loadNormalizer, warn)));
 }
 
 function notifyNode(node, method, value) {
@@ -148,6 +188,9 @@ function report(node, info, saved) {
   if (saved && saved.reason === 'low_disk') {
     return notifyNode(node, 'status', {fill:'yellow',shape:'dot',text:'SDI12 archive skipped: low disk'});
   }
+  if (saved && saved.reason === 'untrusted_clock') {
+    return notifyNode(node, 'status', {fill:'yellow',shape:'dot',text:'SDI12 archive skipped: untrusted clock'});
+  }
   const frames = info && Array.isArray(info.frames) ? info.frames : [];
   const hasOriginalBytes = frames.some(frame => frame && typeof frame === 'object'
     && frame.event && typeof frame.event === 'object' && typeof frame.event.data === 'string');
@@ -158,4 +201,207 @@ function report(node, info, saved) {
   return notifyNode(node, 'status', {fill:'grey',shape:'ring',text:'SDI12 no transmission'});
 }
 
-module.exports = { record, store, report, ARCHIVE_MIN_FREE_BYTES, resetDiskWarnings };
+function openMaintenanceDb(dbApi) {
+  return new Promise((resolve, reject) => {
+    const db = dbApi.openNativeFarming(dbApi.OPEN_READWRITE, error => {
+      if (error) reject(error);
+      else resolve(db);
+    });
+  });
+}
+
+function query(db, method, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db[method](sql, params, function onQuery(error, row) {
+      if (error) reject(error);
+      else resolve(method === 'run' ? this.changes : row);
+    });
+  });
+}
+
+function deleteBatch(db, cutoff, limit = RETENTION_BATCH_SIZE) {
+  return query(db, 'run', `DELETE FROM sdi12_transmissions WHERE id IN (
+    SELECT id ${ORDERED_ROWS} WHERE received_at <= ? ${RECEIPT_ORDER} LIMIT ?
+  )`, [cutoff, limit]);
+}
+
+async function reusableBytes(db) {
+  const { freelist_count: pages } = await query(db, 'get', 'PRAGMA freelist_count');
+  const { page_size: bytes } = await query(db, 'get', 'PRAGMA page_size');
+  return pages * bytes;
+}
+
+async function readPressureState(db) {
+  const row = await query(db, 'get', READ_PRESSURE, [PRESSURE_KEY]);
+  if (!row) return { deleted: 0, confirmed: true };
+  const state = JSON.parse(row.value);
+  if (!state || !Number.isSafeInteger(state.deleted) || state.deleted < 1 || state.deleted > PRESSURE_EPISODE_CAP) {
+    throw new Error('invalid SDI12 archive pressure state');
+  }
+  // An older state record contains only a pre-batch measurement. Treat it
+  // as unconfirmed because that measurement cannot establish recovery.
+  return { deleted: state.deleted, confirmed: typeof state.batchId === 'string' && state.confirmed === true };
+}
+
+function pressureStop(state) {
+  if (state.deleted >= PRESSURE_EPISODE_CAP) return 'pressure_cap';
+  if (!state.confirmed) return 'pressure_stalled';
+  return null;
+}
+
+async function deleteUnderPressure(db, cutoff) {
+  const batchId = randomUUID();
+  await query(db, 'run', 'BEGIN IMMEDIATE');
+  try {
+    // Re-read under the write lock. The batch and the episode receipt must
+    // commit together, including if Node-RED stops before the second statfs.
+    const state = await readPressureState(db);
+    const stopped = pressureStop(state);
+    if (stopped) {
+      await query(db, 'run', 'COMMIT');
+      return { reason: stopped, deleted: 0 };
+    }
+    const limit = Math.min(RETENTION_BATCH_SIZE, PRESSURE_EPISODE_CAP - state.deleted);
+    const deleted = await deleteBatch(db, cutoff, limit);
+    const episode = { deleted: state.deleted + deleted, batchId, confirmed: false };
+    if (deleted) {
+      await query(db, 'run', `INSERT INTO app_settings(key, value, updated_at)
+        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+      [PRESSURE_KEY, JSON.stringify(episode)]);
+    }
+    await query(db, 'run', 'COMMIT');
+    return { reason: deleted ? 'pressure' : 'pressure_protected', deleted, episode };
+  } catch (error) {
+    try {
+      await query(db, 'run', 'ROLLBACK');
+    } catch (rollbackError) {
+      error.rollbackError = rollbackError;
+    }
+    throw error;
+  }
+}
+
+function isBusy(error) {
+  return error.code === 'SQLITE_BUSY' || error.code === 'SQLITE_LOCKED';
+}
+
+async function confirmPressure(db, episode, statFree, freeBytes) {
+  let afterFree;
+  try {
+    afterFree = statFree();
+  } catch (error) {
+    return { reason: 'pressure_stalled', freeBytes, detail: error.message };
+  }
+
+  const pending = JSON.stringify(episode);
+  try {
+    if (afterFree >= PRESSURE_RECOVERY_BYTES) {
+      await query(db, 'run', CLEAR_PRESSURE, [PRESSURE_KEY, pending]);
+      return { reason: 'pressure', freeBytes: afterFree };
+    }
+    if (episode.deleted >= PRESSURE_EPISODE_CAP) return { reason: 'pressure_cap', freeBytes: afterFree };
+    if (afterFree > freeBytes) {
+      // Only the process that measured this batch may confirm it. A
+      // conditional update prevents a stale confirmation after a reset.
+      const changes = await query(db, 'run', `UPDATE app_settings SET value = ?,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE key = ? AND value IS ?`,
+      [JSON.stringify({ ...episode, confirmed: true }), PRESSURE_KEY, pending]);
+      if (changes) return { reason: 'pressure', freeBytes: afterFree };
+    }
+  } catch (error) {
+    if (!isBusy(error)) throw error;
+    return { reason: 'pressure_stalled', freeBytes: afterFree, detail: error.message };
+  }
+  return { reason: 'pressure_stalled', freeBytes: afterFree };
+}
+
+async function prunePressure(db, cutoff, statFree, freeBytes) {
+  const state = await readPressureState(db);
+  const stopped = pressureStop(state);
+  if (stopped) return { reason: stopped, deleted: 0, freeBytes, reusableBytes: await reusableBytes(db) };
+  const eligible = await query(db, 'get', `SELECT id ${ORDERED_ROWS} WHERE received_at <= ? LIMIT 1`, [cutoff]);
+  if (!eligible) {
+    const any = await query(db, 'get', `SELECT id ${ORDERED_ROWS} LIMIT 1`);
+    return { reason: any ? 'pressure_protected' : 'pressure_empty', deleted: 0, freeBytes, reusableBytes: await reusableBytes(db) };
+  }
+
+  const { reason, deleted, episode } = await deleteUnderPressure(db, cutoff);
+  const outcome = deleted ? await confirmPressure(db, episode, statFree, freeBytes) : { reason, freeBytes };
+  return { ...outcome, deleted, reusableBytes: await reusableBytes(db) };
+}
+
+async function prune(db, now, statFree, freeBytes) {
+  if (freeBytes >= PRESSURE_RECOVERY_BYTES) {
+    const prior = await query(db, 'get', READ_PRESSURE, [PRESSURE_KEY]);
+    if (prior) {
+      await query(db, 'run', CLEAR_PRESSURE, [PRESSURE_KEY, prior.value]);
+    }
+  }
+  const cutoff = new Date(now - RETENTION_MS).toISOString();
+  const expired = await query(db, 'get', `SELECT id ${ORDERED_ROWS} WHERE received_at <= ? LIMIT 1`, [cutoff]);
+  if (expired) return { reason: 'expired', deleted: await deleteBatch(db, cutoff), freeBytes };
+  if (freeBytes >= ARCHIVE_MIN_FREE_BYTES) return { reason: 'idle', deleted: 0 };
+  return prunePressure(db, new Date(now - PRESSURE_MIN_AGE_MS).toISOString(), statFree, freeBytes);
+}
+
+async function maintain(dbApi, {
+  now = Date.now(), clock, statfs = fs.statfsSync, dbPath = DEFAULT_DB_PATH,
+} = {}) {
+  // Use the boot's last successful NTP sample and elapsed uptime. A wall-clock
+  // step can otherwise make a recent archive look a year old.
+  const time = receiptClock(now, clock);
+  if (!time.trusted) return { reason: time.reason, deleted: 0 };
+  const statFree = () => filesystemFreeBytes(dbPath, statfs);
+  let freeBytes;
+  try {
+    freeBytes = statFree();
+  } catch (error) {
+    return { reason: 'disk_probe_failed', deleted: 0, detail: error.message };
+  }
+  if (freeBytes < EMERGENCY_FREE_BYTES) return { reason: 'disk_critical', deleted: 0, freeBytes };
+
+  let db;
+  try {
+    db = await openMaintenanceDb(dbApi);
+    await query(db, 'get', 'PRAGMA busy_timeout=0');
+    // The regular writers checkpoint. Maintenance leaves checkpoint work off
+    // its short write path and yields immediately if a writer has the lock.
+    await query(db, 'get', 'PRAGMA wal_autocheckpoint=0');
+    await query(db, 'get', 'PRAGMA synchronous=NORMAL');
+    return await prune(db, now, statFree, freeBytes);
+  } catch (error) {
+    if (isBusy(error)) return { reason: 'busy', deleted: 0 };
+    throw error;
+  } finally {
+    if (db) await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()));
+  }
+}
+
+async function liveMaintain({ node, osiLib }) {
+  if (maintenanceRunning) return null;
+  maintenanceRunning = true;
+  try {
+    const loaded = osiLib.require('osi-db-helper');
+    if (!loaded.ok) throw new Error(loaded.error);
+    const result = await maintain(loaded.value);
+    const lowDisk = result.freeBytes < ARCHIVE_MIN_FREE_BYTES;
+    const healthy = !lowDisk && ['idle', 'expired', 'pressure'].includes(result.reason);
+    const blocked = ['pressure_cap', 'pressure_stalled', 'pressure_protected', 'pressure_empty'].includes(result.reason);
+    const status = blocked ? 'SDI12 archive cannot recover space' : 'SDI12 retention';
+    const text = `${status}: ${result.reason} (${result.deleted} removed)`;
+    notifyNode(node, 'status', { fill: healthy ? 'green' : 'yellow', shape: 'dot', text });
+    if (!healthy && result.reason !== 'busy') {
+      const storage = lowDisk ? `, filesystem free ${result.freeBytes} bytes, SQLite reusable ${result.reusableBytes ?? 'unknown'} bytes` : '';
+      warnDiskOncePerHour(`maintenance:${result.reason}`, message => node.warn(message),
+        text + storage + (result.detail ? `: ${result.detail}` : ''), performance.now());
+    }
+  } catch (error) {
+    node.error('SDI12 retention failed: ' + error.message);
+  } finally {
+    maintenanceRunning = false;
+  }
+  return null;
+}
+
+module.exports = { record, store, report, maintain, liveMaintain, ARCHIVE_MIN_FREE_BYTES, resetDiskWarnings };

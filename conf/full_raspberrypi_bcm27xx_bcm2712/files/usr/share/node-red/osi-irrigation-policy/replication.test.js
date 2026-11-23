@@ -750,53 +750,49 @@ test('valve reassignment retires the old policy binding instead of publishing a 
   } finally { closeFixture(f); }
 });
 
-test('flowPeerDb runs a transaction over the flow connection and commits it (issue #233)', async () => {
+test('flowPeerDb uses the facade transaction scope and preserves its result', async () => {
   const calls = [];
-  const rows = { 'SELECT 1': [{ one: 1 }] };
-  const q = async (sql, params) => { calls.push(['q', sql, params]); return rows[sql] || []; };
-  const run = async (sql, params) => { calls.push(['run', sql, params]); };
-  const warnings = [];
-  const db = replication.flowPeerDb(q, run, (text) => warnings.push(text), 'Peer capture');
+  const tx = { get: async () => ({ one: 1 }), run: async () => {} };
+  const facade = {
+    get: async (sql, params) => { calls.push([sql, params]); return sql === 'SELECT 1' ? { one: 1 } : undefined; },
+    transaction: async (fn) => { calls.push('transaction'); return fn(tx); }
+  };
+  const db = replication.flowPeerDb(facade, assert.fail, 'Peer capture');
   assert.deepEqual(await db.get('SELECT 1'), { one: 1 });
   assert.equal(await db.get('SELECT 2', ['x']), null);
-  const value = await db.transaction(async (tx) => {
-    assert.deepEqual(await tx.get('SELECT 1', [7]), { one: 1 });
-    await tx.run('UPDATE t SET v=?', [1]);
+  assert.equal(await db.transaction(async (scope) => {
+    assert.strictEqual(scope, tx);
     return 'done';
-  });
-  assert.equal(value, 'done');
-  assert.deepEqual(calls, [
-    ['q', 'SELECT 1', []],
-    ['q', 'SELECT 2', ['x']],
-    ['run', 'BEGIN IMMEDIATE', undefined],
-    ['q', 'SELECT 1', [7]],
-    ['run', 'UPDATE t SET v=?', [1]],
-    ['run', 'COMMIT', undefined],
-  ]);
-  assert.deepEqual(warnings, []);
+  }), 'done');
+  assert.deepEqual(calls, [['SELECT 1', []], ['SELECT 2', ['x']], 'transaction']);
 });
 
-test('flowPeerDb rolls back a failed transaction and rethrows its error without a warning (issue #233)', async () => {
-  const calls = [];
-  const warnings = [];
-  const failure = new Error('peer write failed');
-  const db = replication.flowPeerDb(async () => [], async (sql) => { calls.push(sql); }, (text) => warnings.push(text), 'Peer capture');
-  await assert.rejects(db.transaction(async () => { throw failure; }), (error) => error === failure);
-  assert.deepEqual(calls, ['BEGIN IMMEDIATE', 'ROLLBACK']);
-  assert.deepEqual(warnings, []);
+test('flowPeerDb propagates transaction failure and labels an attached rollback failure', async () => {
+  for (const rollbackError of [null, new Error('database is locked')]) {
+    const warnings = [];
+    const failure = new Error('peer write failed');
+    if (rollbackError) failure.rollbackError = rollbackError;
+    const facade = { transaction: async () => { throw failure; } };
+    const db = replication.flowPeerDb(facade, (text) => warnings.push(text), 'Peer invalidation');
+    await assert.rejects(db.transaction(async () => 'value'), (error) => error === failure);
+    assert.deepEqual(warnings, rollbackError ? ['Peer invalidation rollback failed: database is locked'] : []);
+  }
 });
 
-test('flowPeerDb reports a failed rollback with its label and still rethrows the original error (issue #233)', async () => {
-  const calls = [];
-  const warnings = [];
-  const failure = new Error('commit failed');
-  const run = async (sql) => {
-    calls.push(sql);
-    if (sql === 'COMMIT') throw failure;
-    if (sql === 'ROLLBACK') throw new Error('database is locked');
-  };
-  const db = replication.flowPeerDb(async () => [], run, (text) => warnings.push(text), 'Peer invalidation');
-  await assert.rejects(db.transaction(async () => 'value'), (error) => error === failure);
-  assert.deepEqual(calls, ['BEGIN IMMEDIATE', 'COMMIT', 'ROLLBACK']);
-  assert.deepEqual(warnings, ['Peer invalidation rollback failed: database is locked']);
+
+test('an unspecified relink target never inherits the old account; baseline and identity remain fenced', async () => {
+  const f = fixture();
+  try {
+    const context = { server_url: 'https://new-cloud.test', gateway_device_eui: GATEWAY, installation_uuid: INSTALLATION };
+    const attempt = await replication.beginLinkAttempt(f.db, { context, nonce: 'unknown-target' });
+    assert.equal(attempt.context.cloud_user_id, null);
+    assert.equal(attempt.baseline_context.cloud_user_id, USER_UUID);
+    const response = { ...context, cloud_user_id: '77' };
+    const accepted = await replication.validateLinkAttempt(f.db, { nonce: attempt.nonce, context: response, capabilities: ['conditional_irrigation_v1'] });
+    assert.equal(accepted.valid, true);
+    f.native.prepare("UPDATE sync_link_state SET cloud_user_id='concurrent-account' WHERE peer_node='cloud'").run();
+    const stale = await replication.validateLinkAttempt(f.db, { nonce: attempt.nonce, context: response, capabilities: ['conditional_irrigation_v1'] });
+    assert.equal(stale.valid, false);
+    assert.equal(stale.reason, 'stale_peer_context');
+  } finally { closeFixture(f); }
 });

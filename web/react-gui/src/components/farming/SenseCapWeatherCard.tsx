@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { useDismissOnPointerDown } from '../../hooks/useDismissOnPointerDown';
 import { devicesAPI, getApiErrorMessage, s2120API } from '../../services/api';
@@ -25,7 +26,7 @@ interface Props {
 
 type SensorMonitorConfig = {
   field: string;
-  label: string;
+  labelKey: 'environment.metrics.air_temperature_c' | 'environment.metrics.relative_humidity_pct' | 'environment.metrics.pressure_hpa' | 'environment.metrics.light_lux' | 'environment.metrics.uv_index';
   unit: string;
   color: string;
   decimals: number;
@@ -43,45 +44,45 @@ function fmtLux(value: number | null | undefined): string {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}k lux` : `${Math.round(value)} lux`;
 }
 
-function formatCounterInterval(seconds: number | null | undefined): string | null {
+function formatCounterInterval(seconds: number | null | undefined, t: TFunction<'devices'>): string | null {
   const value = Number(seconds);
   if (!Number.isFinite(value) || value <= 0) return null;
   const minutes = value / 60;
   if (minutes >= 1 && Math.abs(minutes - Math.round(minutes)) < 1e-9) {
-    return `${Math.round(minutes)} min interval`;
+    return t('weatherCard.minuteInterval', { value: Math.round(minutes), defaultValue: '{{value}} min interval' });
   }
   if (minutes >= 1) {
-    return `${minutes.toFixed(minutes >= 10 ? 1 : 2)} min interval`;
+    return t('weatherCard.minuteInterval', { value: minutes.toFixed(minutes >= 10 ? 1 : 2), defaultValue: '{{value}} min interval' });
   }
-  return `${Math.round(value)} s interval`;
+  return t('weatherCard.secondInterval', { value: Math.round(value), defaultValue: '{{value}} s interval' });
 }
 
-function formatCounterStatus(status: string | null | undefined): string | null {
+function formatCounterStatus(status: string | null | undefined, t: TFunction<'devices'>): string | null {
   switch (status) {
     case 'first_sample':
-      return 'Waiting for the next uplink to calculate a delta.';
+      return t('weatherCard.counterStatus.first_sample', { defaultValue: 'Waiting for the next uplink to calculate a delta.' });
     case 'duplicate_timestamp':
-      return 'Skipped duplicate uplink timestamp.';
+      return t('weatherCard.counterStatus.duplicate_timestamp', { defaultValue: 'Skipped duplicate uplink timestamp.' });
     case 'out_of_order':
-      return 'Skipped out-of-order uplink.';
+      return t('weatherCard.counterStatus.out_of_order', { defaultValue: 'Skipped out-of-order uplink.' });
     case 'counter_reset':
-      return 'Counter reset detected; interval delta skipped.';
+      return t('weatherCard.counterStatus.counter_reset', { defaultValue: 'Counter reset detected; interval delta skipped.' });
     case 'invalid_interval':
-      return 'Invalid uplink interval; delta skipped.';
+      return t('weatherCard.counterStatus.invalid_interval', { defaultValue: 'Invalid uplink interval; delta skipped.' });
     case 'cumulative_baseline':
-      return 'Rain counter baseline set; waiting for the next uplink to calculate a delta.';
+      return t('weatherCard.counterStatus.cumulative_baseline', { defaultValue: 'Rain counter baseline set; waiting for the next uplink to calculate a delta.' });
     case 'intensity_only':
-      return 'Rain amount unknown for this interval; only the intensity was reported.';
+      return t('weatherCard.counterStatus.intensity_only', { defaultValue: 'Rain amount unknown for this interval; only the intensity was reported.' });
     default:
       return null;
   }
 }
 
-function formatPerTenMinuteValue(value: number | null | undefined, unit: string, digits = 1): string | null {
+function formatPerTenMinuteValue(value: number | null | undefined, unit: string, t: TFunction<'devices'>, digits = 1): string | null {
   if (value == null || !Number.isFinite(value)) {
     return null;
   }
-  return `${value.toFixed(digits)} ${unit} per 10 min`;
+  return t('weatherCard.perTenMinutes', { value: value.toFixed(digits), unit, defaultValue: '{{value}} {{unit}} per 10 min' });
 }
 
 const ZonePickerPanel: React.FC<{
@@ -90,6 +91,7 @@ const ZonePickerPanel: React.FC<{
   onClose: () => void;
   onUpdate?: () => void;
 }> = ({ device, allZones, onClose, onUpdate }) => {
+  const { t } = useTranslation('devices');
   const ref = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set(device.zone_ids ?? []));
   const [busy, setBusy] = useState(false);
@@ -112,7 +114,7 @@ const ZonePickerPanel: React.FC<{
       onUpdate?.();
       onClose();
     } catch (err: unknown) {
-      setError(getApiErrorMessage(err, 'Failed to save'));
+      setError(getApiErrorMessage(err, t('weatherCard.saveFailed', { defaultValue: 'Failed to save' })));
     } finally {
       setBusy(false);
     }
@@ -124,7 +126,7 @@ const ZonePickerPanel: React.FC<{
       className="absolute right-0 top-8 z-20 w-56 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg"
     >
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-        Zone Assignments
+        {t('weatherCard.zoneAssignments', { defaultValue: 'Zone assignments' })}
       </p>
       <div className="mb-3 flex max-h-40 flex-col gap-1 overflow-y-auto">
         {allZones.map((zone) => (
@@ -139,7 +141,7 @@ const ZonePickerPanel: React.FC<{
           </label>
         ))}
         {allZones.length === 0 && (
-          <p className="text-xs text-[var(--text-tertiary)]">No zones available</p>
+          <p className="text-xs text-[var(--text-tertiary)]">{t('weatherCard.noZones', { defaultValue: 'No zones available' })}</p>
         )}
       </div>
       {error && <p className="mb-2 text-xs text-[var(--error-text)]">{error}</p>}
@@ -148,7 +150,7 @@ const ZonePickerPanel: React.FC<{
         disabled={busy}
         className="w-full rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-semibold text-[var(--on-primary)] disabled:opacity-60"
       >
-        {busy ? 'Saving...' : 'Save'}
+        {busy ? t('weatherCard.saving', { defaultValue: 'Saving…' }) : t('weatherCard.save', { defaultValue: 'Save' })}
       </button>
     </div>
   );
@@ -175,14 +177,14 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
   const [showWindMonitor, setShowWindMonitor] = useState(false);
   const [showRainMonitor, setShowRainMonitor] = useState(false);
 
-  const intervalLabel = formatCounterInterval(data.counter_interval_seconds);
-  const rainStatusLabel = formatCounterStatus(data.rain_delta_status);
+  const intervalLabel = formatCounterInterval(data.counter_interval_seconds, t);
+  const rainStatusLabel = formatCounterStatus(data.rain_delta_status, t);
   const rainRateSummary =
-    formatPerTenMinuteValue(data.rain_mm_per_10min, 'mm', 1)
+    formatPerTenMinuteValue(data.rain_mm_per_10min, 'mm', t, 1)
     ?? (data.rain_mm_per_hour != null && intervalLabel
-      ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}`
+      ? t('weatherCard.rateOverInterval', { value: data.rain_mm_per_hour.toFixed(3), interval: intervalLabel, defaultValue: '{{value}} mm/h over {{interval}}' })
       : null)
-    ?? (intervalLabel ? `this ${intervalLabel.toLowerCase()}` : 'this interval');
+    ?? (intervalLabel ?? t('weatherCard.thisInterval', { defaultValue: 'This interval' }));
 
   const zoneLabel = device.zone_names?.length
     ? device.zone_names.join(' · ')
@@ -200,7 +202,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           headingClassName="truncate text-base font-semibold leading-tight text-[var(--text)]"
         />
         <div className="relative flex shrink-0 items-center gap-1.5">
-          <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-sky-800">
+          <span className="rounded-md bg-[var(--info-bg)] px-2 py-0.5 text-xs font-semibold tracking-wide text-[var(--info-text)]">
             S2120
           </span>
           {!readOnly && <button
@@ -210,7 +212,8 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
                 : 'text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)]'
             }`}
-            title="Manage zone assignments"
+            title={t('weatherCard.manageZones', { defaultValue: 'Manage zone assignments' })}
+            aria-label={t('weatherCard.manageZones', { defaultValue: 'Manage zone assignments' })}
           >
             ⚙
           </button>}
@@ -255,10 +258,10 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.air_temperature_c', { defaultValue: 'Air Temp' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: t('environment.metrics.air_temperature_c', { defaultValue: 'Air Temp' }), unit: '°C', color: '#ea580c', decimals: 1 })}
+            onClick={() => setSensorMonitor({ field: 'ambient_temperature', labelKey: 'environment.metrics.air_temperature_c', unit: '°C', color: '#ea580c', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#ea580c' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtNum(data.ambient_temperature, 1, '°C')}
           </button>
@@ -267,10 +270,10 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'relative_humidity', label: t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' }), unit: '%', color: '#0891b2', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'relative_humidity', labelKey: 'environment.metrics.relative_humidity_pct', unit: '%', color: '#0891b2', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#0891b2' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtNum(data.relative_humidity, 0, '%')}
           </button>
@@ -282,12 +285,12 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#4f46e5' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtNum(data.wind_speed_mps, 1, 'm/s')}
           </button>
           {data.wind_gust_mps != null && (
-            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">gust {data.wind_gust_mps.toFixed(1)} m/s</p>
+            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{t('weatherCard.gust', { value: data.wind_gust_mps.toFixed(1), defaultValue: 'Gust {{value}} m/s' })}</p>
           )}
         </div>
 
@@ -297,13 +300,13 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
             onClick={() => setShowWindMonitor(true)}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#7c3aed' }}
+            style={{ color: 'var(--text)' }}
           >
             {formatWindDirection(data.wind_direction_deg)}
           </button>
         </div>
 
-        <RainTodayTile data={data} onOpenHistory={() => setShowRainMonitor(true)} valueStyle={{ color: '#2563eb' }}>
+        <RainTodayTile data={data} onOpenHistory={() => setShowRainMonitor(true)} valueStyle={{ color: 'var(--text)' }}>
           {/* The button already carries a "View history" title; the hint
               said "tap" on a 1366 px desktop screen. */}
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
@@ -313,17 +316,17 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
             <p className="mt-1 text-xs text-[var(--text-tertiary)]">{rainStatusLabel}</p>
           )}
           {data.rain_mm_delta != null && data.rain_mm_delta > 0 && (
-            <p className="mt-1 text-xs text-[var(--text-tertiary)]">Last uplink: {data.rain_mm_delta.toFixed(1)} mm</p>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">{t('weatherCard.lastUplink', { value: data.rain_mm_delta.toFixed(1), defaultValue: 'Last uplink: {{value}} mm' })}</p>
           )}
         </RainTodayTile>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.pressure_hpa', { defaultValue: 'Pressure' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', label: t('environment.metrics.pressure_hpa', { defaultValue: 'Pressure' }), unit: 'hPa', color: '#475569', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'barometric_pressure_hpa', labelKey: 'environment.metrics.pressure_hpa', unit: 'hPa', color: '#475569', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#475569' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtNum(data.barometric_pressure_hpa, 0, 'hPa')}
           </button>
@@ -332,10 +335,10 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.light_lux', { defaultValue: 'Light' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'light_lux', label: t('environment.metrics.light_lux', { defaultValue: 'Light' }), unit: 'lux', color: '#d97706', decimals: 0 })}
+            onClick={() => setSensorMonitor({ field: 'light_lux', labelKey: 'environment.metrics.light_lux', unit: 'lux', color: '#d97706', decimals: 0 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#d97706' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtLux(data.light_lux)}
           </button>
@@ -344,10 +347,10 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.uv_index', { defaultValue: 'UV Index' })}</p>
           <button
-            onClick={() => setSensorMonitor({ field: 'uv_index', label: t('environment.metrics.uv_index', { defaultValue: 'UV Index' }), unit: 'UVI', color: '#ca8a04', decimals: 1 })}
+            onClick={() => setSensorMonitor({ field: 'uv_index', labelKey: 'environment.metrics.uv_index', unit: 'UVI', color: '#ca8a04', decimals: 1 })}
             className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
             title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#ca8a04' }}
+            style={{ color: 'var(--text)' }}
           >
             {fmtNum(data.uv_index, 1, 'UVI')}
           </button>
@@ -365,7 +368,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           deveui={device.deveui}
           deviceName={device.name}
           field={sensorMonitor.field}
-          label={sensorMonitor.label}
+          label={t(sensorMonitor.labelKey)}
           unit={sensorMonitor.unit}
           color={sensorMonitor.color}
           decimals={sensorMonitor.decimals}

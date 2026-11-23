@@ -7,3 +7,6 @@ conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provi
 conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_d_recent.csv -text whitespace=cr-at-eol
 conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_now.csv -text whitespace=cr-at-eol
 conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_recent_tail.csv -text whitespace=cr-at-eol
+
+# Git binary patches require the blank separator terminating their final hunk.
+scripts/fixtures/valve-ingress-x2/handoff.patch whitespace=-blank-at-eof

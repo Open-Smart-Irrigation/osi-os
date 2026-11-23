@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const { functionSource } = require('./flow-function-source');
 const vm = require('vm');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { createRequire } = require('module');
+const { implementationSource: x3Source } = require('./lib/x3-implementation-source');
 const {
   TASK9_OSI_LIB_NODE_POLICIES,
   auditOsiLibBindings,
@@ -14,6 +16,7 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
 const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
+const historySyncSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-history-sync-helper', 'index.js'), 'utf8');
 // Issue #356: the Chameleon insert and backfill bodies and the scheduler SWT query
 // live in these modules; their function nodes only delegate.
 const chameleonHelperSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-chameleon-helper', 'index.js'), 'utf8');
@@ -125,6 +128,7 @@ execFileSync(process.execPath, [path.resolve(__dirname, 'verify-history-api-cont
 execFileSync(process.execPath, [path.resolve(__dirname, 'test-terra-selection-edge-acceptance.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'verify-history-api-contract.test.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, [path.resolve(__dirname, 'verify-scoped-access.js')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'test-release-1.0-surfaces.js')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', path.resolve(__dirname, 'installation-recovery-adapter.test.js')], { stdio: 'inherit' });
 const deployScript = fs.readFileSync(deployScriptPath, 'utf8');
 const nodeRedInitScript = fs.readFileSync(nodeRedInitPath, 'utf8');
@@ -371,11 +375,42 @@ runQuietNodeScript('test-journal-v2-config.js', 'journal v2 startup media config
 runQuietNodeScript('test-journal-v2-worker.js', 'journal v2 durable worker behavior passes');
 
 function findNodeByName(name) {
-  return flows.find((node) => node.name === name);
+  const node = flows.find((node) => node.name === name);
+  return node && require('./lib/valve-ingress-x2-source').resolvedNode(node);
 }
 
 function findNodeById(id) {
-  return flows.find((node) => node.id === id);
+  const node = flows.find((node) => node.id === id);
+  return node && require('./lib/valve-ingress-x2-source').resolvedNode(node);
+}
+
+// EB2 keeps these handlers in the shipped installation module. Check both
+// the exact delegation and that handler's body; unrelated module code cannot
+// satisfy an account-link assertion.
+const accountLinkSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-installation-helper', 'index.js'), 'utf8');
+const accountLinkStages = { 'al-link-build-req':'build', 'al-link-handle-auth':'handle',
+  'sync-refresh-build':'refreshBuild', 'sync-refresh-mark':'refreshMark', 'al-link-finalize':'finalize', 'al-link-clear-state':'clear', 'al-unlink-db':'disconnect', 'al-link-success':'success' };
+function accountLinkGuardSource(node) {
+  const stage=accountLinkStages[node.id];
+  if (!stage) return String(node.func || '');
+  if (!node.func.includes("accountLinkStage('" + stage + "',")) {
+    fail(node.id + ' must delegate to the reviewed account-link stage');
+    return String(node.func || '');
+  }
+  const start=accountLinkSource.indexOf('async function accountLink_' + stage + '(');
+  const next=accountLinkSource.indexOf('async function accountLink_',start+1);
+  const marker=accountLinkSource.indexOf('const ACCOUNT_CONFIG_JOURNAL',start);
+  const end=next>=0?next:marker>=0?marker:accountLinkSource.length;
+  if(start<0 || end<start) { fail('missing account-link stage body: '+stage); return ''; }
+  return node.func + '\n' + accountLinkSource.slice(start,end);
+}
+
+// Each guard reads the reviewed implementation: EB2's account-link stage,
+// X1's daily-scheduler entry point, or X3's zone-env entry point.
+function guardSource(node) {
+  if (accountLinkStages[node.id]) return accountLinkGuardSource(node);
+  const scheduler = functionSource(node, nodeRedRoot);
+  return scheduler !== String(node.func || '') ? scheduler : x3Source(node, nodeRedRoot);
 }
 
 function expectIncludes(nodeName, needle, description) {
@@ -384,7 +419,7 @@ function expectIncludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = guardSource(node);
   if (!func.includes(needle)) {
     fail(`${nodeName} missing ${description}`);
   } else {
@@ -398,7 +433,7 @@ function expectExcludes(nodeName, needle, description) {
     fail(`missing function node ${nodeName}`);
     return;
   }
-  const func = String(node.func || '');
+  const func = guardSource(node);
   if (func.includes(needle)) {
     fail(`${nodeName} still contains ${description}`);
   } else {
@@ -443,7 +478,7 @@ function expectIncludesById(nodeId, needle, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (!String(node.func || '').includes(needle)) {
+  if (!guardSource(node).includes(needle)) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -456,7 +491,7 @@ function expectPatternById(nodeId, pattern, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (!pattern.test(String(node.func || ''))) {
+  if (!pattern.test(functionSource(node, nodeRedRoot))) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -469,7 +504,7 @@ function expectExcludesById(nodeId, needle, description) {
     fail(`missing node ${nodeId}`);
     return;
   }
-  if (String(node.func || '').includes(needle)) {
+  if (functionSource(node, nodeRedRoot).includes(needle)) {
     fail(`${nodeId} still contains ${description}`);
   } else {
     console.log(`OK ${nodeId} removed ${description}`);
@@ -538,7 +573,10 @@ function expectWireById(nodeId, targetId, description) {
     return;
   }
   const wires = Array.isArray(node.wires) ? node.wires.flat() : [];
-  if (!wires.includes(targetId)) {
+  const guard = findNodeById('account-cloud-guard-' + targetId);
+  const guarded = guard && guard.type === 'function' && guard.func.includes('load.value.accountCloudMessage(')
+    && JSON.stringify(guard.wires) === JSON.stringify([[targetId]]) && wires.includes(guard.id);
+  if (!wires.includes(targetId) && !guarded) {
     fail(`${nodeId} missing ${description}`);
   } else {
     console.log(`OK ${nodeId} ${description}`);
@@ -1089,6 +1127,7 @@ async function verifyDbHelperTransactionBehavior(dbHelperSource, dbHelperIndexPa
 function makeUplinkDedupOsiLibStub() {
   return {
     require: (name) => {
+      if (name === 'command-ingress') return { ok:true, value:require('./../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ingress') };
       if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
       return { ok: false, error: 'unexpected osiLib.require in fixture: ' + name };
     },
@@ -1096,7 +1135,7 @@ function makeUplinkDedupOsiLibStub() {
 }
 
 async function executeFunctionNodeById(nodeId, msg, options = {}) {
-  const node = findNodeById(nodeId);
+  const node = flows.find(node=>node.id===nodeId);
   if (!node) {
     throw new Error(`missing node ${nodeId}`);
   }
@@ -1480,8 +1519,8 @@ expectIncludes('Validate & decode token', 'ALLOW_INSECURE_SERVER_URL', 'accepts 
 expectIncludes('Validate & decode token', 'allow_private_target', 'accepts the persisted UCI private-target override flag');
 expectIncludes('Validate & decode token', "normalizeGatewayDeviceEui(env.get('DEVICE_EUI'))", 'uses the canonical runtime gateway identity');
 expectIncludes('Validate & decode token', "env.get('DEVICE_EUI_CONFIDENCE')", 'reads runtime gateway identity confidence');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
-expectIncludes('Validate & decode token', "flow.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
+expectIncludes('Validate & decode token', "state.set('al_gateway_device_eui_source'", 'stores resolved gateway identity metadata in link flow state');
+expectIncludes('Validate & decode token', "state.set('al_gateway_device_eui_confidence'", 'stores resolved gateway identity confidence in link flow state');
 expectIncludes('Validate & decode token', 'Gateway identity is not ready yet. Wait for ChirpStack gateway detection before linking.', 'blocks account linking while gateway identity remains provisional');
 expectExcludes('Validate & decode token', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc ChirpStack log gateway probing');
 expectExcludes('Validate & decode token', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing');
@@ -1728,7 +1767,8 @@ expectIncludes('Build History Batch', 'last_shadow_acked_id', 'uses shadow ACK p
 expectIncludes('Build History Batch', 'helper.prepareRow', 'hashes and validates rows through the shared helper');
 expectIncludes('Build History Batch', 'snapshot_high_id', 'captures raw backfill high-water mark');
 expectIncludes('Build History Batch', 'snapshot_high_key', 'captures natural-key backfill high-water marks');
-expectIncludes('Build History Batch', 'sync_history_dirty_keys', 'drains correction and repair dirty keys');
+expectIncludes('Build History Batch', 'helper.loadDirtyRows(', 'drains correction and repair dirty keys through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'sync_history_dirty_keys', 'selects dirty history keys');
 expectIncludes('Build History Batch', "'tensiomark_observations'", 'classifies Tensiomark observation dirty keys as correction history');
 expectIncludes('POST History Batch', 'osiCloudHttp.requestJsonIpv4', 'uses the shared IPv4 cloud HTTP helper for history batches');
 expectIncludes('Mark History Batch ACK', "batch.phase === 'shadow'", 'keeps shadow cursor progress separate from durable progress');
@@ -1750,10 +1790,11 @@ expectExcludes('Build History Manifest', "'LIMIT 500'", 'does not cap history ma
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
-expectIncludes('Mark History Manifest ACK', 'repairRequested', 'turns manifest mismatches into repair work');
-expectIncludes('Mark History Manifest ACK', 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
+expectIncludes('Mark History Manifest ACK', 'helper.queueManifestRepairs(', 'turns manifest mismatches into repair work through the helper');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'repairRequested', 'queues requested manifest repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
 expectIncludes('Build History Batch', "flow.get('history_repair_turns')", 'lets new tail rows go out between repair batches');
-expectIncludes('Mark History Manifest ACK', "change_kind='repair'", 'persists requested history repairs');
+expectFileIncludes('osi-history-sync-helper/index.js', historySyncSource, "change_kind='repair'", 'persists requested history repairs');
 expectExcludes('Mark History Manifest ACK', 'DELETE FROM', 'never treats manifests as deletion instructions');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
 expectExcludes('Sync Init Schema + Triggers', '" + gateway + "', 'malformed literal gateway fallback SQL in sync triggers');
@@ -2314,25 +2355,26 @@ expectWireById('al-unlink-clear-mqtt', 'al-unlink-db', 'clears linked account st
 expectWireById('al-unlink-db', 'al-unlink-restore-mqtt', 'restores MQTT credentials when unlink database cleanup fails');
 expectWireById('al-unlink-format', 'al-unlink-restart-node-red', 'schedules restart only after unlink state is cleared successfully');
 expectWireById('al-unlink-restart-node-red', 'al-link-clear-state', 'clears transient link state only after successful unlink restart scheduling');
-expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.mqtt_password=", 'writes the MQTT password into UCI after linking');
-expectIncludes('Persist MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=", 'persists the linked gateway identity into UCI after linking');
-expectIncludes('Persist MQTT Broker Config', 'Linked account response is missing MQTT credentials', 'fails linking when MQTT credentials are incomplete');
-expectIncludes('Persist MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before persisting linked credentials');
-expectIncludes('Persist MQTT Broker Config', "const match = text.match(new RegExp('^[a-z][a-z0-9+.-]*://([^/?#]+)', 'i'));", 'falls back to regex host extraction when URL is unavailable');
-expectExcludes('Persist MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while link persistence is still in flight');
-expectWireById('al-link-handle-auth', 'al-link-clear-state', 'clears transient link state when server auth fails');
-expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'clears transient link state when MQTT persistence fails');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.mqtt_password=' + shellQuote('')", 'clears the MQTT password from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', "set osi-server.cloud.link_gateway_device_eui=' + shellQuote('')", 'clears the linked gateway identity from UCI after unlinking');
-expectIncludes('Clear MQTT Broker Config', 'msg._mqttConfigBackup = {', 'backs up prior MQTT config before unlink cleanup');
-expectExcludes('Clear MQTT Broker Config', '/etc/init.d/node-red restart', 'Node-RED restart while unlink cleanup is still in flight');
-expectIncludes('Rollback MQTT Broker Config', 'rolled back MQTT credentials', 'restores prior MQTT config when link finalization fails');
-expectIncludes('Restore MQTT Broker Config', 'restored MQTT credentials', 'restores prior MQTT config when unlink finalization fails');
-expectIncludes('Schedule Link Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful link completion');
-expectIncludes('Schedule Link Restart', "reason: 'account_link', delaySeconds: 10", 'uses the account-link restart contract');
+for (const id of ['al-link-store-mqtt','al-unlink-clear-mqtt']) {
+  expectIncludesById(id, 'return [msg, null];', 'defers configuration writes to the transactional finalizer');
+}
+for (const id of ['al-link-rollback-mqtt','al-unlink-restore-mqtt']) {
+  expectIncludesById(id, 'return msg;', 'forwards errors after module-owned recovery');
+}
+expectIncludes('Finalize linked account state', 'await accountConfigTransaction(db,', 'coordinates link SQL and MQTT with durable recovery');
+expectIncludes('Clear linked account state', 'await accountConfigTransaction(db,', 'coordinates disconnect SQL and MQTT with durable recovery');
+expectWireById('al-link-handle-auth', 'al-link-clear-state', 'cleans up rejected remote responses');
+expectWireById('al-link-store-mqtt', 'al-link-clear-state', 'cleans up wiring-stage failures');
+for (const marker of ['writeAccountJournal(options.fs', 'await mutate(tx)', 'writeMqttConfig(options.cp, options.desired)',
+  'configCommitMatches(tx, journal.marker)', 'fs.fsyncSync(fd)', 'link_recovery_required']) {
+  if (!accountLinkSource.includes(marker)) fail('account-link coordinator missing '+marker);
+}
+expectExcludes('Finalize linked account state', '/etc/init.d/node-red restart', 'direct service restart during link persistence');
+expectIncludes('Schedule Link Restart', "accountLinkStage('restartLink',", 'publishes the durable link restart obligation through the module');
+expectWireById('al-link-build-req', 'al-link-success', 'returns a recovered committed link without cloud authentication');
 expectExcludes('Schedule Link Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
-expectIncludes('Schedule Unlink Restart', '/var/run/osi-node-red-restart-requests', 'requests a daemon-owned restart only after successful unlink completion');
-expectIncludes('Schedule Unlink Restart', "reason: 'account_unlink', delaySeconds: 2", 'uses the account-unlink restart contract');
+expectIncludes('Schedule Unlink Restart', "accountLinkStage('restartDisconnect',", 'publishes the durable disconnect restart obligation through the module');
+if (!accountLinkSource.includes('journal.restart_pending = true')) fail('account finalization must retain a durable restart obligation');
 expectExcludes('Schedule Unlink Restart', '/etc/init.d/node-red restart', 'does not restart Node-RED directly');
 const cloudRestNodeIds = [
   'al-link-server-auth',
@@ -2405,7 +2447,11 @@ expectIncludes('Daily Dendrometer Analytics', 'vpd_override_summary:vpdOverrideS
 expectIncludes('Daily Dendrometer Analytics', 'sd_vpd_summary:sdVpdSummary', 'stores SD-VPD diagnostics in recommendation_json');
 expectIncludes('Get Zone Recommendations', 'zdr.recommendation_json', 'returns recommendation_json from the zone recommendation query');
 expectIncludes('Get Zone Recommendations', 'recommendation_json:r.recommendation_json ?? null', 'exposes recommendation_json in the local recommendations API');
-expectIncludes('Daily Dendrometer Analytics', "env.get('OPENAGRI_WEATHER_RADIUS_KM')", 'supports configurable OpenAgri history search radius for edge analytics');
+expectIncludes('Daily Dendrometer Analytics', 'DA.createWeatherInputs(', 'loads the module weather-input resolver');
+expectIncludes('Daily Dendrometer Analytics', 'weatherInputs.forZone(', 'uses the module weather-input resolver for each zone');
+const dendroWeatherRoot = path.join(path.dirname(flowPath), 'node-red/osi-dendro-analytics');
+expectFileIncludes('osi-dendro-analytics/index.js', fs.readFileSync(path.join(dendroWeatherRoot, 'index.js'), 'utf8'), "require('./weather-inputs').createWeatherInputs", 'delegates weather inputs to the shipped implementation');
+expectFileIncludes('osi-dendro-analytics/weather-inputs.js', fs.readFileSync(path.join(dendroWeatherRoot, 'weather-inputs.js'), 'utf8'), "env.get('OPENAGRI_WEATHER_RADIUS_KM')", 'supports configurable OpenAgri history search radius for edge analytics');
 expectIncludes('Get Zone Environment Summary', 'CREATE TABLE IF NOT EXISTS zone_weather_cache', 'creates a local weather cache table for environment summaries');
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_CURRENT_CACHE_MINUTES')", 'supports configurable current-weather cache TTL');
 expectIncludes('Get Zone Environment Summary', "env.get('OPENAGRI_WEATHER_FORECAST_CACHE_MINUTES')", 'supports configurable forecast cache TTL');
@@ -2512,7 +2558,28 @@ expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the l
 expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
-expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+// Durable MOD9 receipt invariants: ignored inserts cannot lend a previous row id.
+expectIncludes('LSN50 Normalize + Write', 'FROM device_data WHERE id = ?", [writeResult.deviceDataId])', 'reads the persisted/clamped row by the canonical writer returned id');
+expectExcludes('LSN50 Normalize + Write', 'last_insert_rowid()', 'never uses a connection-wide prior insert id for an uplink');
+{
+  const source = String(findNodeByName('LSN50 Normalize + Write')?.func || '');
+  const transaction = /db\.transaction\(async function \(t\) \{([\s\S]*?)\n    \}\);/.exec(source);
+  const body = transaction ? transaction[1] : '';
+  const writeAt = body.indexOf('var writeResult = await writerRes.value.writeDeviceData(t,');
+  const duplicateAt = body.indexOf('if (writeResult.duplicate) return { writeResult: writeResult };');
+  const readAt = body.indexOf('var savedRow = await t.get(');
+  const captureAt = body.indexOf('await rainRes.value.captureLsn50Observation(t, savedRow)');
+  const downstreamAt = source.indexOf('if (result.writeResult.duplicate) return null;', transaction ? transaction.index + transaction[0].length : 0);
+  const attributionAt = source.indexOf('if (result.rainObservation) d.rainObservationId');
+  if (!transaction || writeAt < 0 || duplicateAt <= writeAt || readAt <= duplicateAt || captureAt <= readAt
+      || (source.match(/captureLsn50Observation\(/g) || []).length !== 1
+      || downstreamAt < 0 || attributionAt <= downstreamAt) {
+    fail('LSN50 Normalize + Write must skip duplicate effects and read its returned row id before rain capture in the same transaction');
+  } else {
+    console.log('OK LSN50 duplicate receipt skips rain capture and downstream effects; row readback shares its write transaction');
+  }
+}
+// End durable MOD9 receipt invariants.
 expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
 expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
 expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
@@ -3014,10 +3081,46 @@ for (const field of [
 for (const field of ['chameleonSwt1DepthCm', 'chameleonSwt2DepthCm', 'chameleonSwt3DepthCm']) {
   expectFileIncludes('api.ts', reactGuiApiSource, `${field}?:`, `types setChameleonDepth payload.${field}`);
 }
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Stem change over time', 'labels the basic monitor around the comparable stem-change signal');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Mechanical layer', 'renders mechanical engineering values beneath the stem-change graph');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Current position', 'shows absolute mechanical position below the graph instead of as the headline graph metric');
-expectFileIncludes('DendrometerMonitor.tsx', dendroMonitorSource, 'Awaiting baseline. Mechanical position is available in this window', 'keeps the basic monitor informative when comparable stem change is not ready yet');
+const dendroMonitorEnglish = JSON.parse(fs.readFileSync(
+  path.resolve(__dirname, '..', 'web', 'react-gui', 'public', 'locales', 'en', 'devices.json'),
+  'utf8',
+)).dendrometerMonitor;
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'export const DendrometerMonitor:',
+  "const { t } = useTranslation('devices');",
+  'const format = useDateFormat();',
+], 'resolves basic-monitor labels from the devices namespace');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'plottedData.length > 0 && (',
+  "{t('dendrometerMonitor.stemTitle')}",
+  '<AreaChart data={plottedData}',
+  'dataKey="stem_change_um"',
+], 'labels the basic monitor around the comparable stem-change signal');
+expectEqual(dendroMonitorEnglish.stemTitle, 'Stem change over time', 'devices.json English basic-monitor stem-change heading');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'dataKey="stem_change_um"',
+  '</AreaChart>',
+  'mechanicalData.length > 0 && (',
+  "{t('dendrometerMonitor.mechanicalTitle')}",
+], 'renders mechanical engineering values beneath the stem-change graph');
+expectEqual(dendroMonitorEnglish.mechanicalTitle, 'Mechanical layer', 'devices.json English basic-monitor mechanical heading');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'dataKey="stem_change_um"',
+  '</AreaChart>',
+  "{t('dendrometerMonitor.mechanicalTitle')}",
+  "label={t('dendrometerMonitor.currentPosition')}",
+  'value={latestMechanicalPoint ? `${latestMechanicalPoint.mechanical_position_mm.toFixed(2)} mm`',
+], 'shows absolute mechanical position below the graph instead of as the headline graph metric');
+expectEqual(dendroMonitorEnglish.currentPosition, 'Current position', 'devices.json English basic-monitor absolute-position label');
+expectOrderedContent('DendrometerMonitor.tsx', dendroMonitorSource, [
+  'data.length > 0 && plottedData.length === 0 && (',
+  '{hasRawOnlySamples',
+  "? t('dendrometerMonitor.rawOnly')",
+  ': hasMechanicalOnlySamples',
+  "? t('dendrometerMonitor.awaitingBaseline')",
+  ": t('dendrometerMonitor.noCalibratedData', { hours })",
+], 'keeps the basic monitor informative when comparable stem change is not ready yet');
+expectEqual(dendroMonitorEnglish.awaitingBaseline, 'Awaiting baseline. Mechanical position is available in this window, and the next valid calibrated uplink will establish the new stem-change zero point.', 'devices.json English basic-monitor awaiting-baseline explanation');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'Raw samples are available', 'explains raw-only dendrometer rows in the 24h drawer');
 expectFileIncludes('farming/dendrometer/DendrometerMonitor.tsx', dendroDrawerSource, 'const showRatioDebug = isRatioDendroMode(point.dendro_mode_used_raw);', 'shows CH1 and ratio debug values only for ratio-mode 24h readings');
 expectFileIncludes('DraginoTempCard.tsx', draginoTempCardSource, 'Stem change', 'shows stem change as the only primary dendrometer signal on the device card');
@@ -3560,7 +3663,7 @@ expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPS
 expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT"', 'captures an existing flows and GUI pair before first activation');
-expectFileIncludes('deploy.sh', deployScript, 'chmod 755 /etc/init.d/node-red', 'keeps the deployed Node-RED init script executable');
+expectFileIncludes('deploy.sh', deployScript, '"/etc/init.d/node-red" 755 || exit 1', 'keeps the deployed Node-RED init script executable');
 expectFileIncludes('deploy.sh', deployScript, 'run_schema_migration()', 'defines the deploy-time schema migration runner');
 expectFileIncludes('deploy.sh', deployScript, 'opkg install sqlite3-cli', 'provisions sqlite3-cli before running migrations');
 expectFileIncludes('deploy.sh', deployScript, 'wait_for_node_red_stop "$NODE_RED_STOP_TIMEOUT"', 'verifies the named Node-RED service has stopped before migrating');
@@ -3802,8 +3905,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.8.2 ---
-const EXPECTED_VERSION = '0.8.2';
+// --- firmware version 0.8.3 ---
+const EXPECTED_VERSION = '0.8.3';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);
@@ -3835,8 +3938,8 @@ if (fs.existsSync(osiNodeRedSeedPath)) {
 } else {
   fail(`missing 98_osi_node_red_seed at ${osiNodeRedSeedPath}`);
 }
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package.json" "$DST/package.json"', 'seeds Node-RED package manifest before runtime startup');
-expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp "$SRC/package-lock.json" "$DST/package-lock.json"', 'seeds Node-RED package lock before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, "'package.json', 'package-lock.json'", 'seeds both Node-RED package manifests before runtime startup');
+expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'fs.linkSync(temporary, target)', 'publishes complete Node-RED files only when the destination is absent');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/$module"', 'seeds local helper package directories for file dependencies');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'cp -a "$SRC/$module" "$DST/node_modules/$module"', 'seeds local helper packages into runtime node_modules');
 expectFileIncludes('98_osi_node_red_seed', osiNodeRedSeedScript, 'rm -rf "$DST/$module" "$DST/node_modules/$module"', 'replaces stale helper copies in both package locations');
@@ -3907,9 +4010,9 @@ expectFileExists(rootfsResizeInit2709Path, 'bcm2709 ships rootfs resize init');
 if (fs.existsSync(rootfsGrowDefault2712Path) && fs.existsSync(rootfsResizeInit2712Path)) {
   const rootfsGrowDefault = fs.readFileSync(rootfsGrowDefault2712Path, 'utf8');
   const rootfsResizeInit = fs.readFileSync(rootfsResizeInit2712Path, 'utf8');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'parted -s "$DISK"', 'uses parted for in-place partition growth');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'LC_ALL=C parted "$DISK"', 'uses parted with an explicit mounted-partition confirmation for in-place growth');
   expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, '[ -f "$NEEDS_RESIZE" ] && exit 0', 'does not re-partition while filesystem resize is pending');
-  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart $PART 100%', 'grows the root partition to the end of the disk');
+  expectFileIncludes('90_osi_rootfs_grow', rootfsGrowDefault, 'resizepart "$PART" 100%', 'grows the root partition to the end of the disk');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'START=08', 'runs filesystem resize before Node-RED startup');
   expectFileIncludes('osi-rootfs-resize', rootfsResizeInit, 'resize2fs "$ROOT_SRC"', 'grows the mounted filesystem after reboot');
 }
@@ -3989,7 +4092,7 @@ expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script no
 expectFileExcludes('osi-bootstrap', osiBootstrapInitScript, 'bootstrap script not found, marking done', 'missing-script success path');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'curl -sf --max-time 3 http://localhost:8080', 'init script waits for ChirpStack gRPC via curl');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'seq 1 24', 'init script retries gRPC health check up to 24 times');
-expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done; then', 'init script treats stamp write as part of successful provisioning');
+expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if touch /etc/osi-bootstrap.done && sync; then', 'init script syncs the stamp before reporting successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'provisioned_this_boot=1', 'init script tracks successful first-boot provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, 'if [ "$provisioned_this_boot" = 1 ]; then', 'init script gates the restart request on successful provisioning');
 expectFileIncludes('osi-bootstrap', osiBootstrapInitScript, '/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60', 'init script requests a coordinated restart after successful provisioning');
@@ -4019,7 +4122,9 @@ if (fs.existsSync(sysupgradeConfPath)) {
 
 expectFileIncludes('sysupgrade.conf', sysupgradeConf, '/etc/osi-bootstrap.done', 'sysupgrade.conf preserves the osi-bootstrap stamp file');
 
-const authNodes = flows.filter((node) => typeof node.func === 'string' && node.func.includes('function getAuthSecret()'));
+// Keep the auth-secret guard on the called implementations after X3 moves them.
+const authNodes = flows.map(node => ({ ...node, func: x3Source(node, nodeRedRoot) }))
+  .filter(node => node.func.includes('function getAuthSecret()'));
 for (const insecureNeedle of ['osi-os-default-auth-secret', "env.get('CHIRPSTACK_API_KEY')"]) {
   const offendingNode = authNodes.find((node) => node.func.includes(insecureNeedle));
   if (offendingNode) {

@@ -69,12 +69,12 @@
     "yesRemove": "Yee, Ggyawo",
     "removing": "Tikuggyawo...",
     "failedToRemove": "Okuggyawo ekyuma kugaanye",
-    "soilWaterTension1": "OKUZIKA KW'AMAZZI MU BUTAKA 1",
-    "soilWaterTension2": "OKUZIKA KW'AMAZZI MU BUTAKA 2",
-    "lightIntensity": "AKAWAAWA K'OMUSANA",
+    "soilWaterTension1": "Okuzika kw'amazzi mu butaka 1",
+    "soilWaterTension2": "Okuzika kw'amazzi mu butaka 2",
+    "lightIntensity": "Akawaawa k'omusana",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde",
-    "ambientTemperature": "EBBUGUMU ERY'EMPEWO",
-    "relativeHumidity": "AMAANZI MU MPEWO",
+    "ambientTemperature": "Ebbugumu ery'empewo",
+    "relativeHumidity": "Amaanzi mu mpewo",
     "neverSeen": "Tekalabikangako",
     "settings": "ENTEEKATEEKA",
     "intervalLabel": "Ebbanga lye weetaaga (edakiika)",
@@ -516,7 +516,22 @@
       "noData": "Tewali makulu ag'okulima",
       "fromSource": "okuva {{source}}",
       "kcHelpLabel": "About the crop coefficient",
-      "kcHelp": "FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}."
+      "kcHelp": "FAO-56 Kc for {{crop}}: initial {{ini}}, mid-season {{mid}}, end {{end}}. Current stage: {{stage}}.",
+      "evapotranspiration": "Evapotranspiration",
+      "conditions": "Conditions",
+      "vpdStatus": {
+        "saturated": "Saturated",
+        "low": "Low",
+        "moderate": "Moderate",
+        "high": "High",
+        "stressRisk": "Stress risk"
+      },
+      "thiStatus": {
+        "normal": "Normal",
+        "alert": "Alert",
+        "danger": "Danger",
+        "emergency": "Emergency"
+      }
     },
     "forecast": {
       "dayToday": "Today",
@@ -534,7 +549,12 @@
       "noData": "Tewali bikuubiriza",
       "noLocation": "Teeka entera z'essaza okukozesa ebikuubiriza",
       "hourlyTitle": "Enkuba ku ssawa (essawa 24 ezijja)",
-      "unavailable": "Tekyabaawo"
+      "unavailable": "Tekyabaawo",
+      "rain": "Rain",
+      "probability": "Probability",
+      "hourlyHelpLabel": "About hourly rain",
+      "hourlyHelp": "Bars show rain in millimetres; the dashed line shows rain probability in percent.",
+      "relativeHumidityValue": "{{value}} RH"
     },
     "metrics": {
       "air_temperature_c": "Ebbugumu ery'empewo",
@@ -548,6 +568,24 @@
       "uv_index": "Enkomerero ya UV",
       "soil_temperature_c": "Ebbugumu ery'ettaka",
       "soil_moisture_pct": "Amaanzi mu ttaka"
+    },
+    "compass": {
+      "N": "N",
+      "NNE": "NNE",
+      "NE": "NE",
+      "ENE": "ENE",
+      "E": "E",
+      "ESE": "ESE",
+      "SE": "SE",
+      "SSE": "SSE",
+      "S": "S",
+      "SSW": "SSW",
+      "SW": "SW",
+      "WSW": "WSW",
+      "W": "W",
+      "WNW": "WNW",
+      "NW": "NW",
+      "NNW": "NNW"
     }
   },
   "zoneConfig": {
@@ -1040,7 +1078,18 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} days · daily totals ({{timezone}})",
     "soFar": "so far",
-    "timezoneCheck": "Check the zone time zone in its settings."
+    "timezoneCheck": "Check the zone time zone in its settings.",
+    "title": "Enkuba",
+    "noData": "no data",
+    "windowTotal": "Window total",
+    "peakInterval": "Peak interval",
+    "wetIntervals": "Wet intervals",
+    "rainyDays": "Rainy days",
+    "wettestDay": "Wettest day",
+    "noIntervalData": "No rainfall recorded in the last {{hours}} hours.",
+    "noWindowData": "No rainfall recorded in this window.",
+    "intervalTitle": "Rainfall per interval (mm)",
+    "dailyTitle": "Daily rainfall (mm)"
   },
   "rain": {
     "recordedToday": "Rain recorded today",
@@ -1097,5 +1146,81 @@
     "closeSettings": "Close device settings",
     "zones": "Zones:",
     "noZones": "No zones assigned"
+  },
+  "monitor": {
+    "current": "Current",
+    "minimum": "Min",
+    "maximum": "Max",
+    "hours": "{{count}} h",
+    "days": "{{count}} d",
+    "readings": "{{count}} readings · last {{hours}} h",
+    "noData": "No {{metric}} data in the last {{hours}} hours.",
+    "failedToLoad": "Unable to load measurement history.",
+    "close": "Ggalawo"
+  },
+  "windMonitor": {
+    "title": "Empewo",
+    "currentSpeed": "Current speed",
+    "peakGust": "Peak gust",
+    "currentDirection": "Current direction",
+    "speed": "Speed",
+    "gust": "Gust",
+    "direction": "Direction",
+    "speedAndGust": "Speed and gust (m/s)",
+    "roseTitle": "Wind rose (direction × speed)",
+    "samples": "{{count}} samples · {{calm}}% calm",
+    "noData": "No wind data in the last {{hours}} hours.",
+    "noSpeedData": "No wind-speed or gust samples are available in this window.",
+    "notEnoughData": "Not enough wind data to plot a rose in this window.",
+    "allCalm": "All paired readings are calm; there is no direction to plot.",
+    "chartError": "Unable to load wind rose chart.",
+    "timestamps": "{{count}} timestamps · last {{hours}} h"
+  },
+  "dendrometerMonitor": {
+    "title": "Dendrometer monitor",
+    "position": "Ekifo",
+    "source": "Ensibuko",
+    "aboveRange": "Above extended range",
+    "belowRange": "Below retracted range",
+    "noData": "No dendrometer data in the last {{hours}} hours.",
+    "rawOnly": "Raw samples are available in this window, but calibrated displacement is not yet available.",
+    "awaitingBaseline": "Awaiting baseline. Mechanical position is available in this window, and the next valid calibrated uplink will establish the new stem-change zero point.",
+    "noCalibratedData": "No calibrated stem change is available in the last {{hours}} hours.",
+    "stemTitle": "Stem change over time",
+    "stemDescription": "Stem change is the comparable signal used on the device card and is tracked relative to this device’s edge baseline.",
+    "mechanicalTitle": "Mechanical layer",
+    "mechanicalDescription": "Engineering interpretation only. Absolute position stays here instead of on the main device card.",
+    "engineering": "Debug / engineering",
+    "currentPosition": "Current position",
+    "windowRange": "Window range",
+    "strokeUsed": "Stroke used",
+    "strokeValue": "{{percent}} % of {{stroke}} mm",
+    "rangeState": "Range state",
+    "outsideRange": "This latest mechanical reading is outside the stored calibration range. Stem change on the main card is suppressed until the calibration range is reviewed.",
+    "calibrationDetails": "Ratio and ADC calibration details are available in the LSN50 card’s Advanced device settings."
+  },
+  "weatherCard": {
+    "minuteInterval": "{{value}} min interval",
+    "secondInterval": "{{value}} s interval",
+    "perTenMinutes": "{{value}} {{unit}} per 10 min",
+    "rateOverInterval": "{{value}} mm/h over {{interval}}",
+    "thisInterval": "This interval",
+    "gust": "Gust {{value}} m/s",
+    "lastUplink": "Last uplink: {{value}} mm",
+    "manageZones": "Manage zone assignments",
+    "zoneAssignments": "Zone assignments",
+    "noZones": "No zones available",
+    "save": "Save",
+    "saving": "Saving…",
+    "saveFailed": "Failed to save",
+    "counterStatus": {
+      "first_sample": "Waiting for the next uplink to calculate a delta.",
+      "duplicate_timestamp": "Skipped duplicate uplink timestamp.",
+      "out_of_order": "Skipped out-of-order uplink.",
+      "counter_reset": "Counter reset detected; interval delta skipped.",
+      "invalid_interval": "Invalid uplink interval; delta skipped.",
+      "cumulative_baseline": "Rain counter baseline set; waiting for the next uplink to calculate a delta.",
+      "intensity_only": "Rain amount unknown for this interval; only the intensity was reported."
+    }
   }
 }

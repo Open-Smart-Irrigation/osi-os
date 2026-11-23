@@ -92,23 +92,26 @@ export function desktopSourceOptions(card: HistoryCardSummary): DesktopSourceOpt
   return [{ key: null, label: 'All', labelKey: 'history.sourceFilter.all' }, ...sources];
 }
 
-export function selectableDesktopViews(card: HistoryCardSummary): DesktopViewOption[] {
+export function selectableDesktopViews(card: HistoryCardSummary, expandedViewsEnabled = true): DesktopViewOption[] {
   const definition = historyCardDefinitionsByType[card.cardType];
   if (!definition) {
     const fallbackViews = card.views.length > 0
       ? card.views
       : [card.defaultView];
-    return fallbackViews.map((view) => ({ view: view as HistoryViewMode, labelKey: `history.viewMode.${view}` }));
+    return fallbackViews.filter((view) => expandedViewsEnabled || view !== 'advanced').map((view) => ({ view: view as HistoryViewMode, labelKey: `history.viewMode.${view}` }));
   }
-  const allowedViews = new Set<HistoryViewMode>(definition.views as readonly HistoryViewMode[]);
+  const supportedViews = definition.views.filter((view) => expandedViewsEnabled || view !== 'advanced');
+  const allowedViews = new Set<HistoryViewMode>(supportedViews);
   const views = card.views.filter((view): view is HistoryViewMode => allowedViews.has(view));
-  const resolved = views.length > 0 ? views : [card.defaultView as HistoryViewMode];
+  const resolved = views.length > 0
+    ? views
+    : allowedViews.has(card.defaultView) ? [card.defaultView] : supportedViews;
   return resolved.map((view) => ({ view, labelKey: `history.viewMode.${view}` }));
 }
 
-export function defaultDesktopView(card: HistoryCardSummary): HistoryViewMode {
-  const views = selectableDesktopViews(card).map((entry) => entry.view);
-  return views.includes(card.defaultView) ? card.defaultView : views[0] ?? card.defaultView;
+export function defaultDesktopView(card: HistoryCardSummary, expandedViewsEnabled = true): HistoryViewMode {
+  const views = selectableDesktopViews(card, expandedViewsEnabled).map((entry) => entry.view);
+  return views.includes(card.defaultView) ? card.defaultView : views[0] ?? 'line-chart';
 }
 
 const COMPARE_EXCLUDED_VIEWS = new Set<HistoryViewMode>(['advanced']);

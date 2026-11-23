@@ -373,6 +373,9 @@ async function beginLinkAttempt(dbOrOptions, maybeOptions) {
     });
     const context = normalizeContext(input.context, {
       ...current,
+      // The authenticated response supplies an unspecified target account.
+      // The current account is retained separately as the mutation baseline.
+      cloud_user_id: null,
       installation_uuid: current.installation_uuid || identity.installation_uuid,
       gateway_device_eui: current.gateway_device_eui || identity.gateway_device_eui,
     });
@@ -398,7 +401,7 @@ async function beginLinkAttempt(dbOrOptions, maybeOptions) {
       ? normalizeContext(parseJson(row.peer_capabilities_context_json, {}))
       : null;
     const contextChanged = Boolean(capturedSupportContext)
-      && (!sameContext(current, capturedSupportContext) || !sameContext(context, capturedSupportContext));
+      && (!sameContext(current, capturedSupportContext) || !sameContext({ ...context, cloud_user_id: context.cloud_user_id || current.cloud_user_id }, capturedSupportContext));
     await tx.run(`
       UPDATE sync_link_state
          SET link_attempt_json=?,
@@ -447,9 +450,9 @@ async function validateLinkAttemptTx(tx, input = {}) {
     gateway_device_eui: row.identity_gateway_device_eui,
     installation_uuid: row.identity_installation_uuid,
   });
-  const firstLinkCloudIdentity = !baseline.cloud_user_id && !attemptContext.cloud_user_id && !current.cloud_user_id;
+  const unknownTargetAccount = !attemptContext.cloud_user_id;
   const expectedMatchesAttempt = CONTEXT_KEYS.every((key) => {
-    if (key === 'cloud_user_id' && firstLinkCloudIdentity) return Boolean(expected.cloud_user_id);
+    if (key === 'cloud_user_id' && unknownTargetAccount) return Boolean(expected.cloud_user_id);
     return expected[key] === attemptContext[key];
   });
   if (!sameContext(current, baseline)
@@ -1026,29 +1029,17 @@ async function notifyProjectionKeys(dbOrOptions, maybeOptions) {
   return results;
 }
 
-// Issue #233: the conditional peer database of a flow node, built over that node's own
-// connection. q(sql, params) resolves rows and run(sql, params) executes; the peer verbs above
-// use only get and transaction. A transaction runs fn between BEGIN IMMEDIATE and COMMIT. When
-// fn or COMMIT throws it rolls back, reports a failed rollback through
-// warn(label + ' rollback failed: ...') and rethrows that error.
-function flowPeerDb(q, run, warn, label) {
-  const get = async (sql, params = []) => (await q(sql, params))[0] || null;
+// Use the flow facade's queue, including every statement in the peer transaction.
+// The helper owns rollback; keep the caller's warning label if rollback fails.
+function flowPeerDb(db, warn, label) {
   return {
-    get,
+    get: async (sql, params = []) => (await db.get(sql, params)) || null,
     transaction: async (fn) => {
-      await run('BEGIN IMMEDIATE');
-      const tx = {
-        get,
-        run: async (sql, params = []) => run(sql, params)
-      };
       try {
-        const value = await fn(tx);
-        await run('COMMIT');
-        return value;
+        return await db.transaction(fn);
       } catch (error) {
-        try {
-          await run('ROLLBACK');
-        } catch (rollbackError) {
+        if (error && error.rollbackError) {
+          const rollbackError = error.rollbackError;
           warn(label + ' rollback failed: ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
         }
         throw error;

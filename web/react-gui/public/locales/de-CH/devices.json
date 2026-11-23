@@ -69,12 +69,12 @@
     "yesRemove": "Ja, entfernen",
     "removing": "Wird entfernt...",
     "failedToRemove": "Gerät konnte nicht entfernt werden",
-    "soilWaterTension1": "BODENWASSERSPANNUNG 1",
-    "soilWaterTension2": "BODENWASSERSPANNUNG 2",
-    "lightIntensity": "LICHTINTENSITÄT",
+    "soilWaterTension1": "Bodenwasserspannung 1",
+    "soilWaterTension2": "Bodenwasserspannung 2",
+    "lightIntensity": "Lichtintensität",
     "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten",
-    "ambientTemperature": "UMGEBUNGSTEMPERATUR",
-    "relativeHumidity": "RELATIVE LUFTFEUCHTIGKEIT",
+    "ambientTemperature": "Umgebungstemperatur",
+    "relativeHumidity": "Relative Luftfeuchtigkeit",
     "neverSeen": "Nie gesehen",
     "settings": "EINSTELLUNGEN",
     "intervalLabel": "Gewünschtes Intervall (Minuten)",
@@ -516,7 +516,22 @@
       "noData": "Keine agronomischen Daten verfügbar",
       "fromSource": "von {{source}}",
       "kcHelpLabel": "Info zum Kulturkoeffizienten",
-      "kcHelp": "FAO-56-Kc für {{crop}}: Anfang {{ini}}, Hauptphase {{mid}}, Ende {{end}}. Aktuelle Phase: {{stage}}."
+      "kcHelp": "FAO-56-Kc für {{crop}}: Anfang {{ini}}, Hauptphase {{mid}}, Ende {{end}}. Aktuelle Phase: {{stage}}.",
+      "evapotranspiration": "Evapotranspiration",
+      "conditions": "Bedingungen",
+      "vpdStatus": {
+        "saturated": "Gesättigt",
+        "low": "Niedrig",
+        "moderate": "Mässig",
+        "high": "Hoch",
+        "stressRisk": "Stressrisiko"
+      },
+      "thiStatus": {
+        "normal": "Normal",
+        "alert": "Warnung",
+        "danger": "Gefahr",
+        "emergency": "Notfall"
+      }
     },
     "forecast": {
       "dayToday": "Heute",
@@ -534,7 +549,12 @@
       "noData": "Keine Vorhersage verfügbar",
       "noLocation": "Zonenkoordinaten setzen, um Vorhersage zu aktivieren",
       "hourlyTitle": "Stündlicher Regen (nächste 24 Std.)",
-      "unavailable": "Nicht verfügbar"
+      "unavailable": "Nicht verfügbar",
+      "rain": "Regen",
+      "probability": "Wahrscheinlichkeit",
+      "hourlyHelpLabel": "Zum stündlichen Regen",
+      "hourlyHelp": "Die Balken zeigen Regen in Millimetern; die gestrichelte Linie zeigt die Regenwahrscheinlichkeit in Prozent.",
+      "relativeHumidityValue": "{{value}} r. F."
     },
     "metrics": {
       "air_temperature_c": "Lufttemp.",
@@ -548,6 +568,24 @@
       "uv_index": "UV-Index",
       "soil_temperature_c": "Bodentemp.",
       "soil_moisture_pct": "Bodenfeuchte"
+    },
+    "compass": {
+      "N": "N",
+      "NNE": "NNO",
+      "NE": "NO",
+      "ENE": "ONO",
+      "E": "O",
+      "ESE": "OSO",
+      "SE": "SO",
+      "SSE": "SSO",
+      "S": "S",
+      "SSW": "SSW",
+      "SW": "SW",
+      "WSW": "WSW",
+      "W": "W",
+      "WNW": "WNW",
+      "NW": "NW",
+      "NNW": "NNW"
     }
   },
   "zoneConfig": {
@@ -1040,7 +1078,18 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
     "soFar": "bisher",
-    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
+    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen.",
+    "title": "Niederschlag",
+    "noData": "keine Daten",
+    "windowTotal": "Summe im Zeitraum",
+    "peakInterval": "Höchster Intervallwert",
+    "wetIntervals": "Intervalle mit Regen",
+    "rainyDays": "Regentage",
+    "wettestDay": "Regenreichster Tag",
+    "noIntervalData": "Keine Niederschlagsmessungen in den letzten {{hours}} Stunden.",
+    "noWindowData": "Keine Niederschlagsmessungen in diesem Zeitraum.",
+    "intervalTitle": "Niederschlag je Intervall (mm)",
+    "dailyTitle": "Tagesniederschlag (mm)"
   },
   "rain": {
     "recordedToday": "Heute gemessener Regen",
@@ -1097,5 +1146,81 @@
     "closeSettings": "Geräteeinstellungen schliessen",
     "zones": "Zonen:",
     "noZones": "Keine Zonen zugewiesen"
+  },
+  "monitor": {
+    "current": "Aktuell",
+    "minimum": "Min.",
+    "maximum": "Max.",
+    "hours": "{{count}} h",
+    "days": "{{count}} T.",
+    "readings": "{{count}} Messwerte · letzte {{hours}} h",
+    "noData": "Keine Daten für {{metric}} in den letzten {{hours}} Stunden.",
+    "failedToLoad": "Messverlauf konnte nicht geladen werden.",
+    "close": "Schliessen"
+  },
+  "windMonitor": {
+    "title": "Wind",
+    "currentSpeed": "Aktuelle Geschwindigkeit",
+    "peakGust": "Stärkste Böe",
+    "currentDirection": "Aktuelle Richtung",
+    "speed": "Geschwindigkeit",
+    "gust": "Böe",
+    "direction": "Richtung",
+    "speedAndGust": "Geschwindigkeit und Böen (m/s)",
+    "roseTitle": "Windrose (Richtung × Geschwindigkeit)",
+    "samples": "{{count}} Messwerte · {{calm}} % windstill",
+    "noData": "Keine Winddaten in den letzten {{hours}} Stunden.",
+    "noSpeedData": "In diesem Zeitraum sind keine Messwerte für Windgeschwindigkeit oder Böen verfügbar.",
+    "notEnoughData": "Zu wenige Winddaten für eine Windrose in diesem Zeitraum.",
+    "allCalm": "Alle gepaarten Messwerte zeigen Windstille; es gibt keine Richtung darzustellen.",
+    "chartError": "Windrose konnte nicht geladen werden.",
+    "timestamps": "{{count}} Zeitpunkte · letzte {{hours}} h"
+  },
+  "dendrometerMonitor": {
+    "title": "Dendrometer-Verlauf",
+    "position": "Position",
+    "source": "Quelle",
+    "aboveRange": "Über dem ausgefahrenen Bereich",
+    "belowRange": "Unter dem eingefahrenen Bereich",
+    "noData": "Keine Dendrometerdaten in den letzten {{hours}} Stunden.",
+    "rawOnly": "Rohdaten sind in diesem Zeitraum verfügbar, aber noch keine kalibrierte Verschiebung.",
+    "awaitingBaseline": "Referenzwert ausstehend. Die mechanische Position ist verfügbar. Der nächste gültige kalibrierte Uplink legt den neuen Nullpunkt der Stammänderung fest.",
+    "noCalibratedData": "Keine kalibrierte Stammänderung in den letzten {{hours}} Stunden verfügbar.",
+    "stemTitle": "Stammänderung im Zeitverlauf",
+    "stemDescription": "Die Stammänderung entspricht dem Signal auf der Gerätekarte und wird relativ zum lokalen Referenzwert dieses Geräts erfasst.",
+    "mechanicalTitle": "Mechanische Ebene",
+    "mechanicalDescription": "Nur zur technischen Auswertung. Die absolute Position wird hier angezeigt, statt auf der Hauptgerätekarte.",
+    "engineering": "Diagnose / Technik",
+    "currentPosition": "Aktuelle Position",
+    "windowRange": "Bereich im Zeitraum",
+    "strokeUsed": "Genutzter Hub",
+    "strokeValue": "{{percent}} % von {{stroke}} mm",
+    "rangeState": "Bereichsstatus",
+    "outsideRange": "Der letzte mechanische Messwert liegt ausserhalb des gespeicherten Kalibrierbereichs. Die Stammänderung auf der Hauptkarte wird bis zur Prüfung des Kalibrierbereichs ausgeblendet.",
+    "calibrationDetails": "Details zur Verhältnis- und ADC-Kalibrierung finden Sie unter «Erweiterte Geräteeinstellungen» auf der LSN50-Karte."
+  },
+  "weatherCard": {
+    "minuteInterval": "Intervall von {{value}} min",
+    "secondInterval": "Intervall von {{value}} s",
+    "perTenMinutes": "{{value}} {{unit}} pro 10 min",
+    "rateOverInterval": "{{value}} mm/h über {{interval}}",
+    "thisInterval": "Dieses Intervall",
+    "gust": "Böe {{value}} m/s",
+    "lastUplink": "Letzte Übertragung: {{value}} mm",
+    "manageZones": "Zonenzuordnung verwalten",
+    "zoneAssignments": "Zonenzuordnung",
+    "noZones": "Keine Zonen verfügbar",
+    "save": "Speichern",
+    "saving": "Wird gespeichert…",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "counterStatus": {
+      "first_sample": "Warten auf die nächste Übertragung zur Berechnung der Differenz.",
+      "duplicate_timestamp": "Übertragung mit doppeltem Zeitstempel übersprungen.",
+      "out_of_order": "Übertragung ausserhalb der Reihenfolge übersprungen.",
+      "counter_reset": "Zählerrücksetzung erkannt; Intervalldifferenz übersprungen.",
+      "invalid_interval": "Ungültiges Übertragungsintervall; Differenz übersprungen.",
+      "cumulative_baseline": "Ausgangswert des Regenzählers gesetzt; warten auf die nächste Übertragung zur Berechnung der Differenz.",
+      "intensity_only": "Regenmenge für dieses Intervall unbekannt; nur die Intensität wurde gemeldet."
+    }
   }
 }

@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+
+# S95done owns mount_root done; never reboot a fresh overlay before READY.
+START=96
+STOP=
+USE_PROCD=
+
+NEEDS_RESIZE=/etc/osi-rootfs-grow-needs-resize
+REBOOT_REQUEST=/var/run/osi-rootfs-grow-reboot
+
+start() {
+  [ -f "$REBOOT_REQUEST" ] && [ -f "$NEEDS_RESIZE" ] || return 0
+  . /usr/libexec/osi-rootfs-grow.sh || return 1
+  if ! osi_rootfs_target; then
+    logger -t osi-rootfs-grow "unsupported writable filesystem ($ROOT_FSTYPE); growth reboot skipped"
+    [ "$ROOT_FSTYPE" = f2fs ] && return 0
+    return 1
+  fi
+  if [ "$ROOT_MOUNT" != /overlay ]; then
+    logger -t osi-rootfs-grow "direct ext4 root; normal restart required for filesystem growth"
+    return 0
+  fi
+  if [ "$(readlink /overlay/.fs_state 2>/dev/null)" != 2 ]; then
+    logger -t osi-rootfs-grow "overlay is not READY; deferring queued growth reboot"
+    return 1
+  fi
+  # S07 opened this descriptor before initialization writes. syncfs reports
+  # writeback failures since then; a journal probe also rejects old aborts.
+  /usr/libexec/osi-rootfs-flush flush /overlay /var/run/osi-rootfs-grow-flush.sock || {
+    logger -t osi-rootfs-grow "checked overlay flush or journal probe failed; growth reboot deferred, pending state retained"
+    return 1
+  }
+  logger -t osi-rootfs-grow "checked overlay flush and journal probe complete; overlay READY; rebooting to grow filesystem"
+  reboot || {
+    logger -t osi-rootfs-grow "growth reboot request failed; pending state retained"
+    return 1
+  }
+  rm -f "$REBOOT_REQUEST"
+}

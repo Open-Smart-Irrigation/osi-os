@@ -3,11 +3,10 @@
 import type { MobileHistoryDiagnostics } from '@osi/history-uplot';
 
 declare global {
+  const __OSI_INTERNAL_PHONE_CHARTS__: boolean;
+
   interface ImportMetaEnv {
     readonly VITE_OSI_SERVER_URL?: string;
-    readonly VITE_HISTORY_UPLOT_SOIL_ENABLED?: string;
-    readonly VITE_MOBILE_HISTORY_INTERNAL?: string;
-    readonly VITE_MOBILE_HISTORY_INTERNAL_DIAGNOSTICS?: string;
     readonly VITE_BASE_PATH?: string;
     readonly VITE_PUBLIC_SIMULATOR?: string;
   }

@@ -1167,7 +1167,7 @@ function buildUpdateSqlNode() {
 test('Route Command wires SET_SDI12_IDENTIFY into the sdi12-identify link-in and Build UPDATE SQL', () => {
   const routeCommand = routeCommandNode();
   assert.equal(routeCommand.outputs, 7);
-  assert.match(routeCommand.func, /commandType === 'SET_SDI12_IDENTIFY'/);
+  assert.match(require('./lib/valve-ingress-x2-source').resolvedNode(routeCommand).func, /commandType === 'SET_SDI12_IDENTIFY'/);
 
   const linkOutIds = routeCommand.wires[6];
   assert.equal(linkOutIds.length, 1);
@@ -1287,6 +1287,7 @@ test('the recipe poll, apply and rollback close the real ChirpStack client witho
   };
   const commissioning = {
     pollDeployments: async () => ({ checked: 0 }),
+    recipePollHasDevices: COMMISSIONING.recipePollHasDevices,
     applyDesiredRecipe: async () => ({ deployment: { status: 'PENDING' } }),
     rollbackCompatibleRecipe: async () => ({ deployment: { status: 'PENDING' } }),
   };

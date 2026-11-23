@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import en from '../../../../public/locales/en/devices.json';
 import type { Device } from '../../../types/farming';
 import { KiwiSensorCard } from '../KiwiSensorCard';
 
@@ -12,7 +13,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => STATUS_LABELS[key] ?? options?.defaultValue ?? key }),
+  useTranslation: () => ({ t: (key: string, options?: Record<string, unknown>) => {
+    const [group, leaf] = key.split('.');
+    const text = STATUS_LABELS[key] ?? (en as unknown as Record<string, Record<string, string>>)[group]?.[leaf] ?? options?.defaultValue ?? key;
+    return String(text).replace(/\{\{(\w+)\}\}/g, (_m, name) => String(options?.[name] ?? ''));
+  } }),
 }));
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
@@ -111,7 +116,7 @@ describe('KiwiSensorCard SWT unit preference', () => {
       ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: 0.05 },
     }} />);
     fireEvent.click(screen.getByRole('button', { name: '-0.30 pF' }));
-    expect(await screen.findByRole('heading', { name: 'Soil Water Tension 1 (pF)' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Soil water tension 1 (pF)' })).toBeInTheDocument();
     expect(screen.getAllByText('-0.30 pF').length).toBeGreaterThan(0);
     vi.unstubAllGlobals();
   });
@@ -137,8 +142,8 @@ describe('KiwiSensorCard SWT unit preference', () => {
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
     expect(screen.queryByText('Dry')).not.toBeInTheDocument();
     fireEvent.click(history);
-    expect(screen.getByRole('heading', { name: 'Soil Water Tension 1' })).toBeInTheDocument();
-    expect(await screen.findByText('No soil water tension 1 data in the last 24 hours.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Soil water tension 1' })).toBeInTheDocument();
+    expect(await screen.findByText('No Soil water tension 1 data in the last 24 hours.')).toBeInTheDocument();
   });
 
   it('names the configured depth in the soil history dialog', async () => {
@@ -146,8 +151,8 @@ describe('KiwiSensorCard SWT unit preference', () => {
       ...kiwiDevice, soilMoistureProbeDepths: {swt_1: 20}, last_seen: FRESH,
     }} />);
     fireEvent.click(screen.getByTitle('View history'));
-    expect(screen.getByRole('dialog', {name: 'Soil Water Tension 1 (20 cm)'})).toBeInTheDocument();
-    expect(await screen.findByText('No soil water tension 1 (20 cm) data in the last 24 hours.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', {name: 'Soil water tension 1 (20 cm)'})).toBeInTheDocument();
+    expect(await screen.findByText('No Soil water tension 1 (20 cm) data in the last 24 hours.')).toBeInTheDocument();
   });
 
   it('opens the second channel history when only that channel is invalid', async () => {
@@ -155,8 +160,8 @@ describe('KiwiSensorCard SWT unit preference', () => {
       ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: 30, swt_2: 1_000_001 },
     }} />);
     fireEvent.click(screen.getByRole('button', { name: 'na' }));
-    expect(screen.getByRole('heading', { name: 'Soil Water Tension 2' })).toBeInTheDocument();
-    expect(await screen.findByText('No soil water tension 2 data in the last 24 hours.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Soil water tension 2' })).toBeInTheDocument();
+    expect(await screen.findByText('No Soil water tension 2 data in the last 24 hours.')).toBeInTheDocument();
   });
 
 });

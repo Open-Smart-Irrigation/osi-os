@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {classify}=require('./test-release-smoke');
+const {classify,report}=require('./test-release-smoke');
 const known=[{id:'case',finding:'F-1',failures:[{code:'http',symptom:'http-timeout'}]}];
 const failed={id:'case',failures:[{code:'http',actual:{timeout:true}}]};
 test('exact known failure is counted separately',()=>{
@@ -60,4 +60,59 @@ test('expected refusals are exact by scenario, source, type and full message',()
     assert.equal(isExpectedRefusal({...refusal,...changed},[refusal]),false);
   }
   assert.equal(isExpectedRefusal({...refusal,message:'SQLITE_BUSY: database is locked'},[refusal]),false);
+});
+
+const {runtimeConfig,combineKnown,parseVersions,checkRuntime}=require('./lib/release-smoke-runtimes');
+test('both deployed runtimes have pinned versions and unknown runtimes fail closed',()=>{
+  assert.equal(runtimeConfig('image').nodeRed,'3.1.15');
+  assert.equal(runtimeConfig('stock').nodeRed,'4.0.9');
+  assert.equal(runtimeConfig('stock').node,'20.18.3');
+  assert.throws(()=>runtimeConfig('typo'),/unknown runtime/);
+  assert.throws(()=>parseVersions('env:\n  OSI_SMOKE_NODE_VERSION: lts\n'),/version/);
+});
+test('workflow runtime versions must match both fixture locks',t=>{
+  const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+  for(const name of ['image','stock']) {
+    const config=runtimeConfig(name);
+    const lock=require(path.join(config.fixture,'package-lock.json'));
+    assert.equal(lock.packages['node_modules/node-red'].version,config.nodeRed);
+    assert.equal(require(path.join(config.fixture,'package.json')).dependencies['node-red'],config.nodeRed);
+    assert.throws(()=>checkRuntime({...config,node:process.versions.node,nodeRed:'0.0.0'}),/differs from workflow/);
+  }
+  const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'smoke-pin-test-'));t.after(()=>fs.rmSync(fixture,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(fixture,'package.json'),JSON.stringify({dependencies:{'node-red':'4.0.9'}}));
+  fs.writeFileSync(path.join(fixture,'package-lock.json'),JSON.stringify({packages:{'node_modules/node-red':{version:'4.0.8'}}}));
+  assert.throws(()=>checkRuntime({name:'stock',node:process.versions.node,nodeRed:'4.0.9',fixture}),/package-lock.json.*differs from workflow/);
+});
+test('release policy includes the stock list even when the image list is empty',()=>{
+  const both=combineKnown({image:[],stock:known});
+  assert.equal(both[0].runtime,'stock');
+  assert.equal(gate(both,{ci:true,event:'push',ref:'refs/tags/v0.0.0'}),1);
+  assert.equal(gate(both,{ci:true,event:'workflow_dispatch'}),1);
+  assert.equal(gate(combineKnown({image:[],stock:[]})),0);
+  assert.throws(()=>combineKnown({image:[]}),/stock/);
+  assert.throws(()=>combineKnown({image:[],stock:null}),/stock/);
+});
+
+test('stock install rejects npm exit zero when required user packages are absent',t=>{
+  const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+  const run=fs.mkdtempSync(path.join(os.tmpdir(),'smoke-install-test-'));
+  t.after(()=>fs.rmSync(run,{recursive:true,force:true}));
+  t.mock.method(require('node:child_process'),'spawnSync',()=>({status:0,stdout:'',stderr:'npm error Exit handler never called!'}));
+  const file=require.resolve('./fixtures/release-smoke-stock/install-user');
+  delete require.cache[file];
+  t.after(()=>delete require.cache[file]);
+  assert.throws(()=>require(file).install(path.resolve(__dirname,'..'),run),/stock npm install failed/);
+});
+
+test('a listed case that was not executed fails with exit 1 and a summary',()=>{
+  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+  const run=fs.mkdtempSync(path.join(os.tmpdir(),'osi-release-smoke-policy-'));
+  try {
+    const errors=console.error;console.error=()=>{};
+    let code;try{code=report({cases:[],seconds:1,maxRSSKiB:1},known,run);}finally{console.error=errors;}
+    assert.equal(code,1);
+    const summary=JSON.parse(fs.readFileSync(path.join(run,'summary.json'),'utf8'));
+    assert.deepEqual(summary.failed.map(c=>[c.id,c.reason,c.failures]),[['case','known case was not executed',[]]]);
+  } finally {fs.rmSync(run,{recursive:true,force:true});}
 });

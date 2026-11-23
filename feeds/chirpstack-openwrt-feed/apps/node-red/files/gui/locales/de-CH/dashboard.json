@@ -1,5 +1,5 @@
 {
-  "title": "Open Smart Irrigation Dashboard",
+  "title": "Bewässerungsübersicht",
   "welcome": "Willkommen, {{username}}",
   "add": "Hinzufügen",
   "addMenu": {
@@ -12,7 +12,7 @@
   "admin": "Admin",
   "adminMenu": {
     "users": "Benutzer",
-    "grants": "Berechtigungen"
+    "grants": "Zugriffsrechte"
   },
   "account": "Konto",
   "accountMenu": {
@@ -38,5 +38,9 @@
     "zones": "Zonen",
     "data": "Daten",
     "journal": "Journal"
+  },
+  "header": {
+    "menu": "Menü",
+    "primaryNavigation": "Hauptnavigation"
   }
 }

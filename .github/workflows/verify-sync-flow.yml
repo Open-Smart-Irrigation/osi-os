@@ -30,6 +30,8 @@ jobs:
           node scripts/verify-flows-sandbox.js
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: HTTP auth error replies and SQLite startup configuration
+        run: node --test scripts/test-auth-http-error-wiring.js
       - name: Reference-tree ownership and valve-router client lifetime
         run: node --test scripts/test-reference-tree-and-valve-router.js
       - name: Scoped-access endpoint ratchet
@@ -43,6 +45,10 @@ jobs:
       # history schema/worker tests, history API contract, helper tests, and
       # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
+      - name: X1 prepared adapters satisfy flow and source guards
+        run: node scripts/test-daily-scheduler-prepared-adapters.js guards
+      - name: Shared facade transaction isolation
+        run: node --test scripts/test-manual-facade-transactions.js scripts/test-sqlite-farm-shared-queue.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
       - name: SDI-12 offline profiles and helper regressions
@@ -60,6 +66,8 @@ jobs:
           conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.test.js
           conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.test.js
           conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
+      - name: SDI-12 archive retention and staged flow wiring
+        run: node --test --test-concurrency=1 scripts/test-sdi12-archive-retention.js scripts/test-sdi12-archive-retention-wiring.js
       # Tensiomark storage, sync and precision; the shared matric-potential
       # conversion; the clipped-WATERMARK and Tensiomark history repair CLIs;
       # the unified soil-tension scheduler, its SWT query module and the durable
@@ -87,6 +95,7 @@ jobs:
       - name: Standalone script inventory pass set
         run: |
           node scripts/test-account-link-legacy-cloud.js
+          node --test scripts/test-account-link-restart-obligation.js
           node scripts/test-audit-schema.js
           node scripts/test-command-ack-mark-delivered.js
           node scripts/test-delete-device-flow.js
@@ -123,6 +132,15 @@ jobs:
           node scripts/test-watermark-cloud-command-path.js
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
+          TZ=UTC node scripts/test-x3-zone-env-parity.js --verify
+          TZ=UTC node scripts/test-x3-zone-env-additive.js
+          TZ=Europe/Zurich node scripts/test-x3-zone-env-additive.js
+          node scripts/test-x3-zone-env-revision.js
+          node scripts/test-x3-zone-env-round2.js
+          node --test scripts/test-x3-zone-env-packaging.js
+          node scripts/verify-x3-zone-env-handoff.js
+          node scripts/test-x3-zone-env-squash.js
+          node scripts/test-x3-zone-env-integration.js --full
           node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-env-unknown-rain.js
           node scripts/test-zone-env-rain-policy.js
@@ -168,6 +186,10 @@ jobs:
       # stop commands still run with the gateway clock ahead of their expiry.
       - name: Valve command safety path
         run: node --test scripts/test-valve-command-safety-path.js
+      # NEW-15: a refusal latched after a farm handle is open stops every
+      # further operation on it (node:sqlite adapter, so Node 22 here).
+      - name: Farm database refusal latch
+        run: node --test scripts/test-farming-sqlite-latch.js
       # The eight local STREGA commands that answer after the transport decides
       # (valve CLOSE/CLOSE_FOR_DURATION/OPEN_FOR_DURATION, interval, timed action,
       # magnet, partial opening, flushing) answer exactly once, through a link in
@@ -215,6 +237,8 @@ jobs:
       # manifest keeps a queued key in place so a mismatching segment converges.
       - name: History correction queue drain
         run: node --test scripts/test-sync-history-queue-drain.js
+      - name: History repair convergence and bounded drain
+        run: node --test scripts/test-sync-history-repair-convergence.js
       # The 5-minute history manifest pages through every stored hash v1 segment
       # (500 per request, cursor in app_settings, wraps after a short page), so a
       # segment after the first 500 is compared and repaired too; the repair
@@ -230,12 +254,41 @@ jobs:
           node --test scripts/deploy-command-ledger-dependency.test.js \
             scripts/deploy-fetch-list.test.js \
             scripts/deploy-payload-lifecycle.test.js
+      # A deploy killed after any filesystem change of the payload activation
+      # leaves the old or the new payload complete, and its retry and rollback
+      # both activate a complete set (v0.8.2 review, S-1).
+      - name: Payload activation kill matrix
+        run: node --test scripts/deploy-payload-kill-matrix.test.js
+      # A deploy cut between its migration and its switch (#636, item 3): a
+      # cut after each of the ten commits, then the boot (held, or forward
+      # after the last), then the deploy run again, on a real database with
+      # the real migration runner.
+      - name: Cut during the migration
+        run: node --test --test-concurrency=1 scripts/deploy-cut-during-migration.test.js
+      # The swap helpers of the v0.8.1 and v0.8.2 tags, read from git, on a
+      # gateway in the payloads/active layout: a downgrade ends complete.
+      - name: Payload layout downgrade
+        run: node --test scripts/deploy-payload-downgrade.test.js
       # Gateway records deploy.sh keeps outside the payload: the reported
       # firmware version, which follows the active payload through activation
       # and every rollback, and the
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js
+      # NEW-23: a gateway on a stock base gets its osi-server configuration
+      # from the image's own defaults before anything is replaced.
+      - name: Deploy osi-server configuration
+        run: node --test scripts/test-deploy-osi-server-config.js scripts/test-deploy-root-password-warning.js
+      # Only the commands both gateway bases carry (NEW-27: no stat on
+      # either): deploy.sh's command check, no absent command or tr
+      # character class on the gateway side, and the second-deploy and
+      # retry paths run with a PATH holding only the bases' commands.
+      - name: Gateway base commands
+        run: node --test --test-concurrency=1 scripts/test-deploy-gateway-commands.js
+      # NEW-29: the image's first-boot Tailscale script keeps every letter of
+      # the join key (no tr character class on the gateway bases).
+      - name: Tailscale first-boot join key
+        run: node --test scripts/test-tailscale-init-authkey.js
       # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
       # on the Kiwi profile and gives the Clover its own profile with it instead
       # of aliasing the codec-less field-tester profile; --repair-soil-profiles

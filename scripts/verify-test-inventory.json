@@ -2,6 +2,11 @@
   "$comment": "Read by scripts/verify-test-inventory.js. 'indirect': a test that a runner script (itself run by a workflow) starts; the runner must name the file. 'excluded': a test file or pattern no workflow runs, with the reason. Entries that match nothing, or exclude a test a workflow runs, fail the verifier. Remove an exclusion when its test is wired into a workflow. Test files are those named like tests (see TEST_NAME in the verifier); verifiers such as scripts/verify-*.js are outside the inventory.",
   "indirect": [
     {
+      "path": "scripts/rehearse-legacy-catalog.test.js",
+      "runner": "scripts/run-legacy-catalog-rehearsal.js",
+      "note": "Runs the real offline repair in an isolated PID namespace so its fail-closed /proc scan sees every fixture process."
+    },
+    {
       "path": "scripts/test-sync-history-worker.js",
       "runner": "scripts/verify-sync-flow.js"
     },
@@ -26,6 +31,19 @@
       "runner": "scripts/verify-sync-flow.js"
     },
     {
+      "path": "scripts/test-release-1.0-surfaces.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "web/react-gui/tests/browser/release-data-views.spec.ts",
+      "runner": "web/react-gui/scripts/run-mobile-tension-build-matrix.mjs"
+    },
+    {
+      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
+      "runner": "web/react-gui/scripts/run-mobile-tension-build-matrix.mjs",
+      "note": "CI runs the release exclusion case. The internal chart performance and interaction cases run in the local matrix."
+    },
+    {
       "path": "web/react-gui/tests/browser/conditional-irrigation.spec.ts",
       "runner": "web/react-gui/playwright.conditional.config.ts",
       "note": "The existing frontend CI job runs the Playwright config through test:browser:conditional."
@@ -34,9 +52,21 @@
       "path": "web/react-gui/tests/browser/device-registration.spec.ts",
       "runner": "web/react-gui/playwright.device-registration.config.ts",
       "note": "The GUI browser job runs this Playwright config through test:browser:device-registration."
+    },
+    {
+      "path": "scripts/test-release-sqlite-overlap.js",
+      "runner": "scripts/test-release-smoke.js"
+    },
+    {
+      "path": "scripts/test-x3-zone-env-runtime.js",
+      "runner": "scripts/verify-x3-zone-env-handoff.js"
     }
   ],
   "excluded": [
+    {
+      "path": "tools/raspi5/test-registers.py",
+      "reason": "Local QEMU board-model diagnostic. It needs the built raspi5b machine and kernel and DTB extracted from a Pi 5 factory image."
+    },
     {
       "pattern": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/{node-gyp,pump,retry}/**",
       "reason": "third-party npm packages (node-gyp, pump, retry) vendored into the firmware payload; their own test files are not OSI tests. The bcm2709 copies fall under the mirror pattern below"
@@ -84,10 +114,6 @@
     {
       "pattern": "web/react-gui/demo/tests/public/**/*.spec.ts",
       "reason": "Manual public-release browser acceptance suite (npm run demo:test:public -- --workers=1); no CI workflow builds and runs all three browser projects"
-    },
-    {
-      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
-      "reason": "production-build Playwright matrix run by npm run test:browser:mobile-history; it uses paired flag-off/flag-on production builds, CDP CPU throttling and frame-timing acceptance, so it remains a controlled local release gate tracked by #516 rather than a shared pull-request runner test"
     },
     {
       "path": "scripts/test-task14-journal-preview.js",

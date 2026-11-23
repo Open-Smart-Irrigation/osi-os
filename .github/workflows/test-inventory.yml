@@ -3,7 +3,7 @@ on:
   push:
     branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, release/0.8.3 ]
 jobs:
   test-inventory:
     runs-on: ubuntu-latest
@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Authority inventory compares both profiles at its reviewed source pin.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -26,6 +28,10 @@ jobs:
       # nothing.
       - name: Every test file is run or excluded with a reason
         run: node scripts/verify-test-inventory.js
+      - name: Contract fixture dependencies
+        run: npm ci --prefix scripts --omit=dev --ignore-scripts
+      - name: Authority contract fixtures and source inventory
+        run: node scripts/test-authority-contract.js
       # Tests that no workflow ran before this inventory existed. bcm2712 only:
       # verify-profile-parity.js proves the bcm2709 copies byte-identical.
       - name: Helper-module tests
@@ -49,6 +55,16 @@ jobs:
             scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
+      - name: ChirpStack SQLite WAL one-shot
+        run: node --test scripts/test-chirpstack-sqlite-wal.js
+      - name: Recover Node-RED startup files and fence database restoration
+        run: |
+          if ! command -v sqlite3 >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y sqlite3
+          fi
+          node --test scripts/test-node-red-init-flows.js scripts/test-deploy-db-integrity-first.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-integrity/index.test.js
       - name: Shell tests
         run: |
           sh scripts/test-gateway-identity-helper.sh

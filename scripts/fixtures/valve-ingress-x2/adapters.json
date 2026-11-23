@@ -1,0 +1,239 @@
+{
+  "source": "ec822b556a4bf789774a2e4deda7841d469dc631",
+  "nodes": [
+    {
+      "id": "934bf2bc19a8ce22",
+      "entry": "routeCommand",
+      "file": "command-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('routeCommand', msg, { env, global, node, Date, Buffer, setTimeout, osiLib });\nreturn x2Load.value.routeCommand(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "libs": [
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "83bb4a452dd9ae37",
+      "entry": "authenticateValveCommand",
+      "file": "manual-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('authenticateValveCommand', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });\nreturn x2Load.value.authenticateValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          },
+          {
+            "var": "osiDb",
+            "module": "osi-db-helper"
+          }
+        ]
+      }
+    },
+    {
+      "id": "9ad895844533fb35",
+      "entry": "checkValveOwnership",
+      "file": "manual-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('checkValveOwnership', msg, { env, global, node, Date, Buffer, setTimeout, osiLib });\nreturn x2Load.value.checkValveOwnership(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "libs": [
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dde8e1ef265e96d7",
+      "entry": "buildValveCommand",
+      "file": "manual-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('buildValveCommand', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.buildValveCommand(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cancel-strega-actuation-fn",
+      "entry": "cancelValveRequest",
+      "file": "cancel-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('cancelValveRequest', msg, { env, global, node, Date, Buffer, setTimeout, osiDb, crypto, chirpstack, osiLib });\nreturn x2Load.value.cancelValveRequest(msg, { env, global, node, Date, Buffer, setTimeout, osiDb, crypto, chirpstack, osiLib });",
+        "libs": [
+          {
+            "var": "osiDb",
+            "module": "osi-db-helper"
+          },
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "chirpstack",
+            "module": "osi-chirpstack-helper"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-interval-auth-fn",
+      "entry": "parseStregaIntervalRequest",
+      "file": "service-interval-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaIntervalRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.parseStregaIntervalRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-model-auth-fn",
+      "entry": "parseStregaModelRequest",
+      "file": "service-model-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaModelRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.parseStregaModelRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-timed-auth-fn",
+      "entry": "parseStregaTimedRequest",
+      "file": "service-timed-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaTimedRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });\nreturn x2Load.value.parseStregaTimedRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib, osiDb });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          },
+          {
+            "var": "osiDb",
+            "module": "osi-db-helper"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-magnet-auth-fn",
+      "entry": "parseStregaMagnetRequest",
+      "file": "service-magnet-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaMagnetRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.parseStregaMagnetRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-partial-auth-fn",
+      "entry": "parseStregaPartialRequest",
+      "file": "service-partial-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaPartialRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.parseStregaPartialRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-flush-auth-fn",
+      "entry": "parseStregaFlushRequest",
+      "file": "service-flush-ingress.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('parseStregaFlushRequest', msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });\nreturn x2Load.value.parseStregaFlushRequest(msg, { env, global, node, Date, Buffer, setTimeout, crypto, osiLib });",
+        "libs": [
+          {
+            "var": "crypto",
+            "module": "crypto"
+          },
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "put-strega-advanced-format",
+      "entry": "formatStregaResponse",
+      "file": "run-log-adapters.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('formatStregaResponse', msg, { env, global, node, Date, Buffer, setTimeout, osiLib });\nreturn x2Load.value.formatStregaResponse(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "libs": [
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    },
+    {
+      "id": "5c45136f382d501c",
+      "entry": "buildActuatorLog",
+      "file": "run-log-adapters.js",
+      "replacement": {
+        "func": "const x2Load = osiLib.require('command-ingress');\nif (!x2Load.ok) return osiLib.invokeCommandIngress('buildActuatorLog', msg, { env, global, node, Date, Buffer, setTimeout, osiLib });\nreturn x2Load.value.buildActuatorLog(msg, { env, global, node, Date, Buffer, setTimeout, osiLib });",
+        "libs": [
+          {
+            "var": "osiLib",
+            "module": "osi-lib"
+          }
+        ]
+      }
+    }
+  ]
+}

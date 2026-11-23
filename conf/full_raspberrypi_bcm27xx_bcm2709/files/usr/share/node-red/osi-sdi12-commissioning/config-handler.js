@@ -73,7 +73,6 @@ if (hasLegacyCount && valueCountInput !== null && (!Number.isInteger(valueCountI
 var deveui = String(msg.deviceRow.deveui || '').toUpperCase();
 return (async () => {
   var db = new osiDb.Database('/data/db/farming.db');
-  var transactionStarted = false;
   try {
     if (sentekLayout) {
       var commissioningLoad = osiLib.require('sdi12-commissioning');
@@ -99,44 +98,41 @@ return (async () => {
         return msg;
       }
     }
-    await db.run('BEGIN IMMEDIATE');
-    transactionStarted = true;
-    var profileIsFixedShape = profile.expectedValues != null;
-    var resolvedValueCount;
-    if (profileIsFixedShape) resolvedValueCount = null;
-    else if (hasLegacyCount) resolvedValueCount = valueCountInput;
-    else {
-      var existingCount = await db.get('SELECT sdi12_value_count FROM devices WHERE deveui=?', [deveui]);
-      resolvedValueCount = existingCount ? existingCount.sdi12_value_count : null;
-    }
-    var existingDepths = {};
-    if (depthsByChannel === null) {
-      var existingDepthRow = await db.get('SELECT soil_moisture_probe_depths_json FROM devices WHERE deveui=?', [deveui]);
-      if (existingDepthRow && existingDepthRow.soil_moisture_probe_depths_json) {
-        try {
-          var parsedDepths = JSON.parse(existingDepthRow.soil_moisture_probe_depths_json);
-          if (parsedDepths && typeof parsedDepths === 'object' && !Array.isArray(parsedDepths)) existingDepths = parsedDepths;
-        } catch (error) { node.warn('sdi12 config: invalid stored depth map: ' + String(error && error.message ? error.message : error)); }
+    var resolvedValueCount = await db.transaction(async (tx) => {
+      var profileIsFixedShape = profile.expectedValues != null;
+      let resolvedValueCount;
+      if (profileIsFixedShape) resolvedValueCount = null;
+      else if (hasLegacyCount) resolvedValueCount = valueCountInput;
+      else {
+        var existingCount = await tx.get('SELECT sdi12_value_count FROM devices WHERE deveui=?', [deveui]);
+        resolvedValueCount = existingCount ? existingCount.sdi12_value_count : null;
       }
-      depthsByChannel = {};
-      profile.values.forEach(function (v) {
-        if (Object.prototype.hasOwnProperty.call(existingDepths, v.channel)) depthsByChannel[v.channel] = existingDepths[v.channel];
-      });
-    }
-    await db.run(
-      "UPDATE devices SET sdi12_probe_profile=?, sdi12_probe_status='manual', sdi12_channel_layout_json=NULL, " +
-      "soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=?, sdi12_value_count=?, " +
-      "sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui=?",
-      [profileId, JSON.stringify(depthsByChannel), Object.keys(depthsByChannel).length ? 1 : 0, resolvedValueCount, deveui]);
-    await db.run('COMMIT');
-    transactionStarted = false;
+      var existingDepths = {};
+      if (depthsByChannel === null) {
+        var existingDepthRow = await tx.get('SELECT soil_moisture_probe_depths_json FROM devices WHERE deveui=?', [deveui]);
+        if (existingDepthRow && existingDepthRow.soil_moisture_probe_depths_json) {
+          try {
+            var parsedDepths = JSON.parse(existingDepthRow.soil_moisture_probe_depths_json);
+            if (parsedDepths && typeof parsedDepths === 'object' && !Array.isArray(parsedDepths)) existingDepths = parsedDepths;
+          } catch (error) { node.warn('sdi12 config: invalid stored depth map: ' + String(error && error.message ? error.message : error)); }
+        }
+        depthsByChannel = {};
+        profile.values.forEach(function (v) {
+          if (Object.prototype.hasOwnProperty.call(existingDepths, v.channel)) depthsByChannel[v.channel] = existingDepths[v.channel];
+        });
+      }
+      await tx.run(
+        "UPDATE devices SET sdi12_probe_profile=?, sdi12_probe_status='manual', sdi12_channel_layout_json=NULL, " +
+        "soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=?, sdi12_value_count=?, " +
+        "sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui=?",
+        [profileId, JSON.stringify(depthsByChannel), Object.keys(depthsByChannel).length ? 1 : 0, resolvedValueCount, deveui]);
+      return resolvedValueCount;
+    });
     msg.payload = { probe_profile: profileId, status: 'manual', depths: depthsByChannel, value_count: resolvedValueCount,
       layout_status: profileId === 'SENTEK_ENVIROSCAN' ? 'legacy_count' : null };
     return msg;
   } catch (error) {
-    if (transactionStarted) {
-      try { await db.run('ROLLBACK'); } catch (rollbackError) { node.warn('sdi12 config rollback failed'); }
-    }
+    if (error && error.rollbackError) node.warn('sdi12 config rollback failed');
     msg.statusCode = 500;
     msg.payload = { message: 'Unable to save SDI-12 config' };
     return msg;

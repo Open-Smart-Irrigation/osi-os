@@ -55,6 +55,18 @@ function errorsOf(root) {
   return verify(root).errors.join('\n');
 }
 
+test('direct Python tests are covered only when their exit status can fail the step', () => {
+  for (const suffix of ['', ' || true']) {
+    const root = repo({
+      [INVENTORY]: EMPTY_INVENTORY,
+      '.github/workflows/test.yml': workflow(['python3 tools/test_example.py' + suffix]),
+      'tools/test_example.py': 'raise SystemExit(0)\n',
+    });
+    if (suffix) assert.match(errorsOf(root), /tools\/test_example\.py/);
+    else assert.equal(errorsOf(root), '');
+  }
+});
+
 // ---------------------------------------------------------------- YAML subset
 
 test('parseYaml reads the workflow subset: maps, sequences, flow lists, quotes, comments', () => {
@@ -312,6 +324,45 @@ test('setup-node must pin a numeric Node version', () => {
   }
   const missing = repo({ ...base, '.github/workflows/ci.yml': workflow(['node --test scripts/a.test.js']).replace("        with:\n          node-version: '22'\n", '') });
   assert.match(errorsOf(missing), /setup-node without node-version/);
+});
+
+test('setup-node resolves only a quoted patch version from workflow-level env', () => {
+  const base = { [INVENTORY]: EMPTY_INVENTORY, 'scripts/a.test.js': PASSING };
+  const make = (expression, env = "env:\n  NODE_PIN: '20.18.3'", override = '') => {
+    let text = workflow(['node --test scripts/a.test.js'], env)
+      .replace("node-version: '22'", 'node-version: ' + expression);
+    if (override === 'job') text = text.replace('    steps:', "    env:\n      NODE_PIN: '20.18.3'\n    steps:");
+    if (override === 'step') text = text.replace('        with:', "        env:\n          NODE_PIN: '20.18.3'\n        with:");
+    return repo({ ...base, '.github/workflows/ci.yml': text });
+  };
+  for (const quote of ["'", '"']) {
+    assert.equal(errorsOf(make('${{ env.NODE_PIN }}', 'env:\n  NODE_PIN: ' + quote + '20.18.3' + quote)), '');
+  }
+  for (const expression of ['${{ matrix.node }}', '${{ vars.NODE_PIN }}', '${{ inputs.node }}', "${{ env.NODE_PIN || '22' }}", '${{ env.MISSING }}']) {
+    assert.match(errorsOf(make(expression)), /not a pinned version/, expression);
+  }
+  for (const value of ["'^20.18.3'", "'lts/*'", "'20'", '20.18.3', "'20.18'", "'20.18.3-beta'"]) {
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', 'env:\n  NODE_PIN: ' + value)), /not a pinned version/, value);
+  }
+  for (const override of ['job', 'step']) {
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', "env:\n  NODE_PIN: '20.18.3'", override)), /not a pinned version/, override);
+    assert.match(errorsOf(make('${{ env.NODE_PIN }}', '', override)), /not a pinned version/, override + ' only');
+  }
+  assert.match(errorsOf(make('${{ env.NODE_PIN }}', "env:\n  NODE_PIN: 20.18.3\n  OTHER:\n    NODE_PIN: '20.18.3'")), /not a pinned version/);
+  const file = workflow(['node --test scripts/a.test.js']).replace("node-version: '22'", 'node-version-file: .node-version');
+  assert.match(errorsOf(repo({ ...base, '.node-version': '20.18.3', '.github/workflows/ci.yml': file })), /node-version-file is not supported/);
+});
+
+test('setup-node refuses a workflow pin written to GITHUB_ENV by an earlier job step', () => {
+  const base = workflow(['node --test scripts/a.test.js'], "env:\n  NODE_PIN: '20.18.3'")
+    .replace("node-version: '22'", 'node-version: ${{ env.NODE_PIN }}');
+  const check = text => errorsOf(repo({ [INVENTORY]: EMPTY_INVENTORY, 'scripts/a.test.js': PASSING, '.github/workflows/ci.yml': text }));
+  for (const destination of ['$GITHUB_ENV', '${GITHUB_ENV}', '$env:GITHUB_ENV']) {
+    const write = `      - run: echo "NODE_PIN=lts/*" >> "${destination}"\n`;
+    assert.match(check(base.replace('      - uses: actions/setup-node@v4', write + '      - uses: actions/setup-node@v4')), /not a pinned version/);
+  }
+  assert.equal(check(base.replace('      - uses: actions/setup-node@v4', '      - run: echo "OTHER=lts/*" >> "$GITHUB_ENV"\n      - uses: actions/setup-node@v4')), '');
+  assert.equal(check(base + '      - run: echo "NODE_PIN=lts/*" >> "$GITHUB_ENV"\n'), '');
 });
 
 test('workflows install with npm ci only, without peer-dependency bypasses', () => {
@@ -1195,4 +1246,14 @@ test('this repository passes', () => {
   const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /verify-test-inventory: OK/);
+});
+
+test('positive max-old-space-size keeps direct node tests collected', () => {
+  for (const size of [192, 512]) {
+    const run = `node --max-old-space-size=${size} --test scripts/a.test.js`;
+    assert.deepEqual(verify(gatedRepo({ run })).errors, [], run);
+  }
+  for (const value of ['nope', '-1', '0']) {
+    assert.match(errorsOf(gatedRepo({ run: `node --max-old-space-size=${value} --test scripts/a.test.js` })), /node option .* is not modelled/);
+  }
 });

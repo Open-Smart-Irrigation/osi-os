@@ -609,6 +609,22 @@ test('a node type the ratchet does not know fails closed', async () => {
   );
 });
 
+test('an unreachable Change outside the named error-answer node fails closed', async () => {
+  for (const profile of [PROFILE, MIRROR]) {
+    const flows = loadFlows(profile);
+    assert.equal(await failuresFor(flows, []), '');
+    flows.push({
+      id: 'review-mutant', type: 'change', name: 'Unreachable Change',
+      rules: [{ t: 'set', p: 'payload', pt: 'msg', to: 'mutant', tot: 'str' }],
+      wires: [[]],
+    });
+    assert.match(
+      await failuresFor(flows, []),
+      /node type change \(review-mutant\) is neither an entry the ratchet probes nor a type it knows/
+    );
+  }
+});
+
 test('an unawaited first decision is not hidden by a later write-role check', async () => {
   const flows = addRoute(loadFlows(), 'probe-masked-first-http', {
     decision: `
@@ -702,7 +718,7 @@ test('a device assignment that may take a device from another zone fails', async
 test('a weather station zone set that skips the per-zone check fails', async () => {
   const flows = loadFlows();
   const router = flows.find((node) => node.id === 'scoped-weather-zone-assign-router');
-  const check = '    await scope.assertFreshZoneAccess(db, actor.user_uuid, zoneUuid, { scopedMode: true });\n';
+  const check = '    await scope.assertFreshZoneAccess(tx, actor.user_uuid, zoneUuid, { scopedMode: true });\n';
   assert.ok(router.func.includes(check));
   router.func = router.func.replace(check, '');
   assert.match(
@@ -714,9 +730,11 @@ test('a weather station zone set that skips the per-zone check fails', async () 
 test('a weather station zone set that removes an assignment outside the caller\'s scope fails', async () => {
   const flows = loadFlows();
   const router = flows.find((node) => node.id === 'scoped-weather-zone-assign-router');
-  const scoped = /  await run\(\n    'DELETE FROM weather_station_zones WHERE deveui = \? AND zone_id IN [^]*?\n  \);\n/;
-  assert.match(router.func, scoped, 'the router removes only assignments to the caller\'s zones');
-  router.func = router.func.replace(scoped, "  await run('DELETE FROM weather_station_zones WHERE deveui = ?', [deveui]);\n");
+  const scoped = /  await tx\.run\(\n    'DELETE FROM weather_station_zones WHERE deveui = \? AND zone_id IN [^]*?\n  \);\n/;
+  // This match locates the mutation. The executed ratchet below must detect
+  // an actual foreign assignment being removed by the broadened DELETE.
+  assert.match(router.func, scoped, 'locate the scoped transaction DELETE for the mutation');
+  router.func = router.func.replace(scoped, "  await tx.run('DELETE FROM weather_station_zones WHERE deveui = ?', [deveui]);\n");
   assert.match(
     await failuresFor(flows, ['s2120-zones-put-http']),
     /s2120-zones-put-http.*changes a row outside the caller's scope \(the fixture request\): weather_station_zones row removed/

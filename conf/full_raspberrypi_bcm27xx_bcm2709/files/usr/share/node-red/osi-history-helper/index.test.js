@@ -670,7 +670,7 @@ test('toCsv generates rows and escapes commas, quotes, and formula-injection pre
       { a: '=cmd', b: null },
     ]
   );
-  assert.equal(csv, 'a,b\nplain,text\n"has,comma","has""quote"\n\'=cmd,\n');
+  assert.equal(csv, '\uFEFFa,b\nplain,text\n"has,comma","has""quote"\n\'=cmd,\n');
 });
 
 // Expected strings are what osi-server writes on JDK 21: Double.toString for pF
@@ -709,7 +709,7 @@ test('toCsv writes soil-tension kPa and derived pF cells as the cloud does and l
     { channel_key: 'dendro_ratio', unit: '', value: 2 },
   ]);
   assert.equal(csv, [
-    'channel_key,unit,value',
+    '\uFEFFchannel_key,unit,value',
     'swt_1,kPa,0.0000001',
     'swt_1_pf,pF,-6.0',
     'swt_2,kPa,10',
@@ -721,8 +721,8 @@ test('toCsv writes soil-tension kPa and derived pF cells as the cloud does and l
 });
 
 test('toCsv handles empty rows and non-array input defensively', () => {
-  assert.equal(hh.toCsv(['a', 'b'], []), 'a,b\n');
-  assert.equal(hh.toCsv(['a'], null), 'a\n');
+  assert.equal(hh.toCsv(['a', 'b'], []), '\uFEFFa,b\n');
+  assert.equal(hh.toCsv(['a'], null), '\uFEFFa\n');
 });
 
 test('buildAdvancedDiagnostics reports structure and availability for a soil card with source devices', () => {

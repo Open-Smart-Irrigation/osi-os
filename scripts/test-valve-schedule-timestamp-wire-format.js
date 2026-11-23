@@ -48,6 +48,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { installationOsiLib } = require('./lib/installation-osi-lib');
 const { DatabaseSync } = require('node:sqlite');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { bootstrapFresh } = require('../lib/osi-migrate');
@@ -156,31 +157,19 @@ for (const profile of PROFILES) {
 // --- Layer 3: full end-to-end -- real 0024 trigger + real, unmodified ------
 // --- "Build Edge Event Batch" node function against a real sqlite fixture. -
 function makeOsiDbShim(db) {
-  class ShimDatabase {
-    constructor(_filename) {}
-    all(sql, params, callback) {
-      try { callback(null, db.prepare(sql).all(...(params || []))); }
-      catch (error) { callback(error); }
-    }
-    run(sql, params, callback) {
-      try { db.prepare(sql).run(...(params || [])); callback(null); }
-      catch (error) { callback(error); }
-    }
-    close(callback) { callback(); }
-  }
-  return { Database: ShimDatabase };
+  return require('./lib/queued-db-fixture').osiDbFor(db);
 }
 
-async function runSyncOutboxBuildFunc(func, db, envValues) {
+async function runSyncOutboxBuildFunc(func, db, envValues, profile) {
   const flowState = new Map();
-  const sandbox = { Buffer, console, require, process, setTimeout, clearTimeout, osiDb: makeOsiDbShim(db) };
+  const sandbox = { Buffer, console, require, process, setTimeout, clearTimeout, osiDb: makeOsiDbShim(db), osiLib: installationOsiLib(profile) };
   const script = new vm.Script(`(async function(msg,node,flow,env,global){${func}\n})`);
   const fn = script.runInNewContext(sandbox);
   const msg = {};
   const nodeApi = { error() {}, warn() {}, status() {} };
   const flowApi = { get: (k) => flowState.get(k), set: (k, v) => flowState.set(k, v) };
   const envApi = { get: (k) => (Object.prototype.hasOwnProperty.call(envValues, k) ? envValues[k] : undefined) };
-  const globalApi = { get: (k) => (k === 'fs' ? { existsSync: () => false } : undefined) };
+  const globalApi = { get: (k) => (k === 'fs' ? { existsSync: () => false, readdirSync: () => [] } : undefined) };
   const result = await fn(msg, nodeApi, flowApi, envApi, globalApi);
   return result;
 }
@@ -243,7 +232,7 @@ for (const profile of PROFILES) {
         DEVICE_EUI_LAST_VERIFIED_AT: '2026-09-17T00:00:00.000Z',
         LINK_GATEWAY_DEVICE_EUI: '',
       };
-      const msg = await runSyncOutboxBuildFunc(func, db, envValues);
+      const msg = await runSyncOutboxBuildFunc(func, db, envValues, profile);
       db.close();
 
       assert.ok(msg, 'sync-outbox-build must return a message (a pending VALVE_SCHEDULE event exists)');
@@ -282,7 +271,7 @@ for (const profile of PROFILES) {
         DEVICE_EUI: GATEWAY_EUI, DEVICE_EUI_SOURCE: 'chirpstack', DEVICE_EUI_CONFIDENCE: 'high',
         DEVICE_EUI_LAST_VERIFIED_AT: '2026-09-17T00:00:00.000Z', LINK_GATEWAY_DEVICE_EUI: '',
       };
-      const msg = await runSyncOutboxBuildFunc(func, db, envValues);
+      const msg = await runSyncOutboxBuildFunc(func, db, envValues, profile);
       db.close();
 
       const event = msg.payload.events.find((e) => e.aggregateType === 'VALVE_SCHEDULE');

@@ -204,10 +204,11 @@ const APPEND_EVENTS_SQL = "SELECT COUNT(*) AS n FROM sync_outbox WHERE upper(op)
 async function schedule(profile, dbPath, metric = 'SWT_1') {
   const flowsPath = profilePaths(profile).flows;
   const meanQuery = require(path.join(profilePaths(profile).nodeRed, 'osi-scheduler-mean-query'));
-  const osiLib = { require: (name) => (name === 'scheduler-mean-query' ? { ok: true, value: meanQuery } : { ok: false, error: name }) };
+  const scheduler = require(path.join(profilePaths(profile).nodeRed, 'osi-daily-scheduler'));
+  const osiLib = { require: name => name === 'daily-scheduler' ? { ok: true, value: scheduler } : (name === 'scheduler-mean-query' ? { ok: true, value: meanQuery } : { ok: false, error: name }) };
   const node = { error(m) { throw new Error('query node error: ' + m); } };
-  const queryFn = new Function('msg', 'node', 'osiLib', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
-  const buildQuery = (msg) => queryFn(msg, node, osiLib);
+  const queryFn = new Function('msg', 'node', 'osiLib', 'env', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
+  const buildQuery = (msg) => queryFn(msg, node, osiLib, { get() {} });
   const zone = {
     zone_id: 1, zone_name: 'Z One', user_id: 1, scheduling_mode: 'local', trigger_metric: metric,
     threshold_kpa: 50, duration_minutes: 10, enabled: 1, last_triggered_at: null,
@@ -375,13 +376,16 @@ for (const profile of PROFILES) {
     const pendingB = rt.insert(b);
     await Promise.all([pendingA, rollback, pendingB]);
     const linked = snapshot(dbPath, LINKED_SQL);
-    assert.equal(linked.length, 1, JSON.stringify(linked));
-    assert.equal(linked[0].device_data_id, b.formattedData.deviceDataId, 'the only link belongs to uplink B');
-    assert.equal(linked[0].swt_1, 42);
-    assert.equal(linked[0].r1_ohm_comp, 1002, 'linked diagnostic is B\'s own');
-    assert.deepEqual(snapshot(dbPath, 'SELECT r1_ohm_comp FROM chameleon_readings'), [{ r1_ohm_comp: 1002 }]);
-    assert.ok(rt.errors.some((e) => /Chameleon persistence failed: .*transaction within a transaction/.test(e)), JSON.stringify(rt.errors));
-    assert.equal(snapshot(dbPath, `SELECT COUNT(*) AS n FROM chameleon_reading_links WHERE device_data_id = ${Number(a.formattedData.deviceDataId)}`)[0].n, 0, 'canonical A stays unlinked');
+    assert.equal(linked.length, 2, JSON.stringify(linked));
+    for (const [message, swt, resistance] of [[a, 41, 1001], [b, 42, 1002]]) {
+      const row = linked.find((entry) => entry.device_data_id === message.formattedData.deviceDataId);
+      assert.ok(row, 'both canonical rows have a diagnostic link');
+      assert.equal(row.swt_1, swt);
+      assert.equal(row.r1_ohm_comp, resistance, 'each linked diagnostic belongs to its own uplink');
+    }
+    assert.deepEqual(snapshot(dbPath, 'SELECT r1_ohm_comp FROM chameleon_readings ORDER BY r1_ohm_comp'),
+      [{ r1_ohm_comp: 1001 }, { r1_ohm_comp: 1002 }]);
+    assert.deepEqual(rt.errors, [], 'the retried diagnostic succeeds silently after the other node rolls back');
   });
 
   test(`${profile}: a diagnostic refused during another node's transaction never ends that transaction`, async () => {

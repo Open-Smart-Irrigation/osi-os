@@ -8,6 +8,12 @@ import App from '../../../App';
 import { historyAPI, irrigationZonesAPI, systemAPI, zoneExportAPI } from '../../../services/api';
 import type { HistoryCardSummary } from '../../../history/types';
 
+// Existing tests exercise the deferred modes as component behavior.
+const release = vi.hoisted(() => ({ expandedViewsEnabled: true }));
+vi.mock('../../../history/expandedDataViews', () => ({
+  get EXPANDED_DATA_VIEWS_ENABLED() { return release.expandedViewsEnabled; },
+}));
+
 const { translateForTest } = vi.hoisted(() => {
   const translations: Record<string, string> = {
     'history.detail.backToHistory': 'Back to history',
@@ -215,7 +221,7 @@ function firstZoneCardDataRequest() {
 }
 
 function calendarFixtureDateForRange(from: string | null | undefined, to: string | null | undefined): string {
-  const parsed = Date.parse(from ?? to ?? '');
+  const parsed = Date.parse(to ?? from ?? '');
   const base = Number.isFinite(parsed) ? new Date(parsed) : new Date('2026-06-01T00:00:00.000Z');
   return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), 12)).toISOString().slice(0, 10);
 }
@@ -396,6 +402,8 @@ function gatewayCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSu
 
 describe('History card detail route', () => {
   beforeEach(() => {
+    release.expandedViewsEnabled = true;
+    mockViewport({});
     vi.clearAllMocks();
     window.localStorage.setItem('auth_token', 'test-token');
     window.localStorage.setItem('username', 'operator');
@@ -554,6 +562,47 @@ describe('History card detail route', () => {
       writable: true,
       value: undefined,
     });
+  });
+
+  it.each([
+    [390, true, 'soil', 'soil-profile'],
+    [768, true, 'environment', 'line-chart'],
+    [1440, true, 'soil', 'soil-profile'],
+    [1024, false, 'soil', 'soil-profile'],
+    [1440, false, 'environment', 'line-chart'],
+  ] as const)('retains the basic %s px card with mobile UA=%s and a stale advanced default', async (width, mobile, cardType, view) => {
+    release.expandedViewsEnabled = false;
+    vi.stubGlobal('innerWidth', width);
+    vi.stubGlobal('navigator', { userAgentData: { mobile } });
+    vi.stubEnv('VITE_HISTORY_UPLOT_SOIL_ENABLED', 'true');
+    mockViewport({ isDesktop: width >= 1024 });
+    vi.mocked(systemAPI.getFeatures).mockResolvedValue({
+      historyUxEnabled: true, historyComparisonEnabled: true, historyWorkspacesEnabled: true,
+      historyAdvancedOverlaysEnabled: true, historyCloudAiEnabled: true,
+    });
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12, generatedAt: '2026-05-31T10:00:00Z',
+      cards: [zoneCard({ cardType, defaultView: 'advanced', views: [view, 'advanced'] })],
+    });
+
+    try {
+      renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone?view=advanced');
+      await waitFor(() => expect(firstZoneCardDataRequest()).toEqual(expect.objectContaining({ view, overlays: [] })));
+      expect(historyAPI.getZoneCardAdvanced).not.toHaveBeenCalled();
+      expect(document.querySelector('.uplot')).toBeNull();
+      expect(window.__osiMobileHistoryDiagnostics).toBeUndefined();
+      expect(screen.queryByTestId('mode-compare')).toBeNull();
+      if (mobile) {
+        fireEvent.click(screen.getByRole('button', { name: 'Open card settings' }));
+        expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: 'Advanced View' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+        await waitFor(() => expect(zoneExportAPIMock.download).toHaveBeenCalled());
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('loads the route-backed full-screen detail by zone and encoded card id', async () => {
@@ -1082,6 +1131,9 @@ describe('History card detail route', () => {
   });
 
   it('renders tappable calendar dates on the detail route', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-05-31T10:00:00Z'));
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([{ id: 12, name: 'North Block', device_count: 0, created_at: '', updated_at: '', schedule: null, timezone: 'Europe/Zurich' }]);
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-05-31T10:00:00Z',
@@ -1123,6 +1175,7 @@ describe('History card detail route', () => {
       calendar: {
         timezone: 'Europe/Zurich',
         days: [
+          { date: '2026-06-01', state: 'optimal', coveragePct: 100, coverageConfidence: 'configured', markers: [] },
           {
             date: '2026-05-12',
             state: 'dry_stress',
@@ -1152,12 +1205,18 @@ describe('History card detail route', () => {
     const may12 = await screen.findByRole('gridcell', { name: /May 12/i });
     expect(may12).toHaveAttribute('data-history-calendar-date', '2026-05-12');
     expect(screen.getByTestId('view-mode-label')).toHaveTextContent('Calendar - May 2026');
+    expect(screen.queryByTestId('calendar-cell-2026-06-01')).not.toBeInTheDocument();
+    expect(firstZoneCardDataRequest()?.range).toEqual({
+      label: 'custom', timezone: 'Europe/Zurich',
+      from: '2026-04-30T22:00:00.000Z', to: '2026-05-31T21:59:59.999Z',
+    });
   });
 
   it('changes the visible calendar month on inner horizontal calendar swipe (backward)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
 
+    vi.mocked(irrigationZonesAPI.getAll).mockResolvedValue([{ id: 12, name: 'North Block', device_count: 0, created_at: '', updated_at: '', schedule: null, timezone: 'Europe/Zurich' }]);
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
       generatedAt: '2026-06-15T12:00:00Z',
@@ -1223,27 +1282,9 @@ describe('History card detail route', () => {
     dispatchTouch(surface, 'touchmove', [{ clientX: 250, clientY: 164 }]);
     dispatchTouch(surface, 'touchend', []);
 
-    const initialFrom = Date.parse(initialRequest?.range.from ?? '');
-    const initialMonth = new Date(initialFrom);
-    const expectedPrevMonthStart = new Date(Date.UTC(
-      initialMonth.getUTCFullYear(),
-      initialMonth.getUTCMonth() - 1,
-      1,
-      0,
-      0,
-      0,
-      0,
-    ));
-    const expectedPrevMonthEnd = new Date(Date.UTC(
-      expectedPrevMonthStart.getUTCFullYear(),
-      expectedPrevMonthStart.getUTCMonth() + 1,
-      1,
-      0,
-      0,
-      0,
-      0,
-    ) - 1);
-    const nextDate = calendarFixtureDateForRange(expectedPrevMonthStart.toISOString(), expectedPrevMonthEnd.toISOString());
+    const expectedPrevMonthStart = new Date('2026-04-30T22:00:00.000Z');
+    const expectedPrevMonthEnd = new Date('2026-05-31T21:59:59.999Z');
+    const nextDate = '2026-05-12';
 
     await waitFor(() => {
       expect(historyAPI.getZoneCardData).toHaveBeenLastCalledWith(

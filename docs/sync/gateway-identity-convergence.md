@@ -27,3 +27,42 @@ directly. `/api/system/stats` exposes only
 deadline fields remain private. Do not route identity transitions through the
 GUI `/api/system/reboot` route, and do not edit `sync-init-fn` or any
 `runGatewayMigrationPreflight` body as part of this path.
+
+Account-link and disconnect also pause sync builders while an account operation
+is active or `/data/db/osi-account-link-config.json` exists. This private recovery
+journal coordinates the MQTT UCI options with the SQLite account/peer transaction;
+it carries credentials and must remain mode 0600. The installation helper flushes
+the journal before writing UCI, then flushes the committed database and WAL. Both
+normal finalization and recovery retain this receipt until the daemon-owned
+restart request has been atomically published. A failed local transaction restores
+the old configuration. After an interruption, recovery compares the committed
+account and peer with the journal and either completes the new configuration or
+restores the old one. A stamped committed receipt whose context has changed stays
+blocked for operator disposition.
+
+The account finalizer retries recovery on Node-RED startup. Before another link or
+disconnect, the installation helper also retries outstanding publication. A retry
+of the same committed link returns its saved result through local success wiring,
+without authenticating with the cloud again; a disconnect retry completes without
+repeating its database writes. A different requested operation first publishes
+the earlier obligation and asks the caller to retry after the scheduled restart.
+
+An unreadable journal, failed restore or failed request publication leaves the
+receipt in place and keeps identity-sensitive transport blocked. Thin guards
+before every cloud MQTT output use the same predicate as REST/history builders;
+ChirpStack downlinks and MQTT broker settings are unchanged. Successful
+publication removes the receipt; the identity daemon then owns the restart using
+the existing `account_link`/10-second or `account_unlink`/2-second three-field
+request contract. The identity sentinel still blocks linking and finalization,
+including when it appears while cloud authentication is in flight.
+
+Publication keeps the transport fence in place through the queued account
+request. The shared predicate reads the durable journal, queued `account_link`
+or `account_unlink` requests, then the identity sentinel, in that order. The
+publisher writes the request before removing the journal; identityd writes its
+sentinel before consuming the request. A delayed daemon therefore leaves MQTT,
+REST/history and subsequent account operations blocked throughout the handoff.
+An absent request directory is empty; other queue-read failures block. A pending
+journal can still recover and return its saved reply before the helper refuses
+new account operations. Temporary publications and bootstrap requests do not
+count as queued account requests.

@@ -1,6 +1,6 @@
 # OSI OS — Open Smart Irrigation OS
 
-**v0.8.2 Alpha**
+**v0.8.3**
 
 OSI OS is an open-source, offline-first smart irrigation platform for smallholder farmers. It runs on a Raspberry Pi 5 LoRaWAN gateway and combines soil sensing, automated irrigation scheduling, and a farmer-facing web dashboard — all without requiring internet connectivity.
 
@@ -163,15 +163,6 @@ a gateway in use by image: use `deploy.sh` as described under
 [bundle path over a flaky link](docs/operations/deploying-over-a-flaky-link.md).
 Flash an image only for a new device or a deliberate reset.
 
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 Two ways to get OSI OS running on a Raspberry Pi 5:
 
 |                    | Path A — Pre-built image                                                                            | Path B — ChirpStack Gateway OS + deploy                             |
@@ -206,9 +197,16 @@ No further setup required. See [Step 4 — Install Tailscale](#step-4--install-t
 
 ### Step 1 — Flash ChirpStack Gateway OS
 
-Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a microSD card and boot the Pi. Connect to it via SSH — either through the default Wi-Fi AP (`192.168.0.1`) or your local network IP.
+1. Flash the latest **ChirpStack Gateway OS Full** image for Raspberry Pi 5 to a microSD card and boot the Pi.
+2. Connect to it over its own Wi-Fi access point only (`192.168.0.1`), not yet over your local network. A gateway on a stock base image accepts `root` over SSH with no password at first boot.
+3. Set a root password before the gateway goes on any other network:
+   ```bash
+   ssh -t root@192.168.0.1 passwd
+   ```
+   `passwd` is BusyBox's and works on the stock base. A password keeps the console login (keyboard and screen on the Pi) as the way back in. Closing password login over SSH (`uci set dropbear.@dropbear[0].PasswordAuth='off'`, `uci set dropbear.@dropbear[0].RootPasswordAuth='off'`, `uci commit dropbear`, `/etc/init.d/dropbear restart`) is possible once a key is in `/etc/dropbear/authorized_keys`; it is not the default here, because a lost key then leaves only the console. An operator locked out logs in at the console and runs `passwd` there.
+4. Then connect the gateway to your local network.
 
-Default SSH credentials: `root` / _(no password on first boot, or set during flash)_
+`deploy.sh` warns, and carries on, when root still has no password.
 
 ### Step 2 — Deploy OSI OS components
 
@@ -230,6 +228,8 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
 # 4. Nothing to restart: deploy.sh restarts Node-RED itself and prints a verdict.
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
+
+If the SSH session drops, the deploy ends through its exit path: before the database is changed the gateway runs as before, and after a cut the next boot either completes the switch or holds the gateway with the line "run the deploy again" in `/srv/node-red/DEPLOY-HELD`. In every case, run the same command again. On a link that drops often, use the offline bundle (below), which runs detached and writes its log to `/data/deploy-<time>.log`. The deploy ends with `OK`, with an `UNVERIFIED` payload line (the new release runs, and the next deploy checks it again), or with `ERROR`/`HELD` and its reason.
 
 The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed and enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
@@ -274,19 +274,21 @@ If the stamp is missing, fix the cause and run the command again. A reboot witho
 
 Tailscale provides persistent SSH access to field-deployed devices without needing to know their local IP or be on the same network.
 
+OSI Pi images include Tailscale. Run these commands only if you need to install it manually.
+
 ```bash
 ssh root@<pi-ip> 'opkg update && opkg install tailscale'
 ssh root@<pi-ip> '/etc/init.d/tailscale enable && /etc/init.d/tailscale start'
 ```
 
-Then open the firewall to allow inbound traffic on the Tailscale interface (OpenWrt drops it by default):
+If `/usr/share/nftables.d/chain-pre/input/10-osi-tailscale.nft` exists, fw4 already allows input from `tailscale0`. Skip the firewall commands below. On older gateways without the drop-in, run these commands once if you have yet to add the rule.
 
 ```bash
 ssh root@<pi-ip> "printf '#!/bin/sh\nnft insert rule inet fw4 input iifname \"tailscale0\" accept comment \"tailscale-allow\"\n' > /etc/tailscale-firewall.sh && chmod +x /etc/tailscale-firewall.sh"
 ssh root@<pi-ip> "uci add firewall include && uci set firewall.@include[-1].path='/etc/tailscale-firewall.sh' && uci set firewall.@include[-1].type='script' && uci commit firewall && /etc/init.d/firewall restart"
 ```
 
-Then connect the device to your Tailscale network:
+If the gateway has yet to join your tailnet, connect it now:
 
 ```bash
 ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
@@ -294,7 +296,7 @@ ssh root@<pi-ip> 'tailscale up --accept-dns=false --hostname=<device-name>'
 
 Visit the auth URL printed in the output to approve the device in your Tailscale admin console. Once approved, the device is reachable at its Tailscale IP from anywhere on your tailnet — including via SSH: `ssh root@<tailscale-ip>`.
 
-> **State persistence:** Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs — it survives reboots and stays connected automatically. The firewall rule is re-applied on every firewall restart via the UCI include.
+Tailscale stores its state at `/etc/tailscale/tailscaled.state` on the overlayfs and reconnects after reboot. The fw4 drop-in and the legacy UCI include both persist across firewall reloads.
 
 ### Step 5 — Open the UI
 
@@ -303,10 +305,6 @@ Navigate to `http://<pi-ip>:1880/gui` in a browser (use the Tailscale IP for rem
 ---
 
 ### Re-deploying after changes
-
-Read the caution under [Device Setup](#device-setup) first: until the next
-release, a gateway whose `/usr/lib/node-red/gui` is still a directory must not
-be upgraded by script.
 
 Re-run `deploy.sh` to update application components. It is safe to re-run on live devices because it preserves `/data/db/farming.db` and only seeds the DB on devices where that file is absent:
 

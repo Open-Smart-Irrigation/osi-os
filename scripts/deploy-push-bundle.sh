@@ -63,7 +63,11 @@ fi
 bundle_name="$(basename "$BUNDLE")"
 local_sha="$(cut -d ' ' -f1 "$SIDECAR")"
 local_size="$(wc -c < "$BUNDLE" | tr -d ' ')"
-remote_bundle="$REMOTE_TMP/$bundle_name"
+case "$local_sha" in ''|*[!a-f0-9]*) echo "ERROR: invalid bundle digest" >&2; exit 1 ;; esac
+[ "${#local_sha}" -eq 64 ] || { echo "ERROR: invalid bundle digest" >&2; exit 1; }
+[ "$(sha256sum "$BUNDLE" | cut -d ' ' -f1)" = "$local_sha" ] || { echo "ERROR: local bundle digest mismatch" >&2; exit 1; }
+# Resumption is keyed by content, not the source label (GUI inputs can differ).
+remote_bundle="$REMOTE_TMP/osi-deploy-bundles/$local_sha/bundle.tar.gz"
 
 remote_run() {
   # A single remote command per invocation, matching the "no interactive
@@ -119,7 +123,7 @@ while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
     fi
   else
     echo "Uploading $local_size bytes"
-    if ! remote_run "mkdir -p '$REMOTE_TMP' && cat > '$remote_bundle'" < "$BUNDLE"; then
+    if ! remote_run "umask 077; mkdir -p '${remote_bundle%/*}' && cat > '$remote_bundle'" < "$BUNDLE"; then
       echo "WARN: upload attempt $attempt failed; will retry" >&2
       attempt=$((attempt + 1))
       continue
@@ -142,19 +146,22 @@ if [ "$uploaded_ok" != "1" ]; then
   exit 1
 fi
 
+# Each invocation owns a private launcher set. A concurrent push can neither
+# truncate these files nor replace the digest passed to this supervisor.
+remote_run "mkdir -p '$REMOTE_TMP'"
+remote_launch_dir="$(remote_run "umask 077; mktemp -d '$REMOTE_TMP/osi-deploy-run.XXXXXX'")"
+[ -n "$remote_launch_dir" ] || { echo 'ERROR: no private launcher directory' >&2; exit 1; }
+for companion in deploy-offline-runtime.js deploy-archive.js deploy-local-server.js; do
+  [ -f "$REPO_ROOT/scripts/$companion" ] || { echo "ERROR: missing launcher companion $companion" >&2; exit 1; }
+  remote_run "umask 077; cat > '$remote_launch_dir/$companion.part' && mv '$remote_launch_dir/$companion.part' '$remote_launch_dir/$companion'" < "$REPO_ROOT/scripts/$companion"
+done
 echo "--- Push deploy-offline.sh ---"
-remote_offline="$REMOTE_TMP/deploy-offline.sh"
-remote_run "cat > '$remote_offline'" < "$DEPLOY_OFFLINE"
-remote_run "chmod 755 '$remote_offline'"
+remote_offline="$remote_launch_dir/deploy-offline.sh"
+remote_run "umask 077; cat > '$remote_offline.part' && mv '$remote_offline.part' '$remote_offline' && chmod 700 '$remote_offline'" < "$DEPLOY_OFFLINE"
 echo "OK"
 
-# Also drop the .sha256 sidecar remotely so deploy-offline.sh's own
-# verification step (which reads <bundle>.sha256 next to the bundle) works
-# without re-deriving it.
-remote_run "cat > '$remote_bundle.sha256'" < "$SIDECAR"
-
 echo "--- Launch deploy-offline.sh on $HOST ---"
-remote_cmd="sh '$remote_offline' '$remote_bundle'"
+remote_cmd="sh '$remote_offline' '$remote_bundle' --expected-sha256 '$local_sha'"
 for arg in "${DEPLOY_OFFLINE_ARGS[@]+"${DEPLOY_OFFLINE_ARGS[@]}"}"; do
   remote_cmd="$remote_cmd '$arg'"
 done

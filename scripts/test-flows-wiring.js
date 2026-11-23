@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { implementationSource: x3Source } = require('./lib/x3-implementation-source');
 const {
     TASK9_OSI_LIB_NODE_POLICIES,
     auditOsiLibBindings,
@@ -446,7 +447,7 @@ if (!commandUpdate || !commandApply || !commandPostconditionRoute || !commandPos
     JSON.stringify(commandVerify.wires || []) !== JSON.stringify([['command-postcondition-ack']]) ||
     JSON.stringify(commandVerifiedAck.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
     failures.push('command ACK postconditions: supported mutations must verify once and unrelated mutations must retain their ACK route');
-} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([['d83e38164efbb860']])) {
+} else if (JSON.stringify(legacyScheduleAck.wires || []) !== JSON.stringify([['account-cloud-guard-d83e38164efbb860']])) {
     failures.push('command ACK postconditions: legacy direct ACK must retain its MQTT route');
 } else if (!/FAILED_RETRYABLE/.test(commandVerifiedAck.func || '') ||
     !/postcondition_not_met/.test(commandVerifiedAck.func || '') ||
@@ -496,7 +497,7 @@ if (!dedupe || !requireOsiLibContract(
     'Command helpers unavailable:'
 ) || JSON.stringify(dedupe.wires) !== JSON.stringify([
     ['journal-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
     ['watermark-config-command-apply-fn'],
 ]) || !/deduplicatePendingCommand/.test(dedupe.func || '') ||
     !/protectedTypes/.test(dedupe.func || '') ||
@@ -537,7 +538,7 @@ if (!scopedAccessApply || !requireOsiLibContract(
     'Scoped access command helpers unavailable:'
 ) || JSON.stringify(scopedAccessApply.wires) !== JSON.stringify([
     ['934bf2bc19a8ce22'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyScopedAccessCommand/.test(scopedAccessApply.func || '') ||
     !/\.close\s*\(/.test(scopedAccessApply.func || '')) {
     failures.push('scoped access commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -549,7 +550,7 @@ if (!terraZoneConfigApply || !requireOsiLibContract(
     'Terra zone-config command helpers unavailable:'
 ) || JSON.stringify(terraZoneConfigApply.wires) !== JSON.stringify([
     ['zone-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyZoneCommand/.test(terraZoneConfigApply.func || '') ||
     !/command_type_recognized:\s*msg\._commandTypeRecognized === true/.test(terraZoneConfigApply.func || '') ||
     !/\.close\s*\(/.test(terraZoneConfigApply.func || '')) {
@@ -567,7 +568,7 @@ if (!zoneCommandApply || !requireOsiLibContract(
     // instead of waiting for the 30 s Flush Sync Outbox inject (measured 25.018 s
     // and 24.988 s on Silvan 2026-09-17). Both nodes are on the sync tab, so this
     // is a direct wire; the gate is pinned separately by test-outbox-event-flush.js.
-    ['9d5e3035c3d069c4', 'sync-outbox-flush-coalesce'],
+    ['account-cloud-guard-9d5e3035c3d069c4', 'sync-outbox-flush-coalesce'],
 ]) || !/applyZoneCommand/.test(zoneCommandApply.func || '') ||
     !/\.close\s*\(/.test(zoneCommandApply.func || '')) {
     failures.push('versioned zone commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -580,7 +581,7 @@ if (!weatherZonesCommandApply || !requireOsiLibContract(
     'Weather station zones command helpers unavailable:'
 ) || JSON.stringify(weatherZonesCommandApply.wires) !== JSON.stringify([
     ['installation-revision-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyWeatherStationZonesCommand/.test(weatherZonesCommandApply.func || '') ||
     !/\.close\s*\(/.test(weatherZonesCommandApply.func || '')) {
     failures.push('weather station zones commands: applier must delegate, close DB, and separate legacy fallback from durable ACK');
@@ -592,7 +593,7 @@ if (!installationRevisionApply || !requireOsiLibContract(
     'Installation revision command helpers unavailable:'
 ) || JSON.stringify(installationRevisionApply.wires) !== JSON.stringify([
     ['entity-name-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyCommand/.test(installationRevisionApply.func || '') ||
     !/\.close\s*\(/.test(installationRevisionApply.func || '')) {
     failures.push('installation revision commands: applier must delegate, close DB, and hand unrecognized commands to the entity-name applier');
@@ -605,7 +606,7 @@ if (!entityNameApply || !requireOsiLibContract(
     'Entity name command helpers unavailable:'
 ) || JSON.stringify(entityNameApply.wires) !== JSON.stringify([
     ['watermark-config-command-apply-fn'],
-    ['9d5e3035c3d069c4'],
+    ['account-cloud-guard-9d5e3035c3d069c4'],
 ]) || !/applyNameCommand/.test(entityNameApply.func || '') ||
     !/updateDeviceName\(client, devEui,/.test(entityNameApply.func || '') ||
     !/\.close\s*\(/.test(entityNameApply.func || '') ||
@@ -758,7 +759,7 @@ for (const [nodeId, labels] of [
     ['sync-force-build', ['Peer capture', 'Peer capability', 'Peer invalidation']],
 ]) {
     const source = (byId[nodeId] || {}).func || '';
-    const calls = labels.map((label) => `conditionalReplication.flowPeerDb(q, run, (text) => node.warn(text), '${label}')`);
+    const calls = labels.map((label) => `conditionalReplication.flowPeerDb(_db, (text) => node.warn(text), '${label}')`);
     if (calls.some((call) => source.split(call).length !== 2) || /const peerDb = \{/.test(source)) {
         failures.push(`conditional peer: ${nodeId} must build each peer database through replication.flowPeerDb with its own rollback label`);
     }
@@ -1216,7 +1217,7 @@ assertWires('934bf2bc19a8ce22',
     [
         ['745b6db588017e56'],
         ['conditional-lifecycle-command-adapter'],
-        ['9d5e3035c3d069c4', 'command-ack-queue-rest'],
+        ['account-cloud-guard-9d5e3035c3d069c4', 'command-ack-queue-rest'],
         ['cs-reg-cloud-fn'],
         ['lsn50-mode-link-out-sync'],
         ['b1bc51c1d156de8b'],
@@ -1226,7 +1227,7 @@ assertWires('934bf2bc19a8ce22',
 const lifecycleCommandAdapter = byId['conditional-lifecycle-command-adapter'];
 if (!lifecycleCommandAdapter || !/routes\.conditionalLifecycleCommand/.test(lifecycleCommandAdapter.func || '') ||
     lifecycleCommandAdapter.outputs !== 3 ||
-    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['9d5e3035c3d069c4']])) {
+    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['account-cloud-guard-9d5e3035c3d069c4']])) {
     failures.push('lifecycle command adapter must own schedule/device mutations and durable ACKs before the legacy SQL builder, and send its S2120 unclaim ACK (issue #233) to the MQTT ACK node only');
 } else {
     console.log('OK  lifecycle command adapter delegates canonical mutation and durable ACK atomically; its S2120 unclaim ACK goes to MQTT only');
@@ -1327,7 +1328,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const litersNode = profileFlows.find((node) => node.id === 'strega-today-liters-fn');
     if (!litersNode) {
         failures.push(`H2d ${profile}: strega-today-liters-fn not found`);
-    } else if (!TODAY_LITERS_EXCLUSION_RE.test(litersNode.func || '')) {
+    } else if (!TODAY_LITERS_EXCLUSION_RE.test(x3Source(litersNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(`H2d ${profile}: strega-today-liters-fn must exclude STALE_NO_OBSERVATION rows from litres sums`);
     } else {
         console.log(`OK  H2d ${profile}: strega-today-liters-fn excludes STALE_NO_OBSERVATION from litres`);
@@ -1336,7 +1337,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const zoneEnvNode = profileFlows.find((node) => node.id === 'zone-env-fn');
     if (!zoneEnvNode) {
         failures.push(`H2d ${profile}: zone-env-fn not found`);
-    } else if (!ZONE_ENV_EXCLUSION_RE.test(zoneEnvNode.func || '')) {
+    } else if (!ZONE_ENV_EXCLUSION_RE.test(x3Source(zoneEnvNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(`H2d ${profile}: zone-env-fn must exclude STALE_NO_OBSERVATION rows from estimated irrigation litres`);
     } else {
         console.log(`OK  H2d ${profile}: zone-env-fn excludes STALE_NO_OBSERVATION from estimated irrigation litres`);
@@ -1358,7 +1359,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const profileGetActuationsNode = profileFlows.find((node) => node.id === 'get-actuations-response');
     if (!profileGetActuationsNode) {
         failures.push(`H2f ${profile}: get-actuations-response not found`);
-    } else if (!DISPLAY_GRACE_VALUE_RE.test(profileGetActuationsNode.func || '')) {
+    } else if (!DISPLAY_GRACE_VALUE_RE.test(x3Source(profileGetActuationsNode, path.join(path.dirname(profilePath), 'node-red')))) {
         failures.push(
             `H2f ${profile}: get-actuations-response's GRACE_MS must be 1800 * 1000, matching ` +
             `strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC (a healthy run must not be ` +
@@ -1521,8 +1522,8 @@ for (const node of flows) {
         if (!/const q = \(sql, params = \[\]\) =>/.test(node.func)) {
             failures.push(label + ' defines gateway migration preflight without a parameterized q helper');
         }
-        if (!/const run = \(sql, params = \[\]\) =>/.test(node.func)) {
-            failures.push(label + ' defines gateway migration preflight without a parameterized run helper');
+        if (!/await _db\.transaction\(async \(tx\) =>/.test(node.func) || /await run\(['"]BEGIN/.test(node.func)) {
+            failures.push(label + ' must keep gateway migration writes in a queued transaction scope');
         }
     }
     if (node.id === 'sync-force-build'

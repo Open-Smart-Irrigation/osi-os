@@ -1,7 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { clampCalendarMonthOffset, isFutureCalendarDate } from '../calendarMonth';
+import { calendarMonthForRange, calendarMonthRange, clampCalendarMonthOffset, isFutureCalendarDate } from '../calendarMonth';
 
 const NOW_MS = Date.UTC(2026, 6, 11, 12); // 2026-07-11T12:00Z
+
+describe('requested calendar month', () => {
+  it.each([
+    ['Europe/Zurich', 2026, 11, '2026-10-31T23:00:00.000Z', '2026-11-30T22:59:59.999Z'],
+    ['Europe/Zurich', 2026, 3, '2026-02-28T23:00:00.000Z', '2026-03-31T21:59:59.999Z'],
+    ['Europe/Zurich', 2026, 10, '2026-09-30T22:00:00.000Z', '2026-10-31T22:59:59.999Z'],
+    ['Pacific/Kiritimati', 2026, 12, '2026-11-30T10:00:00.000Z', '2026-12-31T09:59:59.999Z'],
+    ['America/New_York', 2024, 2, '2024-02-01T05:00:00.000Z', '2024-03-01T04:59:59.999Z'],
+  ])('bounds %s %i-%i in local time', (timezone, year, month, from, to) => {
+    expect(calendarMonthRange({ year, month }, timezone)).toEqual({ label: 'custom', timezone, from, to });
+  });
+
+  it('selects the month at the farm rather than UTC and handles year rollover', () => {
+    const range = { label: '24h' as const, from: null, to: '2026-11-30T23:30:00.000Z', timezone: 'Europe/Zurich' };
+    expect(calendarMonthForRange(range, 0)).toEqual({ year: 2026, month: 12 });
+    expect(calendarMonthForRange(range, 1)).toEqual({ year: 2027, month: 1 });
+  });
+
+  it('clamps navigation using the farm current month at the UTC boundary', () => {
+    const now = Date.parse('2026-11-30T23:30:00Z');
+    expect(clampCalendarMonthOffset('2026-11-15T12:00:00Z', 0, 1, now, 'Europe/Zurich')).toBe(1);
+    expect(clampCalendarMonthOffset('2026-11-15T12:00:00Z', 1, 1, now, 'Europe/Zurich')).toBe(1);
+  });
+});
 
 describe('isFutureCalendarDate', () => {
   it('flags dates after today', () => {

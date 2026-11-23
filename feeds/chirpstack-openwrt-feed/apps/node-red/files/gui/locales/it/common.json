@@ -44,7 +44,8 @@
       "help": "Nell'aggregazione grezza ogni punto sta al momento della misura; nell'aggregazione di 15 minuti, oraria, giornaliera o settimanale sta all'inizio del suo periodo, e per le fonti meteo un giorno è il giorno locale della zona. Pioggia, ET0 ed ETc di un fornitore meteo, dei valori orari di una stazione o di «daily agronomy» sono totali del periodo; gli altri valori sono medie. Temperatura, umidità e vento orari di Open-Meteo sono valori all'ora indicata. Le fonti meteo hanno al massimo una risoluzione oraria, «daily agronomy» giornaliera."
     },
     "preset": {
-      "metricLabel": "Metrica tra zone"
+      "metricLabel": "Confronta una misura tra zone",
+      "more": "Altre misure"
     },
     "tray": {
       "label": "Serie di analisi",
@@ -92,6 +93,7 @@
       "normalize": "Normalizza"
     },
     "export": {
+      "label": "Esporta",
       "csv": "Esporta CSV",
       "png": "Esporta PNG",
       "allZonesCsv": "Esporta CSV di tutte le zone",

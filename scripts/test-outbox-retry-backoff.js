@@ -291,26 +291,7 @@ test('transport failure (batch-level, msg.statusCode simulated) never bumps retr
 // =====================================================================
 
 function makeOsiDbShim(db) {
-  class ShimDatabase {
-    constructor(_filename) {}
-    run(sql, params, callback) {
-      if (typeof params === 'function') {
-        callback = params;
-        params = [];
-      }
-      try {
-        const result = params && params.length ? db.prepare(sql).run(...params) : (db.exec(sql), { changes: 1 });
-        if (typeof callback === 'function') callback.call({ changes: Number(result.changes || 0) }, null);
-      } catch (error) {
-        if (typeof callback === 'function') callback(error);
-        else throw error;
-      }
-    }
-    close(callback) {
-      if (typeof callback === 'function') callback();
-    }
-  }
-  return { Database: ShimDatabase };
+  return require('./lib/queued-db-fixture').osiDbFor(db);
 }
 
 async function runOutboxMarkFunc(func, msg, db) {

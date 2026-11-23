@@ -17,6 +17,7 @@ export function createDemoViteConfig(mode: string) {
     define: {
       'import.meta.env.VITE_PUBLIC_SIMULATOR': JSON.stringify(String(publicMode)),
       'import.meta.env.VITE_OSI_SERVER_URL': JSON.stringify(publicMode ? 'https://cloud.example.test' : ''),
+      __OSI_INTERNAL_PHONE_CHARTS__: false,
     },
     plugins: [{name: 'demo-local-translations', enforce: 'pre', resolveId(source, importer) {
       if (/(?:^|\/)utils\/datetime(?:\.ts)?$/.test(source) && !datetimeAliases.includes(importer ?? '')) {

@@ -9,6 +9,7 @@
     "osi-agronomy-daily": "file:osi-agronomy-daily",
     "osi-chameleon-helper": "file:osi-chameleon-helper",
     "osi-chirpstack-helper": "file:osi-chirpstack-helper",
+    "osi-clover-soil": "file:osi-clover-soil",
     "osi-cloud-http": "file:osi-cloud-http",
     "osi-command-ledger": "file:osi-command-ledger",
     "osi-crop-kc": "file:osi-crop-kc",
@@ -53,6 +54,8 @@
     "osi-installation-location-helper": "file:osi-installation-location-helper",
     "osi-network-api": "file:osi-network-api",
     "osi-rejection-recovery": "file:osi-rejection-recovery",
-    "osi-sdi12-archive": "file:osi-sdi12-archive"
+    "osi-sdi12-archive": "file:osi-sdi12-archive",
+    "osi-command-ingress": "file:osi-command-ingress",
+    "osi-daily-scheduler": "file:osi-daily-scheduler"
   }
 }

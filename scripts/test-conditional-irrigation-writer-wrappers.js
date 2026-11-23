@@ -51,8 +51,9 @@ function wrapperContext(db, transport, events, valveControl = VC, envOverrides =
     log(value) { events.push(['log', value]); },
   };
   return {
-    Buffer, Date, msg: null, env, node, flow: { get() { return undefined; } }, osiDb: { Database },
+    Buffer, Date, global:{get(){return undefined;}}, msg: null, env, node, flow: { get() { return undefined; } }, osiDb: { Database },
     osiLib: { require(name) {
+      if (name === 'command-ingress') return {ok:true,value:require(path.join(runtimePath,'osi-command-ingress'))};
       if (name === 'osi-db-helper') return { ok: true, value: { Database } };
       if (name === 'osi-valve-control') return { ok: true, value: valveControl };
       if (name === 'osi-command-ledger') return { ok: true, value: require(path.join(runtimePath, 'osi-command-ledger')) };

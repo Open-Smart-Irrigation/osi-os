@@ -645,8 +645,14 @@ export const devicesAPI = {
 
   // Resolves with the cancel outcome and its flush collateral (null when the reply has none). A
   // handed-off or uncertain outcome rejects (409/503); read it with valveCancelResultFromError.
-  cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<ValveCancelResult | null> => {
-    const response = await api.post(`/api/valve/${deveui}/cancel`, { reason });
+  // expectationId names the run to cancel: with several opens active the gateway refuses an
+  // unnamed cancel as ambiguous_actuation (409). Without it the body is { reason } alone.
+  cancelIrrigation: async (
+    deveui: string,
+    { expectationId = null, reason = 'operator_cancel' }: { expectationId?: string | null; reason?: string } = {},
+  ): Promise<ValveCancelResult | null> => {
+    const body = expectationId ? { reason, expectation_id: expectationId } : { reason };
+    const response = await api.post(`/api/valve/${deveui}/cancel`, body);
     return parseValveCancelResult(response?.data);
   },
 
@@ -1929,6 +1935,9 @@ function normaliseValveSchedule(row: any): ValveSchedule {
     dispatchCommandId: row?.dispatch_command_id ?? row?.dispatchCommandId ?? null,
     dispatchCreatedAt: row?.dispatch_created_at ?? row?.dispatchCreatedAt ?? null,
     dispatchAttemptedAt: row?.dispatch_attempted_at ?? row?.dispatchAttemptedAt ?? null,
+    awaitingConfirmationUntil: row?.awaiting_confirmation_until ?? row?.awaitingConfirmationUntil ?? null,
+    onceProof: row?.once_proof ?? row?.onceProof ?? null,
+    onceOutcome: row?.once_outcome ?? row?.onceOutcome ?? null,
     syncVersion: row?.sync_version == null ? null : Number(row.sync_version),
     conditionPolicyUuid: row?.condition_policy_uuid ?? row?.conditionPolicyUuid ?? null,
     effectiveFrom: row?.effective_from ?? row?.effectiveFrom ?? null,

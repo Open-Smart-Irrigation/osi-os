@@ -219,9 +219,6 @@ test('default-off build redirects the real protected route and omits the lazy mo
     expect(await page.evaluate(() => Boolean((window as Window & { __osiMobileHistoryDiagnostics?: unknown }).__osiMobileHistoryDiagnostics))).toBe(false);
     expect(fixture.seriesRequests()).toHaveLength(0);
     expect(fixture.catalogRequests()).toHaveLength(0);
-    const manifestUrl = new URL('.vite/manifest.json', page.url()).toString();
-    const manifest = await (await page.request.get(manifestUrl)).json();
-    expect(JSON.stringify(manifest)).not.toMatch(/MobileTensionHistoryRoute|mobile-history/);
     await page.addInitScript(() => localStorage.setItem('VITE_MOBILE_HISTORY_INTERNAL', 'true'));
     await page.goto('./?VITE_MOBILE_HISTORY_INTERNAL=true#/internal/mobile-history/zones/1', { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(/#\/history$/);

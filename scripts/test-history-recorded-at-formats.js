@@ -99,7 +99,8 @@ async function withBoth(fn, firstMs = FIRST_MS) {
 // toISOString table: the change must not move a single byte there.
 // Re-pinned for the owner ruling of 2026-10-18 (full-precision soil-tension
 // kPa and pF in CSV v1, written as the cloud writes them); only swt_N and
-// swt_N_pf value cells moved.
+// swt_N_pf value cells moved. EB12 compares the same measured rows after
+// removing the new BOM and explicit blank daily cells; the old hashes stay.
 const PURE_ISO_EXPORT_SHA256 = {
   raw: 'e62adb07257fb8ffc10a361cd2c9ef0421f5d0c98345c9f40282c9df363ab55d',
   hourly: 'dbdb18d30836c487c8a0731bf0187715722268ec7f458c896e2b04383dc9e215',
@@ -139,13 +140,20 @@ for (const profile of PROFILES) {
       }
     });
 
-    test(`${label}: ${granularity} all-zones export of a pure ISO table is byte-identical to the builder before this change`, async () => {
+    test(`${label}: ${granularity} all-zones export preserves the pinned measured CSV bytes after the BOM`, async () => {
       const raw = seedDb('iso');
       try {
         const result = await helper.buildAllZonesExportCsv(facadeDb(raw), {
           zoneIds: [12], from: '2025-09-26', to: '2025-11-03', granularity, site: '0016C001F1000001', nowMs: NOW_MS,
         });
-        assert.equal(sha256(result.csv), PURE_ISO_EXPORT_SHA256[granularity]);
+        assert.equal(result.csv[0], '\uFEFF');
+        const body = result.csv.slice(1);
+        // This fixture has no embedded newlines. Blank daily values are the
+        // intentional missing-data additions; all measured bytes stay pinned.
+        const measuredCsv = granularity === 'daily'
+          ? body.split('\n').filter(line => line && !line.endsWith(',')).join('\n') + '\n'
+          : body;
+        assert.equal(sha256(measuredCsv), PURE_ISO_EXPORT_SHA256[granularity]);
       } finally {
         raw.close();
       }

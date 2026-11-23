@@ -11,40 +11,137 @@ on:
 permissions:
   contents: read
 
+env:
+  OSI_SMOKE_NODE_VERSION: '20.18.3'
+  OSI_SMOKE_IMAGE_NODE_RED_VERSION: '3.1.15'
+  OSI_SMOKE_STOCK_NODE_RED_VERSION: '4.0.9'
+
 jobs:
   release-runtime-smoke:
     name: release-runtime-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The NEW-15 SQLite cases add eight Node-RED runs on this runtime.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.OSI_SMOKE_NODE_VERSION }}
           cache: npm
           cache-dependency-path: scripts/fixtures/release-smoke/package-lock.json
       - name: Install SQLite CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Install pinned runtime
         run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: X1 scheduler parity on the image runtime
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke/node_modules/node-red" node scripts/test-daily-scheduler-node-red.js
+      - name: X1 native duplicate-send and extra-port negative controls
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke/node_modules/node-red" node scripts/test-daily-scheduler-native-controls.js
+      - name: X3 applied handoff parity on the image function-node runtime
+        env:
+          TZ: UTC
+          X3_NODE_RED_DIR: ${{ github.workspace }}/scripts/fixtures/release-smoke/node_modules/node-red
+        run: node scripts/test-x3-zone-env-integration.js --runtime-only
+      - name: Node file serializes the flows' SQLite connection (three package layouts)
+        run: node --test scripts/test-sqlite-serialize-node-file.js
+      - name: Deploy keeps a working node file when its fetch fails
+        run: node --test scripts/test-deploy-node-files.js
       - name: Failure-list policy
-        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js
+        run: node --test --test-concurrency=2 scripts/test-release-smoke-policy.js scripts/test-farming-sqlite-startup.js scripts/test-farming-sqlite-driver.js
+      - name: Pi 5 emulator gate host checks
+        run: python3 tools/raspi5/test_acceptance.py
+      - name: Pi 4 emulator gate host checks
+        run: python3 tools/raspi4/test_acceptance.py
       - name: Reject broken late and caught handlers (serial negative controls)
         run: node scripts/test-release-smoke-controls.js
       - name: Start shipped software and exercise HTTP and radio boundaries
         run: node scripts/test-release-smoke.js
+      - name: Dendro observations and control survive a real restart
+        run: node scripts/test-dendro-provider-restart.js
       - name: Refuse a release with known failures
         run: node scripts/release-smoke-gate.js --ci
+      - name: Record the local candidate smoke requirement
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          printf 'A candidate requires green Pi 4 and Pi 5 emulator runs through osi-heavy before the real-device test sheet. [Pi 4 runbook](%s/%s/blob/%s/docs/build/raspi4-emulator-acceptance.md) and [Pi 5 runbook](%s/%s/blob/%s/docs/build/raspi5-emulator-acceptance.md).\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-runtime-smoke
           path: |
+            /tmp/osi-release-smoke-*/runtime.json
             /tmp/osi-release-smoke-*/results.json
             /tmp/osi-release-smoke-*/runtime.log
             /tmp/osi-release-smoke-*/seed.log
             /tmp/osi-release-smoke-*/summary.json
+            /tmp/osi-release-smoke-*/install.log
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
+          retention-days: 7
+
+  release-stock-runtime-smoke:
+    name: release-stock-runtime-smoke
+    runs-on: ubuntu-latest
+    # The NEW-15 SQLite cases add five Node-RED runs on this runtime.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.OSI_SMOKE_NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            scripts/fixtures/release-smoke/package-lock.json
+            scripts/fixtures/release-smoke-stock/package-lock.json
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json
+      - name: Install SQLite CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Install pinned stock firmware runtime (no SQLite)
+        run: npm ci --prefix scripts/fixtures/release-smoke-stock --omit=dev --no-audit --no-fund
+      - name: Install pinned packages for the node-file layouts and external lock holder
+        run: npm ci --prefix scripts/fixtures/release-smoke --no-audit --no-fund
+      - name: X1 scheduler parity on the stock runtime
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke-stock/node_modules/node-red" node scripts/test-daily-scheduler-node-red.js
+      - name: X1 native duplicate-send and extra-port negative controls
+        run: OSI_X1_NODE_RED="$PWD/scripts/fixtures/release-smoke-stock/node_modules/node-red" node scripts/test-daily-scheduler-native-controls.js
+      - name: X3 applied handoff parity on the stock function-node runtime
+        env:
+          TZ: UTC
+          X3_NODE_RED_DIR: ${{ github.workspace }}/scripts/fixtures/release-smoke-stock/node_modules/node-red
+        run: node scripts/test-x3-zone-env-integration.js --runtime-only
+      - name: Node file serializes the flows' SQLite connection on both runtimes
+        run: node scripts/test-release-smoke-stock-node-file.js
+      - name: Start stock runtime with the deploy-style user install
+        run: node scripts/test-release-smoke.js --runtime=stock
+      - name: Reject broken late and caught stock handlers (serial negative controls)
+        run: node scripts/test-release-smoke-controls.js --runtime=stock
+      - name: Refuse a release with known failures on either runtime
+        run: node scripts/release-smoke-gate.js --ci
+      - name: Preserve stock runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-stock-runtime-smoke
+          path: |
+            /tmp/osi-release-smoke-*/runtime.json
+            /tmp/osi-release-smoke-*/results.json
+            /tmp/osi-release-smoke-*/runtime.log
+            /tmp/osi-release-smoke-*/seed.log
+            /tmp/osi-release-smoke-*/summary.json
+            /tmp/osi-release-smoke-*/install.log
+            /tmp/osi-sqlite-overlap-*/overlap.json
+            /tmp/osi-sqlite-overlap-*/startup.json
+            /tmp/osi-sqlite-overlap-*/runtime.log
+            /tmp/osi-sqlite-overlap-*/summary.json
           retention-days: 7

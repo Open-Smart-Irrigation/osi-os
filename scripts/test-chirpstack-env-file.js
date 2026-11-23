@@ -1531,9 +1531,11 @@ if (process.geteuid() !== 0) {
     const source = fs.readFileSync(path.join(ROOT, 'scripts/chirpstack-bootstrap.js'));
     assert.deepEqual(fs.readFileSync(CANONICAL), source); assert.deepEqual(fs.readFileSync(MIRROR), source);
     assert.deepEqual(fs.readFileSync(INIT_A), fs.readFileSync(INIT_B));
-    assert.match(fs.readFileSync(INIT_A, 'utf8'), /\/usr\/share\/node-red\/chirpstack-bootstrap\.js/);
+    const bootstrapInit = fs.readFileSync(INIT_A, 'utf8');
+    assert.match(bootstrapInit, /\/usr\/share\/node-red\/chirpstack-bootstrap\.js/);
+    assert.match(bootstrapInit, /if updated_bootstrap_verified; then\n\s*bootstrap_script="\$BOOTSTRAP_UPDATED"\n\s*elif \[ -f "\$BOOTSTRAP_ROM" \]; then/);
     const deploy = fs.readFileSync(DEPLOY, 'utf8');
-    assert.match(deploy, /older ROM script/); assert.match(deploy, /updated \/srv\/node-red script/);
+    assert.match(deploy, /publish_bootstrap_receipt "\$BOOTSTRAP_SCRIPT_FALLBACK"/);
     const fx = fixture();
     const raw = 'CHIRPSTACK_APP_SENSORS=app-from-env\nDEVICE_EUI=stale-identity\n';
     fs.writeFileSync(fx.envFile, raw);

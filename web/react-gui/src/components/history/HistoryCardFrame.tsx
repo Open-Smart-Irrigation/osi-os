@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HistoryCardVisualization } from './HistoryCardVisualization';
 import { TimelineBrush } from './TimelineBrush';
+import { defaultDesktopView, selectableDesktopViews } from '../../history/desktopHistory';
 import { formatHistorySourceLabel } from '../../history/sourceLabels';
 import { useHistoryCardData, type HistoryCardDataScope } from '../../history/useHistoryCardData';
 import { useHistoryCardAdvancedData } from '../../history/useHistoryCardAdvancedData';
@@ -19,6 +20,7 @@ import type {
 } from '../../history/types';
 
 interface HistoryCardFrameProps {
+  expandedViewsEnabled?: boolean;
   card: HistoryCardSummary | null;
   scope: HistoryCardDataScope | null;
   viewport?: HistoryTimeViewport;
@@ -67,6 +69,7 @@ function formatAggregation(t: HistoryTranslate, value: HistoryAggregationLevel):
 }
 
 export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
+  expandedViewsEnabled = true,
   card,
   scope,
   viewport: controlledViewport,
@@ -83,7 +86,13 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
   const internalViewport = useTimeViewport(defaultRange, card?.cardId ?? 'empty');
   const viewport = controlledViewport ?? internalViewport.viewport;
   const setViewport = onViewportChange ?? internalViewport.setViewport;
-  const selectedView = card ? controlledSelectedView ?? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const views = card
+    ? (expandedViewsEnabled ? card.views : selectableDesktopViews(card, false).map(({ view }) => view))
+    : [];
+  const requestedView = card ? controlledSelectedView ?? viewModesByCard[card.cardId] ?? card.defaultView : 'line-chart';
+  const selectedView = expandedViewsEnabled || views.includes(requestedView)
+    ? requestedView
+    : card ? defaultDesktopView(card, false) : 'line-chart';
   const shouldRenderAdvanced = selectedView === 'advanced';
   const sourceLabel = card ? formatHistorySourceLabel(t, card) : null;
   const cardData = useHistoryCardData({
@@ -158,7 +167,7 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
 
         {showViewModeControls && (
           <div className="mt-4 flex flex-wrap gap-2" aria-label={t('history.cardFrame.viewModes', { title: card.title })}>
-            {card.views.map((view) => (
+            {views.map((view) => (
               <button
                 key={view}
                 type="button"
@@ -198,16 +207,21 @@ export const HistoryCardFrame: React.FC<HistoryCardFrameProps> = ({
           keyboardHelp={t('history.cardFrame.timelineBrushKeyboardHelp')}
         />
 
-        <HistoryCardVisualization
-          card={card}
-          data={cardData.data}
-          selectedView={selectedView}
-          isLoading={cardData.isLoading}
-          error={cardData.error}
-          advancedData={advancedData.data}
-          advancedIsLoading={advancedData.isLoading}
-          advancedError={advancedData.error}
-        />
+        <div
+          data-testid="history-card-plot"
+          className={selectedView === 'line-chart' ? 'flex h-[28rem] min-w-0 flex-col' : undefined}
+        >
+          <HistoryCardVisualization
+            card={card}
+            data={cardData.data}
+            selectedView={selectedView}
+            isLoading={cardData.isLoading}
+            error={cardData.error}
+            advancedData={advancedData.data}
+            advancedIsLoading={advancedData.isLoading}
+            advancedError={advancedData.error}
+          />
+        </div>
       </div>
     </section>
   );

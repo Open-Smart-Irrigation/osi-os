@@ -769,7 +769,8 @@ function r2SeedHarness(gw, opts = {}) {
     const segment = a.slice(a.indexOf(begin) + begin.length, a.indexOf(end)).trim();
     assert.match(segment, /seed_native_sqlite3\(\) \{/);
     assert.match(segment, /\nseed_native_sqlite3 \|\| exit 1$/);
-    body = segment.replace(/\nseed_native_sqlite3 \|\| exit 1$/, '');
+    const sync = a.match(/^seed_sync_paths\(\) \{\n[\s\S]*?^\}/m)?.[0] || '';
+    body = sync + '\n' + segment.replace(/\nseed_native_sqlite3 \|\| exit 1$/, '');
   } else {
     assert.ok(a.includes('\n' + oldRemove + '\n'), 'BASE deletion bytes changed');
     assert.ok(a.includes('\n' + oldSource + '\n'), 'BASE source block bytes changed');
@@ -2232,15 +2233,19 @@ test('R10 seed still refuses a broken module when the firmware module cannot rep
 // identity, the candidate marker, the copied files) are flushed before the
 // rename. The hooks log each sync with the metadata files on disk at that
 // moment, every mv naming a sqlite3 path and every cp into a stage.
-function r10DurabilityHooks(logFile, root) {
+function r10DurabilityHooks(logFile, root, { seed = false } = {}) {
   const q = r2Quote(logFile);
   const nm = r2Quote(path.join(root, 'node_modules'));
   const files = ['.osi-sqlite3-*/.owner', '.osi-sqlite3-*/.candidate-id',
-    '.osi-sqlite3-*/.osi-sqlite3-candidate-owner', '.osi-sqlite3-*/candidate/.osi-sqlite3-candidate-owner']
+    '.osi-sqlite3-*/.osi-sqlite3-candidate-owner', '.osi-sqlite3-*/candidate/.osi-sqlite3-candidate-owner',
+    'sqlite3/.osi-sqlite3-candidate-owner']
     .map(g => `${nm}/${g}`).join(' ');
+  const report = `{ printf 'sync'; for f in ${files}; do` +
+    ` [ -f "$f" ] && printf ' %s=%s' "\${f##*/}" "$(cat "$f")"; done; printf '\\n'; } >> ${q};`;
   return [
-    `sync() { command sync "$@" || return $?; { printf 'sync'; for f in ${files}; do` +
-    ` [ -f "$f" ] && printf ' %s=%s' "\${f##*/}" "$(cat "$f")"; done; printf '\\n'; } >> ${q}; }`,
+    seed
+      ? `node() { command node "$@" || return $?; if [ "${'$'}{1:-}" = - ]; then ${report} fi; }`
+      : `sync() { command sync "$@" || return $?; ${report} }`,
     `mv() { case "$*" in *sqlite3*) printf '%s\\n' "mv $*" >> ${q} ;; esac; command mv "$@"; }`,
     `cp() { case "$*" in *osi-sqlite3-*stage*) printf '%s\\n' "cp $*" >> ${q} ;; esac; command cp "$@"; }`,
   ];
@@ -2274,14 +2279,14 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   const gw = makeGateway('real-without-binary');
   r2OldBytes(gw);
   const log = path.join(gw.root, 'durability.log');
-  const r = r2SeedHarness(gw, { shellHooks: r10DurabilityHooks(log, gw.proj) });
+  const r = r2SeedHarness(gw, { shellHooks: r10DurabilityHooks(log, gw.proj, { seed: true }) });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /SEED_RC=0/);
-  assert.doesNotMatch(r.stderr, /WARN: sync failed/);
+  assert.doesNotMatch(r.stderr, /ERROR: could not sync/);
   const b = String.raw`\S*/\.osi-sqlite3-seed-rollback\.[^/ ]+`;
   const s = String.raw`\S*/\.osi-sqlite3-seed-stage\.[^/ ]+`;
   const lines = r9Lines(log);
-  assert.equal(lines.length, 6, lines.join('\n'));
+  assert.equal(lines.length, 7, lines.join('\n'));
   assert.equal(lines[0], 'sync .owner=osi-sqlite3-seed-stage-v2');
   assert.match(lines[1], new RegExp(`^cp -a \\S+ ${s}/candidate$`));
   assert.equal(lines[2], 'sync .owner=osi-sqlite3-seed-v2 .owner=osi-sqlite3-seed-stage-v2');
@@ -2292,6 +2297,34 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   assert.match(lines[3], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
   assert.match(lines[4], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
   assert.match(lines[5], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
+  assert.match(lines[6], /^sync /);
+  assert.match(lines[6], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
+});
+
+test('R10 seed retains the rollback copy when the promoted module cannot be synced', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  const promoted = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const inject = path.join(gw.root, 'fail-promoted-sync.cjs');
+  fs.writeFileSync(inject, `
+const fs = require('node:fs');
+const sync = fs.fsyncSync;
+fs.fsyncSync = fd => {
+  if (fs.readlinkSync('/proc/self/fd/' + fd) === ${JSON.stringify(fs.realpathSync(promoted))}) {
+    throw new Error('injected promoted-directory fsync failure');
+  }
+  return sync(fd);
+};`);
+  const failed = r2SeedHarness(gw, { shellHooks: ['export NODE_OPTIONS=--require=' + r2Quote(inject)] });
+  assert.match(failed.stdout, /SEED_RC=1/);
+  assert.match(failed.stderr, /injected promoted-directory fsync failure/);
+  assert.match(failed.stderr, /rollback retained/);
+  const [backup] = r2Names(gw, '.osi-sqlite3-seed-rollback.');
+  assert.ok(backup);
+  assert.ok(fs.existsSync(path.join(gw.proj, 'node_modules', backup, 'original')));
+  const retry = r2SeedHarness(gw);
+  assert.match(retry.stderr, /verified interrupted seed promotion/);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
 });
 
 // R11: the whole seed script, booted the way OpenWrt runs a uci-defaults
@@ -2302,9 +2335,15 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
 const R11_HELPERS = ['osi-lib', 'osi-db-helper'];
 function r11Image(gw) {
   const img = path.join(gw.root, 'image');
+  // makeGateway models a project after npm install. The factory image has no
+  // installed helper links before the first-boot seed runs.
+  fs.unlinkSync(path.join(gw.proj, 'node_modules', 'osi-fixture-helper'));
   fs.mkdirSync(path.join(img, 'codecs'), { recursive: true });
   fs.mkdirSync(path.join(img, 'node_modules'), { recursive: true });
   fs.copyFileSync(writeLockFixture(gw, LOCKED_VERSION), path.join(img, 'package-lock.json'));
+  fs.copyFileSync(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db'),
+    path.join(img, 'farming.db'));
+  fs.copyFileSync(path.join(img, 'farming.db'), path.join(gw.root, 'farming.db'));
   fs.writeFileSync(path.join(img, 'flows.json'), 'image\n');
   fs.writeFileSync(path.join(img, 'edge-channels.json'), 'image\n');
   fs.writeFileSync(path.join(img, 'codecs', 'kiwi.js'), 'image\n');
@@ -2324,7 +2363,12 @@ function r11Script(gw, opts = {}) {
   for (const [from, to, n] of [
     ['\nSRC=/usr/share/node-red\n', '\nSRC=' + r2Quote(img) + '\n', 1],
     ['\nDST=/srv/node-red\n', '\nDST=' + r2Quote(gw.proj) + '\n', 1],
-    ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 2],
+    ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 1],
+    ['/usr/share/db/farming.db', r2Quote(path.join(img, 'farming.db')), 1],
+    ['/data/db/farming.db', r2Quote(path.join(gw.root, 'farming.db')), 1],
+    ['/usr/lib/node-red/gui', path.join(gw.root, 'gui'), 1],
+    ['/var/run/osi-factory-seed.pending', path.join(gw.root, 'factory-seed.pending'), 1],
+    ['/etc/uci-defaults/97_osi_db_seed', path.join(gw.root, '97_osi_db_seed'), 1],
     ['\n    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3\n',
       '\n    SQLITE_SRC=' + r2Quote(fw) + '\n', 1],
     ['\nSEED_COPIED=/etc/osi-node-red-seed.copied\n',
@@ -2401,6 +2445,7 @@ test('R11 fresh image: the first boot seeds sqlite3 and copies the image', () =>
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /OK: seeded verified sqlite3/);
   assert.deepEqual(r11Copies(gw), r11All('image'));
+  assert.match(fs.readFileSync(path.join(gw.proj, '.image-flows-origin'), 'utf8'), /^[0-9a-f]{64}\n$/);
   assert.equal(fs.existsSync(r11Marker(gw)), false, 'a successful seed removes its marker');
   assert.equal(requireSqlite3(gw.proj).status, 0);
 });

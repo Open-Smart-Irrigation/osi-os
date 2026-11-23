@@ -26,17 +26,6 @@ The actual guard, in `seed_db_if_missing()`:
    `sqlite3` if available), re-check the target is still absent (race guard), then
    `mv` the seed into place.
 
-## Before any upgrade by script
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
-
 ## Quick reference
 
 | Task | Command |
@@ -46,8 +35,9 @@ until that release.
 | Serve repo root | `python3 -m http.server 9876 --bind 127.0.0.1` |
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
 | Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
-| Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
-| Show active helper modules | `ls -l /srv/node-red/osi-lib` (symlink into `payloads/<stamp>/modules/`; every staged `osi-*` module follows the same stamp as `flows.json`) |
+| Show active payload | `ls -l /srv/node-red/payloads/active` (link to `<stamp>`; `flows.json`, the GUI and every staged `osi-*` module link through it, and a switch is one rename of this link). A gateway last deployed by v0.8.2 or earlier links each entry straight into `payloads/<stamp>` until its next deploy converts it |
+| Show which payloads a rollback may return to | `cat /srv/node-red/payloads/*/health.json` (`healthy` with digests once a deploy's health check passed; `activated` means it never passed one; no file means it predates the record and is trusted) |
+| Show active helper modules | `readlink -f /srv/node-red/osi-lib` (resolves into `payloads/<stamp>/modules/`, the same stamp as `flows.json`) |
 | Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
 | SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
@@ -129,13 +119,22 @@ dev workstation unless noted.
 
    On a passing post-flip self-check the script prints, in order:
    ```text
-   OK: boot node confirmed 'sync-init: schema init complete' after <n>s
-   OK: local health self-check PASSED (Node-RED service running, /gui reachable after <n>s)
+   OK: local health self-check PASSED (the boot node logged 'sync-init: schema init complete' after <n>s; the service is running and /gui answers)
    OK: committing payload <stamp>
    ```
    and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
 
-   On a failing self-check it instead prints:
+   When the check is inconclusive (no failure observed, but the completion
+   line was not seen, for example because the log ring evicted it; or the
+   completion line was seen and `/gui` answers but the service state could
+   not be read), the new payload keeps running as `unverified`, the next
+   deploy checks it again, and the deploy exits 0 with this as its last line:
+   ```text
+   UNVERIFIED: payloads/<stamp> runs, but its start could not be confirmed: <reason>. The next deploy checks it again.
+   ```
+
+   On an observed failure (an error line of the start, the service not
+   running, or `/gui` not answering) it instead prints:
    ```text
    ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI
    ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair
@@ -153,6 +152,18 @@ dev workstation unless noted.
    (e.g. the very first deploy), it prints
    `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
    and exits 1 — treat that as a stop, with the service down.
+
+   When the deploy migrated the database and no payload that passed its health
+   check fits the new schema, it holds Node-RED stopped and ends with one line,
+   kept in `/srv/node-red/DEPLOY-HELD` until the hold ends:
+   `HELD: Node-RED stopped. payloads/<failed> failed after migrating ... Restore the pre-migration backup and return to payloads/<healthy> with: <command>`.
+   The command restores the named `/data/backups/migrate/farming.db.premigrate-*`
+   backup, switches back to that payload, records it healthy in
+   `/srv/node-red/payload-state.json`, removes `DEPLOY-HELD` and starts identityd
+   and Node-RED. While the gateway is held, Node-RED does not start, after a
+   reboot or `/etc/init.d/node-red start` either: the start logs the `HELD:`
+   line instead. The command, or a later deploy that switches in a payload,
+   ends the hold.
 
    Restarting Node-RED by hand right after a green deploy doesn't make it any
    safer — it only obscures which restart (migration, flip, or yours) produced
@@ -215,9 +226,10 @@ dev workstation unless noted.
      The CLI's `ENV_FILE` override is for direct use only. Updated and replaced files are
      root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
      existing backup is retained. Text repair requires lossless UTF-8.
-   - Deploy updates `/srv/node-red/` but does not replace the image's ROM
-     `/usr/share/node-red/` writer. `osi-bootstrap` continues to prefer that
-     ROM file whenever it exists; only a new image supplies an updated ROM copy.
+   - Deploy installs the bootstrap writer at `/srv/node-red/chirpstack-bootstrap.js`
+     as a synced, atomic replacement. The updated `osi-bootstrap` service
+     selects that copy first. A factory image without a deployed copy uses
+     `/usr/share/node-red/chirpstack-bootstrap.js`.
    - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
      none (a codec already there is left alone), a new `OSI CLOVER Sensor`
      profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
@@ -303,21 +315,39 @@ Reading straight through the script, in order:
     migration step already activated it),
     writes the new `firmware_version` to UCI (every switch back to the previous
     payload puts the old value back first), restarts Node-RED unless the
-    migration step did, then probes `http://127.0.0.1:1880/gui` with
-    `wget --spider` and requires the boot node's
-    `sync-init: schema init complete` line from this restart (5.3 / DD10).
-    On pass: prints `OK: local health self-check PASSED …` then
-    `OK: committing payload <stamp>` and prunes old payload directories to
-    `PAYLOAD_KEEP_N` (default 5). On fail: prints
-    `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
-    flips back to the previous stamp (flows, GUI and modules together), restarts
-    Node-RED on the last-known-good pair, prints
-    `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
-    notes that a committed DB migration is **not** auto-undone (DD10 — see
-    step 8) and that `deploy-canary-gate.js` gives the full cloud verdict, then
-    exits 1. If there is no previous payload to roll back to, it removes the
-    first-deploy payload, leaves Node-RED stopped, prints an `ERROR`, and
-    exits 1.
+    migration step did, and judges that start (5.3 / DD10). It reads only the
+    log lines after a marker it wrote with `logger` just before the restart,
+    probes `http://127.0.0.1:1880/gui` with `wget --spider`, and checks that
+    the service runs. One rule for every check of a start (this one and the
+    owed check of a retry):
+    - **Healthy:** the boot node's `sync-init: schema init complete` line
+      after the marker, the service running and `/gui` answering. Prints
+      `OK: local health self-check PASSED …` then `OK: committing payload
+      <stamp>` and prunes old payload directories to `PAYLOAD_KEEP_N`
+      (default 5).
+    - **Unverified (inconclusive):** no failure observed, but either the
+      completion line not seen (the marker evicted from a full log ring,
+      `logread` absent or empty) while the service runs and `/gui` answers,
+      or the completion line seen and `/gui` answering while the service
+      state could not be read (reason: "the service state could not be
+      read"). The new payload
+      keeps running, `payload-state.json` says `unverified`, nothing is
+      pruned or rolled back, the next deploy runs the check again, and the
+      deploy exits 0 with `UNVERIFIED: …` as its last line.
+    - **Failed (an observed failure only):** an error line of the start after
+      the marker (`devices rebuild ABORTED`, `Uncaught Exception:`, `Failed to
+      start server:`, `Error loading flows:`), the service not running, or
+      `/gui` not answering within its time. Prints
+      `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
+      flips back to the previous stamp (flows, GUI and modules together),
+      restarts Node-RED on the last-known-good pair, prints
+      `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
+      notes that a committed DB migration is **not** auto-undone (DD10 — see
+      step 8) and that `deploy-canary-gate.js` gives the full cloud verdict,
+      then exits 1. When no previous payload fits a migrated database, the
+      gateway is held (`HELD:` line, run the deploy again first). If there is
+      no previous payload at all, it removes the first-deploy payload, leaves
+      Node-RED stopped, prints an `ERROR`, and exits 1.
 11. The React GUI is not a separate step after the flip. Earlier,
     `--- flows.json + React GUI (staged payload; activation deferred to migration) ---`
     fetches `react_gui.tar.gz`, extracts it into a staging directory and stages
@@ -394,15 +424,6 @@ a gateway in use by image.** Use `deploy.sh`, or the
 for supported upgrades. An image is for a new device or a deliberate reset.
 The post-sysupgrade states below describe recovery from unsupported operations;
 they do not authorize performing such an upgrade.
-
-Until the next release, a gateway that was installed from an OSI OS image and
-has never been upgraded by script must not be upgraded by script either: the
-upgrade stops at the payload switch, after the database migration, and leaves
-the gateway stopped (NEW-13 in
-[#637](https://github.com/Open-Smart-Irrigation/osi-os/issues/637)). Check on
-the gateway before any upgrade: if `ls -ld /usr/lib/node-red/gui` shows a
-directory (`d`) and not a link (`l`), leave the gateway on its current version
-until that release.
 
 A deploy keeps the set it replaces as its rollback target. When the live
 `flows.json` and GUI point into one `payloads/<stamp>`, that payload is the

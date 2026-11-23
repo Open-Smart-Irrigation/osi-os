@@ -199,7 +199,7 @@ function verifyWiring() {
   wires(POSTCONDITION, [[VERIFY]]);
   wires(VERIFY, [[ACK]]);
   wires(ACK, [[ACK_QUEUE]]);
-  wires(LEGACY_ACK, [['d83e38164efbb860']]);
+  wires(LEGACY_ACK, [['account-cloud-guard-d83e38164efbb860']]);
   const source = node(ACK).func || '';
   ['postcondition_not_met', 'FAILED_RETRYABLE', 'stale_sync_version', 'sync_version'].forEach((text) => {
     if (!source.includes(text)) fail(`verified ACK does not contain ${text}`);

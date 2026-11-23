@@ -1,0 +1,14 @@
+// Self-heal broken FK refs (can be caused by devices table rename migration)
+try {
+  const q2 = (sql) => new Promise((res,rej) => _db.all(sql, (e,r) => e?rej(e):res(r||[])));
+  const bad2 = await q2("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%devices_old%'");
+  if (bad2.length > 0) {
+    const svRows = await q2('PRAGMA schema_version');
+    const sv = svRows[0] ? svRows[0].schema_version : 0;
+    await exec('PRAGMA writable_schema=ON');
+    await exec("UPDATE sqlite_master SET sql = REPLACE(REPLACE(sql, 'REFERENCES \"devices_old\"', 'REFERENCES devices'), 'REFERENCES devices_old', 'REFERENCES devices') WHERE type='table' AND sql LIKE '%devices_old%'");
+    await exec('PRAGMA writable_schema=OFF');
+    await exec('PRAGMA schema_version=' + (sv + 1));
+    node.warn('Self-healed FK refs for: ' + bad2.map(r=>r.name).join(', '));
+  }
+} catch(fkErr) { node.warn('FK self-heal failed: ' + fkErr.message); }

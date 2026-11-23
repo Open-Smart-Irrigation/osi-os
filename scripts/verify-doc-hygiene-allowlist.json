@@ -289,16 +289,16 @@
       "issue": 384
     },
     {
-      "path": "docs/superpowers/plans/issue-233-exact-plan.md",
-      "max": 6,
-      "reason": "Node-RED node ids quoted in the issue 233 exact plan wiring hunks; the EUI pattern cannot tell them apart",
-      "issue": 233
-    },
-    {
       "path": "docs/superpowers/plans/2026-10-28-issue-356-chameleon-reading-links.md",
       "max": 20,
       "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
       "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/issue-233-exact-plan.md",
+      "max": 6,
+      "reason": "Node-RED node ids quoted in the issue 233 exact plan wiring hunks; the EUI pattern cannot tell them apart",
+      "issue": 233
     },
     {
       "path": "docs/superpowers/plans/issue-356-chameleon-reading-links/apply-flow-edits.cjs",
@@ -323,6 +323,12 @@
       "max": 2,
       "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
       "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/x1-daily-scheduler-evidence/r3-results.json",
+      "max": 2,
+      "reason": "Two exact local command records contain the T3 worktree identifier; this is a checkout ID, not a gateway or device EUI.",
+      "issue": 705
     },
     {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
@@ -395,6 +401,24 @@
       "max": 6,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
+    },
+    {
+      "path": "tools/raspi5/check-concentratord.sh",
+      "max": 3,
+      "reason": "Synthetic WM1302 OTP EUI shared by the emulator and the guest-local MQTT assertions",
+      "issue": 384
+    },
+    {
+      "path": "tools/raspi5/probe-wm1302.c",
+      "max": 1,
+      "reason": "Synthetic WM1302 OTP EUI asserted by the Semtech HAL probe",
+      "issue": 384
+    },
+    {
+      "path": "docs/contracts/authority/fixtures/auth-consumers.json",
+      "max": 46,
+      "reason": "Exact Node-RED route/function node ids from the pinned source in the EB5b auth-consumer inventory; validated against the flow nodes by test-authority-contract.js. These are code identifiers, not deployment EUIs.",
+      "issue": 520
     }
   ]
 }
