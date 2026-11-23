@@ -2746,6 +2746,26 @@ gateway_state_preflight() {
     fi
     [ -e "$DB_PATH" ] || return 0
     fetch_migration_runner || { gsp_refuse "the migration runner could not be fetched and verified"; return 1; }
+    # A database a newer release already migrated (an applied ledger row above
+    # this release's migration head) is refused here, before anything changes.
+    # Migrating it with this release re-runs migrations the newer release
+    # renumbered and leaves a failed ledger row the newer release cannot clear.
+    # Foreign-numbered lineages the reconciliation renumbers sit below the head.
+    if ! gsp_newest="$(sqlite3 -readonly "$DB_PATH" "SELECT COALESCE(MAX(version),0) FROM schema_migrations WHERE status='applied'" 2>/dev/null)"; then
+        if sqlite3 -readonly "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations' LIMIT 1;" 2>/dev/null | grep -qx '1'; then
+            gsp_refuse "could not read the schema_migrations ledger" || return 1
+        fi
+        gsp_newest=0
+    fi
+    if ! gsp_head="$(node -e 'const m = require(process.argv[1]).readMigrationManifest(process.argv[2]); process.stdout.write(String(Math.max(...m.map((e) => e.version))));' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir")"; then
+        gsp_refuse "could not read this release's migration head" || return 1
+    fi
+    case "$gsp_newest:$gsp_head" in
+        *[!0-9:]*|:*|*:) gsp_refuse "could not compare the ledger with this release's migration head" || return 1 ;;
+    esac
+    if [ "$gsp_newest" -gt "$gsp_head" ]; then
+        gsp_refuse "this gateway has a newer database (schema_migrations has an applied version $gsp_newest, above this release's head $gsp_head); deploy the newer release" || return 1
+    fi
     # A repair_required ledger row whose checksum already matches the release
     # stops the migration runner, and nothing in the deploy clears it.
     gsp_repair="$(sqlite3 -readonly "$DB_PATH" "SELECT version || ':' || checksum FROM schema_migrations WHERE status='repair_required'" 2>/dev/null || true)"
