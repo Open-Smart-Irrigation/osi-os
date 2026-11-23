@@ -125,6 +125,41 @@ Not version locations: `web/react-gui/package.json` (`1.0.0`), the Node-RED
 `package.json` (no version field), and the `release_id` fixture in
 `osi-journal-replication/index.test.js`. Leave them.
 
+### Step 1b — Update the node-red.init pin
+
+On a line whose `deploy.sh` pins `node-red.init` by SHA-256, the version bump
+changes the file's hash, so update the pin in the same commit. The deploy
+downloads the init script through `fetch_required ... "$NODE_RED_INIT_SHA256"`;
+`osi-atomic-write.js` compares the downloaded bytes with the pin and, on a
+mismatch, refuses before it replaces `/etc/init.d/node-red`
+(`shell download SHA-256 pin mismatch`), which fails the deploy. The release
+lines carry the pin from 0.8.3 on; `deploy.sh` on `main` does not declare it
+today, and the `grep` below then does nothing.
+
+```bash
+if grep -q '^NODE_RED_INIT_SHA256=' deploy.sh; then
+  new=$(sha256sum feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init | cut -d' ' -f1)
+  sed -i "s/^NODE_RED_INIT_SHA256=\"[0-9a-f]\{64\}\"/NODE_RED_INIT_SHA256=\"$new\"/" deploy.sh
+  git diff -- deploy.sh                          # exactly one line changed
+  node --test scripts/test-atomic-runtime-writes.js
+fi
+```
+
+`scripts/test-atomic-runtime-writes.js` (run by the Test Inventory workflow)
+fails on a stale pin: it publishes the real `node-red.init` through
+`fetch_required` with the pin from `deploy.sh`, and the case "a cut during the
+Node-RED init script download leaves the old file intact" fails with the pin
+mismatch. `verify-sync-flow.js` only checks that the install line names the
+pin, not its value.
+
+No other pinned file changes with the version string. The
+`COMMAND_LEDGER_*_SHA256`, `OSI_SQLITE_SERIALIZE_*_SHA256` and
+`DEPLOY_GUI_ARCHIVE_SHA256` pins on `main`, and the payload-swap, atomic-writer,
+identity and bootstrap pins on the release lines, cover files that carry no
+release version (the command-ledger `package.json` says `1.0.0`, which is not
+a version location). If the `git grep` above ever lists a pinned file, update
+its pin the same way and run the test that guards it.
+
 Then verify:
 
 ```bash
@@ -326,12 +361,48 @@ release branch and merge it through a pull request, so the CI workflows from
 the pre-flight run on the release commit. The feed GUI is tracked in git;
 `git add -A` on its directory also stages the deleted old hashed assets:
 
+**A release cut on a release line** opens its pull request into a
+`release/<LINE>` branch (for example `release/v0.8.4` into `release/0.8.4`)
+instead of `main`. GitHub starts a `pull_request` or `push` workflow only when
+the target branch matches the workflow's `branches:` filter, and most
+workflows list only `main` and `master`. Without the edit below, the release
+pull request runs a handful of checks and skips the rest; the v0.8.4 release
+pull request (#757) had to add `release/0.8.4` to the triggers. Before the
+commit below, add the line branch to both filters of every workflow in
+`.github/workflows/` that should gate it, then list each event filter that
+still lacks it:
+
+```bash
+LINE=release/<LINE>
+# edit each file: branches: [ main, master, 'release/<LINE>' ] under push and pull_request
+for f in .github/workflows/*.yml; do
+  for ev in push pull_request; do
+    awk -v ev="$ev" -v line="$LINE" '
+      /^on:/ {on=1; next}
+      on && /^[^ #]/ {on=0}
+      on && $0 ~ "^  " ev ":" {inev=1; next}
+      on && /^  [a-z_]+:/ {inev=0}
+      inev && /branches:/ {found=1; if (index($0, line)) ok=1}
+      END {exit !(found && ok)}' "$f" || echo "$f: $ev lacks $LINE"
+  done
+done
+```
+
+The check expects the one-line `branches: [ ... ]` form the workflows use.
+Leave a workflow out only on purpose, such as one filtered by `paths:` to
+parts of the tree the line does not change, or one that runs only on pull
+requests. The `git add` below stages `.github/workflows`; on a release from
+`main` that path has no changes. Before you merge, compare the checks on the
+pull request with the pre-flight list; a workflow that is missing there did
+not run.
+
 ```bash
 git switch -c release/v<NEW>
 git add web/react-gui/src/pages/Login.tsx \
         conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config \
         conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config \
         feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init \
+        deploy.sh \
         conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
         conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
         scripts/verify-sync-flow.js \
@@ -346,7 +417,8 @@ git add web/react-gui/src/pages/Login.tsx \
         .claude/skills/osi-config-and-flags/references/uci-and-identity.md \
         .claude/skills/osi-config-and-flags/references/runtime-and-flags.md \
         README.md \
-        CHANGELOG.md
+        CHANGELOG.md \
+        .github/workflows
 git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
 git status --short    # nothing left unstaged
 git commit -m "release: OSI OS v<NEW>"
@@ -365,6 +437,10 @@ blocks it. A green
 ordinary push or PR run permits listed failures and does not satisfy this
 pre-tag requirement. If `main` moves, select and check the release commit
 again before tagging; do not use a successful run from another commit.
+On a release line the merge lands on `release/<LINE>`, not `main`: start the
+run on that branch instead (`gh workflow run release-smoke.yml --ref
+release/<LINE>`) and apply the same `headSha` check to the line's merge
+commit.
 
 Only after that strict hosted run is green, tag its commit and push only
 the tag:
@@ -615,10 +691,11 @@ On each Pi after the deploy:
                  matching osi-server revision found with verify-sync-op-parity
                  Luganda release gate checked (docs/i18n/pending-luganda-translations.md)
 [ ] Step 1  — Bump every version location; run the verifiers
+[ ] Step 1b — Update NODE_RED_INIT_SHA256 in deploy.sh when the line pins it; test-atomic-runtime-writes green
 [ ] Step 1a — Refresh Chameleon snapshot; review every SQL, old and final row privately; approve or stop on collisions; apply with --require-rows; verify all seven images before representative inspection
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
-[ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, manual strict hosted smoke green on that SHA, tag v<NEW>, push only the tag, tag smoke green
+[ ] Step 4  — Release PR (incl. feed GUI; on a release line, add release/<LINE> to the workflow triggers), merge, CI green, manual strict hosted smoke green on that SHA, tag v<NEW>, push only the tag, tag smoke green
 [ ] Step 5  — Build both factory images, rename, SHA256SUMS, Pi 4 and Pi 5 emulators green through osi-heavy before the real-device sheet, first-boot check
 [ ] Step 6  — Deploy and verify osi-server (first when a contract change needs the cloud first)
 [ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
