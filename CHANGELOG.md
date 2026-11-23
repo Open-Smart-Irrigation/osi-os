@@ -14,6 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 0.8.4 is 0.8.3 with two gateway sync fixes. Field gateways can go from
 0.8.0, 0.8.1, 0.8.2 or 0.8.3 straight to this release.
 
+**Update to edit zones from the cloud:** editing zones from the cloud needs
+this release on the gateway.
+
 ### Upgrade notes
 - The deploy adds one database migration (0081, a new trigger, no data
   change). It is the same file as migration 0084 on the 0.9 line; a later
