@@ -1,6 +1,6 @@
 import {expect, test, type Locator, type Page} from '@playwright/test';
-import {mkdirSync} from 'node:fs';
-import {getDemoMessages, type DemoLanguage} from '../../public/messages';
+import {mkdirSync, readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 
 test.setTimeout(240_000);
 
@@ -57,7 +57,7 @@ for (const language of languages) {
     // Walk to the timed-irrigation step one confirmed step at a time: each Enter goes to the
     // Next button itself, and the step copy must change before the next press, so a press
     // can never land on a stale enabled state of the previous step.
-    const copy = getDemoMessages(language.code as DemoLanguage);
+    const copy = JSON.parse(readFileSync(resolve('demo/public/locales', `${language.code}.json`), 'utf8')) as Record<string, string>;
     for (const step of [copy.stepInspect, copy.stepAdvice, copy.stepHistory, copy.stepIrrigation]) {
       await expect(page.locator('#guide-next')).toBeEnabled({timeout: 10_000});
       await page.locator('#guide-next').press('Enter');
