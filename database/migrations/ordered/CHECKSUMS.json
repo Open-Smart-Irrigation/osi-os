@@ -81,5 +81,6 @@
   "0080__sdi12_transmissions.sql": "126072b50e960359769cac9cd9fabe7899899b0a4fb7b991e0f3b83681c4687a",
   "0081__uplink_idempotency.sql": "707efb537fa766d51329885bba7e8c92f7b23a9032caea608bd61059a9bd9019",
   "0082__history_repair_progress_indexes.sql": "1a9fbc6a5f32e71265e30d81b738992cb8fe7336240a195f412044e387180795",
-  "0083__sdi12_archive_retention_index.sql": "c980eb37554b4b891684470cd9f707b9651f9c50cbbe6e0ece0eded8b1912b32"
+  "0083__sdi12_archive_retention_index.sql": "c980eb37554b4b891684470cd9f707b9651f9c50cbbe6e0ece0eded8b1912b32",
+  "0084__schedule_insert_outbox_trigger.sql": "8e72ed0a96876c8a612d196db1bf754c946475986494298bb96c1052481fcfb4"
 }
