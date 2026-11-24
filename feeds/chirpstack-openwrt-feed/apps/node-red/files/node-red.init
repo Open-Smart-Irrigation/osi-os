@@ -211,6 +211,11 @@ cloud_broker_url_for_log() {
 # (any letter case), the same hosts osi-cloud-http allows without TLS. Reads
 # the host only: userinfo, port, path, query and fragment are left out. Pure,
 # no subshell.
+# Two spellings read differently from osi-cloud-http, which gets the host from
+# a URL parser: 127.00.0.1 (a leading zero, which the module accepts) and
+# 127.1.2 in a ws:// or wss:// address (the parser expands the short form to
+# 127.1.0.2). Both are loopback there, so account link stores such an
+# address, and not here, so the start ignores it.
 cloud_broker_url_is_loopback() {
     local rest="${1#*://}"
     local host="${rest%%/*}"
