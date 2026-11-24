@@ -11,6 +11,7 @@
     "@grpc/grpc-js": "1.14.3",
     "@chirpstack/chirpstack-api": "4.12.1",
     "aedes": "0.51.3",
-    "mqtt": "4.3.7"
+    "mqtt": "4.3.7",
+    "ws": "7.5.13"
   }
 }

@@ -47,6 +47,8 @@ jobs:
         run: node scripts/test-x3-zone-env-integration.js --runtime-only
       - name: An unlinked gateway opens no cloud broker connection (#766)
         run: node scripts/test-cloud-broker-unlinked-node-red.js
+      - name: The cloud broker refuses a certificate that does not verify
+        run: node scripts/test-cloud-broker-certificate-node-red.js
       - name: Node file serializes the flows' SQLite connection (three package layouts)
         run: node --test scripts/test-sqlite-serialize-node-file.js
       - name: Deploy keeps a working node file when its fetch fails

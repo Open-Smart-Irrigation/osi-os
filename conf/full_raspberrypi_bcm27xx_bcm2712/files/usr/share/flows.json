@@ -3775,6 +3775,7 @@
     "clientid": "device_${DEVICE_EUI}",
     "autoConnect": "${OSI_CLOUD_BROKER_AUTOCONNECT}",
     "usetls": false,
+    "verifyservercert": true,
     "protocolVersion": "5",
     "keepalive": "60",
     "cleansession": false,

@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- The cloud MQTT broker connection now verifies the server certificate
+  (`verifyservercert: true` on the "OSI Cloud Broker" node, both profiles).
+  Cloud REST traffic already verified. A gateway whose broker serves a
+  certificate the bundled Node root store does not verify stops reporting
+  over MQTT and retries automatically; it reconnects by itself once the
+  broker serves a verifying chain again.
+
 ---
 
 ## [0.8.3] — 2026-11-19

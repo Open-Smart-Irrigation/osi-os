@@ -105,7 +105,12 @@ zone update event and both snapshots carry it, null when unset (see "Zone
 Broker: `${OSI_CLOUD_BROKER_URL}` in the "OSI Cloud Broker" node, set by
 `node-red.init` from `osi-server.cloud.mqtt_broker_url`, else
 `wss://<osi-server.cloud.server_host>/mqtt`, else the default
-`wss://server.opensmartirrigation.org/mqtt`.
+`wss://server.opensmartirrigation.org/mqtt`. The connection verifies the
+server certificate (`verifyservercert` is the literal boolean `true` on the
+node; `scripts/verify-communication-contract.js` pins it). If the broker
+serves a certificate that does not verify, the gateway retries on the usual
+reconnect interval and recovers by itself once a verifying chain is served;
+cloud REST traffic verifies the same way.
 
 The topic table stays in `AGENTS.md`.
 

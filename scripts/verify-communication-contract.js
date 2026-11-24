@@ -108,6 +108,18 @@ for (const relativePath of cloudBrokerFlowPaths) {
   if (broker.broker !== cloudBrokerPlaceholder) {
     fail(`${relativePath}: OSI Cloud Broker "broker" must be exactly ${cloudBrokerPlaceholder} (no literal host); found ${JSON.stringify(broker.broker)}`);
   }
+  // Certificate verification must be the literal boolean true. Node-RED reads
+  // `verifyservercert == "true" || === true`, so a string "true" happens to
+  // work but an unresolved env placeholder ("${...}") is neither and leaves
+  // verification off; only the literal boolean is unambiguous. A tls-config
+  // reference (usetls/tls) would move the decision to that node's own
+  // verifyservercert, so the broker node must not carry one.
+  if (broker.verifyservercert !== true) {
+    fail(`${relativePath}: OSI Cloud Broker must carry "verifyservercert": true as the literal boolean (found ${JSON.stringify(broker.verifyservercert)}); the cloud broker certificate must be verified, and an env placeholder does not enable it`);
+  }
+  if (broker.usetls || broker.tls !== undefined) {
+    fail(`${relativePath}: OSI Cloud Broker must not reference a tls-config node (found usetls ${JSON.stringify(broker.usetls)}, tls ${JSON.stringify(broker.tls)}); its settings would override the broker-level verifyservercert`);
+  }
 }
 
 const nodeRedInit = read(nodeRedInitPath);
