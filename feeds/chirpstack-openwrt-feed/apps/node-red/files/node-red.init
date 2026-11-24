@@ -159,6 +159,12 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
+# The scheme of a value from 1 is read without regard to letter case. A ws://
+# or mqtt:// value is used only for a loopback host; any other value with a
+# scheme that is not TLS is ignored with a WARN (the cloud endpoint scheme
+# policy), and 2 or 3 takes over. 3 only when the ignored value named the
+# default broker's host: otherwise the credential belongs to another cloud,
+# and the gateway gets OSI_UNLINKED_CLOUD_BROKER_URL instead.
 # A gateway linked to the default host gets byte-identical behaviour to the
 # old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
@@ -204,25 +210,103 @@ cloud_broker_url_for_log() {
     esac
 }
 
+# The host of a broker URL as written, without userinfo, port, path, query
+# or fragment; the brackets of an IPv6 address are left out. Sets
+# CLOUD_BROKER_URL_HOST. Pure, no subshell.
+cloud_broker_url_host() {
+    local rest="${1#*://}"
+    local host="${rest%%/*}"
+    host="${host%%\?*}"
+    host="${host%%\#*}"
+    host="${host##*@}"
+    case "$host" in
+        "["*) host="${host#\[}"; host="${host%%\]*}" ;;
+        *) host="${host%%:*}" ;;
+    esac
+    CLOUD_BROKER_URL_HOST="$host"
+}
+
+# Whether the host of a broker URL is loopback: 127.0.0.0/8, ::1 or localhost
+# (any letter case), the same hosts osi-cloud-http allows without TLS. Reads
+# the host only: userinfo, port, path, query and fragment are left out. Pure,
+# no subshell.
+# Stricter than osi-cloud-http in two ways. Such an address is loopback
+# there (account link stores it) and ignored here:
+# - an address with a backslash is never loopback here. The MQTT client
+#   reads a backslash as a slash, so it can connect to another host than the
+#   one read here. The module allows such an address only when its two
+#   readings of it agree (ws://127.0.0.1\@other/, for example);
+# - 127.00.0.1 (a leading zero, which the module accepts).
+cloud_broker_url_is_loopback() {
+    local host rest part
+    case "$1" in *'\'*) return 1 ;; esac
+    cloud_broker_url_host "$1"
+    host="$CLOUD_BROKER_URL_HOST"
+    case "$host" in
+        [lL][oO][cC][aA][lL][hH][oO][sS][tT]|::1) return 0 ;;
+        127.*.*.*) ;;
+        *) return 1 ;;
+    esac
+    rest="${host#127.}"
+    for part in 1 2 3; do
+        host="${rest%%.*}"
+        if [ "$part" = 3 ]; then host="$rest"; fi
+        # Each is 0 to 255, written without a leading zero.
+        case "$host" in
+            0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+            *) return 1 ;;
+        esac
+        rest="${rest#*.}"
+    done
+    return 0
+}
+
 # Sets CLOUD_BROKER_URL and CLOUD_BROKER_URL_SOURCE (mqtt_broker_url,
-# server_host or default). Pure apart from logging; no subshell, so the
-# caller sees both variables.
+# server_host, default or refused). Pure apart from logging; no subshell, so
+# the caller sees both variables.
 resolve_cloud_broker_url() {
     local configured_url="$1"
     local server_host="$2"
+    local refused=0
+    local refused_host=""
+    local default_host
 
     if [ -n "$configured_url" ]; then
         case "$configured_url" in
-            *[[:space:]]*) ;;
-            wss://?*|ws://?*|mqtts://?*|mqtt://?*)
+            *[[:space:]]*)
+                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)"
+                ;;
+            [Ww][Ss][Ss]://?*|[Mm][Qq][Tt][Tt][Ss]://?*)
                 CLOUD_BROKER_URL="$configured_url"
                 CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
                 return 0
                 ;;
-        esac
-        case "$configured_url" in
-            *[[:space:]]*) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)" ;;
-            *) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)" ;;
+            *://?*)
+                # Any other scheme, in any letter case, is not TLS.
+                case "$configured_url" in
+                    [Ww][Ss]://?*|[Mm][Qq][Tt][Tt]://?*)
+                        if cloud_broker_url_is_loopback "$configured_url"; then
+                            CLOUD_BROKER_URL="$configured_url"
+                            CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
+                            return 0
+                        fi
+                        logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback; the cloud broker needs wss:// or mqtts://)"
+                        ;;
+                    *)
+                        logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)"
+                        ;;
+                esac
+                refused=1
+                # An address with a backslash has no host to trust: it never
+                # counts as the default broker's.
+                case "$configured_url" in
+                    *'\'*) refused_host="" ;;
+                    *) cloud_broker_url_host "$configured_url"; refused_host="$CLOUD_BROKER_URL_HOST" ;;
+                esac
+                ;;
+            *)
+                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)"
+                ;;
         esac
     fi
 
@@ -236,8 +320,24 @@ resolve_cloud_broker_url() {
                 return 0
                 ;;
         esac
-        # Falls back to the default broker, like an unlinked gateway.
-        logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host")); MQTT uses the default broker"
+        if [ "$refused" = 1 ]; then
+            logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host"))"
+        else
+            logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host")); MQTT uses the default broker"
+        fi
+    fi
+
+    if [ "$refused" = 1 ]; then
+        # The MQTT credential belongs to the cloud that answered the ignored
+        # address. When that is not the default cloud, it must not go to the
+        # default broker, so the gateway gets the name that never resolves.
+        cloud_broker_url_host "$OSI_DEFAULT_CLOUD_BROKER_URL"
+        default_host="$CLOUD_BROKER_URL_HOST"
+        if [ "$refused_host" != "$default_host" ]; then
+            CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
+            CLOUD_BROKER_URL_SOURCE="refused"
+            return 0
+        fi
     fi
 
     CLOUD_BROKER_URL="$OSI_DEFAULT_CLOUD_BROKER_URL"
@@ -487,7 +587,9 @@ start_service() {
     logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
     # Only a URL that came from UCI may replace a literal in an older
     # flows.json (a rollback payload); with nothing usable configured, or
-    # when unlinked, that literal stays and flows.json is not rewritten.
+    # when unlinked, that literal stays and flows.json is not rewritten. A
+    # refused plain address without a server_host does replace it, with the
+    # name that never resolves: the credential must reach no broker.
     local cloud_broker_patch_url=""
     case "$CLOUD_BROKER_URL_SOURCE" in
         default|unlinked) ;;

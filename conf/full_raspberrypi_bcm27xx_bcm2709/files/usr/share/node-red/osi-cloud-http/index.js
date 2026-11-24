@@ -5,6 +5,13 @@ const https = require('https');
 const path = require('path');
 
 const DEFAULT_TIMEOUT_MS = 30000;
+// Protocols that carry TLS. Any other protocol reaches a cloud address only
+// when its host is loopback.
+const TLS_PROTOCOLS = ['https:', 'wss:', 'mqtts:'];
+// One line per process, shared by every copy of this module (an image and a
+// deployed payload can hold more than one), like the start-up state in
+// osi-db-helper.
+const REFUSAL_WARNED = Symbol.for('osi.cloud-http.refusalWarned');
 
 // Issue #766: an unlinked gateway reports nothing to the cloud. Linking always
 // stores an MQTT password (the link is refused without one, since v0.7.0), and
@@ -75,6 +82,44 @@ function warnGate(text) {
   console.warn('osi-cloud-http: ' + text);
 }
 
+// Loopback hosts: 127.0.0.0/8, ::1 and the name localhost. Returns the host
+// in one spelling (lower case, no brackets) when it is loopback, else ''.
+function loopbackHostname(hostname) {
+  const host = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === '::1') return host;
+  const address = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  return address && address.slice(1).every((octet) => Number(octet) <= 255) ? host : '';
+}
+
+function isLoopbackHostname(hostname) {
+  return loopbackHostname(hostname) !== '';
+}
+
+// The cloud endpoint scheme policy, shared with the account link and the zone
+// environment summary: a cloud address uses TLS unless its host is loopback.
+// Returns null when the address passes, else an error with the code
+// cloud_endpoint_scheme. A caller whose client reads the address with
+// another parser passes that reading as { clientHostname }; a plain address
+// then passes only when both read the same loopback host. The first refusal
+// in a process is logged: nothing else tells an operator that a stored
+// address no longer passes. Pass { quiet: true } where the caller reports
+// the refusal itself.
+function cloudEndpointRefusal(protocol, hostname, options) {
+  const settings = options || {};
+  if (TLS_PROTOCOLS.includes(String(protocol || '').toLowerCase())) return null;
+  const host = loopbackHostname(hostname);
+  const clientHost = settings.clientHostname === undefined ? host : loopbackHostname(settings.clientHostname);
+  if (host && host === clientHost) return null;
+  const error = new Error('A cloud address outside loopback must use TLS; relink the gateway with its https address');
+  error.code = 'cloud_endpoint_scheme';
+  if (!(options && options.quiet) && !globalThis[REFUSAL_WARNED]) {
+    globalThis[REFUSAL_WARNED] = true;
+    warnGate('refused a request over ' + String(protocol || 'no protocol').replace(/:$/, '') + ' to ' +
+      String(hostname || 'no host') + '. ' + error.message + '. Logged once per start.');
+  }
+  return error;
+}
+
 // true, false, or 'unavailable' when the gate cannot be loaded or run; the
 // caller refuses in both the true and the 'unavailable' case.
 function accountWorkPending() {
@@ -136,7 +181,8 @@ function normalizeRequest(input) {
 
 function requestJsonIpv4(input) {
   const request = normalizeRequest(input);
-  const refusal = unlinkedRefusal(request.parsed);
+  const refusal = unlinkedRefusal(request.parsed) ||
+    cloudEndpointRefusal(request.parsed.protocol, request.parsed.hostname);
   if (refusal) return Promise.reject(refusal);
   const transport = request.parsed.protocol === 'https:' ? https : http;
   const diagnostics = {
@@ -211,7 +257,9 @@ function requestJsonIpv4(input) {
 module.exports = {
   requestJsonIpv4,
   gatewayLinked,
-  linkedOnlyPath
+  linkedOnlyPath,
+  isLoopbackHostname,
+  cloudEndpointRefusal
 };
 
 // Tests read the account files from an in-memory gateway instead of the disk,

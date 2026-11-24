@@ -39,6 +39,17 @@ and which carry only the support request. Unlinking requires an enabled
 gateway admin; on a gateway without an enabled admin, the enabled, linked
 account that is not a viewer may unlink it (#766).
 
+Cloud endpoints require TLS (the cloud endpoint scheme policy). `osi-cloud-http`
+sends to an `http:` address only when its host is loopback (`127.0.0.0/8`,
+`::1`, `localhost`). The zone environment summary has its own transport and
+applies the same rule. Any other plain address is refused before a request is
+sent, with error code `cloud_endpoint_scheme`; the http nodes report it as a
+transport failure (status 0). The first refusal of a start is logged once,
+naming the fix: relink the gateway with its `https` address.
+`osi-server.cloud.allow_private_target` does not change this. With it set, the
+account-link form accepts a plain address for any host, and the link request
+is then refused unless the host is loopback.
+
 ## Cloud to edge command types
 
 Delivered via pending-commands:
@@ -111,6 +122,17 @@ node; `scripts/verify-communication-contract.js` pins it). If the broker
 serves a certificate that does not verify, the gateway retries on the usual
 reconnect interval and recovers by itself once a verifying chain is served;
 cloud REST traffic verifies the same way.
+
+A stored `ws://` or `mqtt://` broker address is used only for a loopback host.
+The scheme is read without regard to letter case; any other scheme that is
+not TLS counts as plain. For such a host `node-red.init` ignores the address
+with one warning that does not print the address, and
+`wss://<server_host>/mqtt` takes over. Without a `server_host`, the default
+broker takes over only when the ignored address named the default broker's
+host; otherwise the gateway gets the broker name that never resolves until it
+is relinked, because its credential belongs to another cloud. Account link
+refuses such an address in the cloud's reply. It reads the address the way
+the MQTT client does as well, so none is stored.
 
 The topic table stays in `AGENTS.md`.
 
