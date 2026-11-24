@@ -39,10 +39,13 @@ function profileDir(profile) {
 const cloudHttpFile = (profile) => path.join(profileDir(profile), 'node-red/osi-cloud-http/index.js');
 
 // Stands in for the network: records every request and answers `reply`
-// (status and body) or 200 {}. A refused request must never reach it.
+// (status and body) or 200 {}. `reply` may be a function, read at each
+// request. A refused request must never reach it. Call it once per test:
+// a second call in the same test would leave a stub behind.
 function stubTransport(t, reply) {
   const calls = [];
   const restore = [];
+  const answer = () => (typeof reply === 'function' ? reply() : reply);
   for (const [name, mod] of [['http', http], ['https', https]]) {
     const original = mod.request;
     mod.request = (options, callback) => {
@@ -53,11 +56,12 @@ function stubTransport(t, reply) {
       req.destroy = (error) => req.emit('error', error);
       req.end = () => {
         const res = new EventEmitter();
-        res.statusCode = reply ? reply.status : 200;
+        const current = answer();
+        res.statusCode = current ? current.status : 200;
         res.headers = { 'content-type': 'application/json' };
         res.complete = true;
         callback(res);
-        res.emit('data', JSON.stringify(reply ? reply.body : {}));
+        res.emit('data', JSON.stringify(current ? current.body : {}));
         res.emit('end');
       };
       return req;
@@ -579,7 +583,35 @@ for (const profile of PROFILES) {
     });
   }
 
-  for (const [broker, what] of [['mqtt://broker.example.net:1883', 'a plain address'], ['mqtt://other.example.test\\@127.0.0.1:1883/', 'an address that only reads as loopback here']]) {
+  test(`${profile}: a broker address with whitespace or a control character inside it in the cloud reply fails the link`, async (t) => {
+    silenceConsoleWarn(t);
+    let reply = null;
+    const calls = stubTransport(t, () => reply);
+    for (const broker of ['wss://cust_cloud.example\t/mqtt', 'mqtt://other.example.test\t@127.0.0.1:1883/',
+      'wss://cloud.example.org/\u0001mqtt', 'mqtt://127.0.0.1:1883\u007f']) {
+      const f = fixture(profile);
+      try {
+        processStarted(false);
+        calls.length = 0;
+        reply = linkReply(f, broker);
+        const outcome = await linkChain(f, 'https://cloud.example.test', {});
+        assert.deepEqual(outcome.path.slice(0, -1), ['al-link-validate', 'al-link-build-req', 'al-link-server-auth'], 'the cloud was asked over the stand-in');
+        assert.equal(outcome.stoppedAt, 'al-link-handle-auth', JSON.stringify(broker));
+        assert.equal(outcome.failure.statusCode, 502, JSON.stringify(broker));
+        assert.equal(outcome.failure.payload.reason, 'invalid_mqtt_broker_url', JSON.stringify(broker));
+        assert.equal(outcome.failure.payload.message, 'Server authentication returned an invalid MQTT broker URL', JSON.stringify(broker));
+        assert.equal(calls.length, 1, 'only the link request was sent');
+        assert.equal(outcome.failure._alState.al_mqtt_broker_url, undefined, 'the broker address is not kept');
+        assertNothingStored(f);
+      } finally { f.cleanup(); }
+    }
+  });
+
+  for (const [broker, what, reason, detail] of [
+    ['mqtt://broker.example.net:1883', 'a plain address', 'cloud_endpoint_scheme', /wss:\/\/ or mqtts:\/\//],
+    ['mqtt://other.example.test\\@127.0.0.1:1883/', 'an address the MQTT client would read differently', 'cloud_endpoint_scheme', /wss:\/\/ or mqtts:\/\//],
+    ['wss://cust_cloud.example\t/mqtt', 'an address with whitespace in it', 'invalid_mqtt_broker_url', /invalid MQTT broker URL/],
+  ]) {
     test(`${profile}: the link finalizer refuses ${what} even when the earlier check is skipped`, async (t) => {
       silenceConsoleWarn(t);
       const f = fixture(profile);
@@ -591,8 +623,8 @@ for (const profile of PROFILES) {
         });
         assert.equal(outcome.stoppedAt, 'al-link-finalize', 'the link stops at its finalizer: ' + outcome.path.join(' > '));
         assert.equal(outcome.failure.statusCode, 502);
-        assert.equal(outcome.failure.payload.reason, 'cloud_endpoint_scheme');
-        assert.match(outcome.failure.payload.detail, /wss:\/\/ or mqtts:\/\//, outcome.failure.payload.detail);
+        assert.equal(outcome.failure.payload.reason, reason);
+        assert.match(outcome.failure.payload.detail, detail, outcome.failure.payload.detail);
         assertNothingStored(f);
       } finally { cloud.respond = null; f.cleanup(); }
     });
@@ -616,6 +648,18 @@ for (const profile of PROFILES) {
         assert.equal(rows[0].n, 1, broker + ': the account is linked');
       } finally { cloud.respond = null; f.cleanup(); }
     }
+  });
+
+  test(`${profile}: a broker address with whitespace only around it in the cloud reply is stored without it`, async () => {
+    // What is stored is the address that was checked.
+    const f = fixture(profile);
+    try {
+      processStarted(false);
+      cloud.respond = () => linkReply(f, ' wss://cloud.example.org/mqtt ');
+      const outcome = await linkChain(f, loopbackCloud(), { ALLOW_PRIVATE_SERVER_URLS: '1' });
+      assert.equal(outcome.stoppedAt, null, 'the link reached its restart request: ' + outcome.path.join(' > ') + ' ' + JSON.stringify(outcome.failure && outcome.failure.payload) + outcome.warnings.join('; '));
+      assert.equal(f.io.config.get('osi-server.cloud.mqtt_broker_url'), 'wss://cloud.example.org/mqtt');
+    } finally { cloud.respond = null; f.cleanup(); }
   });
 
   test(`${profile}: a stored http address outside loopback sends no sync request`, async (t) => {

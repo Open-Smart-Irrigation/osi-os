@@ -29,6 +29,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   linked over a plain address before this change keeps its link and fails its
   cloud requests until it is relinked with its `https` address; the first
   refused request of a start logs that fix once.
+- Cloud broker fallback hardening. A stored broker value that `node-red.init`
+  does not use, whatever its form (no scheme, whitespace or a control
+  character included), now counts as refused: without a `server_host` the
+  default broker is used only when the value named the default broker's host,
+  letter case aside. Whenever a stored value is not used, a literal broker
+  address in an older `flows.json` is replaced by the broker chosen at start.
+  Account link refuses a broker address with whitespace or a control
+  character inside it.
 
 ---
 
