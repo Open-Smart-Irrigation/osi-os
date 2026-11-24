@@ -20,7 +20,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   refuses an `mqtt:`/`ws:` broker address outside loopback in the cloud's
   reply, reading the address the way the MQTT client does as well. At start,
   `node-red.init` uses a stored `ws://`/`mqtt://` broker address only for a
-  loopback host; for any other it logs one warning and
+  loopback host; the scheme is read without regard to letter case. For any
+  other value with a scheme that is not TLS it logs one warning and
   `wss://<server_host>/mqtt` takes over. Without a `server_host`, the default
   broker takes over only when the ignored address named the default broker's
   host; otherwise the gateway gets the broker name that never resolves until

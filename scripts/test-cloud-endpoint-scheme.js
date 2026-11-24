@@ -120,13 +120,13 @@ for (const profile of PROFILES) {
   test(`${profile}: the rule allows TLS anywhere and anything else only on loopback`, () => {
     for (const [protocol, hostname] of [['http:', 'cloud.example.test'], ['http:', '10.0.0.1'], ['http:', '192.168.1.1'],
       ['ws:', 'broker.example.test'], ['mqtt:', 'broker.example.net'], ['ftp:', 'cloud.example.test'], ['', 'cloud.example.test'],
-      ['http:', '127.0.0.1.example.test']]) {
+      ['http:', '127.0.0.1.example.test'], ['MQTT:', 'broker.example.test'], ['TCP:', 'broker.example.net:1883']]) {
       const refusal = cloudHttp.cloudEndpointRefusal(protocol, hostname, { quiet: true });
       assert.equal(refusal && refusal.code, 'cloud_endpoint_scheme', 'refused: ' + protocol + ' ' + hostname);
     }
     for (const [protocol, hostname] of [['https:', 'cloud.example.test'], ['HTTPS:', 'cloud.example.test'],
       ['wss:', 'broker.example.test'], ['mqtts:', 'broker.example.net'], ['http:', '127.0.0.1'], ['http:', '127.8.8.8'],
-      ['http:', 'localhost'], ['ws:', '[::1]'], ['mqtt:', '::1']]) {
+      ['http:', 'localhost'], ['ws:', '[::1]'], ['mqtt:', '::1'], ['MQTTS:', 'broker.example.net'], ['WSS:', 'broker.example.test']]) {
       assert.equal(cloudHttp.cloudEndpointRefusal(protocol, hostname, { quiet: true }), null, 'allowed: ' + protocol + ' ' + hostname);
     }
   });
@@ -556,6 +556,8 @@ for (const profile of PROFILES) {
     // The MQTT client reads these two as a host outside loopback.
     ['mqtt://other.example.test\\@127.0.0.1:1883/', 'an mqtt:// broker address that only reads as loopback here'],
     ['ws://other.example.test\\@127.0.0.1/', 'a ws:// broker address of the same kind'],
+    ['MQTT://broker.example.test:8081/mqtt', 'an uppercase MQTT:// broker address outside loopback'],
+    ['TCP://broker.example.test:1883', 'a broker address with another plain scheme'],
   ]) {
     test(`${profile}: ${what} in the cloud reply fails the link`, async (t) => {
       silenceConsoleWarn(t);
@@ -597,10 +599,12 @@ for (const profile of PROFILES) {
   }
 
   test(`${profile}: wss, mqtts and loopback broker addresses in the cloud reply are stored as given`, async () => {
-    // The last two name their loopback host in a spelling that differs
-    // between the two parsers; the host is still the same.
+    // The scheme is read without regard to letter case. Some of these name
+    // their loopback host in a spelling that differs between the two
+    // parsers; the host is still the same.
     for (const broker of ['wss://cloud.example.org/mqtt', 'mqtts://broker.example.net:8883', 'ws://127.0.0.1:8081/mqtt',
-      'mqtt://[::1]:1883', 'mqtt://LOCALHOST:1883']) {
+      'mqtt://[::1]:1883', 'mqtt://LOCALHOST:1883', 'WSS://cloud.example.org/mqtt', 'MQTTS://broker.example.net:8883',
+      'Ws://127.0.0.1:8081/mqtt', 'MQTT://LOCALHOST:1883']) {
       const f = fixture(profile);
       try {
         processStarted(false);

@@ -159,9 +159,10 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
-# A ws:// or mqtt:// value from 1 is used only for a loopback host (the cloud
-# endpoint scheme policy); any other is ignored with a WARN, like an unusable
-# value, and 2 or 3 takes over. 3 only when the ignored value named the
+# The scheme of a value from 1 is read without regard to letter case. A ws://
+# or mqtt:// value is used only for a loopback host; any other value with a
+# scheme that is not TLS is ignored with a WARN (the cloud endpoint scheme
+# policy), and 2 or 3 takes over. 3 only when the ignored value named the
 # default broker's host: otherwise the credential belongs to another cloud,
 # and the gateway gets OSI_UNLINKED_CLOUD_BROKER_URL instead.
 # A gateway linked to the default host gets byte-identical behaviour to the
@@ -275,18 +276,26 @@ resolve_cloud_broker_url() {
             *[[:space:]]*)
                 logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)"
                 ;;
-            wss://?*|mqtts://?*)
+            [Ww][Ss][Ss]://?*|[Mm][Qq][Tt][Tt][Ss]://?*)
                 CLOUD_BROKER_URL="$configured_url"
                 CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
                 return 0
                 ;;
-            ws://?*|mqtt://?*)
-                if cloud_broker_url_is_loopback "$configured_url"; then
-                    CLOUD_BROKER_URL="$configured_url"
-                    CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
-                    return 0
-                fi
-                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback; the cloud broker needs wss:// or mqtts://)"
+            *://?*)
+                # Any other scheme, in any letter case, is not TLS.
+                case "$configured_url" in
+                    [Ww][Ss]://?*|[Mm][Qq][Tt][Tt]://?*)
+                        if cloud_broker_url_is_loopback "$configured_url"; then
+                            CLOUD_BROKER_URL="$configured_url"
+                            CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
+                            return 0
+                        fi
+                        logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback; the cloud broker needs wss:// or mqtts://)"
+                        ;;
+                    *)
+                        logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)"
+                        ;;
+                esac
                 refused=1
                 # An address with a backslash has no host to trust: it never
                 # counts as the default broker's.

@@ -105,10 +105,11 @@ sed \
 
 # ---------------------------------------------------------------------------
 # Part 1b: the cloud endpoint scheme policy in the resolver. A ws:// or
-# mqtt:// address is used only for a loopback host; any other is ignored like
-# an unusable value, so the next source takes over. Without a server_host, a
-# refused address for a host other than the default broker hands the gateway
-# to the name that never resolves: its credential belongs to another cloud.
+# mqtt:// address is used only for a loopback host; any other, like any
+# address with a scheme that is not TLS (in any letter case), is ignored with
+# a WARN, so the next source takes over. Without a server_host, a refused
+# address for a host other than the default broker hands the gateway to the
+# name that never resolves: its credential belongs to another cloud.
 # ---------------------------------------------------------------------------
 (
     . "$SANDBOX/node-red.init"
@@ -153,11 +154,36 @@ sed \
         scheme_eq "wss://cloud.example.org/mqtt" "$CLOUD_BROKER_URL" "an address that only looks like loopback is ignored"
     done
 
+    # The scheme is read without regard to letter case.
+    for url in "WSS://cloud.example.org/mqtt" "MQTTS://broker.example.net:8883" "wSs://cloud.example.org:8443/mqtt"; do
+        resolve_cloud_broker_url "$url" "other.example.org"
+        scheme_eq "$url" "$CLOUD_BROKER_URL" "a TLS scheme in upper or mixed case is used as given"
+        scheme_eq "mqtt_broker_url" "$CLOUD_BROKER_URL_SOURCE" "a TLS scheme in upper or mixed case: source"
+    done
+    for url in "Ws://127.0.0.1:8081/mqtt" "MQTT://localhost:1883" "Mqtt://[::1]:1883"; do
+        resolve_cloud_broker_url "$url" "other.example.org"
+        scheme_eq "$url" "$CLOUD_BROKER_URL" "a plain scheme in upper or mixed case on loopback is used as given"
+        scheme_eq "mqtt_broker_url" "$CLOUD_BROKER_URL_SOURCE" "a plain scheme in upper or mixed case on loopback: source"
+    done
+    for url in "WS://broker.example.net/mqtt" "Mqtt://broker.example.net:1883" "tcp://broker.example.net:1883" "FTP://broker.example.net/mqtt"; do
+        resolve_cloud_broker_url "$url" "cloud.example.org"
+        scheme_eq "wss://cloud.example.org/mqtt" "$CLOUD_BROKER_URL" "a non-TLS scheme in any case for another host falls through to server_host"
+        resolve_cloud_broker_url "$url" ""
+        scheme_eq "$UNLINKED_URL" "$CLOUD_BROKER_URL" "a non-TLS scheme in any case for another host with no server_host: the name that never resolves"
+        scheme_eq "refused" "$CLOUD_BROKER_URL_SOURCE" "a non-TLS scheme in any case with no server_host: source"
+    done
+    resolve_cloud_broker_url "TCP://server.opensmartirrigation.org:1883" ""
+    scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a non-TLS scheme in any case on the default broker host: default broker"
+    # A value without a scheme stays an unusable value, as before.
+    resolve_cloud_broker_url "broker.example.net" ""
+    scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a value without a scheme: default broker"
+    scheme_eq "default" "$CLOUD_BROKER_URL_SOURCE" "a value without a scheme: source"
+
     # The loopback test reads the host of the address only.
-    for url in "ws://[::1]" "mqtt://127.0.0.1" "ws://127.0.0.2:8081/mqtt?x=1"; do
+    for url in "ws://[::1]" "mqtt://127.0.0.1" "ws://127.0.0.2:8081/mqtt?x=1" "Ws://[::1]:8081/mqtt" "MQTT://127.0.0.1:1883"; do
         cloud_broker_url_is_loopback "$url" || scheme_note "loopback: $url"
     done
-    for url in "wss://broker.example.net/mqtt" "mqtt://[::1.5]:1883" "mqtt://::1:1883" "ws://localhost.:1883" "mqtt://127.0.0.1.5:1883" \
+    for url in "wss://broker.example.net/mqtt" "mqtt://[::1.5]:1883" "mqtt://::1:1883" "ws://localhost.:1883" "mqtt://127.0.0.1.5:1883" "WS://broker.example.net/mqtt" \
         'mqtt://other.example.test\@127.0.0.1:1883/' 'ws://other.example.test\@127.0.0.1/' 'mqtt://127.0.0.1\@127.0.0.1:1883/' 'mqtt://127.0.0.1\@other.example.test:1883/'; do
         if cloud_broker_url_is_loopback "$url"; then scheme_note "not loopback: $url"; fi
     done
@@ -342,6 +368,22 @@ scheme_lacks "other.example.test" "the WARN must not print an address with a bac
 write_flows "$PLACEHOLDER"
 run_start 'ws://other.example.test\@127.0.0.1/' ""
 scheme_eq "$UNLINKED_URL" "$(exported_url)" "an address with a backslash and no server_host: the name that never resolves"
+
+write_flows "$PLACEHOLDER"
+run_start "WSS://cloud.example.org/mqtt" ""
+scheme_eq "WSS://cloud.example.org/mqtt" "$(exported_url)" "a TLS scheme in upper case is exported as given"
+scheme_lacks "WARN" "a TLS scheme in upper case logs no WARN"
+
+write_flows "$PLACEHOLDER"
+run_start "WS://broker.example.net/mqtt" ""
+scheme_eq "$UNLINKED_URL" "$(exported_url)" "a plain scheme in upper case for another host with no server_host: the name that never resolves"
+scheme_has "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback" "a plain scheme in upper case logs the WARN"
+scheme_has "cloud MQTT broker $UNLINKED_URL source=refused" "a plain scheme in upper case: the start log names the name that never resolves"
+
+write_flows "$PLACEHOLDER"
+run_start "Ws://127.0.0.1:8081/mqtt" "cloud.example.org"
+scheme_eq "Ws://127.0.0.1:8081/mqtt" "$(exported_url)" "a plain scheme in mixed case on loopback is exported as given"
+scheme_lacks "WARN" "a plain scheme in mixed case on loopback logs no WARN"
 
 write_flows "$PLACEHOLDER"
 run_start "mqtt://127.0.0.1:1883" "cloud.example.org"
