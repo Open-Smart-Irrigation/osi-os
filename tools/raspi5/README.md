@@ -87,6 +87,8 @@ A published Pi 5 hardware console trace shows the EEPROM reading FAT and selecti
 The default candidate suite runs on the build workstation through `osi-heavy`.
 The release runbook lists the input artifacts, fixture selection and evidence to retain.
 [Run the acceptance gate](../../docs/build/raspi5-emulator-acceptance.md).
+Use `--tailscale-boot-only` for the tailscale boot cases; the same page
+describes them. `OSI_HEAVY_LABEL` sets the slot label of a focused run.
 
 The customer-line 0.7.0 fixture is **PROVISIONAL** and off by default. Release
 evidence requires a successful owner-only qualification receipt for the exact

@@ -1,0 +1,561 @@
+"""Tailscale boot cases: a stalled cleanup is cut short and the service starts last.
+
+The tailscale 1.80.3-r1 package init runs `tailscaled --cleanup` before the
+daemon, with no time limit, at S80. The OSI copy cuts that cleanup short
+after OSI_CLEANUP_LIMIT seconds and starts the service at S99.
+
+A stand-in for tailscaled makes the cleanup block in one process, the way a
+hung cleanup does, and runs the real binary for everything else. Evidence
+comes from the guest's persistent syslog, read after a marker written before
+the reboot.
+"""
+import re
+import secrets
+import subprocess
+import time
+from pathlib import Path
+
+from suite_vm import SLOW_BOOT_SECONDS
+from upgrade_suite import CANDIDATE_INSTALL, checked
+
+INIT = Path('conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale')
+INSTALLED_CASE = 'Tailscale init installed by the deploy'
+STALL_CASE = 'Tailscale cleanup cut short'
+NORMAL_CASE = 'Tailscale boot without a stall'
+REFUSAL_CASE = 'Tailscale init left alone'
+FALLBACK_CASE = 'Tailscale stall before the fix'
+CASES = (INSTALLED_CASE, STALL_CASE, NORMAL_CASE, REFUSAL_CASE, FALLBACK_CASE)
+
+# The one line a technician on the LAN runs over SSH; the runbook carries it
+# under "Boot stops at the tailscale cleanup". The bracket keeps the pattern
+# from matching the shell that runs the line.
+TECHNICIAN_COMMAND = "kill -9 $(pgrep -f 'tailscaled --cleanu[p]')"
+STALLED_CLEANUP = "pgrep -f 'tailscaled --cleanu[p]'"
+# The same lookup through ps, for an image without pgrep. Each lookup runs
+# in a shell whose own command line carries the pattern with its bracket.
+PS_LOOKUP = "ps w | awk '/[t]ailscaled --cleanu[p]/ {print $1}'"
+ALTERNATE_COMMAND = 'kill -9 $(' + PS_LOOKUP + ')'
+# The line of the on-site instructions for a gateway held at the cleanup. The
+# fallback case runs it too, in a second round, and times the recovery the
+# way that document does.
+ONSITE_COMMAND = "kill -9 $(ps w | grep '[t]ailscaled --cleanup' | awk '{print $1}')"
+ONSITE_LOOKUP = "ps w | grep '[t]ailscaled --cleanup' | awk '{print $1}'"
+# What the on-site document checks after the kill, in its order.
+MILESTONES = ("echo \"daemon=$(pidof tailscaled.real) chirpstack=$(pidof chirpstack) \""
+              "\"node=$(ps w | grep -q '[n]ode-red' && echo up) \""
+              "\"gui=$(wget -q -T 2 -O /dev/null http://127.0.0.1:1880/gui/ && echo up)\"")
+HANG_AGE = ("p=$(pgrep -f 'tailscaled --cleanu[p]'); "
+            "echo $(( $(cut -d. -f1 /proc/uptime) - $(cut -d' ' -f22 /proc/$p/stat) / 100 ))")
+# What must be absent while the boot is held, and how long the cleanup has run.
+HELD_STATE = ("pidof chirpstack; ps w | grep -q '[n]ode-red' && echo node-red; "
+              "wget -q -T 2 -O /dev/null http://127.0.0.1:1880/gui/ && echo gui-up; echo age=$(" + HANG_AGE + ")")
+
+# One process, blocked in open(2) on a FIFO that no writer opens.
+STALL_WRAPPER = """#!/bin/sh
+# Test stand-in: the cleanup blocks; everything else runs the real binary.
+if [ "$1" = "--cleanup" ]; then
+    logger -t osi-test-cleanup "cleanup stall started"
+    mkfifo /tmp/osi-cleanup-stall.fifo
+    exec 3</tmp/osi-cleanup-stall.fifo
+    exit 0
+fi
+exec /usr/sbin/tailscaled.real "$@"
+"""
+
+CONSOLE = b'Please press Enter to activate this console'
+NO_MATCH = rb'OSI_CONSOLE_MARKER_THAT_NEVER_APPEARS_[0-9a-f]{40}'
+# Group 1 is the two digits of the rc.d link: S<digits>tailscale.
+RC_LINE = re.compile(r'procd: /etc/rc\.d/S(\d\d)tailscale: (.*)$')
+
+COMMITTED = re.compile(r'node-red\.init: committed flows\.json digest=[0-9a-f]{64} stamp=')
+CTIME = re.compile(r'^\w{3} \w{3} +\d+ (\d\d):(\d\d):(\d\d) \d{4} ')
+# A healthy cleanup returns within a second, also on a host about six times
+# slower than the gate's. The boot is held when nothing starts long after.
+HELD_SECONDS = 60
+
+
+def free_port():
+    import socket
+    with socket.socket() as port:
+        port.bind(('127.0.0.1', 0))
+        return port.getsockname()[1]
+
+
+def cleanup_limit(init_source):
+    match = re.search(r'^OSI_CLEANUP_LIMIT=(\d+)$', init_source, re.M)
+    if not match:
+        raise ValueError('the OSI tailscale init does not set OSI_CLEANUP_LIMIT')
+    return int(match.group(1))
+
+
+def gave_up_line(limit):
+    return f'cleanup did not finish in {limit} s; continuing without it'
+
+
+def line_seconds(line):
+    match = CTIME.match(line)
+    if not match:
+        raise RuntimeError('a syslog line has no time of day: ' + line[:60])
+    hour, minute, second = (int(part) for part in match.groups())
+    return hour * 3600 + minute * 60 + second
+
+
+def first(lines, predicate, missing):
+    for position, line in enumerate(lines):
+        if predicate(line):
+            return position, line
+    raise RuntimeError(missing)
+
+
+def tail_rc(lines):
+    """Every line the boot runner captured from the tailscale init, with its link."""
+    return [(position, 'S' + match.group(1) + 'tailscale', match.group(2))
+            for position, line in enumerate(lines)
+            if (match := RC_LINE.search(line))]
+
+
+def stall_verdict(log, limit):
+    """Judge a boot whose cleanup was made to stall; return its receipt."""
+    lines = log.splitlines()
+    started, _ = first(lines, lambda line: 'osi-test-cleanup[' in line and 'cleanup stall started' in line,
+                       'the stalled cleanup did not announce itself in syslog')
+    committed, _ = first(lines, COMMITTED.search, "Node-RED's init did not report its flows commit")
+    gave_up, gave_up_text = first(lines, lambda line: 'tailscale[' in line and gave_up_line(limit) in line,
+                                  f'the init did not give up on the cleanup after {limit} s')
+    daemon, daemon_text = first(lines, lambda line: RC_LINE.search(line)
+                                and 'Program starting' in line and '--port' in line,
+                                'the tailscale daemon did not start after the cleanup was cut short')
+    tailscale = tail_rc(lines)
+    if any(link != 'S99tailscale' for _, link, _ in tailscale):
+        links = ', '.join(sorted({link for _, link, _ in tailscale if link != 'S99tailscale'}))
+        raise RuntimeError('the tailscale init ran from ' + links + ' instead of S99tailscale')
+    if not committed < started < gave_up < daemon:
+        raise RuntimeError(f'syslog order is wrong: flows commit at line {committed}, stall at {started}, '
+                           f'give-up at {gave_up}, daemon at {daemon}')
+    waited = (line_seconds(gave_up_text) - line_seconds(lines[started])) % 86400
+    if not limit <= waited <= limit + 4:
+        raise RuntimeError(f'the init gave up {waited} s after the stall began, not {limit} s')
+    return (f'cleanup stalled {waited} s before the init gave up; Node-RED init came first; '
+            'the daemon started with ' + daemon_text[daemon_text.index('--port'):].strip())
+
+
+def normal_verdict(log, limit):
+    """Judge a boot with the real cleanup; return its receipt."""
+    lines = log.splitlines()
+    tailscale = tail_rc(lines)
+    if any(link != 'S99tailscale' for _, link, _ in tailscale):
+        links = ', '.join(sorted({link for _, link, _ in tailscale if link != 'S99tailscale'}))
+        raise RuntimeError('the tailscale init ran from ' + links + ' instead of S99tailscale')
+    if any('osi-test-cleanup[' in line for line in lines):
+        raise RuntimeError('the test stand-in was still installed')
+    cleanup, _ = first(lines, lambda line: RC_LINE.search(line)
+                       and 'Program starting' in line and '"--cleanup"' in line,
+                       'the real cleanup did not run from S99tailscale')
+    cut = next((position for position, line in enumerate(lines)
+                if 'tailscale[' in line and gave_up_line(limit) in line), None)
+    flushed = next((position for position, link, text in tailscale if 'flushing log.' in text
+                    and position > cleanup), None)
+    daemon = next((position for position, link, text in tailscale
+                   if 'Program starting' in text and '--port' in text), None)
+    if cut is None and flushed is None:
+        raise RuntimeError('the cleanup neither finished nor was cut short')
+    if daemon is None or daemon <= cleanup:
+        raise RuntimeError('the tailscale daemon did not start after its cleanup')
+    if cut is not None:
+        return f'cleanup was cut short after {limit} s and the daemon started'
+    return 'cleanup finished with "flushing log." and the daemon started'
+
+
+def install_stall(vm):
+    checked(vm, """set -e
+test ! -e /usr/sbin/tailscaled.real
+mv /usr/sbin/tailscaled /usr/sbin/tailscaled.real
+cat >/usr/sbin/tailscaled <<'OSI_STALL'
+""" + STALL_WRAPPER + """OSI_STALL
+chmod 755 /usr/sbin/tailscaled
+sync
+sha256sum /usr/sbin/tailscaled.real""")
+
+
+def remove_stall(vm):
+    checked(vm, """set -e
+mv -f /usr/sbin/tailscaled.real /usr/sbin/tailscaled
+sync
+test ! -e /usr/sbin/tailscaled.real""")
+
+
+def mark(vm):
+    """Write a marker to syslog and return it; a case reads its boot's log after it."""
+    token = 'OSI-TAILSCALE-' + secrets.token_hex(6)
+    checked(vm, f'logger -t osi-test "{token}"; sync')
+    return token
+
+
+def boot_log(vm, token):
+    """Syslog lines after the marker, from the file node-red.init keeps on /data."""
+    return checked(vm, """cat /data/log/osi-system.log.old /data/log/osi-system.log 2>/dev/null |
+awk -v token=""" + "'" + token + "'" + """ 'index($0, token) { kept = "" } { kept = kept $0 "\\n" } END { printf "%s", kept }' |
+grep -E 'tailscale|Tailscale|node-red\\.init: committed|osi-test' """)
+
+
+def init_state(vm):
+    output = checked(vm, """sha256sum /etc/init.d/tailscale | cut -d' ' -f1
+for link in /etc/rc.d/S[0-9][0-9]tailscale; do
+    [ -e "$link" ] || [ -L "$link" ] || continue
+    echo "link $(basename "$link") $(readlink "$link")"
+done
+echo "daemon $(pidof tailscaled)" """)
+    lines = output.splitlines()
+    if not lines or not re.fullmatch(r'[0-9a-f]{64}', lines[0]):
+        raise RuntimeError('could not read the tailscale init digest: ' + output[:80])
+    links = [line[5:] for line in lines[1:] if line.startswith('link ')]
+    daemon = next((line[7:] for line in lines if line.startswith('daemon ')), '')
+    return {'sha': lines[0], 'links': links, 'daemon': daemon}
+
+
+def image_receipt(vm):
+    """What the factory image's read-only root carries; never fails a run."""
+    try:
+        lines = vm.command("ls /rom/etc/rc.d/ | grep -E '^[SK][0-9][0-9]tailscale$'; "
+                           "echo digest $(sha256sum /rom/etc/init.d/tailscale 2>/dev/null | cut -d' ' -f1)")[1].splitlines()
+    except Exception as error:  # diagnostics only
+        return f'unreadable ({error!r})'
+    digest = next((line[7:] for line in lines if line.startswith('digest ')), '')
+    links = [line for line in lines if not line.startswith('digest ')]
+    return f'{",".join(links) or "no boot link"}, init digest {digest[:12] or "absent"}'
+
+
+def init_digest(release):
+    import hashlib
+    return hashlib.sha256((release/INIT).read_bytes()).hexdigest()
+
+
+def installed(state, release):
+    digest = init_digest(release)
+    if state['sha'] != digest:
+        raise RuntimeError(f'the installed tailscale init has digest {state["sha"][:12]}, the release ships {digest[:12]}')
+    if state['links'] != ['S99tailscale ../init.d/tailscale']:
+        raise RuntimeError('tailscale boot links are ' + (', '.join(state['links']) or 'none') + ', expected S99tailscale only')
+
+
+def install_candidate(vm, release):
+    code, _ = vm.command('set -e\n' + CANDIDATE_INSTALL, 2400)
+    if code:
+        _, reasons = vm.command("""sync
+f=$(ls -t /data/deploy-*.log | head -1)
+for reason in ENOTCACHED ENOENT EAI_AGAIN ERESOLVE EACCES SQLITE_BUSY SQLITE_CONSTRAINT 'npm install failed' 'insufficient disk' 'payload verification failed' 'migration failed'; do
+grep -Fq "$reason" "$f" && echo "$reason"
+done""")
+        raise RuntimeError(f'offline installer exited {code}; {reasons.replace(chr(10), ", ")}')
+
+
+def hold(vm, seconds):
+    """Read the held boot's console for `seconds`; say whether its login prompt came up."""
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            vm.expect(NO_MATCH, min(1.0, remaining))
+        except TimeoutError:
+            pass
+        at = vm.buf.find(CONSOLE)
+        if at >= 0:
+            vm.buf = vm.buf[at + len(CONSOLE):]
+            return True
+
+
+def parse_fields(output):
+    """`name=value` words, whitespace separated; a name without a value is absent."""
+    return {name: value for name, _, value in (word.partition('=') for word in output.split()) if value}
+
+
+def held_state(output):
+    """(ChirpStack pid or '', other lines) from HELD_STATE's output."""
+    lines = [line.strip() for line in output.splitlines() if line.strip() and not line.startswith('age=')]
+    pid = lines[0] if lines and lines[0].isdigit() else ''
+    return pid, [line for line in lines if not line.isdigit()]
+
+
+def process_starts(output, now):
+    """Seconds after the boot began for each `name <seconds ago>` line.
+
+    `now` is the host time, in seconds after the boot began, of the reading.
+    A process start is read from /proc/<pid>/stat in the guest, so it does not
+    depend on when the guest is asked.
+    """
+    starts = {}
+    for line in output.splitlines():
+        name, _, ago = line.partition(' ')
+        if ago.strip().isdigit():
+            starts[name] = max(0.0, now - int(ago))
+    return starts
+
+
+PROCESS_STARTS = """up=$(cut -d. -f1 /proc/uptime)
+for name in DAEMON chirpstack; do
+    p=$(pidof "$name" | cut -d' ' -f1)
+    [ -n "$p" ] && echo "$name $(( up - $(cut -d' ' -f22 /proc/$p/stat) / 100 ))"
+done
+p=$(pgrep -f 'node-re[d]' | head -1)
+[ -n "$p" ] && echo "node-red $(( up - $(cut -d' ' -f22 /proc/$p/stat) / 100 ))"
+"""
+
+
+def since_boot(vm):
+    return time.monotonic() - vm.started
+
+
+def record_processes(vm, daemon, note, record):
+    """Record when the daemon, ChirpStack and Node-RED started, in seconds after the boot began."""
+    before = since_boot(vm)
+    output = vm.command(PROCESS_STARTS.replace('DAEMON', daemon))[1]
+    after = since_boot(vm)
+    starts = process_starts(output, (before + after) / 2)
+    record(f'{note}: process starts in seconds after the boot began: ' + ', '.join(f'{name} {starts[name]:.0f}'
+           for name in (daemon, 'chirpstack', 'node-red') if name in starts))
+    return starts
+
+
+def lan_ssh(port, command, timeout=30):
+    """Run one command on the guest over its LAN address as root, as on a fresh image."""
+    options = ['-p', str(port), '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+               '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=5', '-o', 'PubkeyAuthentication=no']
+    try:
+        run = subprocess.run(['ssh', *options, '-o', 'BatchMode=yes', '-o', 'PreferredAuthentications=none',
+                              'root@127.0.0.1', command], capture_output=True, text=True, timeout=timeout,
+                             stdin=subprocess.DEVNULL)
+        if run.returncode == 255 and 'Permission denied' in run.stderr:
+            raise PermissionError(run.stderr.strip())
+        return run.returncode, run.stdout.strip(), run.stderr.strip()
+    except (PermissionError, subprocess.TimeoutExpired):
+        pass
+    # A blank root password: answer the password prompt with an empty line.
+    try:
+        import pexpect
+    except ImportError as error:
+        raise RuntimeError('LAN SSH needs pexpect when the gateway asks for a password') from error
+    child = pexpect.spawn('ssh', [*options, 'root@127.0.0.1', command], encoding='utf-8', timeout=timeout)
+    try:
+        if child.expect([r'[Pp]assword: ?', pexpect.EOF]) == 0:
+            child.sendline('')
+            child.expect(pexpect.EOF)
+        return child.exitstatus, child.before.strip(), ''
+    finally:
+        child.close(force=True)
+
+
+def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archive, media, ready):
+    limit = cleanup_limit((release/INIT).read_text())
+    healthy = [True]
+
+    def guest(name, image, **options):
+        return make_guest(scratch/f'tailscale-{name}', image, args.qemu, args.ram,
+                          receipts=run_dir/f'tailscale-{name}', **options)
+
+    def boot_log_of(vm, token, verdict):
+        log = boot_log(vm, token)
+        (run_dir/f'tailscale-{vm.boots}.syslog').write_text(log)
+        if token not in log:
+            raise RuntimeError('the marker written before the reboot is not in the persistent syslog')
+        return verdict(log, limit)
+
+    def version(vm):
+        return vm.command('uci get osi-server.cloud.firmware_version')[1]
+
+    def daemon_runs(vm, name='tailscaled'):
+        if not vm.command(f'pidof {name}')[1]:
+            raise RuntimeError(f'the tailscale daemon ({name}) is not running')
+
+    # The four deploy-side cases share one guest: an earlier failure leaves it
+    # in an unknown state, so the later ones are then reported as not run.
+    def chained(case):
+        def run_case():
+            if not healthy[0]:
+                raise RuntimeError('not run: an earlier tailscale case failed on this guest')
+            try:
+                return case()
+            except BaseException:
+                healthy[0] = False
+                raise
+        return run_case
+
+    upgraded = guest('upgraded', fixture_archive('0.8.0'), upgrade=media)
+
+    def installed_by_deploy():
+        upgraded.start()
+        ready(upgraded)
+        before = init_state(upgraded)
+        record(f'0.8.0 tailscale init before the deploy: {before}')
+        if version(upgraded) != '0.8.0':
+            raise RuntimeError('fixture firmware version mismatch')
+        if before['links'] != ['S80tailscale ../init.d/tailscale'] or not before['daemon']:
+            raise RuntimeError('the 0.8.0 fixture does not show the package layout: ' + str(before))
+        install_candidate(upgraded, release)
+        after_deploy = init_state(upgraded)
+        record(f'tailscale init after the deploy: {after_deploy}')
+        installed(after_deploy, release)
+        if after_deploy['daemon'] != before['daemon']:
+            raise RuntimeError('the deploy restarted tailscaled')
+        if version(upgraded) != args.osi_version:
+            raise RuntimeError('offline installer did not reach the candidate version')
+        return 'package file replaced, boot link S80 to S99, tailscaled kept pid ' + after_deploy['daemon']
+
+    def stalled_boot():
+        install_stall(upgraded)
+        token = mark(upgraded)
+        upgraded.upgrade_reboot('sync && reboot', launch_only=True)
+        upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
+        prompt = since_boot(upgraded)
+        upgraded.shell()
+        receipt = boot_log_of(upgraded, token, stall_verdict)
+        ready(upgraded)
+        record(f'boot with the stalled cleanup: login prompt {prompt:.0f} s, farm page and ChirpStack '
+               f'{since_boot(upgraded):.0f} s after the boot began')
+        record_processes(upgraded, 'tailscaled.real', 'boot with the stalled cleanup', record)
+        if upgraded.command(STALLED_CLEANUP)[1]:
+            raise RuntimeError('the stalled cleanup is still running')
+        daemon_runs(upgraded, 'tailscaled.real')
+        return receipt
+
+    def normal_boot():
+        remove_stall(upgraded)
+        token = mark(upgraded)
+        upgraded.upgrade_reboot('sync && reboot', launch_only=True)
+        upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
+        prompt = since_boot(upgraded)
+        upgraded.shell()
+        receipt = boot_log_of(upgraded, token, normal_verdict)
+        ready(upgraded)
+        record(f'boot without the stall: login prompt {prompt:.0f} s, farm page and ChirpStack '
+               f'{since_boot(upgraded):.0f} s after the boot began')
+        record_processes(upgraded, 'tailscaled', 'boot without the stall', record)
+        daemon_runs(upgraded)
+        return receipt
+
+    def left_alone():
+        # A package that ships another init file and another boot position.
+        checked(upgraded, """set -e
+cp /rom/etc/init.d/tailscale /etc/init.d/tailscale
+sed -i 's/^START=80$/START=85/' /etc/init.d/tailscale
+rm -f /etc/rc.d/S99tailscale
+ln -s ../init.d/tailscale /etc/rc.d/S85tailscale
+sync""")
+        before = init_state(upgraded)
+        install_candidate(upgraded, release)
+        after_deploy = init_state(upgraded)
+        record(f'tailscale init with a foreign package file after the deploy: {after_deploy}')
+        if after_deploy != before:
+            raise RuntimeError('the deploy changed a tailscale init that is neither the 1.80.3-r1 file nor its own')
+        lines = checked(upgraded, """f=$(ls -t /data/deploy-*.log | head -1)
+sed -n '/--- Tailscale boot init ---/,$p' "$f" """)
+        step = lines.split('=== Deploy complete. ===')[0].splitlines()
+        banner = lines.split('=== Deploy complete. ===')[1].splitlines()
+        warning = ('WARN: tailscale boot protection NOT installed: /etc/init.d/tailscale is neither '
+                   'the tailscale 1.80.3-r1 package file nor the OSI copy; the file was left unchanged')
+        said = [line.strip() for line in step if line.strip()]
+        if said != ['--- Tailscale boot init ---', warning] or warning not in [line.strip() for line in banner]:
+            raise RuntimeError('the deploy did not leave the foreign init alone with one WARN line, repeated in the '
+                               'banner: ' + ' | '.join(said) + ' // ' + ' | '.join(line.strip() for line in banner if 'tailscale' in line))
+        return 'foreign package file and its S85 link untouched; one WARN line, repeated in the banner; deploy completed'
+
+    def recovery(vm, port, began):
+        """Seconds from the kill until each milestone of the on-site document.
+
+        Read over LAN SSH while the boot is still held at its scripts, then
+        over the console: the login prompt can come before the farm page.
+        """
+        seen = {}
+        prompted = False
+        while len(seen) < 4 and time.monotonic() - began < SLOW_BOOT_SECONDS:
+            if not prompted:
+                if hold(vm, 2):
+                    prompted = True
+                    vm.shell()
+                else:
+                    output = lan_ssh(port, MILESTONES)[1]
+            if prompted:
+                output = vm.command(MILESTONES)[1]
+                time.sleep(1)
+            for name, value in parse_fields(output).items():
+                seen.setdefault(name, time.monotonic() - began)
+        return seen
+
+    def one_held_boot(vm, port, command, name):
+        """Hold a boot at the cleanup, end it with `command`, and time the recovery."""
+        vm.upgrade_reboot('sync && reboot', launch_only=True)
+        deadline = time.monotonic() + SLOW_BOOT_SECONDS
+        stalled, error = '', ''
+        while not stalled and time.monotonic() < deadline:
+            if hold(vm, 3):
+                raise RuntimeError('the login prompt came up although the cleanup had not returned')
+            code, stalled, error = lan_ssh(port, STALLED_CLEANUP)
+        if not stalled:
+            raise RuntimeError('the stalled cleanup was not found over LAN SSH: ' + error)
+        # One pid from each lookup: two would mean the lookup matched the
+        # shell running it, none that it cannot see the cleanup.
+        found = {}
+        for label, lookup in (('pgrep', STALLED_CLEANUP), ('ps and awk', PS_LOOKUP), ('on-site document', ONSITE_LOOKUP)):
+            code, found[label], error = lan_ssh(port, lookup)
+        wrong = {label: pids for label, pids in found.items() if pids.split() != stalled.split()}
+        if wrong:
+            raise RuntimeError(f'the lookups do not name the same single cleanup pid (pgrep found {stalled!r}): {wrong}')
+        held_from = time.monotonic()
+        if hold(vm, HELD_SECONDS):
+            raise RuntimeError('the login prompt came up while the cleanup was still stalled')
+        code, output, error = lan_ssh(port, HELD_STATE)
+        chirpstack_pid, others = held_state(output)
+        record(f'{name}: boot held for {time.monotonic() - held_from:.0f} s at the stalled cleanup {stalled}, '
+               f'which had then run {parse_fields(output).get("age", "?")} s; ChirpStack pid {chirpstack_pid or "none"}; '
+               f'other output: {" ".join(others) or "none"}')
+        if chirpstack_pid or others:
+            raise RuntimeError('services started although the cleanup was still stalled: ' + output.replace(chr(10), ' '))
+        killed_at = time.monotonic()
+        code, _, error = lan_ssh(port, command)
+        if code:
+            raise RuntimeError(f'the line failed over LAN SSH: {command}: {error}')
+        seen = recovery(vm, port, killed_at)
+        ready(vm)
+        daemon_runs(vm, 'tailscaled.real')
+        order = (('the Tailscale daemon', 'daemon'), ('ChirpStack', 'chirpstack'), ('the Node-RED process', 'node'),
+                 ('the farm page', 'gui'))
+        missing = [label for label, milestone in order if milestone not in seen]
+        if missing:
+            raise RuntimeError(f'after the kill these did not come up within {SLOW_BOOT_SECONDS} s: {missing}')
+        record(f'{name}: seconds from the kill until: ' + ', '.join(f'{label} {seen[milestone]:.0f}' for label, milestone in order))
+        return ', '.join(f'{label} {seen[milestone]:.0f} s' for label, milestone in order)
+
+    def fallback():
+        # The package init at S80 with a stalled cleanup: the state a gateway
+        # on the field image is in. No shell exists on the console, so the
+        # case reaches the gateway over its LAN address, as a technician does.
+        # Two rounds: the runbook's line, then the on-site document's.
+        vm = guest('fallback', fixture_archive('0.8.0'))
+        ssh_port = free_port()
+        vm.extra_hostfwd.append((ssh_port, 22))
+        try:
+            vm.start()
+            ready(vm)
+            checked(vm, """uci set network.lan.proto='static'
+uci set network.lan.ipaddr='192.0.2.15'
+uci set network.lan.netmask='255.255.255.0'
+uci commit network
+sync""")
+            install_stall(vm)
+            timings = [one_held_boot(vm, ssh_port, TECHNICIAN_COMMAND, 'fallback round 1, the runbook line'),
+                       one_held_boot(vm, ssh_port, ONSITE_COMMAND, 'fallback round 2, the on-site document line')]
+            return ('two boots held at S80tailscale with SSH up; pgrep, ps and awk, and the on-site lookup named the same '
+                    'cleanup pid; after the kill, from the kill: ' + '; '.join(timings))
+        finally:
+            vm.stop()
+
+    try:
+        test(INSTALLED_CASE, chained(installed_by_deploy))
+        test(STALL_CASE, chained(stalled_boot))
+        test(NORMAL_CASE, chained(normal_boot))
+        test(REFUSAL_CASE, chained(left_alone))
+    finally:
+        healthy[0] = False
+        upgraded.stop()
+    test(FALLBACK_CASE, fallback)

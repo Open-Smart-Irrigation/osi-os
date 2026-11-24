@@ -207,6 +207,52 @@ The cut marker records the starting flows and the running init and writer
 digests. The runner checks them before accepting clone evidence. It also
 derives the instrumented offline bundle from the deployment tree in scratch.
 
+### Tailscale boot cases
+
+Every stock run records one line, `Factory image tailscale init:`, with the
+tailscale boot links and init digest that the image's read-only root carries.
+
+Use `--tailscale-boot-only` for the five tailscale boot cases. They need the
+offline release and the 0.8.0 fixture and can omit the candidate archive. The
+release tree must ship the OSI tailscale init; the runner reads its cleanup
+limit from that file.
+
+A stand-in for `/usr/sbin/tailscaled` blocks in one process when it is asked
+for `--cleanup`, and runs the real binary, kept as `tailscaled.real`, for
+everything else. Four cases share one guest that the offline installer takes
+from 0.8.0 to the release:
+
+- after the install, the init file has the release digest, `S99tailscale` is
+  the only boot link, and `tailscaled` kept its pid;
+- with the stand-in, the next boot reaches its login prompt and `/gui/`, and
+  the persistent syslog shows Node-RED's flows commit before the stall, the
+  init giving up 15 to 19 s after the stall began, and the daemon starting
+  after that;
+- without the stand-in, the next boot shows the real cleanup finishing, or
+  cut short if the real binary stalls, and then the daemon starting;
+- an init file that is neither the 1.80.3-r1 package file nor the OSI copy,
+  linked at `S85tailscale`, survives a second install unchanged. The deploy
+  log holds one `WARN` that says the boot protection was not installed and
+  why, once in the step and once in the closing banner.
+
+The fifth case boots the untouched 0.8.0 fixture with the stand-in, twice.
+The package init holds the boot at `S80tailscale`. The case reaches the
+gateway over SSH through an extra host forward to its LAN address. `pgrep`,
+`ps w | awk` and the lookup of the on-site instructions must each name the
+stalled cleanup and nothing else, which also shows that no lookup matches
+the shell running it. The case waits 60 s with the stalled cleanup present
+and no service started. It ends the first boot with the runbook's line and
+the second with the line of the on-site instructions. After each kill it
+records the seconds until the Tailscale daemon, ChirpStack, the Node-RED
+process and the farm page are up. It needs `ssh` on the host.
+
+The run also records, for the two boots of the upgraded guest, when the
+login prompt and the farm page came up and when the tailscale daemon,
+ChirpStack and Node-RED started, in seconds after the boot began.
+
+`acceptance.sh` labels its slot `OSI Pi 5 acceptance`. Set `OSI_HEAVY_LABEL`
+to label it for a release lane.
+
 ### Customer-line 0.7.0 image fixture (PROVISIONAL)
 
 This fixture is off by default. Count it as release evidence only after a

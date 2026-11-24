@@ -18,6 +18,7 @@ from minimal_flows import (
 from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
+import tailscale_boot
 
 HERE = Path(__file__).resolve().parent
 UPGRADE_VERSIONS = ('0.8.0', '0.8.1')
@@ -112,6 +113,8 @@ class NotApplicable:
 
 
 def expected_cases(args, image_capability, customer_selected, *, historical=False):
+    if getattr(args, 'tailscale_boot_only', False):
+        return dict.fromkeys(tailscale_boot.CASES)
     if args.flows_power_cut_only:
         return dict.fromkeys(FLOWS_CASES)
     if args.upgrade_boot_safety_only:
@@ -325,6 +328,11 @@ def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_boar
                     help='rerun only the three flows cut cases on a candidate containing PR #714')
     mode.add_argument('--upgrade-boot-safety-only', action='store_true',
                       help='rerun cases A, B and C using the offline release and 0.8.1 fixture')
+    if board == 'pi5':
+        mode.add_argument('--tailscale-boot-only', action='store_true',
+                          help='run only the tailscale boot cases, on the 0.8.0 fixture and the offline release')
+    else:
+        ap.set_defaults(tailscale_boot_only=False)
     ap.set_defaults(customer_fixture_only=False, historical=False)
     if board == 'pi5':
         mode.add_argument('--customer-fixture-only', action='store_true',
@@ -335,7 +343,7 @@ def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_boar
     args=ap.parse_args(argv)
     if not re.fullmatch(r'[0-9a-f]{40}', args.release_revision):
         ap.error('--release-revision must be a full commit SHA')
-    if not args.upgrade_boot_safety_only or args.candidate or args.candidate_sha256:
+    if not (args.upgrade_boot_safety_only or args.tailscale_boot_only) or args.candidate or args.candidate_sha256:
         if args.candidate is None or not re.fullmatch(r'[0-9a-f]{64}', args.candidate_sha256 or ''):
             ap.error('--candidate and a lowercase --candidate-sha256 are required together')
     if board == 'pi4':
@@ -348,6 +356,12 @@ def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_boar
         except (OSError, ValueError, RuntimeError):
             ap.error('run root and Pi 4 inputs must exist outside Git trees and /tmp')
     release = args.release.resolve()
+    if args.tailscale_boot_only:
+        try:
+            limit = tailscale_boot.cleanup_limit((release/tailscale_boot.INIT).read_text())
+        except (OSError, ValueError) as error:
+            ap.error(f'the offline release does not ship the OSI tailscale init: {error}')
+        print(f'OSI tailscale init: cleanup cut short after {limit} s', flush=True)
     receipt = (release/'SERVED-FROM.txt').read_text()
     if not re.search(rf'\b{args.release_revision}\b', receipt):
         ap.error('offline release receipt does not identify --release-revision')
@@ -385,6 +399,7 @@ def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_boar
         f'offline_flows_capability={capability}\n'
         f'flows_power_cut_only={args.flows_power_cut_only}\n'
         f'upgrade_boot_safety_only={args.upgrade_boot_safety_only}\n'
+        f'tailscale_boot_only={args.tailscale_boot_only}\n'
         f'customer_fixture_only={args.customer_fixture_only}\n')
     if args.keep_scratch:
         scratch = run/'scratch'
@@ -418,7 +433,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             print(row, file=log)
         print(row, flush=True)
 
-    focused = args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
+    focused = (args.flows_power_cut_only or args.customer_fixture_only or args.upgrade_boot_safety_only
+               or getattr(args, 'tailscale_boot_only', False))
     historical = board == 'pi4' and args.historical
     expected = expected_cases(args, None, customer_selected, historical=historical)
 
@@ -629,6 +645,9 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             for phase, label in MINIMAL_FACTORY_CASES.items():
                 test(label, lambda: factory_minimal_cut(phase))
             test(MINIMAL_UPGRADE_CASE, lambda: verify_upgrade('0.8.1', cut_at=CUT_RECEIPT))
+        if expected.get(tailscale_boot.CASES[0], False) is None:
+            tailscale_boot.run(args, run, scratch, release, make_guest, test, record,
+                               fixture_archive, candidate_media, ready)
         if board == 'pi5' and (not focused or args.customer_fixture_only):
             from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
             selection = 'opt-in qualification' if customer_selected else 'off by default'
@@ -649,6 +668,7 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
         ready(vm)
         if verify_board is not None:
             verify_board(vm)
+        log('Factory image tailscale init: ' + tailscale_boot.image_receipt(vm))
         versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
         if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
             raise RuntimeError('unexpected versions '+versions)

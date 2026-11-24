@@ -9,10 +9,12 @@ if [[ -n ${OSI_HEAVY_HOLDER:-} ]]; then
   exit 2
 fi
 gate=${OSI_HEAVY:-"$HOME/projects/osi-workstation-config/bin/osi-heavy"}
-gate_args=(wait --contain --need-gib 10 --timeout 86400 --label 'OSI Pi 5 acceptance')
+# The slot label names the run on the heavy gate; a release lane sets its own.
+gate_label=${OSI_HEAVY_LABEL:-'OSI Pi 5 acceptance'}
+gate_args=(wait --contain --need-gib 10 --timeout 86400 --label "$gate_label")
 for arg in "$@"; do
   case "$arg" in
-    --flows-power-cut-only|--upgrade-boot-safety-only|--customer-fixture-only)
+    --flows-power-cut-only|--upgrade-boot-safety-only|--customer-fixture-only|--tailscale-boot-only)
       exec "$gate" "${gate_args[@]}" -- python3 "$here/acceptance.py" "$@"
       ;;
   esac

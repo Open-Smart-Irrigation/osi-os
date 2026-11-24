@@ -18,7 +18,7 @@ import tempfile
 from types import SimpleNamespace
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import acceptance
 from archives import verified_archive
@@ -28,6 +28,7 @@ import minimal_flows
 import radio_suite
 import run
 from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
+import tailscale_boot
 import upgrade_suite
 
 
@@ -1732,6 +1733,247 @@ class ProgressTests(unittest.TestCase):
         error, rows = self.exercise(['0', '', '2 1 1 0 7'])
         self.assertIn('installer returned 7', error)
         self.assertEqual(rows[-1]['installer_rc'], 7)
+
+
+class TailscaleBootTests(unittest.TestCase):
+    # Syslog lines as the image's persistent sink writes them.
+    @staticmethod
+    def line(second, text):
+        return f'Sun Apr 13 16:50:{second:02d} 2025 ' + text
+
+    RC = 'daemon.notice procd: /etc/rc.d/'
+
+    def stall_log(self, *, gave_up_after=15, link='S99tailscale'):
+        lines = [
+            self.line(0, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+            self.line(20, self.RC + f'{link}: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
+            self.line(20, 'user.notice osi-test-cleanup[4211]: cleanup stall started'),
+            self.line(20 + gave_up_after, 'daemon.notice tailscale[4210]: cleanup did not finish in 15 s; continuing without it'),
+            self.line(20 + gave_up_after, self.RC + f'{link}: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled.real", "--port", "41641"}'),
+        ]
+        return '\n'.join(lines)
+
+    def normal_log(self):
+        return '\n'.join([
+            self.line(0, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+            self.line(20, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
+            self.line(20, self.RC + 'S99tailscale: flushing log.'),
+            self.line(21, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--port", "41641"}'),
+        ])
+
+    def test_the_limit_is_read_from_the_shipped_init(self):
+        repo = Path(__file__).resolve().parents[2]
+        init = (repo/tailscale_boot.INIT).read_text()
+        self.assertEqual(tailscale_boot.cleanup_limit(init), 15)
+        package = (repo/'scripts/fixtures/tailscale-package-init/1.80.3-r1.init').read_text()
+        with self.assertRaisesRegex(ValueError, 'OSI_CLEANUP_LIMIT'):
+            tailscale_boot.cleanup_limit(package)
+
+    def test_the_stall_stand_in_is_one_blocked_process_and_runs_the_real_daemon(self):
+        self.assertNotIn('&', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('exec 3</tmp/osi-cleanup-stall.fifo', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('exec /usr/sbin/tailscaled.real "$@"', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('--cleanup', tailscale_boot.STALL_WRAPPER)
+        # The technician command finds the stand-in, and not the shell running the command.
+        pattern = 'tailscaled --cleanu[p]'
+        self.assertRegex('/bin/sh /usr/sbin/tailscaled --cleanup', pattern)
+        self.assertNotRegex(f"sh -c kill -9 $(pgrep -f '{pattern}')", pattern)
+
+    def test_the_runbook_carries_the_technician_command_the_harness_runs(self):
+        repo = Path(__file__).resolve().parents[2]
+        recipe = (repo/'.claude/skills/osi-live-ops-runbook/references/repair.md').read_text()
+        for command in (tailscale_boot.TECHNICIAN_COMMAND, tailscale_boot.ALTERNATE_COMMAND):
+            self.assertIn(command, recipe)
+        self.assertEqual(tailscale_boot.ALTERNATE_COMMAND, 'kill -9 $(' + tailscale_boot.PS_LOOKUP + ')')
+
+    def test_a_stalled_cleanup_is_cut_short_after_the_limit_and_node_red_came_first(self):
+        receipt = tailscale_boot.stall_verdict(self.stall_log(), 15)
+        self.assertIn('stalled 15 s', receipt)
+        self.assertIn('Node-RED init came first', receipt)
+        self.assertIn('--port', receipt)
+
+    def test_a_stall_verdict_names_what_is_wrong(self):
+        for label, log, limit, reason in [
+            ['no give-up', '\n'.join(self.stall_log().splitlines()[:3]), 15, 'did not give up'],
+            ['no stall announcement', self.stall_log().replace('cleanup stall started', 'x'), 15, 'did not announce'],
+            # syslog is chronological: a later line is a later event.
+            ['Node-RED after tailscale', '\n'.join(self.stall_log().splitlines()[1:]
+                                                  + [self.line(45, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x')]),
+             15, 'order is wrong'],
+            ['gave up late', self.stall_log(gave_up_after=40), 15, '40 s after the stall began'],
+            ['ran from S80', self.stall_log(link='S80tailscale'), 15, 'S80tailscale instead of S99tailscale'],
+            ['daemon not started', self.stall_log().replace('--port', '--no-port'), 15, 'daemon did not start'],
+            ['cut short at another limit', self.stall_log(gave_up_after=15), 30, 'did not give up'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.stall_verdict(log, limit)
+
+    def test_a_normal_boot_finishes_its_cleanup_and_starts_the_daemon(self):
+        self.assertIn('flushing log.', tailscale_boot.normal_verdict(self.normal_log(), 15))
+
+    def test_a_cleanup_the_real_binary_hangs_on_is_reported_as_cut_short(self):
+        log = self.normal_log().replace(self.line(20, self.RC + 'S99tailscale: flushing log.'),
+                                        self.line(35, 'daemon.notice tailscale[4210]: cleanup did not finish in 15 s; continuing without it'))
+        self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
+
+    def test_a_normal_verdict_names_what_is_wrong(self):
+        for label, log, reason in [
+            ['cleanup never ran', self.line(0, 'daemon.notice procd: /etc/rc.d/S99node-red: x'), 'real cleanup did not run'],
+            ['neither finished nor cut short', '\n'.join(self.normal_log().splitlines()[:2]), 'neither finished nor'],
+            ['still the stand-in', self.normal_log() + '\n' + self.line(1, 'user.notice osi-test-cleanup[4211]: cleanup stall started'),
+             'stand-in was still installed'],
+            ['ran from S80', self.normal_log().replace('S99tailscale', 'S80tailscale'), 'S80tailscale instead of S99tailscale'],
+            ['daemon missing', '\n'.join(self.normal_log().splitlines()[:3]), 'daemon did not start'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.normal_verdict(log, 15)
+
+    def test_the_syslog_time_of_day_is_read_across_the_minute(self):
+        self.assertEqual(tailscale_boot.line_seconds('Sun Apr 13 16:50:58 2025 x'), 16 * 3600 + 50 * 60 + 58)
+        gave_up = tailscale_boot.stall_verdict(self.stall_log(gave_up_after=15).replace('16:50:35', '16:51:03')
+                                               .replace('16:50:20', '16:50:48'), 15)
+        self.assertIn('stalled 15 s', gave_up)
+
+    def test_every_command_sent_to_the_guest_parses_as_shell(self):
+        # Over LAN SSH goes one line; the process-start script goes over the console.
+        over_ssh = ('MILESTONES', 'HELD_STATE', 'STALLED_CLEANUP', 'PS_LOOKUP', 'ONSITE_LOOKUP', 'ONSITE_COMMAND', 'HANG_AGE')
+        for name in (*over_ssh, 'PROCESS_STARTS'):
+            text = getattr(tailscale_boot, name).replace('DAEMON', 'tailscaled')
+            for shell in ('sh', 'bash'):
+                run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, f'{name} under {shell}: {run.stderr}')
+            if name in over_ssh:
+                self.assertNotIn('\n', text, f'{name} is one line')
+
+    def test_the_on_site_line_is_pinned_and_differs_from_the_runbook_line_only_in_its_lookup(self):
+        self.assertEqual(tailscale_boot.ONSITE_COMMAND,
+                         "kill -9 $(ps w | grep '[t]ailscaled --cleanup' | awk '{print $1}')")
+        self.assertEqual(tailscale_boot.ONSITE_LOOKUP, tailscale_boot.ONSITE_COMMAND[len('kill -9 $('):-1])
+        self.assertEqual(tailscale_boot.ALTERNATE_COMMAND, 'kill -9 $(' + tailscale_boot.PS_LOOKUP + ')')
+        self.assertEqual(tailscale_boot.TECHNICIAN_COMMAND, 'kill -9 $(' + tailscale_boot.STALLED_CLEANUP + ')')
+        # Each lookup's pattern, applied to the text of the lookup itself, must not match.
+        for lookup in (tailscale_boot.STALLED_CLEANUP, tailscale_boot.PS_LOOKUP, tailscale_boot.ONSITE_LOOKUP):
+            self.assertNotRegex(lookup, 'tailscaled --cleanup')
+        self.assertRegex('/usr/sbin/tailscaled --cleanup', 'tailscaled --cleanup')
+        self.assertRegex('/bin/sh /usr/sbin/tailscaled --cleanup', 'tailscaled --cleanup')
+
+    def test_field_and_start_readings(self):
+        self.assertEqual(tailscale_boot.parse_fields('daemon= chirpstack=2833 node=up gui=\nage=235'),
+                         {'chirpstack': '2833', 'node': 'up', 'age': '235'})
+        self.assertEqual(tailscale_boot.process_starts('tailscaled.real 79\nchirpstack 76\nnode-red 72\n', 100),
+                         {'tailscaled.real': 21, 'chirpstack': 24, 'node-red': 28})
+        self.assertEqual(tailscale_boot.process_starts('chirpstack: no process found\n', 100), {})
+        self.assertEqual(tailscale_boot.held_state('\n\nage=235\n'), ('', []))
+        self.assertEqual(tailscale_boot.held_state('2833\nage=99\n'), ('2833', []))
+        self.assertEqual(tailscale_boot.held_state('\nnode-red\ngui-up\nage=99\n'), ('', ['node-red', 'gui-up']))
+
+    def test_the_focused_mode_expects_exactly_the_tailscale_cases(self):
+        args = SimpleNamespace(tailscale_boot_only=True)
+        self.assertEqual(set(acceptance.expected_cases(args, None, False)), set(tailscale_boot.CASES))
+        plain = SimpleNamespace(tailscale_boot_only=False, flows_power_cut_only=False, customer_fixture_only=False,
+                                upgrade_boot_safety_only=False)
+        self.assertFalse(set(tailscale_boot.CASES) & set(acceptance.expected_cases(plain, None, False)))
+
+    def test_the_focused_run_requires_a_pass_from_every_case_and_needs_no_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init = root/tailscale_boot.INIT
+            init.parent.mkdir(parents=True)
+            init.write_text((Path(__file__).resolve().parents[2]/tailscale_boot.INIT).read_text())
+            args = SimpleNamespace(fixtures=root, qemu=None, ram=8, release_revision='a' * 40, osi_version='0.8.5',
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False, tailscale_boot_only=True)
+            def held(*call):
+                for label in tailscale_boot.CASES:
+                    call[5](label, Mock(side_effect=RuntimeError('held')))
+
+            with (redirect_stdout(io.StringIO()), patch.object(tailscale_boot, 'run', side_effect=held) as run,
+                  redirect_stderr(io.StringIO())):
+                status = acceptance.run_cases(args, root, root, root, 'recovery', False)
+            self.assertEqual(status, 1)
+            run.assert_called_once()
+            result = (root/'results.log').read_text()
+            for label in tailscale_boot.CASES:
+                self.assertIn(f'{label} | REQUIRED | FAIL | FAIL', result)
+            self.assertIn('Focused acceptance: FAIL', result)
+
+    @staticmethod
+    def unguest(directory):
+        # A Guest without an image: launch() only needs these attributes.
+        vm = Guest.__new__(Guest)
+        vm.work = vm.receipts = Path(directory)
+        vm.qemu = vm.work/'qemu'
+        vm.process = vm.bridge = vm.radio = None
+        vm.boots = 0
+        vm.ram = 8
+        vm.private = False
+        vm.direct_io = False
+        vm.upgrade = None
+        vm.extra_hostfwd = []
+        (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
+        vm.qemu.mkdir()
+        for name in ('dtmerge', 'rpi5-bl31.bin'):
+            (vm.qemu/name).write_bytes(b'')
+        return vm
+
+    def test_an_extra_host_forward_reaches_the_guest_lan_address(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            vm.extra_hostfwd.append((43210, 22))
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
+                vm.launch()
+            vm.stop()
+            bridge = ' '.join(popen.call_args_list[0].args[0])
+            self.assertIn('hostfwd=tcp:127.0.0.1:43210-192.0.2.15:22', bridge)
+            self.assertIn('hostfwd=tcp:127.0.0.1:49152-192.0.2.15:1880', bridge)
+            self.assertIn('restrict=on', bridge)
+
+    def test_a_launch_without_extra_forwards_keeps_the_bridge_as_before(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
+                vm.launch()
+            vm.stop()
+            bridge = ' '.join(popen.call_args_list[0].args[0])
+            self.assertEqual(bridge.count('hostfwd='), 1)
+
+    def test_launch_returns_before_the_console_and_the_shell_follows_the_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()):
+                vm.launch()
+            self.assertEqual(vm.boots, 1)
+            vm.buf = b'Linux version ...\r\n'
+            # Nothing on the console yet: hold reads it until its time is up.
+            with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')) as expect:
+                self.assertFalse(tailscale_boot.hold(vm, 0.05))
+            self.assertEqual(expect.call_args_list[0].args[0], tailscale_boot.NO_MATCH)
+            # The login prompt arrives: hold reports it and leaves it consumed.
+            with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')):
+                vm.buf += tailscale_boot.CONSOLE + b'\r\nlogin:'
+                self.assertTrue(tailscale_boot.hold(vm, 5))
+            self.assertEqual(vm.buf, b'\r\nlogin:')
+            with patch.object(vm, 'expect', return_value=Mock()) as expect, patch.object(vm, 'command') as command:
+                vm.shell()
+            vm.stop()
+            self.assertEqual(expect.call_args_list, [call(b':~#', 40)])
+            command.assert_called_once_with('true')
+
+    def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
+        vm = Mock()
+        vm.command.return_value = (0, 'S80tailscale\ndigest a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest a874f9fd1032')
+        vm.command.return_value = (0, 'S99tailscale\ndigest ')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S99tailscale, init digest absent')
+        vm.command.return_value = (0, 'digest ')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'no boot link, init digest absent')
+        vm.command.side_effect = RuntimeError('no shell')
+        self.assertIn('unreadable', tailscale_boot.image_receipt(vm))
 
 
 if __name__ == '__main__':
