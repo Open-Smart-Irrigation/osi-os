@@ -26,6 +26,7 @@ const CANONICAL_PAYLOAD = [
   'files/etc/init.d/osi-rootfs-resize',
   'files/etc/init.d/osi-bootstrap',
   'files/etc/init.d/osi-identityd',
+  'files/etc/init.d/tailscale',
   'files/etc/nginx',
   'files/etc/redis.conf',
   'files/etc/sysupgrade.conf',
