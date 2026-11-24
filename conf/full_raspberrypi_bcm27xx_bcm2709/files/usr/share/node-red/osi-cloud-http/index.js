@@ -82,22 +82,34 @@ function warnGate(text) {
   console.warn('osi-cloud-http: ' + text);
 }
 
-// Loopback hosts: 127.0.0.0/8, ::1 and the name localhost.
-function isLoopbackHostname(hostname) {
+// Loopback hosts: 127.0.0.0/8, ::1 and the name localhost. Returns the host
+// in one spelling (lower case, no brackets) when it is loopback, else ''.
+function loopbackHostname(hostname) {
   const host = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (host === 'localhost' || host === '::1') return true;
+  if (host === 'localhost' || host === '::1') return host;
   const address = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  return Boolean(address) && address.slice(1).every((octet) => Number(octet) <= 255);
+  return address && address.slice(1).every((octet) => Number(octet) <= 255) ? host : '';
+}
+
+function isLoopbackHostname(hostname) {
+  return loopbackHostname(hostname) !== '';
 }
 
 // The cloud endpoint scheme policy, shared with the account link and the zone
 // environment summary: a cloud address uses TLS unless its host is loopback.
 // Returns null when the address passes, else an error with the code
-// cloud_endpoint_scheme. The first refusal in a process is logged: nothing
-// else tells an operator that a stored address no longer passes. Pass
-// { quiet: true } where the caller reports the refusal itself.
+// cloud_endpoint_scheme. A caller whose client reads the address with
+// another parser passes that reading as { clientHostname }; a plain address
+// then passes only when both read the same loopback host. The first refusal
+// in a process is logged: nothing else tells an operator that a stored
+// address no longer passes. Pass { quiet: true } where the caller reports
+// the refusal itself.
 function cloudEndpointRefusal(protocol, hostname, options) {
-  if (TLS_PROTOCOLS.includes(String(protocol || '').toLowerCase()) || isLoopbackHostname(hostname)) return null;
+  const settings = options || {};
+  if (TLS_PROTOCOLS.includes(String(protocol || '').toLowerCase())) return null;
+  const host = loopbackHostname(hostname);
+  const clientHost = settings.clientHostname === undefined ? host : loopbackHostname(settings.clientHostname);
+  if (host && host === clientHost) return null;
   const error = new Error('A cloud address outside loopback must use TLS; relink the gateway with its https address');
   error.code = 'cloud_endpoint_scheme';
   if (!(options && options.quiet) && !globalThis[REFUSAL_WARNED]) {

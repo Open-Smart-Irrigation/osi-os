@@ -2,6 +2,8 @@
 
 const crypto = require('crypto');
 const cloudHttp = require('../osi-cloud-http');
+// mqtt.js reads a broker address with url.parse(), not with the URL class.
+const nodeUrl = require('url');
 
 function normalizeInstallationUuid(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -778,12 +780,20 @@ function emptyMqttConfig() {
 }
 
 // The cloud endpoint scheme policy for the broker address in the cloud's
-// link reply: TLS unless the host is loopback. Null when the address passes
-// or cannot be parsed here; linkMqttConfig still rejects one it cannot parse.
+// link reply: TLS unless the host is loopback. The address is read twice,
+// with the URL class and with the parser the MQTT client uses; a plain
+// address passes only when both read the same loopback host (osi-cloud-http
+// compares them). Null when the address passes or cannot be parsed here;
+// linkMqttConfig still rejects one it cannot parse.
 function cloudBrokerRefusal(mqttBrokerUrl) {
   let broker;
+  let clientReading;
   try { broker = new URL(String(mqttBrokerUrl)); } catch (error) { return null; }
-  if (!cloudHttp.cloudEndpointRefusal(broker.protocol, broker.hostname, { quiet: true })) return null;
+  try { clientReading = nodeUrl.parse(String(mqttBrokerUrl)); } catch (error) { clientReading = null; }
+  const refusal = cloudHttp.cloudEndpointRefusal(broker.protocol, broker.hostname, {
+    quiet: true, clientHostname: clientReading && clientReading.hostname,
+  });
+  if (!refusal) return null;
   return Object.assign(new Error('The MQTT broker address returned by the cloud must use wss:// or mqtts:// outside loopback'), {
     code: 'cloud_endpoint_scheme', statusCode: 502,
   });

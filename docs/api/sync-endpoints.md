@@ -125,9 +125,12 @@ cloud REST traffic verifies the same way.
 
 A stored `ws://` or `mqtt://` broker address is used only for a loopback host.
 For any other host `node-red.init` ignores it with one warning that does not
-print the address, and `wss://<server_host>/mqtt`, else the default broker,
-takes over. Account link refuses such an address in the cloud's reply, so
-none is stored.
+print the address, and `wss://<server_host>/mqtt` takes over. Without a
+`server_host`, the default broker takes over only when the ignored address
+named the default broker's host; otherwise the gateway gets the broker name
+that never resolves until it is relinked, because its credential belongs to
+another cloud. Account link refuses such an address in the cloud's reply. It
+reads the address the way the MQTT client does as well, so none is stored.
 
 The topic table stays in `AGENTS.md`.
 

@@ -18,12 +18,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   only for a loopback host (`127.0.0.0/8`, `::1`, `localhost`), and the zone
   environment summary applies the same rule to its cloud call. Account link
   refuses an `mqtt:`/`ws:` broker address outside loopback in the cloud's
-  reply. At start, `node-red.init` uses a stored `ws://`/`mqtt://` broker
-  address only for a loopback host; for any other it logs one warning and the
-  `wss://<server_host>/mqtt` or default broker takes over. A gateway linked
-  over a plain address before this change keeps its link and fails its cloud
-  requests until it is relinked with its `https` address; the first refused
-  request of a start logs that fix once.
+  reply, reading the address the way the MQTT client does as well. At start,
+  `node-red.init` uses a stored `ws://`/`mqtt://` broker address only for a
+  loopback host; for any other it logs one warning and
+  `wss://<server_host>/mqtt` takes over. Without a `server_host`, the default
+  broker takes over only when the ignored address named the default broker's
+  host; otherwise the gateway gets the broker name that never resolves until
+  it is relinked, because its credential belongs to another cloud. A gateway
+  linked over a plain address before this change keeps its link and fails its
+  cloud requests until it is relinked with its `https` address; the first
+  refused request of a start logs that fix once.
 
 ---
 

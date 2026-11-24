@@ -131,6 +131,21 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: with a second reading of the address, a plain address passes only when both name the same loopback host`, () => {
+    // A caller whose client reads the address with another parser passes that
+    // reading as clientHostname.
+    for (const [hostname, clientHostname] of [['127.0.0.1', 'other.example.test'], ['127.0.0.1', null], ['localhost', 'localhost.example.test'],
+      ['127.0.0.1', ''], ['127.0.0.1', '127.0.0.2']]) {
+      const refusal = cloudHttp.cloudEndpointRefusal('mqtt:', hostname, { quiet: true, clientHostname });
+      assert.equal(refusal && refusal.code, 'cloud_endpoint_scheme', 'refused: ' + hostname + ' as ' + clientHostname);
+    }
+    for (const [protocol, hostname, clientHostname] of [['mqtt:', '127.0.0.1', '127.0.0.1'], ['mqtt:', '[::1]', '::1'],
+      ['mqtt:', 'LOCALHOST', 'localhost'], ['mqtt:', '127.0.0.1', undefined], ['wss:', '127.0.0.1', 'other.example.test']]) {
+      assert.equal(cloudHttp.cloudEndpointRefusal(protocol, hostname, { quiet: true, clientHostname }), null,
+        'allowed: ' + protocol + ' ' + hostname + ' as ' + clientHostname);
+    }
+  });
+
   test(`${profile}: cloud REST refuses http to a host outside loopback before any request is sent`, async (t) => {
     silenceConsoleWarn(t);
     const calls = stubTransport(t);
@@ -535,17 +550,23 @@ for (const profile of PROFILES) {
     } finally { cloud.respond = null; f.cleanup(); }
   });
 
-  for (const [scheme, label] of [['ws', 'ws://'], ['mqtt', 'mqtt://']]) {
-    test(`${profile}: a ${scheme}:// broker address outside loopback in the cloud reply fails the link`, async (t) => {
+  for (const [broker, what] of [
+    ['ws://broker.example.test:8081/mqtt', 'a ws:// broker address outside loopback'],
+    ['mqtt://broker.example.test:8081/mqtt', 'a mqtt:// broker address outside loopback'],
+    // The MQTT client reads these two as a host outside loopback.
+    ['mqtt://other.example.test\\@127.0.0.1:1883/', 'an mqtt:// broker address that only reads as loopback here'],
+    ['ws://other.example.test\\@127.0.0.1/', 'a ws:// broker address of the same kind'],
+  ]) {
+    test(`${profile}: ${what} in the cloud reply fails the link`, async (t) => {
       silenceConsoleWarn(t);
       const f = fixture(profile);
       try {
         processStarted(false);
-        const calls = stubTransport(t, linkReply(f, `${label}broker.example.test:8081/mqtt`));
+        const calls = stubTransport(t, linkReply(f, broker));
         // The cloud itself is reached over TLS; only its broker address is plain.
         const outcome = await linkChain(f, 'https://cloud.example.test', {});
         assert.deepEqual(outcome.path.slice(0, -1), ['al-link-validate', 'al-link-build-req', 'al-link-server-auth'], 'the cloud was asked over the stand-in');
-        assert.equal(outcome.stoppedAt, 'al-link-handle-auth');
+        assert.equal(outcome.stoppedAt, 'al-link-handle-auth', broker);
         assert.equal(outcome.failure.statusCode, 502);
         assert.equal(outcome.failure.payload.reason, 'cloud_endpoint_scheme');
         assert.match(outcome.failure.payload.message, /wss:\/\/ or mqtts:\/\//, outcome.failure.payload.message);
@@ -556,25 +577,30 @@ for (const profile of PROFILES) {
     });
   }
 
-  test(`${profile}: the link finalizer refuses a broker address without TLS even when the earlier check was skipped`, async (t) => {
-    silenceConsoleWarn(t);
-    const f = fixture(profile);
-    try {
-      processStarted(false);
-      cloud.respond = () => linkReply(f, 'wss://cloud.example.org/mqtt');
-      const outcome = await linkChain(f, loopbackCloud(), { ALLOW_PRIVATE_SERVER_URLS: '1' }, (id, msg) => {
-        if (id === 'al-link-finalize') msg._alState.al_mqtt_broker_url = 'mqtt://broker.example.net:1883';
-      });
-      assert.equal(outcome.stoppedAt, 'al-link-finalize', 'the link stops at its finalizer: ' + outcome.path.join(' > '));
-      assert.equal(outcome.failure.statusCode, 502);
-      assert.equal(outcome.failure.payload.reason, 'cloud_endpoint_scheme');
-      assert.match(outcome.failure.payload.detail, /wss:\/\/ or mqtts:\/\//, outcome.failure.payload.detail);
-      assertNothingStored(f);
-    } finally { cloud.respond = null; f.cleanup(); }
-  });
+  for (const [broker, what] of [['mqtt://broker.example.net:1883', 'a plain address'], ['mqtt://other.example.test\\@127.0.0.1:1883/', 'an address that only reads as loopback here']]) {
+    test(`${profile}: the link finalizer refuses ${what} even when the earlier check is skipped`, async (t) => {
+      silenceConsoleWarn(t);
+      const f = fixture(profile);
+      try {
+        processStarted(false);
+        cloud.respond = () => linkReply(f, 'wss://cloud.example.org/mqtt');
+        const outcome = await linkChain(f, loopbackCloud(), { ALLOW_PRIVATE_SERVER_URLS: '1' }, (id, msg) => {
+          if (id === 'al-link-finalize') msg._alState.al_mqtt_broker_url = broker;
+        });
+        assert.equal(outcome.stoppedAt, 'al-link-finalize', 'the link stops at its finalizer: ' + outcome.path.join(' > '));
+        assert.equal(outcome.failure.statusCode, 502);
+        assert.equal(outcome.failure.payload.reason, 'cloud_endpoint_scheme');
+        assert.match(outcome.failure.payload.detail, /wss:\/\/ or mqtts:\/\//, outcome.failure.payload.detail);
+        assertNothingStored(f);
+      } finally { cloud.respond = null; f.cleanup(); }
+    });
+  }
 
   test(`${profile}: wss, mqtts and loopback broker addresses in the cloud reply are stored as given`, async () => {
-    for (const broker of ['wss://cloud.example.org/mqtt', 'mqtts://broker.example.net:8883', 'ws://127.0.0.1:8081/mqtt']) {
+    // The last two name their loopback host in a spelling that differs
+    // between the two parsers; the host is still the same.
+    for (const broker of ['wss://cloud.example.org/mqtt', 'mqtts://broker.example.net:8883', 'ws://127.0.0.1:8081/mqtt',
+      'mqtt://[::1]:1883', 'mqtt://LOCALHOST:1883']) {
       const f = fixture(profile);
       try {
         processStarted(false);
