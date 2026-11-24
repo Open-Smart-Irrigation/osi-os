@@ -298,6 +298,11 @@ jobs:
       # the join key (no tr character class on the gateway bases).
       - name: Tailscale first-boot join key
         run: node --test scripts/test-tailscale-init-authkey.js
+      # The OSI copy of the tailscale init time-limits the cleanup at boot and
+      # starts the service last. deploy.sh replaces the package file only
+      # while it still is the 1.80.3-r1 file, and never restarts the service.
+      - name: Tailscale boot init
+        run: node --test --test-concurrency=1 scripts/test-tailscale-init.js scripts/test-deploy-tailscale-init.js
       # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
       # on the Kiwi profile and gives the Clover its own profile with it instead
       # of aliasing the codec-less field-tester profile; --repair-soil-profiles

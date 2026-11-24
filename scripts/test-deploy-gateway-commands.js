@@ -27,6 +27,7 @@ const GATEWAY_SIDE = [
   'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init',
   `${P}/etc/init.d/osi-bootstrap`,
   `${P}/etc/init.d/osi-identityd`,
+  `${P}/etc/init.d/tailscale`,
   `${P}/usr/libexec/osi-gateway-identity.sh`,
   `${P}/usr/libexec/osi-identityd.sh`,
   `${P}/etc/hotplug.d/ntp/70-osi-irrigation-clock`,
@@ -156,6 +157,7 @@ test('the gateway side uses no tr character class', () => {
 // own harnesses with only the bases' commands on PATH.
 for (const [file, pattern] of [
   ['scripts/test-conditional-irrigation-clock-install.js', ''],
+  ['scripts/test-deploy-tailscale-init.js', ''],
   ['scripts/deploy-payload-lifecycle.test.js', 'owed check|a retry after a kill|v0.8.1 or v0.7.0 gateway|kill after each step|after the migration commit|held by the old positional check'],
 ]) {
   test(`with only the bases' commands on PATH: ${path.basename(file)}${pattern ? ` (${pattern})` : ''}`, () => {

@@ -914,6 +914,88 @@ enable_osi_bootstrap() {
     return 0
 }
 
+# tailscale's package init (1.80.3-r1) runs `tailscaled --cleanup` before the
+# daemon, with no time limit, at START=80. A cleanup that does not return
+# then holds every later boot service, ChirpStack and Node-RED included. The
+# OSI copy time-limits that cleanup and starts the service last. It replaces
+# the package file only while that file still has the package digest: a
+# package that ships a different init brings its own and is left alone.
+# Nothing here restarts tailscale, which would drop an operator's session;
+# the change applies at the next boot. Never fails the deploy. A refusal or
+# a failure leaves the old init untouched and prints one WARN that says the
+# boot protection was not installed and why; the closing banner repeats it.
+TAILSCALE_INIT="${TAILSCALE_INIT:-/etc/init.d/tailscale}"
+TAILSCALE_RC_D="${TAILSCALE_RC_D:-/etc/rc.d}"
+TAILSCALE_INIT_SHA256="2faa5325efb4069c1d939920a3f7e4ba6932cfc742dc4b500fc8e4c6129b11f3"
+TAILSCALE_PACKAGE_INIT_SHA256="a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56"
+
+install_tailscale_init() {
+    if [ ! -f "$TAILSCALE_INIT" ]; then
+        echo "OK: tailscale is not installed"
+        return 0
+    fi
+    tailscale_init_sha="$(file_sha256 "$TAILSCALE_INIT" 2>/dev/null || true)"
+    if [ "$tailscale_init_sha" != "$TAILSCALE_INIT_SHA256" ]; then
+        if [ "$tailscale_init_sha" != "$TAILSCALE_PACKAGE_INIT_SHA256" ]; then
+            tailscale_init_warning="WARN: tailscale boot protection NOT installed: $TAILSCALE_INIT is neither the tailscale 1.80.3-r1 package file nor the OSI copy; the file was left unchanged"
+            echo "$tailscale_init_warning" >&2
+            return 0
+        fi
+        # Staged beside the target and complete before one rename replaces the
+        # package file, so a deploy cut here leaves the old file or the new.
+        tailscale_init_stage="$(mktemp "$TAILSCALE_INIT.osi-stage.XXXXXX")" || {
+            tailscale_init_warning="WARN: tailscale boot protection NOT installed: could not stage the OSI init beside $TAILSCALE_INIT; the package file stays"
+            echo "$tailscale_init_warning" >&2
+            return 0
+        }
+        tailscale_init_why=""
+        if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale" "$tailscale_init_stage"; then
+            tailscale_init_why="could not download the OSI init"
+        elif [ "$(file_sha256 "$tailscale_init_stage")" != "$TAILSCALE_INIT_SHA256" ]; then
+            tailscale_init_why="the downloaded init does not match its SHA-256 pin"
+        elif ! sh -n "$tailscale_init_stage"; then
+            tailscale_init_why="the downloaded init fails the shell syntax check"
+        elif ! { chmod 755 "$tailscale_init_stage" && sync && mv -f "$tailscale_init_stage" "$TAILSCALE_INIT"; }; then
+            tailscale_init_why="could not replace the package file"
+        fi
+        if [ -n "$tailscale_init_why" ]; then
+            rm -f "$tailscale_init_stage"
+            tailscale_init_warning="WARN: tailscale boot protection NOT installed: $tailscale_init_why; the package file stays"
+            echo "$tailscale_init_warning" >&2
+            return 0
+        fi
+        sync 2>/dev/null || true
+        echo "OK: OSI tailscale init installed (cleanup time-limited, START=99)"
+    fi
+    tailscale_link_present=0
+    for tailscale_link in "$TAILSCALE_RC_D"/S[0-9][0-9]tailscale; do
+        if [ -e "$tailscale_link" ] || [ -L "$tailscale_link" ]; then
+            tailscale_link_present=1
+        fi
+    done
+    if [ "$tailscale_link_present" != 1 ]; then
+        # Disabled on purpose stays disabled: only the boot position moves.
+        echo "OK: tailscale is disabled at boot; left disabled"
+        return 0
+    fi
+    # S99 first: a deploy cut in between leaves two links, never none.
+    if ! ln -sf ../init.d/tailscale "$TAILSCALE_RC_D/S99tailscale"; then
+        tailscale_init_warning="WARN: tailscale boot protection installed, but NOT moved to S99: could not create $TAILSCALE_RC_D/S99tailscale; tailscale keeps its boot position"
+        echo "$tailscale_init_warning" >&2
+        return 0
+    fi
+    for tailscale_link in "$TAILSCALE_RC_D"/S[0-9][0-9]tailscale; do
+        [ "$tailscale_link" != "$TAILSCALE_RC_D/S99tailscale" ] || continue
+        [ -e "$tailscale_link" ] || [ -L "$tailscale_link" ] || continue
+        if ! rm -f "$tailscale_link"; then
+            tailscale_init_warning="WARN: tailscale boot protection installed at S99, but another boot link stays: $tailscale_link could not be removed; tailscale starts twice at boot until it is"
+            echo "$tailscale_init_warning" >&2
+            return 0
+        fi
+    done
+    echo "OK: tailscale starts at S99 from the next boot (after ChirpStack and Node-RED); it was not restarted"
+}
+
 # Closing-banner note on ChirpStack provisioning for the gateway this ran on.
 # It always points at the osi-bootstrap service, never at a bare
 # `node chirpstack-bootstrap.js`: a direct run writes no stamp, so the enabled
@@ -4920,6 +5002,10 @@ DEPLOY_IDENTITYD_STATE=running
 identityd_deploy_state="disarmed"
 echo "OK"
 
+echo "--- Tailscale boot init ---"
+tailscale_init_warning=""
+install_tailscale_init
+
 echo ""
 echo "=== Deploy complete. ==="
 if [ "$PROBE_OK" = "unverified" ]; then
@@ -4934,6 +5020,10 @@ if [ "$soil_profile_repair_failed" = 1 ]; then
     echo "  WARN: the Kiwi/Clover profile repair failed (see above); Kiwi and Clover uplinks"
     echo "        may stay undecoded. Rerun exactly (the /srv/node-red copy, never /usr/share):"
     echo "        node $BOOTSTRAP_SCRIPT_FALLBACK --repair-soil-profiles"
+    echo ""
+fi
+if [ -n "$tailscale_init_warning" ]; then
+    echo "  $tailscale_init_warning"
     echo ""
 fi
 print_bootstrap_note
