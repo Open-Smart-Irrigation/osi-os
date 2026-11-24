@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A boot no longer waits on the Tailscale cleanup. The init file of tailscale
+  1.80.3-r1 runs `tailscaled --cleanup` before the daemon with no time limit,
+  at `START=80`, so a cleanup that did not return kept ChirpStack and
+  Node-RED from starting. OSI OS ships its own copy of the file: the cleanup is
+  cut short after 15 seconds and the service starts last (`START=99`).
+  `deploy.sh` installs the copy while a gateway's file still is the package
+  file, moves the boot link to `S99tailscale`, and does not restart Tailscale;
+  the change applies at the next boot. New images ship the copy.
+
 ---
 
 ## [0.8.4] — 2026-11-30
