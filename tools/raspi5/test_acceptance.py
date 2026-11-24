@@ -125,29 +125,30 @@ class RadioTests(unittest.TestCase):
         command, command_wire = self.downlink(valve.devaddr)
         _, other_wire = self.downlink(2)
         _, mac_wire = self.downlink(valve.devaddr, port=0)
-        vm = Mock()
-        vm.command.side_effect = lambda script, *_: (0, '5 0' if '# attempt-marker' in script else
-                                                     'match 81 1\nmatch 82 2\nmarked\nclosed\nram 2')
+        replies = iter([(mac_wire + command_wire, self.valve_stamp(1)), (b'', self.valve_stamp(2))])
+        output = io.StringIO()
+        vm = self.answering({
+            'frames()': [f'match 81 {self.VALVE_COUNT}\n' + self.CLOSED, f'match 82 {self.VALVE_COUNT}\n' + self.CLOSED],
+            'valve_actuation_expectations': ['', self.expectation_row('a56e55db', self.QUEUE)],
+            'device_queue_item': ['']})
         with (host, model, ThreadPoolExecutor(1) as worker,
-              patch.object(radio_suite, '_wait_history'),
+              patch.object(radio_suite, '_wait_history'), redirect_stdout(output),
               patch.object(radio_suite, 'EARLY_WINDOW_TIMEOUT', 0.01)):
             model.settimeout(2)
             model.sendall(self.receipt(b'old-id!!', 1) + command_wire)
 
             def reply():
                 with model.makefile('rb') as wire:
-                    request_id, payload = self.request(wire)
-                    self.assertEqual(payload, b'trigger receive window')
-                    model.sendall(mac_wire + command_wire + self.receipt(request_id, 1))
-                    request_id, payload = self.request(wire)
-                    self.assertEqual(payload, b'report opened')
-                    model.sendall(self.receipt(request_id, 1))
+                    for extra, stamp in replies:
+                        request_id, payload = self.request(wire)
+                        model.sendall(extra + self.receipt(request_id, 1, stamp))
 
             waiting = worker.submit(reply)
             air = radio_suite.Radio(host)
             result = radio_suite.run_valve(vm, air, {radio_suite.VALVE: valve},
                                           lambda: model.sendall(other_wire + mac_wire))
             self.assertEqual(result, 'WM1302 model delivered=2, Concentratord frames received=2')
+            self.assertEqual(len(output.getvalue().strip().splitlines()), 2)
             self.assertFalse(air.buffer)
             valve.downlink.assert_called_once_with(command)
             waiting.result()
@@ -163,30 +164,319 @@ class RadioTests(unittest.TestCase):
                 radio_suite.run_valve(vm, radio_suite.Radio(host), {radio_suite.VALVE: valve},
                                       lambda: model.sendall(command_wire))
 
-    def radio_evidence(self, output, code=0, delivered=1):
-        vm = Mock()
-        vm.command.return_value = (code, output)
-        return radio_suite._radio_evidence(vm, radio_suite.Marker('fixture', '5', 0), delivered)
+    VALVE_COUNT = 247517304
+    SCHEDULED = 'dl enqueue 3000953403 248517304 248376850\ndl tx 3000953403 248517304 -\n'
+    REFUSED = 'dl too-late 3000953403 248517304 248517604\n'
+    SHORT_LEAD = 'dl too-late 3000953403 248517304 248517004\n'
+    QUEUE = '6f1c0b52-3a1e-4a62-9a53-2d9d0e0c1b7f'
+    NO_FRAME = 'marked\nclosed\nram 0'
 
-    def test_model_delivery_without_concentratord_frame_fails(self):
-        with self.assertRaisesRegex(RuntimeError, 'Concentratord frames received=0'):
-            self.radio_evidence('marked\nclosed\nram 0')
+    def valve_stamp(self, uplink):
+        """The 32 MHz stamp the model gives the valve case's n-th uplink; the HAL subtracts about 460 us."""
+        return (self.VALVE_COUNT + 460 * uplink) % (1 << 27) * 32
 
-    def test_unavailable_concentratord_log_fails(self):
-        with self.assertRaisesRegex(RuntimeError, 'persistent log unreadable'):
-            self.radio_evidence('match 4 1\nmarked\nclosed', code=1, delivered=4)
+    def expectation_row(self, identifier, queue_id, phase='ACCEPTED'):
+        """One valve_actuation_expectations row as the edge query returns it."""
+        transport = {'phase': phase, 'queue_id': queue_id, 'accepted_at': '2025-04-13T16:49:14.498Z'}
+        if queue_id is None:
+            del transport['queue_id'], transport['accepted_at']
+        return f'{identifier}|PENDING_OBSERVATION|' + json.dumps(transport).encode().hex()
 
-    def test_frames_without_crc_filter_do_not_count(self):
-        with self.assertRaisesRegex(RuntimeError, 'disable_crc_filter is not false'):
-            self.radio_evidence('crc-filter-off')
+    def answering(self, reads):
+        """A guest whose marker reads succeed and whose other reads come from the lists, in call order."""
+        reads = {needle: iter(answers) for needle, answers in reads.items()}
 
-    def test_unclosed_window_does_not_count(self):
-        with self.assertRaisesRegex(RuntimeError, 'end marker did not reach the persistent log within 10 s'):
-            self.radio_evidence('match 81 1\nmarked\nram 0')
+        def command(script, timeout=None):
+            if '# attempt-marker' in script:
+                return 0, '5 0'
+            for needle, answers in reads.items():
+                if needle in script:
+                    answer = next(answers)
+                    return answer if isinstance(answer, tuple) else (0, answer)
+            raise AssertionError('unexpected guest command')
+        return SimpleNamespace(command=command)
 
-    def test_positive_model_and_concentratord_counts_pass(self):
-        self.assertEqual(self.radio_evidence('match 81 1\nmatch 82 2\nmarked\nclosed\nram 0', delivered=2),
-                         'WM1302 model delivered=2, Concentratord frames received=2')
+    def valve_fixture(self, arrivals, payload=b'\x41\x01'):
+        """A valve whose trigger uplinks are followed by the listed arrivals.
+
+        arrivals holds one list of delays after the trigger, in seconds, per
+        attempt. The radio clock advances by every receive timeout, so a wrap
+        139.31 s after the uplink costs the 40 s window and 109.31 s of drain.
+        """
+        now, pending = 0, []
+        air, valve = Mock(), Mock(devaddr=1)
+        valve.uplink.side_effect = lambda frame, *_args, **_keywords: b'trigger' if frame == radio_suite.STREGA else b'report'
+        valve.downlink.return_value = {'fport': 2, 'payload': payload}
+        arrivals, sends = iter(arrivals), iter(range(1, 1000))
+
+        def send(frame):
+            nonlocal pending
+            air.last_stamp = self.valve_stamp(next(sends))
+            if frame == b'trigger':
+                pending = [None if delay is None else now + delay for delay in next(arrivals, [])]
+            return 1
+
+        def receive(timeout, matches):
+            nonlocal now, pending
+            if pending and pending[0] is not None and pending[0] <= now + timeout:
+                now, pending = pending[0], pending[1:]
+                packet = self.downlink(1)[0]
+                self.assertTrue(matches(packet))
+                return packet
+            now += timeout
+            raise TimeoutError
+
+        air.send.side_effect, air.receive.side_effect = send, receive
+        return air, valve, lambda: now
+
+    def valve_case(self, arrivals, *, error=None, payload=b'\x41\x01', **reads):
+        """Run the valve case against the fixture; collect what it logged even when it fails."""
+        air, valve, clock = self.valve_fixture(arrivals, payload)
+        gui_open, output, raised = Mock(), io.StringIO(), None
+        with (patch.object(radio_suite.time, 'monotonic', clock),
+              patch.object(radio_suite, '_wait_history'), redirect_stdout(output)):
+            try:
+                result = radio_suite.run_valve(self.answering(reads), air, {radio_suite.VALVE: valve}, gui_open)
+            except RuntimeError as exception:
+                if error is None:
+                    raise
+                self.assertRegex(str(exception), error)
+                raised, result = exception, None
+        if error is not None and raised is None:
+            self.fail(f'the valve case passed where "{error}" was expected')
+        return SimpleNamespace(result=result, error=raised, lines=output.getvalue().strip().splitlines(),
+                               air=air, valve=valve, gui_open=gui_open, clock=clock)
+
+    def valve_reads(self, windows, edges, queues):
+        return {'frames()': windows, 'valve_actuation_expectations': edges, 'device_queue_item': queues}
+
+    def assert_only_triggers(self, case):
+        self.assertEqual([call.args[0] for call in case.air.send.call_args_list], [b'trigger'] * case.air.send.call_count)
+
+    def test_valve_receipt_names_the_queue_item_and_the_scheduling_line(self):
+        """One delivered open, as in the 0.8.4 diagnostic run that delivered on the first attempt's path."""
+        case = self.valve_case(
+            [[1.0]], **self.valve_reads(
+                [f'match 1902493660 {self.VALVE_COUNT}\n' + self.SCHEDULED + self.CLOSED,
+                 f'match 1902493661 {self.VALVE_COUNT}\n' + self.CLOSED],
+                ['', self.expectation_row('a56e55db', self.QUEUE)], ['']))
+        self.assertEqual(case.lines, [
+            f'{radio_suite.VALVE} valve open attempt 1/3 (queue item {self.QUEUE}, sent {radio_suite.UPLINK}): received | '
+            f'frame: Concentratord uplink_id 1902493660 (count_us {self.VALVE_COUNT}) at 902300000 Hz, 125000 Hz, SF7, '
+            f'model stamp {self.valve_stamp(1)}; '
+            f'edge: queue item {self.QUEUE} ACCEPTED at 2025-04-13T16:49:14.498Z; '
+            'chirpstack: ChirpStack queue after the attempt: empty; '
+            'concentratord: RX1 +1 s: Concentratord scheduled the open command for TX (downlink_id 3000953403) '
+            'with 140.5 ms lead at enqueue; '
+            'downlink: open command received after 1.00 s',
+            f'{radio_suite.VALVE} valve open report (sent {radio_suite.UPLINK}): Concentratord uplink_id 1902493661 '
+            f'(count_us {self.VALVE_COUNT}) at 902300000 Hz, 125000 Hz, SF7, model stamp {self.valve_stamp(2)}'])
+        self.assertEqual(case.result, 'WM1302 model delivered=2, Concentratord frames received=2')
+        case.gui_open.assert_called_once()
+        self.assertEqual([call.args[0] for call in case.air.send.call_args_list], [b'trigger', b'report'])
+        case.valve.downlink.assert_called_once()
+
+    def test_wrapped_valve_downlink_drains_then_reissues_the_open(self):
+        """The 0.8.4 failure: Concentratord scheduled the open with 140.5 ms lead and the model got it one wrap late."""
+        first, second = self.expectation_row('e1', 'q1'), self.expectation_row('e2', 'q2')
+        case = self.valve_case([[139.31], [1.0]], **self.valve_reads(
+            [f'match {uplink} {self.VALVE_COUNT}\n' + self.SCHEDULED + self.CLOSED for uplink in (81, 82)]
+            + [f'match 83 {self.VALVE_COUNT}\n' + self.CLOSED],
+            ['', first, first, first + '\n' + second], ['', '']))
+        self.assertEqual(case.result, 'WM1302 model delivered=3, Concentratord frames received=3; '
+                         'passed on attempt 2/3 after 1 retry (attempt 1: open command late after 139.31 s (drained); '
+                         'RX1 +1 s: Concentratord scheduled the open command for TX (downlink_id 3000953403) '
+                         'with 140.5 ms lead at enqueue)')
+        self.assertEqual(case.gui_open.call_count, 2)
+        self.assertEqual(case.air.begin_case.call_count, 2)
+        self.assertEqual([call.args[0] for call in case.air.send.call_args_list], [b'trigger', b'trigger', b'report'])
+        self.assertEqual([round(call.args[0], 2) for call in case.air.receive.call_args_list],
+                         [2, 40, 110, 10.69, 2, 40])
+        self.assertEqual([call.args[1] for call in case.air.receive.call_args_list][1:4],
+                         [case.air.receive.call_args_list[1].args[1]] * 3)
+        self.assertIn(f'attempt 1/3 (queue item q1, sent {radio_suite.UPLINK}): missing downlink |', case.lines[0])
+        self.assertIn(f'chirpstack: ChirpStack queue after the attempt: empty; ', case.lines[0])
+        self.assertIn('downlink: MISSING (open command late after 139.31 s (drained))', case.lines[0])
+        self.assertIn(f'attempt 2/3 (queue item q2, sent {radio_suite.UPLINK}): received |', case.lines[1])
+        self.assertIn('; edge: queue item q2 ACCEPTED at 2025-04-13T16:49:14.498Z;', case.lines[1])
+
+    def test_open_command_chirpstack_never_emits_still_fails_after_three_opens(self):
+        """No downlink in any window is not a wrap: three opens, three receipts, then FAIL."""
+        rows = [self.expectation_row(f'e{n}', f'q{n}') for n in (1, 2, 3)]
+        known = ['', rows[0], rows[0], '\n'.join(rows[:2]), '\n'.join(rows[:2]), '\n'.join(rows)]
+        case = self.valve_case([[None]] * 3, error='open command not received after 3 attempts', **self.valve_reads(
+            [f'match {81 + n} {self.VALVE_COUNT}\n' + self.CLOSED for n in range(3)], known, ['', '', '']))
+        self.assertEqual(case.gui_open.call_count, 3)
+        self.assert_only_triggers(case)
+        self.assertEqual(case.clock(), 3 * (radio_suite.EARLY_WINDOW_TIMEOUT + radio_suite.VALVE_DRAIN_WINDOW))
+        self.assertEqual(len(case.lines), 3)
+        for n, line in enumerate(case.lines, 1):
+            self.assertIn(f'attempt {n}/3 (queue item q{n}, sent {radio_suite.UPLINK}): missing downlink |', line)
+            self.assertIn('concentratord: no open-command downlink logged; ', line)
+            self.assertIn('downlink: MISSING (open command absent after 150.00 s)', line)
+
+    def test_open_command_concentratord_refuses_still_fails_after_the_resends(self):
+        """A refusal at enqueue on every window fails after the bounded attempts; none is masked by a retry."""
+        row, held = self.expectation_row('e1', self.QUEUE), f'{self.QUEUE}|2|4101|0'
+        case = self.valve_case([[None]] * 3, error='open command not received after 3 attempts', **self.valve_reads(
+            [f'match {81 + n} {self.VALVE_COUNT}\n' + self.REFUSED + self.CLOSED for n in range(3)],
+            ['', row, row, row], [held] * 3))
+        case.gui_open.assert_called_once()
+        self.assert_only_triggers(case)
+        for line in case.lines:
+            self.assertIn(f'(queue item {self.QUEUE}, sent {radio_suite.UPLINK}): missing downlink |', line)
+            self.assertIn('concentratord: RX1 +1 s: open command refused by concentratord at enqueue: too late, '
+                          '0.3 ms past its TX time', line)
+            self.assertIn(f'chirpstack: ChirpStack queue after the attempt: item {self.QUEUE} FPort 2 data 4101 is_pending 0', line)
+
+    def test_open_whose_queue_item_stays_at_chirpstack_is_resent_without_a_new_open(self):
+        """ChirpStack still holds the item after a lost window: the next uplink alone gets the same item delivered."""
+        row, held = self.expectation_row('e1', self.QUEUE), f'{self.QUEUE}|2|4101|0'
+        case = self.valve_case([[None], [1.0]], **self.valve_reads(
+            [f'match 81 {self.VALVE_COUNT}\n' + self.SHORT_LEAD + self.CLOSED,
+             f'match 82 {self.VALVE_COUNT}\n' + self.SCHEDULED + self.CLOSED,
+             f'match 83 {self.VALVE_COUNT}\n' + self.CLOSED],
+            ['', row, row], [held, '']))
+        self.assertEqual(case.result, 'WM1302 model delivered=3, Concentratord frames received=3; '
+                         'passed on attempt 2/3 after 1 retry (attempt 1: open command absent after 150.00 s; '
+                         'RX1 +1 s: open command refused by concentratord at enqueue: too late, only 0.3 ms lead time)')
+        case.gui_open.assert_called_once()
+        self.assertEqual([round(call.args[0], 2) for call in case.air.receive.call_args_list], [2, 40, 110, 40])
+        self.assertIn(f'attempt 2/3 (queue item {self.QUEUE}, sent {radio_suite.UPLINK}): received |', case.lines[1])
+
+    def test_second_late_copy_is_drained_before_the_retry(self):
+        """Both receive slots wrap: both copies leave the socket, so neither passes for the retry's command."""
+        first, second = self.expectation_row('e1', 'q1'), self.expectation_row('e2', 'q2')
+        frame = f'match 81 {self.VALVE_COUNT}\n'
+        case = self.valve_case([[139.31, 140.31], [1.0]], **self.valve_reads(
+            [frame + self.SCHEDULED + self.CLOSED, frame + self.SCHEDULED + self.CLOSED, frame + self.CLOSED],
+            ['', first, first, first + '\n' + second], ['', '']))
+        self.assertEqual([round(call.args[0], 2) for call in case.air.receive.call_args_list],
+                         [2, 40, 110, 10.69, 9.69, 2, 40])
+        self.assertIn('passed on attempt 2/3 after 1 retry (attempt 1: open command late after 139.31 s '
+                      '(drained with 1 later copy)', case.result)
+        self.assertEqual([call.args[0] for call in case.air.send.call_args_list], [b'trigger', b'trigger', b'report'])
+
+    def test_valve_attempt_missing_its_frame_or_edge_part_fails_before_a_retry(self):
+        """A timeout without Concentratord's frame, or without the edge's queue item, is not retried."""
+        row = self.expectation_row('e1', 'q1')
+        no_frame = self.valve_case(
+            [[None], [1.0]], error='incomplete valve receipt',
+            **self.valve_reads([self.NO_FRAME], ['', row], ['']))
+        self.assertIn('attempt 1/3 (queue item q1, sent', no_frame.lines[0])
+        self.assertIn('missing frame, downlink | frame: MISSING (no Concentratord "Frame received" line in '
+                      'the attempt window of the persistent log)', no_frame.lines[0])
+        no_expectation = self.valve_case(
+            [[None], [1.0]], error='incomplete valve receipt',
+            **self.valve_reads([f'match 81 {self.VALVE_COUNT}\n' + self.CLOSED], ['', ''], ['']))
+        self.assertIn('missing edge, downlink |', no_expectation.lines[0])
+        self.assertIn('edge: MISSING (the edge recorded no new valve expectation for the open)', no_expectation.lines[0])
+        foreign_frame = self.valve_case(
+            [[None], [1.0]], error='incomplete valve receipt',
+            **self.valve_reads(['match 99 200000000\n' + self.CLOSED], ['', row], ['']))
+        self.assertIn('missing frame, downlink | frame: MISSING (no Concentratord frame carries the model stamp '
+                      f'{self.valve_stamp(1)} (count_us {self.valve_stamp(1) // 32 % (1 << 27)} mod 2^27, less up to '
+                      '20000 us); frames at 902300000 Hz, 125000 Hz, SF7: uplink_id 99 (count_us 200000000))',
+                      foreign_frame.lines[0])
+        for case in (no_frame, no_expectation, foreign_frame):
+            case.gui_open.assert_called_once()
+            self.assert_only_triggers(case)
+            self.assertEqual(case.clock(), radio_suite.EARLY_WINDOW_TIMEOUT + radio_suite.VALVE_DRAIN_WINDOW)
+
+    def test_older_expectation_cannot_stand_in_for_a_new_open(self):
+        """An open that added no expectation is missing its edge part, even though older rows exist."""
+        older = self.expectation_row('e0', 'q0')
+        case = self.valve_case(
+            [[None], [1.0]], error='incomplete valve receipt',
+            **self.valve_reads([f'match 81 {self.VALVE_COUNT}\n' + self.CLOSED], [older, older], ['']))
+        self.assertIn('missing edge, downlink |', case.lines[0])
+        self.assertIn('edge: MISSING (the edge recorded no new valve expectation for the open)', case.lines[0])
+        case.gui_open.assert_called_once()
+        self.assert_only_triggers(case)
+
+    def test_open_attempt_whose_edge_transport_was_not_accepted_fails_before_a_retry(self):
+        row = self.expectation_row('e1', None, phase='ATTEMPTED')
+        case = self.valve_case(
+            [[None], [1.0]], error='incomplete valve receipt',
+            **self.valve_reads([self.NO_FRAME], ['', row], ['']))
+        self.assertIn('missing frame, edge, downlink |', case.lines[0])
+        self.assertIn('edge: MISSING (the edge transport phase is ATTEMPTED with no queue item)', case.lines[0])
+        case.gui_open.assert_called_once()
+        self.assert_only_triggers(case)
+
+    def test_reissued_open_that_the_gui_refuses_names_the_attempt(self):
+        frame = f'match 81 {self.VALVE_COUNT}\n'
+        row = self.expectation_row('e1', 'q1')
+        air, valve, clock = self.valve_fixture([[None], [1.0]])
+        gui_open = Mock(side_effect=[None, RuntimeError('GUI open check failed')])
+        with (patch.object(radio_suite.time, 'monotonic', clock), redirect_stdout(io.StringIO()),
+              self.assertRaisesRegex(RuntimeError, 'open attempt 2/3: GUI open check failed')):
+            radio_suite.run_valve(self.answering(self.valve_reads([frame + self.CLOSED], ['', row, row], [''])),
+                                  air, {radio_suite.VALVE: valve}, gui_open)
+        self.assert_only_triggers(SimpleNamespace(air=air))
+
+    def test_open_report_missing_from_the_concentratord_log_fails(self):
+        """The frame that carries the open state needs its own receipt."""
+        row = self.expectation_row('e1', self.QUEUE)
+        case = self.valve_case(
+            [[1.0]], error='incomplete open report receipt: no Concentratord "Frame received" line',
+            **self.valve_reads([f'match 81 {self.VALVE_COUNT}\n' + self.SCHEDULED + self.CLOSED, self.NO_FRAME],
+                               ['', row], ['']))
+        self.assertEqual(len(case.lines), 1)
+        self.assertEqual([call.args[0] for call in case.air.send.call_args_list], [b'trigger', b'report'])
+
+    def test_open_command_with_another_payload_fails_at_once(self):
+        row = self.expectation_row('e1', 'q1')
+        case = self.valve_case(
+            [[1.0], [1.0]], error='timed-open downlink payload mismatch', payload=b'\x41\x02',
+            **self.valve_reads([f'match 81 {self.VALVE_COUNT}\n' + self.CLOSED], ['', row], ['']))
+        self.assert_only_triggers(case)
+        self.assertEqual(case.lines, [])
+
+    def test_valve_window_errors_fail_the_case_before_a_retry(self):
+        row = self.expectation_row('e1', 'q1')
+        for answer, reason in (((0, 'crc-filter-off'), 'disable_crc_filter is not false'),
+                               ((1, ''), 'persistent log unreadable'),
+                               ((0, 'marked\nram 0'), 'end marker did not reach the persistent log within 10 s'),
+                               ((0, 'rotated-away'), 'rotated past the attempt marker')):
+            with self.subTest(reason=reason):
+                case = self.valve_case(
+                    [[None], [1.0]], error='incomplete valve receipt: .*' + reason,
+                    **self.valve_reads([answer], ['', row], ['']))
+                self.assert_only_triggers(case)
+
+    def test_downlink_fate_reports_the_lead_at_enqueue_and_follows_the_schedule(self):
+        """Concentratord's scheduling line, with the lead it had, wrap-safe, and only for this downlink."""
+        def frame(count, current, sent=True, downlink='7'):
+            events = [radio_suite.Downlink('enqueue', downlink, count, current)]
+            return radio_suite.Frames(downlinks=events + [radio_suite.Downlink('tx', downlink, count, None)] if sent else [])
+        fate = radio_suite._downlink_fate
+        scheduled = 'Concentratord scheduled the open command for TX (downlink_id 7)'
+        self.assertEqual(fate(frame(248517304, 248376850), 248517304, 'open command', lead=True),
+                         scheduled + ' with 140.5 ms lead at enqueue')
+        self.assertEqual(fate(frame(100, 4294967200), 100, 'open command', lead=True),
+                         scheduled + ' with 0.2 ms lead at enqueue')
+        self.assertEqual(fate(frame(200, 300), 200, 'open command', lead=True),
+                         scheduled + ' with 0.1 ms past its TX time at enqueue')
+        self.assertEqual(fate(frame(248517304, 248376850), 248517304, 'open command'), scheduled)
+        self.assertIsNone(fate(frame(248517304, 248376850, sent=False), 248517304, 'open command', lead=True))
+        self.assertIsNone(fate(frame(248517304, 248376850), 248517305, 'open command', lead=True))
+
+    def test_valve_downlinks_name_each_receive_slot_after_the_frame(self):
+        """RX1 refused for want of lead, RX2 scheduled: both are reported; nothing without a frame."""
+        count = 247517304
+        refused = radio_suite.Downlink('too-late', '3000953403', count + 1000000, count + 1000000 - 300)
+        scheduled = [radio_suite.Downlink('enqueue', '9', count + 2000000, count + 20000),
+                     radio_suite.Downlink('tx', '9', count + 2000000, None)]
+        self.assertEqual(
+            radio_suite._valve_downlinks(radio_suite.Frames(downlinks=[*scheduled, refused]), count),
+            'RX1 +1 s: open command refused by concentratord at enqueue: too late, only 0.3 ms lead time; '
+            'RX2 +2 s: Concentratord scheduled the open command for TX (downlink_id 9) with 1980.0 ms lead at enqueue')
+        self.assertEqual(radio_suite._valve_downlinks(radio_suite.Frames(downlinks=scheduled), count),
+                         'RX2 +2 s: Concentratord scheduled the open command for TX (downlink_id 9) with 1980.0 ms lead at enqueue')
+        self.assertEqual(radio_suite._valve_downlinks(radio_suite.Frames(), count), 'no open-command downlink logged')
+        self.assertEqual(radio_suite._valve_downlinks(radio_suite.Frames(), None),
+                         'no Concentratord frame to schedule against')
 
     def test_no_output_or_message_names_crc_ok(self):
         # Concentratord, its HAL wrapper and libconcentratord never log the
@@ -564,6 +854,111 @@ class RadioTests(unittest.TestCase):
                 if not line.startswith('concentratord pid'):
                     self.assertRegex(line, r'^[^\d\n]+ \d+$')
 
+    def valve_outcome(self, receipts, failing=False):
+        """Run only the valve case of stock_cases against log fixtures; return the guest."""
+        def test(label, fn):
+            if label == 'Valve open and outcome':
+                if failing:
+                    with self.assertRaisesRegex(RuntimeError, 'fixture valve failure'):
+                        fn()
+                else:
+                    fn()
+        vm = SimpleNamespace(command=lambda script, *_args, **_keywords: self.run_log_script(script, receipts, 'JoinRequest'),
+                             radio=None, receipts=receipts, note=Mock())
+        with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'gui', return_value=''),
+              patch.object(radio_suite, 'run_valve', return_value='valve evidence',
+                           side_effect=RuntimeError('fixture valve failure') if failing else None)):
+            acceptance.stock_cases(vm, None, test)
+        return vm
+
+    def test_valve_case_saves_the_radio_log_and_both_queues_pass_or_fail(self):
+        """Radio daemon and marker lines from both log files, plus both queue states, are saved whatever the verdict."""
+        line = 'Sun Apr 13 16:49:17 2025 '
+        radio = [
+            line + 'user.notice osi-radio-suite: marker-0001',
+            line + 'user.info chirpstack-concentratord-sx1302[10712]: Frame received, uplink_id: 1902493660, count_us: 247517304',
+            line + 'user.info chirpstack-mqtt-forwarder[10944]: Received downlink command, downlink_id: 3000953403',
+            line + 'user.info chirpstack-concentratord-sx1302[10712]: Scheduled packet for TX, downlink_id: 3000953403, count_us: 248517304']
+        for failing in (False, True):
+            with self.subTest(failing=failing), tempfile.TemporaryDirectory() as directory:
+                receipts = Path(directory)
+                (receipts/'osi-system.log.old').write_text('\n'.join([
+                    line + 'daemon.notice procd: /etc/rc.d/S99zzz-lorawan-devices.init: 2025-04-13T16:49:07.115143Z  INFO '
+                    'chirpstack::storage::device_profile_template: Device-profile template upserted', radio[0], radio[1]]) + '\n')
+                (receipts/'osi-system.log').write_text('\n'.join([
+                    radio[2], line + 'daemon.info node[13309]: 13 Apr 16:49:17 - [warn] [function:Persist STREGA Uplink] '
+                    'STREGA CLOSED evidence not quiesced', radio[3]]) + '\n')
+                item = radio_suite.QueueItem(self.QUEUE, '2', '4101', '0')
+                expectation = radio_suite.Expectation('a56e55db', 'PENDING_OBSERVATION', 'ACCEPTED', self.QUEUE,
+                                                      '2025-04-13T16:49:14.498Z')
+                with (patch.object(radio_suite, '_edge_expectations', return_value=radio_suite.EdgeState((expectation,))) as edge,
+                      patch.object(radio_suite, '_chirpstack_queue',
+                                   return_value=radio_suite.QueueState((item,))) as queue):
+                    vm = self.valve_outcome(receipts, failing)
+                self.assertEqual((receipts/'valve-radio.log').read_text(), '\n'.join(radio) + '\n')
+                self.assertEqual((receipts/'valve-queue.log').read_text(), (
+                    f'edge valve_actuation_expectations for {radio_suite.VALVE}:\n'
+                    f'a56e55db PENDING_OBSERVATION queue item {self.QUEUE} ACCEPTED at 2025-04-13T16:49:14.498Z\n'
+                    f'ChirpStack device_queue_item for {radio_suite.VALVE}:\n'
+                    f'{self.QUEUE} FPort 2 data 4101 is_pending 0\n'))
+                edge.assert_called_once_with(vm, radio_suite.VALVE)
+                queue.assert_called_once_with(vm, radio_suite.VALVE)
+                vm.note.assert_not_called()
+
+    def test_valve_attempt_lines_reach_the_results_log(self):
+        """stock_cases hands run_valve the same record function the join attempts use."""
+        record = Mock()
+
+        def test(label, fn):
+            if label == 'Valve open and outcome':
+                fn()
+
+        def run_valve(_vm, _air, _session, _gui_open, *, log):
+            log('valve attempt line')
+            return 'valve evidence'
+
+        with (patch.object(radio_suite, 'run_valve', run_valve), patch.object(radio_suite, 'valve_diagnostics'),
+              patch.object(acceptance, 'gui', return_value='')):
+            acceptance.stock_cases(SimpleNamespace(radio=None), None, test, log=record)
+        record.assert_called_once_with('valve attempt line')
+
+    def test_unreadable_queue_state_is_saved_and_noted(self):
+        """A queue read that fails leaves the other in the file and a note; it changes no verdict."""
+        with tempfile.TemporaryDirectory() as directory:
+            receipts = Path(directory)
+            (receipts/'osi-system.log').write_text('')
+            with (patch.object(radio_suite, '_edge_expectations', return_value=radio_suite.EdgeState()),
+                  patch.object(radio_suite, '_chirpstack_queue',
+                               return_value=radio_suite.QueueState(error='ChirpStack database unreadable'))):
+                vm = self.valve_outcome(receipts)
+            self.assertEqual((receipts/'valve-queue.log').read_text(), (
+                f'edge valve_actuation_expectations for {radio_suite.VALVE}:\nempty\n'
+                f'ChirpStack device_queue_item for {radio_suite.VALVE}:\nChirpStack database unreadable\n'))
+            self.assertIn('valve diagnostics incomplete: ChirpStack database unreadable', vm.note.call_args.args[0])
+
+    def test_failed_evidence_capture_keeps_the_valve_verdict(self):
+        """A guest that stops answering during the capture neither masks the valve error nor fails a pass."""
+        for failing in (False, True):
+            with self.subTest(failing=failing), tempfile.TemporaryDirectory() as directory:
+                receipts = Path(directory)
+                vm = SimpleNamespace(command=Mock(side_effect=RuntimeError('guest serial closed')),
+                                     radio=None, receipts=receipts, note=Mock())
+
+                def test(label, fn):
+                    if label == 'Valve open and outcome':
+                        if failing:
+                            with self.assertRaisesRegex(RuntimeError, 'fixture valve failure'):
+                                fn()
+                        else:
+                            fn()
+
+                with (redirect_stdout(io.StringIO()), patch.object(acceptance, 'gui', return_value=''),
+                      patch.object(radio_suite, 'run_valve', return_value='valve evidence',
+                                   side_effect=RuntimeError('fixture valve failure') if failing else None)):
+                    acceptance.stock_cases(vm, None, test)
+                vm.note.assert_called_once_with("valve diagnostics failed: RuntimeError('guest serial closed')")
+                self.assertEqual(list(receipts.iterdir()), [])
+
     # Real guest scripts against log fixtures.
     LINE = 'Sun Apr 13 16:45:08 2025 user.'
     DAEMON = 'chirpstack-concentratord-sx1302[51]: '
@@ -814,6 +1209,57 @@ INSERT INTO device_keys VALUES (x'A840410000000002', '2025-04-13 16:47:51.17+00:
             database.unlink()
             self.assertEqual(radio_suite._chirpstack_state(vm, 'A840410000000001', join),
                              state(error='ChirpStack database unreadable'))
+
+    @unittest.skipUnless(shutil.which('sqlite3'), 'sqlite3 CLI absent')
+    def test_edge_and_chirpstack_queries_read_the_queue_item(self):
+        """Both queue reads against tables shaped like the edge's and ChirpStack 4.12.1's."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            farming, chirpstack = root/'farming.db', root/'chirpstack.sqlite'
+            with closing(sqlite3.connect(farming)) as db:
+                db.executescript(f"""
+CREATE TABLE valve_actuation_expectations (expectation_id text primary key, device_eui text not null,
+    reconciliation_state text not null default 'PENDING_OBSERVATION', transport_json text);
+INSERT INTO valve_actuation_expectations VALUES ('e1', 'a840410000000001', 'PENDING_OBSERVATION',
+    '{json.dumps({"phase": "ACCEPTED", "queue_id": self.QUEUE, "accepted_at": "2025-04-13T16:49:14.498Z"})}');
+INSERT INTO valve_actuation_expectations VALUES ('e2', 'A840410000000001', 'OBSERVED_RUNNING', NULL);
+INSERT INTO valve_actuation_expectations VALUES ('e3', 'A840410000000001', 'PENDING_OBSERVATION', 'not json');
+INSERT INTO valve_actuation_expectations VALUES ('e4', 'A840410000000002', 'PENDING_OBSERVATION', '{{"queue_id":"other"}}');
+""")
+            with closing(sqlite3.connect(chirpstack)) as db:
+                db.executescript(f"""
+CREATE TABLE device_queue_item (id text not null primary key,
+    dev_eui blob references device on delete cascade not null, created_at datetime not null,
+    f_port smallint not null, confirmed boolean not null, data blob not null, is_pending boolean not null,
+    f_cnt_down bigint null, timeout_after datetime, is_encrypted boolean default FALSE not null, expires_at datetime null);
+INSERT INTO device_queue_item VALUES ('{self.QUEUE}', x'A840410000000001', '2025-04-13 16:49:14.4+00:00',
+    2, false, x'4101', false, NULL, NULL, false, '2025-04-13 17:20:13.71+00:00');
+""")
+
+            def command(script, timeout=None):
+                script = script.replace(radio_suite.DB, quote(str(farming)))
+                script = script.replace(radio_suite.CHIRPSTACK_DB, quote(str(chirpstack)))
+                result = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
+                return result.returncode, result.stdout.strip()
+
+            vm = SimpleNamespace(command=command)
+            expectation, item = radio_suite.Expectation, radio_suite.QueueItem
+            self.assertEqual(radio_suite._edge_expectations(vm, 'A840410000000001'), radio_suite.EdgeState((
+                expectation('e1', 'PENDING_OBSERVATION', 'ACCEPTED', self.QUEUE, '2025-04-13T16:49:14.498Z'),
+                expectation('e2', 'OBSERVED_RUNNING'), expectation('e3', 'PENDING_OBSERVATION'))))
+            self.assertEqual(radio_suite._chirpstack_queue(vm, 'A840410000000001'),
+                             radio_suite.QueueState((item(self.QUEUE, '2', '4101', '0'),)))
+            self.assertEqual(radio_suite._chirpstack_queue(vm, 'A840410000000002'), radio_suite.QueueState(()))
+            farming.unlink()
+            chirpstack.unlink()
+            self.assertEqual(radio_suite._edge_expectations(vm, 'A840410000000001'),
+                             radio_suite.EdgeState(error='edge database unreadable'))
+            self.assertEqual(radio_suite._chirpstack_queue(vm, 'A840410000000001'),
+                             radio_suite.QueueState(error='ChirpStack database unreadable'))
+            with self.assertRaisesRegex(ValueError, 'invalid device identifier'):
+                radio_suite._edge_expectations(vm, "x' OR 1=1 --")
+            with self.assertRaisesRegex(ValueError, 'invalid device identifier'):
+                radio_suite._chirpstack_queue(vm, "x' OR 1=1 --")
 
 
 class BundleNameTests(unittest.TestCase):

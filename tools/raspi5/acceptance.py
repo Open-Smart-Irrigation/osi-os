@@ -643,7 +643,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
 
 def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=False):
-    from radio_suite import Radio, VALVE, radio_diagnostics, run_uplinks, run_valve
+    from radio_suite import Radio, VALVE, radio_diagnostics, run_uplinks, run_valve, valve_diagnostics
 
     def boot():
         ready(vm)
@@ -679,9 +679,18 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
             raise
     test('WM1302 uplinks',uplinks)
     def valve():
-        evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE))
-        gui(vm,password,'outcome',VALVE)
-        return evidence
+        try:
+            evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE), log=log)
+            gui(vm,password,'outcome',VALVE)
+            return evidence
+        finally:
+            try:
+                valve_diagnostics(vm)
+            except Exception as error:
+                try:
+                    vm.note(f'valve diagnostics failed: {error!r}')
+                except Exception:
+                    pass
     test('Valve open and outcome',valve)
     def reboot():
         sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")

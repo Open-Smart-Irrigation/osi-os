@@ -132,8 +132,8 @@ downlink, matched by its scheduled `count_us`:
 (the queue reached it after its time), `refused by concentratord at enqueue:
 too late` with the lead time it had or how far past its time it was, or
 `Concentratord scheduled the join-accept for TX`. One retained 0.8.3 run lost
-a join-accept to the first case, with no counter wrap. The valve case needs at
-least one matching `Frame received` line in its own window.
+a join-accept to the first case, with no counter wrap. The valve case has its
+own receipt, under [Valve open and outcome](#valve-open-and-outcome).
 
 `radio-diagnostics.log` counts selected log lines in both sinks (including
 `Scheduled packet is too old`), lists ChirpStack's DevNonce count and DevAddr
@@ -155,6 +155,66 @@ radio traffic. The counts for the rotated file come from the gate's
 per-attempt evidence analysis. This repository's own read of that disk could
 not extract the rotated file, so it checked only the active file's window at
 16:45:57.
+
+### Valve open and outcome
+
+The open command gets the windows and retries of a join-accept. An attempt
+issues the one-minute open from the GUI, or re-sends the queue item ChirpStack
+still holds, then sends one uplink and waits 40 s for the command at the
+emulated valve. On a miss the runner keeps reading the radio socket until 150 s
+after the uplink. A wrapped command and any later copy of it are read off the
+socket before the next attempt. Three attempts is the limit.
+
+Each attempt logs one line with five parts:
+
+`A840410000000001 valve open attempt 1/3 (queue item <id>, sent 902300000 Hz, 125000 Hz, SF7): missing downlink | frame: Concentratord uplink_id 1902493660 (count_us 247517304) at 902300000 Hz, 125000 Hz, SF7, model stamp <stamp>; edge: queue item <id> ACCEPTED at 2025-04-13T16:49:14.498Z; chirpstack: ChirpStack queue after the attempt: empty; concentratord: RX1 +1 s: Concentratord scheduled the open command for TX (downlink_id 3000953403) with 140.5 ms lead at enqueue; downlink: MISSING (open command late after 139.31 s (drained))`
+
+1. A Concentratord `Frame received` line in the attempt's window, bound to
+   the model's stamp as in part 1 of the join receipt.
+2. The edge's queue item, read from the gateway's own database. For each open,
+   `valve_actuation_expectations.transport_json` holds the `queue_id`, `phase`
+   and `accepted_at`. An attempt that issued an open takes the newest
+   expectation the read before the issue did not hold. A re-send takes the
+   expectation that carries its item. The ID is the one ChirpStack returned
+   when the edge enqueued the command.
+3. ChirpStack's `device_queue_item` rows for the valve after the attempt: ID,
+   FPort, payload and `is_pending`. ChirpStack 4.12.1 deletes an unconfirmed
+   item once the gateway has taken it, so the queue is empty after a lost
+   downlink.
+4. What Concentratord did with each receive slot after the frame, RX1 at +1 s
+   and RX2 at +2 s: `Concentratord scheduled the open command for TX
+   (downlink_id N) with X ms lead at enqueue`, refused at enqueue
+   (`too late`), dropped (`too old`), or `no open-command downlink logged`.
+   The lead is `counter_us - current_counter_us` of the
+   `Enqueueing timestamped packet` line, wrap-safe.
+5. Whether the emulated valve got the command: received after X s, late after
+   X s (drained), or absent after Y s.
+
+**Retry rule.** Only an attempt with parts 1 to 3 whose command is late or
+absent is retried. Any other missing part fails the case on that attempt. A
+retry re-sends when ChirpStack's queue still holds the edge's item: the next
+uplink alone opens a receive window for it. Otherwise the runner issues the
+open again, and the edge creates a new queue item.
+
+The case row reports a pass on a later attempt with the count and the reasons:
+
+`Valve open and outcome     PASS    215.3s  WM1302 model delivered=3, Concentratord frames received=3; passed on attempt 2/3 after 1 retry (attempt 1: open command late after 139.31 s (drained); RX1 +1 s: Concentratord scheduled the open command for TX (downlink_id 3000953403) with 140.5 ms lead at enqueue)`
+
+Three misses end the case with `open command not received after 3 attempts`.
+The uplink that reports the open state needs its own frame receipt.
+
+After the case, pass or fail, the candidate directory holds two more files:
+
+- `valve-radio.log` has every Concentratord and MQTT forwarder line and every
+  harness marker of the persistent logs, in order across a rotation. Node-RED
+  lines and the device-profile import are left out. ChirpStack itself writes
+  no syslog line in these images; the forwarder's `Received downlink command`
+  and `Received ack` lines are its downlink record.
+- `valve-queue.log` has the valve's expectations with their queue items and
+  the ChirpStack queue rows, as they stand after the case.
+
+A read that fails is written as such in the file and noted in
+`harness-events.log`. It does not change the verdict.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's
