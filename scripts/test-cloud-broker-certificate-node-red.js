@@ -8,9 +8,11 @@
 // verifyservercert is never overridden: it must come from the shipped node.
 //
 // Cases:
-//   self-signed   a self-signed server certificate is refused: no TLS
-//                 session completes, no MQTT CONNECT, no credentials leave
-//                 the client, no publish reaches the broker.
+//   self-signed   a self-signed server certificate is refused: the server
+//                 sees repeated TLS attempts, an in-process TLS probe with
+//                 verification on reports the trust failure for the same
+//                 port and trust store, no MQTT CONNECT, no credentials
+//                 leave the client, no publish reaches the broker.
 //   untrusted-ca  a certificate from a CA the process does not trust is
 //                 refused the same way.
 //   trusted-ca    a certificate from a CA injected through
@@ -21,12 +23,13 @@
 //                 CA while running; the client recovers on its next retry
 //                 without a restart.
 //   placeholder   a "${...}" value in place of the literal boolean does not
-//                 enable verification (the client connects to the
-//                 self-signed broker), which is why the shipped property
-//                 must stay the literal boolean true.
+//                 turn verification on (the in-process probe still refuses
+//                 the certificate, but the client connects to it), which is
+//                 why the shipped property must stay the literal boolean
+//                 true.
 //
-// Throwaway certificates are generated with openssl at run time; nothing
-// here is a real credential.
+// Throwaway certificates are generated with openssl at run time in a
+// per-run scratch directory; nothing here is a real credential.
 //
 // Run: node scripts/test-cloud-broker-certificate-node-red.js
 // (needs npm ci --prefix scripts/fixtures/release-smoke and openssl)
@@ -74,9 +77,15 @@ async function child(profile, kase) {
   delete broker.credentials;
   if (kase === 'placeholder') broker.verifyservercert = '${OSI_UNSET_VERIFY}';
 
-  const certDir = path.join(os.tmpdir(), 'osi-broker-tls-certs');
+  // Per-run scratch directory created by the parent (mkdtemp) and passed
+  // through the environment, so concurrent runs never share certificates.
+  const certDir = process.env.OSI_BROKER_TLS_CERTDIR;
+  assert.ok(certDir, 'OSI_BROKER_TLS_CERTDIR must point at the per-run certificate directory');
   const aedes = fixtureRequire('aedes')();
-  const seen = { authenticates: [], publishes: [], tlsClientErrors: [], connectsBeforeSwap: 0, swapped: false };
+  // Client-side connection errors, from the mqtt client the broker node
+  // owns (its own error handler is empty), so a refusal can be told apart
+  // from a harness that never dials.
+  const seen = { authenticates: [], publishes: [], tlsClientErrors: [], clientErrors: [], connectsBeforeSwap: 0, swapped: false };
   aedes.on('client', (client) => { if (!seen.swapped) seen.connectsBeforeSwap += 1; });
   aedes.authenticate = (client, username, password, done) => {
     seen.authenticates.push(username || '<none>');
@@ -130,21 +139,57 @@ async function child(profile, kase) {
   await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const waitFor = async (predicate, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sleep(250);
+    }
+    return predicate();
+  };
+  // The broker node's mqtt client appears once the flow (and its config
+  // node with credentials) finishes loading; attach the error hook by
+  // polling for it rather than assuming it exists the moment start()
+  // resolves. mqtt.js only re-emits socket-class stream errors on its
+  // client and suppresses certificate errors, so whatever arrives here is
+  // diagnostics; the asserted client-side reason comes from the direct TLS
+  // probe below.
+  const hooked = await waitFor(() => {
+    const n = RED.nodes.getNode(BROKER_ID);
+    return !!(n && n.client);
+  }, 5000);
+  assert.ok(hooked, 'the broker node exposes its mqtt client');
+  RED.nodes.getNode(BROKER_ID).client.on('error', (error) => {
+    seen.clientErrors.push(String((error && (error.code || error.message)) || error));
+  });
+  // Client-side reason, from the same process and trust store the mqtt
+  // client uses: a direct TLS connection to the same broker port with
+  // verification on. Refusal cases must fail here with a trust failure;
+  // the trusted case must complete the handshake.
+  const probeTls = () => new Promise((resolve) => {
+    const socket = require('node:tls').connect(
+      { host: '127.0.0.1', port: server.address().port, rejectUnauthorized: true },
+      () => { socket.destroy(); resolve({ ok: true }); },
+    );
+    socket.on('error', (error) => resolve({ ok: false, error: String((error && (error.code || error.message)) || error) }));
+  });
+  const probe = await probeTls();
   const publishAll = async () => {
     for (let i = 0; i < MESSAGES; i++) {
       RED.nodes.getNode('test-inject').receive({ payload: { i }, topic: 'devices/' + EUI + '/heartbeat' });
       await sleep(150);
     }
   };
-  const waitConnected = async (timeoutMs) => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const node = RED.nodes.getNode(BROKER_ID);
-      if (node && node.connected) return true;
-      await sleep(250);
-    }
-    return false;
-  };
+  const waitConnected = async (timeoutMs) => waitFor(() => {
+    const node = RED.nodes.getNode(BROKER_ID);
+    return !!(node && node.connected);
+  }, timeoutMs);
+  // A refusal is proven, not assumed: the server must see TLS attempts and
+  // the in-process TLS probe must report a trust failure for them.
+  const waitRefused = async () => waitFor(
+    () => seen.tlsClientErrors.length >= 2,
+    10000,
+  );
 
   let connectedDuringRun = false;
   if (kase === 'trusted-ca' || kase === 'placeholder') {
@@ -152,7 +197,7 @@ async function child(profile, kase) {
     await publishAll();
     await sleep(1500);
   } else if (kase === 'recover') {
-    await sleep(4000); // a few refused attempts on the unverified certificate
+    await waitRefused(); // refused attempts only, before the swap
     const node = RED.nodes.getNode(BROKER_ID);
     connectedDuringRun = !!(node && node.connected);
     await publishAll(); // dropped while not connected
@@ -162,7 +207,7 @@ async function child(profile, kase) {
     await publishAll();
     await sleep(1500);
   } else {
-    await sleep(5000); // refused attempts only
+    await waitRefused(); // the same 10 s window the success paths get
     const node = RED.nodes.getNode(BROKER_ID);
     connectedDuringRun = !!(node && node.connected);
     await publishAll(); // must all be dropped, never queued
@@ -179,6 +224,8 @@ async function child(profile, kase) {
     publishes: seen.publishes.length,
     connectsBeforeSwap: seen.connectsBeforeSwap,
     tlsClientErrors: seen.tlsClientErrors.slice(0, 5),
+    clientErrors: seen.clientErrors.slice(0, 5),
+    tlsProbe: probe,
   };
   await RED.stop();
   httpServer.closeAllConnections();
@@ -190,20 +237,32 @@ async function child(profile, kase) {
   return result;
 }
 
-function runChild(profile, kase, extraCa) {
+const PROXY_ENV_KEYS = [
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+];
+
+function runChild(profile, kase, extraCa, certDir) {
   const env = { ...process.env };
   delete env.NODE_EXTRA_CA_CERTS;
   delete env.OSI_CLOUD_BROKER_AUTOCONNECT;
   delete env.OSI_CLOUD_BROKER_URL;
   delete env.OSI_UNSET_VERIFY;
+  // A proxy in the environment would route the loopback dial through it.
+  for (const key of PROXY_ENV_KEYS) delete env[key];
   env.DEVICE_EUI = EUI;
   env.DEVICE_MQTT_PASSWORD = 'fixture-mqtt';
+  env.OSI_BROKER_TLS_CERTDIR = certDir;
   if (extraCa) env.NODE_EXTRA_CA_CERTS = extraCa;
   const result = spawnSync(process.execPath, [__filename, '--child', profile, kase], { encoding: 'utf8', timeout: 90000, env });
   const line = (result.stdout || '').split('\n').find((l) => l.startsWith('RESULT '));
   assert.ok(line, `${profile} ${kase}: child produced no result (status ${result.status})\n${result.stderr}`);
   return JSON.parse(line.slice(7));
 }
+
+// A trust-failure signature, from the client-side TLS probe's error: either
+// a Node TLS error code or the OpenSSL reason string in the message.
+const TRUST_FAILURE = /SELF_SIGNED|self-signed|UNABLE_TO_VERIFY|unable to verify|unable to get local issuer|ALTNAME/i;
 
 if (process.argv[2] === '--child') {
   child(process.argv[3], process.argv[4]).then(
@@ -216,39 +275,52 @@ if (process.argv[2] === '--child') {
   );
 } else {
   assert.equal(fixtureRequire('node-red/package.json').version, '3.1.15', 'the image Node-RED runtime is pinned');
-  const certDir = path.join(os.tmpdir(), 'osi-broker-tls-certs');
-  fs.rmSync(certDir, { recursive: true, force: true });
-  fs.mkdirSync(certDir, { recursive: true });
-  makeCertificates(certDir);
-  const caPem = path.join(certDir, 'ca.pem');
+  // Per-run certificate scratch (mkdtemp), removed even when an assertion
+  // fails; the child only receives the directory through the environment.
+  const certDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-broker-tls-'));
+  try {
+    makeCertificates(certDir);
+    const caPem = path.join(certDir, 'ca.pem');
 
-  for (const profile of PROFILES) {
-    const selfSigned = runChild(profile, 'self-signed', null);
-    assert.equal(selfSigned.nodeRed, '3.1.15');
-    assert.equal(selfSigned.connected, false, `${profile} self-signed: the client never completes a connection`);
-    assert.deepEqual(selfSigned.authenticates, [], `${profile} self-signed: no MQTT CONNECT, so no credentials reach the broker`);
-    assert.equal(selfSigned.publishes, 0, `${profile} self-signed: nothing is published`);
+    for (const profile of PROFILES) {
+      const selfSigned = runChild(profile, 'self-signed', null, certDir);
+      assert.equal(selfSigned.nodeRed, '3.1.15');
+      assert.equal(selfSigned.rejectUnauthorized, true, `${profile} self-signed: the client runs with certificate verification on`);
+      assert.ok(!selfSigned.tlsProbe.ok && TRUST_FAILURE.test(selfSigned.tlsProbe.error), `${profile} self-signed: the in-process TLS probe reports a trust failure ${JSON.stringify(selfSigned.tlsProbe)}`);
+      assert.ok(selfSigned.tlsClientErrors.length >= 2, `${profile} self-signed: the server saw repeated TLS attempts ${JSON.stringify(selfSigned)}`);
+      assert.equal(selfSigned.connected, false, `${profile} self-signed: the client never completes a connection`);
+      assert.deepEqual(selfSigned.authenticates, [], `${profile} self-signed: no MQTT CONNECT, so no credentials reach the broker`);
+      assert.equal(selfSigned.publishes, 0, `${profile} self-signed: nothing is published`);
 
-    const untrusted = runChild(profile, 'untrusted-ca', null);
-    assert.equal(untrusted.connected, false, `${profile} untrusted CA: the client never completes a connection`);
-    assert.deepEqual(untrusted.authenticates, [], `${profile} untrusted CA: no credentials reach the broker`);
-    assert.equal(untrusted.publishes, 0, `${profile} untrusted CA: nothing is published`);
+      const untrusted = runChild(profile, 'untrusted-ca', null, certDir);
+      assert.equal(untrusted.rejectUnauthorized, true, `${profile} untrusted CA: the client runs with certificate verification on`);
+      assert.ok(!untrusted.tlsProbe.ok && TRUST_FAILURE.test(untrusted.tlsProbe.error), `${profile} untrusted CA: the in-process TLS probe reports a trust failure ${JSON.stringify(untrusted.tlsProbe)}`);
+      assert.ok(untrusted.tlsClientErrors.length >= 2, `${profile} untrusted CA: the server saw repeated TLS attempts ${JSON.stringify(untrusted)}`);
+      assert.equal(untrusted.connected, false, `${profile} untrusted CA: the client never completes a connection`);
+      assert.deepEqual(untrusted.authenticates, [], `${profile} untrusted CA: no credentials reach the broker`);
+      assert.equal(untrusted.publishes, 0, `${profile} untrusted CA: nothing is published`);
 
-    const trusted = runChild(profile, 'trusted-ca', caPem);
-    assert.equal(trusted.connected, true, `${profile} trusted CA: connects when the CA is injected into the child process`);
-    assert.ok(trusted.authenticates.includes(EUI), `${profile} trusted CA: connects with the gateway credentials ${JSON.stringify(trusted)}`);
-    assert.equal(trusted.publishes, MESSAGES, `${profile} trusted CA: every publish arrives`);
+      const trusted = runChild(profile, 'trusted-ca', caPem, certDir);
+      assert.ok(trusted.tlsProbe.ok, `${profile} trusted CA: the in-process TLS probe completes the handshake ${JSON.stringify(trusted.tlsProbe)}`);
+      assert.equal(trusted.connected, true, `${profile} trusted CA: connects when the CA is injected into the child process`);
+      assert.ok(trusted.authenticates.includes(EUI), `${profile} trusted CA: connects with the gateway credentials ${JSON.stringify(trusted)}`);
+      assert.equal(trusted.publishes, MESSAGES, `${profile} trusted CA: every publish arrives`);
 
-    const recover = runChild(profile, 'recover', caPem);
-    assert.equal(recover.connectsBeforeSwap, 0, `${profile} recover: the unverified certificate is refused first`);
-    assert.equal(recover.connected, true, `${profile} recover: reconnects after the certificate swap without a restart`);
-    assert.equal(recover.publishes, MESSAGES, `${profile} recover: publishes after recovery`);
+      const recover = runChild(profile, 'recover', caPem, certDir);
+      assert.ok(!recover.tlsProbe.ok && TRUST_FAILURE.test(recover.tlsProbe.error), `${profile} recover: the pre-swap certificate fails the in-process TLS probe ${JSON.stringify(recover.tlsProbe)}`);
+      assert.equal(recover.connectsBeforeSwap, 0, `${profile} recover: the unverified certificate is refused first`);
+      assert.equal(recover.connected, true, `${profile} recover: reconnects after the certificate swap without a restart`);
+      assert.equal(recover.publishes, MESSAGES, `${profile} recover: publishes after recovery`);
 
-    const placeholder = runChild(profile, 'placeholder', null);
-    assert.equal(placeholder.connected, true, `${profile} placeholder: an unresolved env value does not enable verification (the shipped property must stay the literal boolean)`);
-    assert.equal(placeholder.publishes, MESSAGES, `${profile} placeholder: the client behaves as if verification were off`);
-    console.log(`${profile}: self-signed refused (tls errors ${JSON.stringify(selfSigned.tlsClientErrors)}); untrusted CA refused; trusted CA ${trusted.publishes} publishes; recovered ${recover.publishes} after swap; placeholder connects ${placeholder.connected}`);
+      const placeholder = runChild(profile, 'placeholder', null, certDir);
+      assert.ok(!placeholder.tlsProbe.ok && TRUST_FAILURE.test(placeholder.tlsProbe.error), `${profile} placeholder: the certificate still fails the in-process TLS probe ${JSON.stringify(placeholder.tlsProbe)}`);
+      assert.equal(placeholder.rejectUnauthorized, false, `${profile} placeholder: an unresolved env value does not turn verification on (the shipped property must stay the literal boolean)`);
+      assert.equal(placeholder.connected, true, `${profile} placeholder: the client connects as if verification were off`);
+      assert.equal(placeholder.publishes, MESSAGES, `${profile} placeholder: the client behaves as if verification were off`);
+      console.log(`${profile}: self-signed refused (probe ${JSON.stringify(selfSigned.tlsProbe)}); untrusted CA refused (probe ${JSON.stringify(untrusted.tlsProbe)}); trusted CA ${trusted.publishes} publishes; recovered ${recover.publishes} after swap; placeholder connects ${placeholder.connected}`);
+    }
+  } finally {
+    fs.rmSync(certDir, { recursive: true, force: true });
   }
-  fs.rmSync(certDir, { recursive: true, force: true });
   console.log('PASS: the cloud broker refuses a certificate that does not verify and recovers after a trusted swap (Node-RED 3.1.15)');
 }
