@@ -633,11 +633,12 @@ for (const profile of PROFILES) {
   });
 }
 
-// A gateway installed from the current seed with scoped access off: the first
-// registered account is a researcher and no account is an admin. The linked
-// account stands in for the gateway owner then (unless it is a viewer), so the
-// farmer who linked the gateway can unlink it. Reported by the round-2 review
-// with this sequence: register, link through the shipped chain, unlink.
+// A gateway installed from the current seed with scoped access off: since K1
+// R2 (#770) the first registered account is an admin, so it unlinks through
+// the admin branch. The no-admin linked-account fallback below still covers
+// gateways provisioned before R2, whose first account is a researcher.
+// Reported by the round-2 review with this sequence: register, link through
+// the shipped chain, unlink.
 for (const profile of PROFILES) {
   for (const scoped of [false, true]) {
     test(`${profile} scoped ${scoped ? 'on' : 'off'}: the first registered account links and then unlinks the gateway`, async () => {
@@ -651,7 +652,7 @@ for (const profile of PROFILES) {
         const registered = await runNode(f, 'auth-db-insert', { userInsert: { username: 'farmer', passwordHash: 'h', createdAt: '2026-01-01T00:00:00Z' } }, new Map(), env);
         assert.ok(registered.result[0], 'registered');
         const user = sql(f, "SELECT id, role FROM users WHERE username='farmer'")[0];
-        assert.equal(user.role, scoped ? 'admin' : 'researcher', 'the role registration gives the first account');
+        assert.equal(user.role, 'admin', 'the role registration gives the first account (K1 R2)');
         await linkAs(f, user.id, 'farmer', 501);
         processStarted(true);
         const outcome = await unlinkRoute(f, linkedFlowStore(), bearer(user.id, 'farmer'), scoped);

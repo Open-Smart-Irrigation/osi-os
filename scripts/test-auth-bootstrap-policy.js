@@ -7,6 +7,15 @@ const crypto = require('node:crypto');
 const { fixture, profiles, flowFile, backfill, expected, until, bcrypt } = require('./lib/bootstrap-auth-harness');
 const recover = (...args) => require('./lib/account-recovery-transaction').recover(...args);
 const password = () => crypto.randomBytes(12).toString('hex');
+// A fan-less sysfs stand-in: sys-fan-fn's admin-role gate (scoped on) must
+// pass, then fan hardware discovery fails deterministically with 503 -- never
+// touching the host's real /sys.
+const fanlessFs = {
+  readdirSync() { throw new Error('fixture: no /sys/class/hwmon'); },
+  readFileSync() { throw new Error('fixture: no sysfs reads'); },
+  accessSync() { throw new Error('fixture: no /sys/class/pwm/pwmchip2'); },
+  writeFileSync() { throw new Error('fixture: sysfs writes refused'); },
+};
 function closed(response, status = 403) {
   assert.equal(response.statusCode, status);
   assert.ok(!response.payload.token);
@@ -32,16 +41,16 @@ for (const profile of profiles) {
     const ownerPassword = password();
     assert.equal((await f.register('owner', ownerPassword, false)).statusCode, 201);
     const before = f.users();
-    assert.equal(before[0].role, 'researcher');
+    assert.equal(before[0].role, 'admin');
     closed(await f.register('peer', password(), true));
     assert.deepEqual(f.users(), before);
     closed(await f.login('peer', password()), 401);
     const ownerLogin = await f.login('owner', ownerPassword);
-    assert.equal((await f.account(ownerLogin.payload.token)).statusCode, 403);
-    await recover(f.raw, { action: 'promote', expected: expected(before[0]) });
-    assert.equal(f.users()[0].role, 'admin');
-    assert.equal((await f.login('owner', ownerPassword)).statusCode, 200);
     assert.equal((await f.account(ownerLogin.payload.token)).statusCode, 200);
+    // The recorded operator promotion targets legacy non-admin accounts (R2):
+    // promoting the already-admin owner refuses and changes nothing.
+    await assert.rejects(recover(f.raw, { action: 'promote', expected: expected(before[0]) }));
+    assert.deepEqual(f.users(), before);
     closed(await f.register('later-peer', password(), true));
   }));
   for (const on of [false, true]) {
@@ -49,7 +58,8 @@ for (const profile of profiles) {
       const credential = password();
       assert.equal((await f.register('first', credential, on)).statusCode, 201);
       assert.equal(f.users().length, 1);
-      assert.equal(f.users()[0].role, on ? 'admin' : 'researcher');
+      // K1 R2 (#770): a fresh zero-user bootstrap stores admin in both flags.
+      assert.equal(f.users()[0].role, 'admin');
       assert.equal((await f.login('first', credential, on)).statusCode, 200);
       closed(await f.register('second', password(), on));
       assert.equal(f.users().length, 1);
@@ -119,6 +129,34 @@ for (const profile of profiles) {
       assert.deepEqual(f.users(), before);
     }));
   }
+  test(`${profile}: #770 K1 R2 flag-off bootstrap stores a real admin, second registration stays closed`, () => using(profile, async f => {
+    const firstPassword = password();
+    assert.equal((await f.register('first', firstPassword, false)).statusCode, 201);
+    assert.equal(f.users().length, 1);
+    assert.equal(f.users()[0].role, 'admin');
+    const second = await f.register('second', password(), false);
+    closed(second);
+    assert.equal(second.payload.message, 'Registration is closed: this gateway already has an account. Sign in with an existing account.');
+    assert.equal(f.users().length, 1);
+    // Effective role through /api/me: the flag-off synthetic presentation is
+    // unchanged, and with scoped access on the stored role now agrees.
+    const flagOffToken = (await f.login('first', firstPassword, false)).payload.token;
+    const meOff = await f.invoke('api-me-fn', await f.invoke('api-me-auth', { req: { headers: { authorization: 'Bearer ' + flagOffToken } } }, false), false);
+    assert.equal(meOff.statusCode, 200);
+    assert.equal(meOff.payload.role, 'admin');
+    assert.equal(meOff.payload.features.scoped_access, false);
+    const token = (await f.login('first', firstPassword)).payload.token;
+    const me = await f.invoke('api-me-fn', await f.invoke('api-me-auth', { req: { headers: { authorization: 'Bearer ' + token } } }, true), true);
+    assert.equal(me.statusCode, 200);
+    assert.equal(me.payload.role, 'admin');
+    assert.equal(me.payload.features.scoped_access, true);
+    // Effective role through an admin-only route (fan) under the stored-role
+    // gate (scoped on): the admin assertion passes and the probe stops at
+    // fan hardware discovery (503), never at the role gate (403).
+    const fan = await f.invoke('sys-fan-fn', { req: { headers: { authorization: 'Bearer ' + token }, body: { speed: 128 } } }, true, {}, { fs: fanlessFs });
+    assert.equal(fan.statusCode, 503);
+    assert.equal(fan.payload.error, 'Fan control not available on this device');
+  }));
   test(`${profile}: unavailable insert helper fails without success`, () => using(profile, async f => {
     const request = await f.prepare('public', password(), true);
     await assert.rejects(f.finish(request, true, { osiDb: undefined }));
