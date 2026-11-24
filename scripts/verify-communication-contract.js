@@ -97,16 +97,54 @@ const cloudBrokerPlaceholder = '${OSI_CLOUD_BROKER_URL}';
 // bcm2708's flows have no cloud broker (only a local one).
 const cloudBrokerFlowPaths = platformFlowPaths.filter((p) => /_bcm2712\/|_bcm2709\//.test(p));
 if (cloudBrokerFlowPaths.length !== 2) fail('expected the bcm2712 and bcm2709 flows.json paths for the cloud broker check');
+const loopbackBrokerHosts = new Set(['localhost', '127.0.0.1', '::1']);
+// A broker node is cloud-bound when its target is the cloud URL placeholder
+// or any host that is not loopback (with or without a scheme). Only loopback
+// brokers (the local ChirpStack-side and Agroscope ones) are exempt.
+function isLoopbackBrokerNode(node) {
+  const raw = node.broker !== undefined ? String(node.broker) : String(node.url === undefined ? '' : node.url);
+  if (raw === cloudBrokerPlaceholder) return false;
+  let host;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) {
+    try { host = new URL(raw).hostname; } catch { return false; } // unparseable URL: treat as cloud-bound
+  } else {
+    host = raw.trim();
+  }
+  return loopbackBrokerHosts.has(host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase());
+}
 for (const relativePath of cloudBrokerFlowPaths) {
-  const brokers = parseFlow(relativePath)
-    .filter((node) => node.type === 'mqtt-broker' && node.name === 'OSI Cloud Broker');
-  if (brokers.length !== 1) {
-    fail(`${relativePath}: expected exactly one "OSI Cloud Broker" mqtt-broker node, found ${brokers.length}`);
+  const allBrokers = parseFlow(relativePath)
+    .filter((node) => node.type === 'mqtt-broker');
+  const named = allBrokers.filter((node) => node.name === 'OSI Cloud Broker');
+  if (named.length !== 1) {
+    fail(`${relativePath}: expected exactly one "OSI Cloud Broker" mqtt-broker node, found ${named.length}`);
     continue;
   }
-  const broker = brokers[0];
-  if (broker.broker !== cloudBrokerPlaceholder) {
-    fail(`${relativePath}: OSI Cloud Broker "broker" must be exactly ${cloudBrokerPlaceholder} (no literal host); found ${JSON.stringify(broker.broker)}`);
+  if (named[0].broker !== cloudBrokerPlaceholder) {
+    fail(`${relativePath}: OSI Cloud Broker "broker" must be exactly ${cloudBrokerPlaceholder} (no literal host); found ${JSON.stringify(named[0].broker)}`);
+  }
+  const cloudBound = allBrokers.filter((node) => !isLoopbackBrokerNode(node));
+  // Certificate verification must be the literal boolean true on EVERY
+  // cloud-bound broker node, whatever its name. Node-RED reads
+  // `verifyservercert == "true" || === true`, so a string "true" happens to
+  // work but an unresolved env placeholder ("${...}") is neither and leaves
+  // verification off; only the literal boolean is unambiguous. A tls-config
+  // reference (usetls/tls) would move the decision to that node's own
+  // verifyservercert, so a verified broker node must not carry one.
+  for (const broker of cloudBound) {
+    if (broker.verifyservercert !== true) {
+      fail(`${relativePath}: mqtt-broker ${broker.name || broker.id} (${JSON.stringify(broker.broker)}) must carry "verifyservercert": true as the literal boolean (found ${JSON.stringify(broker.verifyservercert)}); a cloud-bound broker must verify the server certificate, and an env placeholder does not enable it`);
+    }
+    if (broker.usetls || broker.tls !== undefined) {
+      fail(`${relativePath}: mqtt-broker ${broker.name || broker.id} must not reference a tls-config node (found usetls ${JSON.stringify(broker.usetls)}, tls ${JSON.stringify(broker.tls)}); its settings would override the broker-level verifyservercert`);
+    }
+  }
+  if (cloudBound.length !== 1) {
+    fail(`${relativePath}: expected exactly one cloud-bound mqtt-broker node (the "OSI Cloud Broker"), found ${cloudBound.length}: ${cloudBound.map((n) => JSON.stringify(n.broker)).join(', ')}`);
+    continue;
+  }
+  if (cloudBound[0] !== named[0]) {
+    fail(`${relativePath}: the single cloud-bound mqtt-broker node must be the "OSI Cloud Broker" node, found ${JSON.stringify(cloudBound[0].name || cloudBound[0].id)}`);
   }
 }
 
