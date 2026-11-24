@@ -159,6 +159,9 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
+# A ws:// or mqtt:// value from 1 is used only for a loopback host (the cloud
+# endpoint scheme policy); any other is ignored with a WARN, like an unusable
+# value, and 2 or 3 takes over.
 # A gateway linked to the default host gets byte-identical behaviour to the
 # old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
@@ -204,6 +207,40 @@ cloud_broker_url_for_log() {
     esac
 }
 
+# Whether the host of a broker URL is loopback: 127.0.0.0/8, ::1 or localhost
+# (any letter case), the same hosts osi-cloud-http allows without TLS. Reads
+# the host only: userinfo, port, path, query and fragment are left out. Pure,
+# no subshell.
+cloud_broker_url_is_loopback() {
+    local rest="${1#*://}"
+    local host="${rest%%/*}"
+    local part
+    host="${host%%\?*}"
+    host="${host%%\#*}"
+    host="${host##*@}"
+    case "$host" in
+        "["*) host="${host#\[}"; host="${host%%\]*}" ;;
+        *) host="${host%%:*}" ;;
+    esac
+    case "$host" in
+        [lL][oO][cC][aA][lL][hH][oO][sS][tT]|::1) return 0 ;;
+        127.*.*.*) ;;
+        *) return 1 ;;
+    esac
+    rest="${host#127.}"
+    for part in 1 2 3; do
+        host="${rest%%.*}"
+        if [ "$part" = 3 ]; then host="$rest"; fi
+        # Each is 0 to 255, written without a leading zero.
+        case "$host" in
+            0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+            *) return 1 ;;
+        esac
+        rest="${rest#*.}"
+    done
+    return 0
+}
+
 # Sets CLOUD_BROKER_URL and CLOUD_BROKER_URL_SOURCE (mqtt_broker_url,
 # server_host or default). Pure apart from logging; no subshell, so the
 # caller sees both variables.
@@ -213,16 +250,25 @@ resolve_cloud_broker_url() {
 
     if [ -n "$configured_url" ]; then
         case "$configured_url" in
-            *[[:space:]]*) ;;
-            wss://?*|ws://?*|mqtts://?*|mqtt://?*)
+            *[[:space:]]*)
+                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)"
+                ;;
+            wss://?*|mqtts://?*)
                 CLOUD_BROKER_URL="$configured_url"
                 CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
                 return 0
                 ;;
-        esac
-        case "$configured_url" in
-            *[[:space:]]*) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)" ;;
-            *) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)" ;;
+            ws://?*|mqtt://?*)
+                if cloud_broker_url_is_loopback "$configured_url"; then
+                    CLOUD_BROKER_URL="$configured_url"
+                    CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
+                    return 0
+                fi
+                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback; the cloud broker needs wss:// or mqtts://)"
+                ;;
+            *)
+                logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)"
+                ;;
         esac
     fi
 

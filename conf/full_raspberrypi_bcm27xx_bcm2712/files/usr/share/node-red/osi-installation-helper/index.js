@@ -382,6 +382,14 @@ if (!extractHostFromAbsoluteUrl(mqttBrokerUrl)) {
   msg.payload = { message: 'Server authentication returned an invalid MQTT broker URL' };
   return [null, msg];
 }
+// Reported here, where the reply is turned into a message for the farmer;
+// linkMqttConfig refuses the same address again before anything is stored.
+const brokerRefusal = cloudBrokerRefusal(mqttBrokerUrl);
+if (brokerRefusal) {
+  msg.statusCode = 502;
+  msg.payload = { message: brokerRefusal.message, reason: brokerRefusal.code };
+  return [null, msg];
+}
 
 const localUsername = String(flow.get('al_local_username') || '').trim();
 const serverUrl = String(attemptContext.server_url || '').trim();
@@ -769,6 +777,18 @@ function emptyMqttConfig() {
   return Object.fromEntries(MQTT_KEYS.map(key => [key, '']));
 }
 
+// The cloud endpoint scheme policy for the broker address in the cloud's
+// link reply: TLS unless the host is loopback. Null when the address passes
+// or cannot be parsed here; linkMqttConfig still rejects one it cannot parse.
+function cloudBrokerRefusal(mqttBrokerUrl) {
+  let broker;
+  try { broker = new URL(String(mqttBrokerUrl)); } catch (error) { return null; }
+  if (!cloudHttp.cloudEndpointRefusal(broker.protocol, broker.hostname, { quiet: true })) return null;
+  return Object.assign(new Error('The MQTT broker address returned by the cloud must use wss:// or mqtts:// outside loopback'), {
+    code: 'cloud_endpoint_scheme', statusCode: 502,
+  });
+}
+
 function linkMqttConfig(state) {
   const mqttPassword = String(state.get('al_mqtt_password') || '').trim();
   const mqttBrokerUrl = String(state.get('al_mqtt_broker_url') || '').trim();
@@ -776,6 +796,8 @@ function linkMqttConfig(state) {
   if (!mqttPassword || !gateway) throw new Error('Linked account response is missing MQTT credentials or gateway identity');
   const broker = new URL(mqttBrokerUrl);
   if (!broker.host || !['mqtt:', 'mqtts:', 'ws:', 'wss:'].includes(broker.protocol)) throw new Error('Invalid MQTT broker URL');
+  const brokerRefusal = cloudBrokerRefusal(mqttBrokerUrl);
+  if (brokerRefusal) throw brokerRefusal;
   return { server_host: broker.host, mqtt_password: mqttPassword, mqtt_broker_url: mqttBrokerUrl, link_gateway_device_eui: gateway };
 }
 

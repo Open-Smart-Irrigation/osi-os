@@ -3,6 +3,9 @@
 // policy, and caught failures. Behavioral changes belong to their later packages.
 // All request state and runtime services are injected per invocation.
 const runProjection = require('./run-projection');
+// The cloud endpoint scheme policy, the rule osi-cloud-http's own client
+// applies. Pure functions; no request state.
+const cloudHttp = require('../osi-cloud-http');
 
 // Provider errors may contain authentication response bodies. Never copy the
 // message into diagnostics: retain only a bounded status and fixed category.
@@ -242,6 +245,11 @@ async function fetchSharedBundle(linkTarget, zone) {
   const url = linkTarget.serverUrl +
     '/api/v1/sync/gateways/' + encodeURIComponent(String(gatewayDeviceEui).toUpperCase()) +
     '/environment-bundles?zoneUuid=' + encodeURIComponent(zoneUuid);
+  // This call has its own transport, so the refusal in osi-cloud-http's
+  // client would not see it.
+  const endpoint = new URL(url);
+  const refusal = cloudHttp.cloudEndpointRefusal(endpoint.protocol, endpoint.hostname);
+  if (refusal) throw refusal;
   const response = await requestJson('GET', url, {
     headers: {
       Authorization: 'Bearer ' + linkTarget.syncToken

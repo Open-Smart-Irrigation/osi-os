@@ -14,6 +14,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   certificate the bundled Node root store does not verify stops reporting
   over MQTT and retries automatically; it reconnects by itself once the
   broker serves a verifying chain again.
+- Cloud endpoints require TLS. `osi-cloud-http` sends to an `http:` address
+  only for a loopback host (`127.0.0.0/8`, `::1`, `localhost`), and the zone
+  environment summary applies the same rule to its cloud call. Account link
+  refuses an `mqtt:`/`ws:` broker address outside loopback in the cloud's
+  reply. At start, `node-red.init` uses a stored `ws://`/`mqtt://` broker
+  address only for a loopback host; for any other it logs one warning and the
+  `wss://<server_host>/mqtt` or default broker takes over. A gateway linked
+  over a plain address before this change keeps its link and fails its cloud
+  requests until it is relinked with its `https` address; the first refused
+  request of a start logs that fix once.
 
 ---
 
