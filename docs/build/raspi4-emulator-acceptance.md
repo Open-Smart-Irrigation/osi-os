@@ -94,6 +94,39 @@ Use `--historical` for the ten baseline diagnostics on an image and offline
 tree that precede both flows fixes. The historical verdict is diagnostic.
 Flags and environment variables cannot grant N/A to any case.
 
+## Ethernet address and identity evidence
+
+The Pi 4 model gives its Ethernet port the fixed address 52:54:00:27:11:04.
+The launcher writes it as `local-mac-address` into `/scb/ethernet@7d580000`
+of the device tree it boots and passes the same address to QEMU on `-nic`.
+The Pi 5 model keeps QEMU's default, 52:54:00:12:34:56.
+
+The property is what fixes the address. The shipped bcm2711 device tree
+carries no MAC for GENET, and on a device-tree boot the bcmgenet driver takes
+eth0's address only from the device tree; its fallback to the controller's
+registers needs an ACPI companion (`bcmgenet.c`, probe). Without the property
+the kernel picks a random address on every boot and logs
+`bcmgenet fd580000.ethernet: using random Ethernet MAC`. The Pi 5 guest reads
+the address from its emulated controller instead, because its RP1 GEM runs the
+macb driver.
+
+The gateway derives its provisional EUI from that address, `FFFE` between its
+two halves (`osi-gateway-identity.sh`), and the Node-RED init rewrites
+`flows.json` whenever `clientid` differs from `device_<EUI>`. With a random
+address the rewrite differs on every boot. The minimal-cut cases then fail on
+the check that requires the recovered flows digest to equal the digest written
+at the cut, although the cut itself is correct. With the fixed address both
+boots write the same bytes, so that check holds.
+
+Each run records the identity of every boot in the case directory's
+`gateway-identity.log`. At launch it notes the address written into the device
+tree and the EUI derived from it. When the console answers it adds the address
+the kernel gave each interface, the number of `using random Ethernet MAC`
+warnings in the kernel ring, and the EUI and source stored in UCI at that
+moment. A boot cut before its console answers keeps only the launch line. The
+cold boot fails with `eth0 does not carry the fixed MAC …` when eth0 has
+another address or the kernel logged the random fallback.
+
 The real-device sheet covers early EEPROM and VideoCore firmware, VL805
 firmware, USB timing, real radio behavior, SD power loss and physical
 valves. Include a real upgrade alongside the physical power-cut and valve

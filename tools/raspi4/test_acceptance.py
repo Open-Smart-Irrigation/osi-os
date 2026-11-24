@@ -5,15 +5,17 @@ import io
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
+import pi4
 from pi4 import DTB, Pi4, acceptance, boot_config
 from minimal_flows import ATOMIC_PUBLISH, CUT_RECEIPT
-from suite_vm import INSPECTION_INIT
+from suite_vm import INSPECTION_INIT, Guest
 
 
 def write_upgrade_fixtures(root, data):
@@ -218,6 +220,10 @@ class Pi4Tests(unittest.TestCase):
             vm.work = Path(directory)
             vm.qemu = vm.work/'qemu-system-aarch64'
             vm.ram = 2
+            vm.receipts = vm.work/'receipts'
+            vm.receipts.mkdir()
+            vm.boots = 4
+            vm.private = False
             (vm.work/DTB).write_bytes(b'dtb')
             cmdline = f'root=/dev/mmcblk0p2 {vm.console_args} init=/bin/sh -- -c "{INSPECTION_INIT}"'
             disk = 'if=sd,format=raw,file=inspect.img,cache=none'
@@ -231,6 +237,95 @@ class Pi4Tests(unittest.TestCase):
             self.assertIn(disk, args)
             self.assertTrue(any(str(arg).startswith('loader,file=inspect.dtb,') for arg in args))
             self.assertEqual((vm.work/DTB).read_bytes(), b'dtb')
+            self.assertEqual(args[args.index('-nic') + 1], f'socket,fd=5,mac={pi4.Ethernet.MAC}')
+            self.assertEqual((vm.receipts/'gateway-identity.log').read_text(), (
+                f'boot=4 device tree {pi4.Ethernet.NODE} local-mac-address {pi4.Ethernet.MAC}, '
+                f'provisional EUI {pi4.provisional_eui(pi4.Ethernet.MAC)}\n'))
+
+    def test_qemu_argv_carries_a_fixed_mac_distinct_from_the_pi5_model(self):
+        """The fixed MAC reaches QEMU on -nic and is not QEMU's default, which the Pi 5 model keeps."""
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Pi4.__new__(Pi4)
+            vm.work, vm.qemu, vm.ram = Path(directory), Path(directory)/'qemu-system-aarch64', 2
+            vm.receipts, vm.boots, vm.private = vm.work, 1, True
+            (vm.work/DTB).write_bytes(b'dtb')
+            with patch('pi4.subprocess.run'):
+                args = vm.qemu_args(5, 'disk', 'cmdline', False)
+            self.assertRegex(args[args.index('-nic') + 1], r'^socket,fd=5,mac=([0-9a-f:]{17})$')
+            self.assertNotEqual(args[args.index('-nic') + 1], 'socket,fd=5,mac=52:54:00:12:34:56')
+            self.assertEqual(args[args.index('-M') + 1], 'raspi4b')
+
+    def test_launcher_pins_the_ethernet_mac_into_the_device_tree(self):
+        """load_boot writes the fixed MAC as six bytes into the shipped DTB's Ethernet node."""
+        self.assertEqual(pi4.Ethernet.MAC, '52:54:00:27:11:04')
+        self.assertEqual(pi4.Ethernet.NODE, '/scb/ethernet@7d580000')
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            stub = bytearray(256)
+            struct.pack_into('<I', stub, 0xf0, 0x5afe570b)
+            (work/'armstub8-32-gic.bin').write_bytes(stub)
+            with (patch.object(pi4.subprocess, 'check_output', return_value=b'[all]\n'),
+                  patch.object(pi4.subprocess, 'run') as run, patch.object(pi4.shutil, 'which', return_value=None)):
+                Pi4.load_boot('boot.fat', work, work/'dtmerge', quiet=True)
+            fdtput = work/'fdtput'
+            writes = [c.args[0] for c in run.call_args_list if c.args[0] and c.args[0][0] == fdtput]
+            self.assertEqual(writes.count([fdtput, '-t', 'bx', work/DTB, pi4.Ethernet.NODE, 'local-mac-address',
+                                           *pi4.Ethernet.MAC.split(':')]), 1)
+            self.assertIn([fdtput, '-t', 's', work/DTB, '/soc/serial@7e201000', 'status', 'okay'], writes)
+
+    def test_each_boot_records_the_guest_mac_and_its_derived_eui(self):
+        """The console read notes what the kernel gave eth0 and the EUI derived from it; private guests keep no file."""
+        answer = (0, 'mac-eth0=52:54:00:27:11:04\nmac-br-lan=52:54:00:27:11:04\nrandom-mac=0\nuci-eui=\nuci-source=\n')
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Pi4.__new__(Pi4)
+            vm.receipts, vm.boots, vm.private = Path(directory), 7, False
+            with patch.object(Guest, 'command', side_effect=[(0, ''), answer]) as command:
+                vm.console_ready()
+            self.assertEqual(command.call_args_list[0].args[0], 'true')
+            script = command.call_args_list[1].args[0]
+            for needle in ('/sys/class/net/$interface/address', 'using random Ethernet MAC', 'osi-server.cloud.device_eui'):
+                self.assertIn(needle, script)
+            self.assertEqual((vm.receipts/'gateway-identity.log').read_text(), (
+                f'boot=7 eth0 52:54:00:27:11:04, provisional EUI {pi4.provisional_eui(pi4.Ethernet.MAC)}; '
+                'random-MAC warnings 0; uci device_eui - source -\n'))
+            vm.private, vm.boots = True, 8
+            with patch.object(Guest, 'command', side_effect=[(0, ''), answer]):
+                vm.console_ready()
+            self.assertEqual((vm.receipts/'gateway-identity.log').read_text().count('\n'), 1)
+
+    def test_identity_script_counts_kernel_warnings_without_doubling_zero(self):
+        """The guest script through sh: no warning counts 0 once; a dmesg that fails says so."""
+        stubs = ('cat() { case "$1" in */eth0/address) echo 52:54:00:27:11:04;; esac; }\n'
+                 'uci() { return 1; }\n')
+        for dmesg, expected in (('dmesg() { echo "bcmgenet fd580000.ethernet: using random Ethernet MAC"; }', 'random-mac=1'),
+                                ('dmesg() { :; }', 'random-mac=0'),
+                                ('dmesg() { return 1; }', 'random-mac=unreadable')):
+            with self.subTest(expected=expected):
+                result = subprocess.run(['sh', '-c', stubs + dmesg + '\n' + pi4.IDENTITY],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines()[:2], ['mac-eth0=52:54:00:27:11:04', expected])
+
+    def test_board_check_requires_the_fixed_mac(self):
+        """Cold boot fails unless eth0 carries the fixed MAC and the kernel did not fall back to a random one."""
+        for mac, warnings, fails in ((pi4.Ethernet.MAC, '0', False), (pi4.Ethernet.MAC, 'unreadable', False),
+                                     ('52:54:00:aa:bb:cc', '0', True), (pi4.Ethernet.MAC, '1', True)):
+            with self.subTest(mac=mac, warnings=warnings):
+                vm = Mock()
+                vm.command.return_value = (0, f'mac-eth0={mac}\nrandom-mac={warnings}\n')
+                if fails:
+                    with self.assertRaisesRegex(RuntimeError, 'fixed MAC ' + pi4.Ethernet.MAC):
+                        pi4.verify(vm)
+                else:
+                    pi4.verify(vm)
+
+    def test_provisional_eui_follows_the_identity_helper(self):
+        """FFFE between the two halves of the MAC, upper-cased, as osi-gateway-identity.sh derives it."""
+        eui = pi4.provisional_eui(pi4.Ethernet.MAC)
+        self.assertEqual((len(eui), eui[:6], eui[6:10], eui[10:]), (16, '525400', 'FFFE', '271104'))
+        self.assertEqual(pi4.provisional_eui('b8-27-eb-12-34-56'), pi4.provisional_eui('B8:27:EB:12:34:56'))
+        with self.assertRaisesRegex(ValueError, 'invalid MAC'):
+            pi4.provisional_eui('52:54:00:27:11')
 
     def test_pi4_candidate_fails_for_missing_required_case(self):
         with tempfile.TemporaryDirectory() as directory:
