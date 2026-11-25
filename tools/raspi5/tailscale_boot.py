@@ -333,13 +333,14 @@ def mark_script(token, files=None):
     """logger, then wait until the line is in the persistent log.
 
     logd keeps the line in its ring; a separate `logread -F` writer appends it
-    to the file later. A reboot right after `logger` can lose it.
+    to the file later. A reboot right after `logger` can lose it. The image's
+    BusyBox sleeps whole seconds only (no float durations).
     """
     names = ' '.join("'" + name + "'" for name in (files or SYSLOG_FILES))
     return (f'logger -t osi-test "{token}"\n'
             'i=0\n'
             f'until cat {names} 2>/dev/null | grep -qF \'{token}\'; do\n'
-            '    i=$((i + 1)); [ "$i" -le 40 ] || exit 3; sleep 0.5\n'
+            '    i=$((i + 1)); [ "$i" -le 20 ] || exit 3; sleep 1\n'
             'done\n'
             'sync')
 

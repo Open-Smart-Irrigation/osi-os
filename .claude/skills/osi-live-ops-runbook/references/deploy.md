@@ -67,6 +67,39 @@ case "$(uci -q get osi-server.cloud.mqtt_password)" in *[![:space:]]*) echo pres
 On `MISSING`, do not deploy: stop and escalate. The same check applies to the
 bundle path ([deploying over a flaky link](../../../../docs/operations/deploying-over-a-flaky-link.md)).
 
+**Before a release that carries the tailscale boot init (0.8.5),** read two
+things on the gateway; both checks change nothing.
+
+The tailscale init and its boot link:
+
+```sh
+sha256sum /etc/init.d/tailscale | cut -c1-12; ls /etc/rc.d | grep tailscale
+```
+
+`a874f9fd1032` is the 1.80.3-r1 package file, which the deploy replaces;
+`da01bb4b08ea` is the OSI copy already in place. Any other digest gets the
+`WARN: tailscale boot protection NOT installed` line and no protection: the
+deploy goes on, but escalate before relying on the fix. No `S??tailscale`
+link means tailscale is disabled at boot and stays so.
+
+The osi-bootstrap stamp. tailscale now starts after `S99osi-bootstrap`,
+which returns at once only on a stamped gateway:
+
+```sh
+[ -f /etc/osi-bootstrap.done ] && echo stamp-present || echo stamp-MISSING
+grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null && echo env-provisioned || echo env-NOT-provisioned
+```
+
+- `stamp-present` and `env-provisioned`: deploy.
+- `stamp-MISSING` with `env-provisioned`: ChirpStack is provisioned but not
+  stamped, so every boot reruns the bootstrap before tailscale starts. Stamp
+  it as `deploy.sh` does when it enables the service on such a gateway,
+  `touch /etc/osi-bootstrap.done && sync`, with the deploy owner's go (it is
+  a write), and read both lines again.
+- `env-NOT-provisioned`: the gateway is not provisioned. Every boot then
+  waits up to 120 s for ChirpStack and then for the bootstrap script before
+  tailscale, and with it remote access, starts. Do not deploy: escalate.
+
 1. **Build the GUI.**
    ```bash
    cd web/react-gui && npm run build

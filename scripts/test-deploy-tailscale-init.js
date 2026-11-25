@@ -74,6 +74,12 @@ test('the installer never runs a service command and never fails the deploy', ()
   for (const line of code) {
     assert.doesNotMatch(line, SERVICE_CALL, `the installer never calls the service: ${line.trim()}`);
   }
+  // Nor does it signal the running daemon: procd would respawn it, which
+  // drops an operator's session as a restart does.
+  const SIGNAL = /(^|[\s;&|(`])(kill|killall|pkill|start-stop-daemon)\b/;
+  for (const line of code) {
+    assert.doesNotMatch(line, SIGNAL, `the installer never signals a process: ${line.trim()}`);
+  }
   const returns = installerSource.match(/^\s*return [1-9]/gm) || [];
   assert.deepEqual(returns, [], 'every return is a 0');
   // Every warning is one line in one grammar: what is installed, the reason,
@@ -421,6 +427,7 @@ test('no run of the installer calls the tailscale service', () => {
   // Traced, so a call of any form is seen: `/etc/init.d/tailscale restart`,
   // "$TAILSCALE_INIT" stop, an rc.d link, service or ubus.
   const CALL = /(init\.d\/tailscale|rc\.d\/S\d\dtailscale|\bservice\b|\bubus\b|\bprocd\b)\S*\s+(start|stop|restart|reload|enable|disable|boot|running|call)\b/;
+  const SIGNAL = /^\++ (kill|killall|pkill|start-stop-daemon)\b/;
   for (const [label, options] of [
     ['package file at S80', {}],
     ['ours at S80', { init: 'ours', links: ['S80tailscale'] }],
@@ -437,6 +444,7 @@ test('no run of the installer calls the tailscale service', () => {
       assert.ok(commands.length > 3, `${label}: the call was traced`);
       for (const line of commands) {
         assert.doesNotMatch(line, CALL, `${label}: the installer called the service: ${line}`);
+        assert.doesNotMatch(line, SIGNAL, `${label}: the installer signalled a process: ${line}`);
       }
     } finally { cleanup(fixture); }
   }

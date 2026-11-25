@@ -306,11 +306,17 @@ test('a cleanup that outlives the helper does not hold the service lock', { skip
   const lock = path.join(fixture.dir, 'procd_tailscale.lock');
   let pid = null;
   try {
-    const run = runHelper(fixture, LIMIT, `exec 1000>"$FIXTURE/procd_tailscale.lock"; flock 1000\nkill() { return 0; }\n`);
+    // A probe a second into the wait: the init's own shell must still hold
+    // the lock then, so only the background runner dropped it, not the
+    // start_service that procd's lock protects.
+    const probe = `( exec 1000>&-; sleep 1; if flock -n "$FIXTURE/procd_tailscale.lock" true; then echo free; else echo held; fi >"$FIXTURE/probe" ) &`;
+    const run = runHelper(fixture, LIMIT, `exec 1000>"$FIXTURE/procd_tailscale.lock"; flock 1000\n${probe}\nkill() { return 0; }\n`);
     pid = run.standinPid;
     assert.ok(pid > 0, 'the stand-in started');
     assert.equal(alive(pid), true, 'the cleanup outlived the helper');
     assert.match(run.log, /continuing without it/);
+    assert.equal(fs.readFileSync(path.join(fixture.dir, 'probe'), 'utf8').trim(), 'held',
+      'the init keeps the lock while it waits for the cleanup');
     // The next `/etc/init.d/tailscale restart` takes the same lock.
     const next = spawnSync('flock', ['-w', '3', lock, 'true'], { stdio: 'ignore', timeout: 10_000 });
     assert.equal(next.status, 0, 'a later init call gets the lock while the cleanup still runs');

@@ -2003,6 +2003,11 @@ class TailscaleBootTests(unittest.TestCase):
             # A logger whose line lands in the file a second later, as logread -F does.
             (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{log}) &\n')
             (bin_dir/'logger').chmod(0o755)
+            # The image's BusyBox sleep takes whole seconds only.
+            real_sleep = shutil.which('sleep')
+            (bin_dir/'sleep').write_text('#!/bin/sh\ncase "$1" in *[!0-9]*) echo "sleep: invalid number \'$1\'" >&2; exit 1 ;; esac\n'
+                                       f'exec {real_sleep} "$1"\n')
+            (bin_dir/'sleep').chmod(0o755)
             env = dict(os.environ, PATH=f'{bin_dir}:{os.environ["PATH"]}')
             began = time.monotonic()
             run = subprocess.run(['sh', '-c', script], env=env, capture_output=True, text=True, timeout=60)
@@ -2010,9 +2015,13 @@ class TailscaleBootTests(unittest.TestCase):
             self.assertGreaterEqual(time.monotonic() - began, 0.9, 'it waited for the writer')
             self.assertIn('OSI-TAILSCALE-cccc', log.read_text())
             (bin_dir/'logger').write_text('#!/bin/sh\nexit 0\n')
-            lost = subprocess.run(['sh', '-c', tailscale_boot.mark_script('OSI-TAILSCALE-dddd', (str(log),)).replace('-le 40', '-le 2')],
+            self.assertNotIn('sleep: invalid number', run.stderr)
+            began = time.monotonic()
+            lost = subprocess.run(['sh', '-c', tailscale_boot.mark_script('OSI-TAILSCALE-dddd', (str(log),)).replace('-le 20', '-le 2')],
                                   env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual(lost.returncode, 3)
+            self.assertGreaterEqual(time.monotonic() - began, 1.9, 'a lost marker is waited for, not polled in a busy loop')
+            self.assertIn('-le 20 ] || exit 3; sleep 1', tailscale_boot.mark_script('x'))
 
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')
