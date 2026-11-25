@@ -241,6 +241,11 @@ never retried:
   too.
 - A re-send of a still-queued item missed the model: `the re-send of queue
   item <id> on attempt N missed`.
+- A copy reached the model late while ChirpStack still holds the item: `a late
+  copy of the open arrived, but ChirpStack still holds queue item <id>`.
+  Concentratord transmits only what it enqueued and acks it `OK`, on which
+  ChirpStack deletes the item, so such a record is inconsistent; a re-send
+  would deliver the same open twice.
 - The command was delivered, but ChirpStack still holds another item for the
   valve, such as a second open: `the open was delivered, but ChirpStack still
   holds ...`.

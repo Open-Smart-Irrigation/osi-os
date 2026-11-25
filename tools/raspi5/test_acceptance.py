@@ -721,7 +721,7 @@ class RadioTests(unittest.TestCase):
             bind(radio_suite.Frames(downlinks=dropped, commands=['3000953403']), count, delays, 'q1', None).text,
             'ChirpStack downlink 3000953403, ack not logged: Concentratord took it at RX1 +1 s with 140.5 ms lead at '
             'enqueue; Concentratord dropped a packet at RX1 +1 s as too old, 19.9 ms after its TX time; the line names '
-            'no downlink ID, so it is no decision for this one; no TX, refusal or drop logged for it; queue item q1 left '
+            'no downlink ID, so it is no decision for this one; no TX or refusal logged for it; queue item q1 left '
             'ChirpStack\'s queue without an OK ack')
         across = [radio_suite.Downlink('enqueue', '3000953403', count + 1000000, count + 1000000 - 140454),
                   radio_suite.Downlink('tx', '3000953403', count + 2000000, None)]
@@ -730,7 +730,7 @@ class RadioTests(unittest.TestCase):
                                     acks=[('["OK", "IGNORED"]', '3000953403')]), count, delays, 'q1', None),
             radio_suite.Binding('ChirpStack downlink 3000953403, ack ["OK", "IGNORED"]: Concentratord took it at RX1 +1 s '
                                'with 140.5 ms lead at enqueue; Scheduled packet for TX at RX2 +2 s, where it was not '
-                               'enqueued; no TX, refusal or drop logged for it', False, True))
+                               'enqueued; no TX or refusal logged for it', False, True))
         self.assertEqual(bind(radio_suite.Frames(commands=['7']), None, delays, 'q1', kept).text,
                          'ChirpStack downlink 7, ack not logged: no Concentratord frame to place the receive slots')
         too_far = [radio_suite.Downlink('tx', '7', count - 2000000, None),
@@ -1083,7 +1083,7 @@ class RadioTests(unittest.TestCase):
         taken = self.command() + f'dl enqueue {self.DOWNLINK} {slot} {slot - 140454}\n' + self.ack('OK', 'IGNORED')
         case = self.valve_case(
             [[None], [1.0]], error=f'ChirpStack downlink {self.DOWNLINK}, ack ["OK", "IGNORED"]: Concentratord took it at '
-                                  'RX1 +1 s with 140.5 ms lead at enqueue; no TX, refusal or drop logged for it; '
+                                  'RX1 +1 s with 140.5 ms lead at enqueue; no TX or refusal logged for it; '
                                   'the attempt is not credited',
             frames=[self.window(taken, 1), self.window(self.scheduled(2), 2), self.window('', 3)],
             edges=['', row, row], held=[self.HELD, self.HELD], after=['', ''])
@@ -1205,6 +1205,44 @@ class RadioTests(unittest.TestCase):
             held=[self.HELD, self.TAKEN, 'q2|2|4101|0|0|'], after=[self.TAKEN, '', ''])
         self.assertIn('passed on attempt 3/3 after 2 retries', case.result)
         self.assertEqual(case.gui_open.call_count, 2)
+
+    def test_a_late_copy_while_chirpstack_still_holds_the_item_fails(self):
+        """Review r4 probe A, inverted: a late copy with the item still queued is no ground for a second re-send."""
+        row = self.expectation_row('e1', self.QUEUE)
+        case = self.valve_case(
+            [[None], [139.31], [1.0]],
+            error=f'a late copy of the open arrived, but ChirpStack still holds queue item {self.QUEUE}: '
+                  'ChirpStack downlink 99',
+            frames=[self.window(self.refused(1), 1), self.window(self.refused(2).replace(self.DOWNLINK, '99'), 2),
+                    self.window(self.scheduled(3), 3), self.window('', 4)],
+            edges=['', row, row, row], held=[self.HELD, self.TAKEN, self.TAKEN], after=[self.TAKEN, self.TAKEN, ''])
+        self.assertEqual(self.sent(case), [b'trigger', b'trigger'])
+        case.gui_open.assert_called_once()
+
+    def test_a_too_old_drop_cannot_earn_a_resend(self):
+        """An ID-less "too old" drop in the slot is no decision: the attempt fails instead of being re-sent."""
+        row = self.expectation_row('e1', self.QUEUE)
+        slot = self.slot(1)
+        dropped = (self.command() + f'dl enqueue {self.DOWNLINK} {slot} {slot - 140454}\n'
+                   f'dl too-old - {slot} {slot + 19900}\n' + self.ack('TOO_LATE', 'IGNORED'))
+        case = self.valve_case(
+            [[None], [1.0]], error='the attempt is not credited',
+            frames=[self.window(dropped, 1), self.window(self.scheduled(2), 2), self.window('', 3)],
+            edges=['', row, row, row], held=[self.HELD, self.TAKEN], after=[self.TAKEN, ''])
+        self.assertEqual(self.sent(case), [b'trigger'])
+        self.assertIn('no TX or refusal logged for it', str(case.error))
+
+    def test_a_tx_outside_its_enqueued_slot_cannot_credit_a_delivery(self):
+        """Enqueued for RX1, TX logged at RX2: the on-time delivery is not credited and the case fails."""
+        row = self.expectation_row('e1', self.QUEUE)
+        first, second = self.slot(1), self.slot(1, 2)
+        across = (self.command() + f'dl enqueue {self.DOWNLINK} {first} {first - 140454}\n'
+                  f'dl tx {self.DOWNLINK} {second} -\n' + self.ack('OK', 'IGNORED'))
+        case = self.valve_case([[1.0]], error='the attempt is not credited',
+                               frames=[self.window(across, 1), self.window('', 2)],
+                               edges=['', row], held=[self.HELD], after=[''])
+        self.assertEqual(self.sent(case), [b'trigger'])
+        case.valve.downlink.assert_called_once()
 
     def test_an_earlier_row_that_disappears_fails_the_case(self):
         """The earlier expectation must still exist when the successful attempt is reported."""

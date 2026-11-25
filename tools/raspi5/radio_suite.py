@@ -570,7 +570,7 @@ def _bind_downlink(frames, count, delays, queue_id, kept):
                                 'the line names no downlink ID, so it is no decision for this one')
     problems = []
     if not decided:
-        problems.append('no TX, refusal or drop logged for it')
+        problems.append('no TX or refusal logged for it')
     if holds and not kept.f_cnt:
         problems.append(f'ChirpStack still holds queue item {queue_id} with no f_cnt_down, so it built no downlink from it')
     if ack_ok and holds:
@@ -1357,6 +1357,13 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
                                f'{"; ".join(_queue_item_text(item) for item in extra)} for the valve, which the '
                                'next uplink would deliver')
         return Attempt(receipt.number, 'received', '', binding.text, holds, row, len(frames.matched))
+    if late and holds:
+        # Concentratord transmits only a packet it enqueued and acks it OK, and
+        # ChirpStack deletes an unconfirmed item on that ack, so a copy that
+        # reached the model while the item is still queued has no consistent
+        # record; re-sending it would deliver the same open twice.
+        raise RuntimeError(f'{VALVE}: a late copy of the open arrived, but ChirpStack still holds queue item '
+                           f'{row.queue_id}: {binding.text}')
     if not late and not holds:
         raise RuntimeError(f'{VALVE}: open command lost: {binding.text}; it never reached the model and '
                            'ChirpStack has consumed it, so its expectation stays pending and a second open '
