@@ -170,9 +170,10 @@ class RadioTests(unittest.TestCase):
                                       '[0-9.]+ s after the GUI open, before the receive window')):
             radio_suite.run_valve(self.answering({'valve_actuation_expectations': [''], 'device_queue_item': [self.HELD]}),
                                   radio_suite.Radio(host), {radio_suite.VALVE: valve}, lambda: model.sendall(command_wire))
-        self.assertEqual(output.getvalue().strip(), (
+        self.assertRegex(output.getvalue().strip(), '^' + re.escape(
             f'{radio_suite.VALVE} valve open attempt 1/3 (open, queue item -): failed: downlink before receive window | '
-            'downlink: MISSING (FPort 2 payload 4101 received 0.00 s after the GUI open, before the receive window)'))
+            'downlink: MISSING (FPort 2 payload 4101 received ') + r'[0-9]+\.[0-9]{2}' + re.escape(
+            ' s after the GUI open, before the receive window)') + '$')
 
     VALVE_COUNT = 247517304
     QUEUE = '6f1c0b52-3a1e-4a62-9a53-2d9d0e0c1b7f'
@@ -1244,6 +1245,66 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(self.sent(case), [b'trigger'])
         case.valve.downlink.assert_called_once()
 
+    def test_an_accepted_expectation_without_its_effect_snapshot_sends_nothing(self):
+        """The edge must record the command it queued; the harness never fills in FPort 2 and payload 4101 for it."""
+        transport = {'phase': 'ACCEPTED', 'queue_id': self.QUEUE, 'accepted_at': '2025-04-13T16:49:14.498Z'}
+        for snapshot in (None, {'fPort': 2}, {'bytes_hex': '4101'}):
+            with self.subTest(snapshot=snapshot):
+                row = 'e1|PENDING_OBSERVATION|||' + json.dumps(
+                    {**transport, **({'effect_snapshot': snapshot} if snapshot else {})}).encode().hex()
+                case = self.valve_case(
+                    [[1.0]], error=f'the edge recorded no FPort and payload in the effect snapshot of queue item {self.QUEUE}, '
+                                   'so the command it queued is unknown; no uplink was sent',
+                    edges=['', row], held=[self.HELD], after=[''], frames=[self.window(self.scheduled(1), 1)])
+                self.assertEqual(self.sent(case), [])
+
+    def test_an_on_time_delivery_whose_item_chirpstack_still_holds_fails(self):
+        """TX logged, no ack, item still queued: the on-time delivery does not pass, since the next uplink would repeat it."""
+        row = self.expectation_row('e1', self.QUEUE)
+        slot = self.slot(1)
+        unacked = self.command() + f'dl enqueue {self.DOWNLINK} {slot} {slot - 140454}\ndl tx {self.DOWNLINK} {slot} -\n'
+        case = self.valve_case(
+            [[1.0]], error=f'the open was delivered on time, but ChirpStack still holds queue item {self.QUEUE}, which '
+                           'the next uplink would deliver again',
+            frames=[self.window(unacked, 1), self.window('', 2)], edges=['', row], held=[self.HELD], after=[self.TAKEN])
+        self.assertEqual(self.sent(case), [b'trigger'])
+        consumed = self.valve_case([[1.0]], frames=[self.window(self.scheduled(1), 1), self.window('', 2)],
+                                   edges=['', row], held=[self.HELD], after=[''])
+        self.assertEqual(consumed.result, 'WM1302 model delivered=2, Concentratord frames received=2')
+
+    def test_another_item_left_queued_after_a_late_delivery_fails_before_the_close_out(self):
+        """A second open behind a late one would be delivered by the close-out reports; the case fails first."""
+        row = self.expectation_row('e1', self.QUEUE)
+        case = self.valve_case(
+            [[139.31], [1.0]], error='the open was delivered, but ChirpStack still holds item dup FPort 2 data 4101',
+            frames=[self.window(self.scheduled(1), 1)], edges=['', row, row, row],
+            held=[self.HELD + '\ndup|2|4101|0|0|'], after=['dup|2|4101|0|0|'])
+        self.assertEqual(self.sent(case), [b'trigger'])
+        case.gui_open.assert_called_once()
+
+    def test_two_records_of_one_downlink_command_bind_neither(self):
+        """Each forwarder command record counts; the same ID logged twice is two records, not one command."""
+        row = self.expectation_row('e1', self.QUEUE)
+        case = self.valve_case(
+            [[1.0]], error=f'2 ChirpStack downlink commands in the window ({self.DOWNLINK}, {self.DOWNLINK}); none can be '
+                           f'bound to queue item {self.QUEUE}; the attempt is not credited',
+            frames=[self.window(self.command() + self.scheduled(1), 1)], edges=['', row], held=[self.HELD], after=[''])
+        self.assertEqual(self.sent(case), [b'trigger'])
+
+    def test_a_failed_radio_drain_leaves_the_attempts_receipt(self):
+        """The drain before an attempt belongs to it: a failure there is logged and nothing is opened or sent."""
+        row = self.expectation_row('e1', self.QUEUE)
+        air, valve, vm, clock = self.valve_fixture([[1.0]], edges=['', row], held=[self.HELD])
+        air.begin_case.side_effect = RuntimeError('partial packet on the radio socket')
+        gui_open, output = Mock(), io.StringIO()
+        with (patch.object(radio_suite.time, 'monotonic', clock), patch.object(radio_suite.time, 'sleep'),
+              redirect_stdout(output), self.assertRaisesRegex(RuntimeError, 'partial packet')):
+            radio_suite.run_valve(vm, air, {radio_suite.VALVE: valve}, gui_open)
+        self.assertEqual(output.getvalue().strip(), f'{radio_suite.VALVE} valve open attempt 1/3 (open, queue item -): '
+                                                    'failed: RuntimeError: partial packet on the radio socket')
+        gui_open.assert_not_called()
+        air.send.assert_not_called()
+
     def test_an_earlier_row_that_disappears_fails_the_case(self):
         """The earlier expectation must still exist when the successful attempt is reported."""
         closed = self.reported('e1', self.QUEUE)
@@ -1702,6 +1763,39 @@ class RadioTests(unittest.TestCase):
                 f'edge valve_actuation_expectations for {radio_suite.VALVE}:\nempty\n'
                 f'ChirpStack device_queue_item for {radio_suite.VALVE}:\n[incomplete] ChirpStack database unreadable\n'))
             vm.note.assert_called_once_with('valve diagnostics incomplete: ChirpStack database unreadable')
+
+    def test_radio_log_keeps_the_newest_lines_within_its_bound_and_says_so(self):
+        """Older radio lines are left out to fit the console reply; the receipt keeps the newest and names the gap."""
+        lines = [f'Sun Apr 13 16:49:17 2025 user.info chirpstack-concentratord-sx1302[1]: Frame received, uplink_id: {n}'
+                 for n in range(10)]
+        with tempfile.TemporaryDirectory() as directory:
+            receipts = Path(directory)
+            (receipts/'osi-system.log').write_text('\n'.join(lines) + '\n')
+            vm = self.log_guest(receipts)
+            with (patch.object(radio_suite, 'RADIO_LOG', radio_suite._radio_log(3 * (len(lines[0]) + 1))),
+                  patch.object(radio_suite, '_edge_expectations', return_value=radio_suite.EdgeState()),
+                  patch.object(radio_suite, '_chirpstack_queue', return_value=radio_suite.QueueState())):
+                problems = radio_suite.valve_diagnostics(vm)
+            self.assertEqual(problems, ['radio log truncated: the oldest 7 radio lines were left out to fit the console reply'])
+            self.assertEqual((receipts/'valve-radio.log').read_text(), '\n'.join(lines[7:]) + '\n[incomplete] ' + problems[0] + '\n')
+        self.assertLess(2 * radio_suite.RADIO_LOG_LIMIT + 200, 2000000)
+
+    def test_radio_log_read_failure_is_marked_incomplete_and_keeps_what_was_read(self):
+        """A persistent log that cannot be read in full marks the receipt incomplete; lines already read stay."""
+        line = 'Sun Apr 13 16:49:17 2025 user.info chirpstack-concentratord-sx1302[1]: Frame received, uplink_id: 1'
+        for broken in (False, True):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as directory:
+                receipts = Path(directory)
+                (receipts/'osi-system.log').write_text(line + '\n')
+                if broken:
+                    (receipts/'osi-system.log.old').mkdir()
+                vm = self.log_guest(receipts)
+                with (patch.object(radio_suite, '_edge_expectations', return_value=radio_suite.EdgeState()),
+                      patch.object(radio_suite, '_chirpstack_queue', return_value=radio_suite.QueueState())):
+                    problems = radio_suite.valve_diagnostics(vm)
+                self.assertEqual(problems, ['a persistent log could not be read in full'] if broken else [])
+                self.assertEqual((receipts/'valve-radio.log').read_text(), line + '\n' + (
+                    '[incomplete] a persistent log could not be read in full\n' if broken else ''))
 
     def test_capture_saves_the_radio_log_before_it_reads_the_queues(self):
         """A guest that dies after the radio log keeps that log on disk; each queue read leaves its marker."""

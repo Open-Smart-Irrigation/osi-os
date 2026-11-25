@@ -168,12 +168,14 @@ Each attempt follows the same steps:
 
 1. The runner notes the active persistent log, then issues the one-minute open
    from the GUI. A re-send skips this step: ChirpStack still holds the item.
-2. No downlink for the valve may reach the model in the next 2 s. One that
-   does fails the attempt, and its line names the decoded frame.
+2. On a fresh open, no downlink for the valve may reach the model in the next
+   2 s. One that does fails the attempt, and its line names the decoded frame.
+   A re-send skips this check, so its receipt has no such part.
 3. The edge's own database must show an accepted queue item for this open: the
    newest expectation the read before the issue did not hold, or the
-   expectation carrying the re-sent item. Its `effect_snapshot` must name FPort
-   2 and payload `4101`.
+   expectation carrying the re-sent item. Its `effect_snapshot` must record
+   FPort 2 and payload `4101`; a snapshot without them fails, and the runner
+   never fills them in.
 4. ChirpStack's `device_queue_item` must hold that item as FPort 2, payload
    `4101`, with `is_encrypted 0` and `is_pending 0`, as the first item for the
    device. ChirpStack 4.12.1 builds the next downlink from the first queue
@@ -246,9 +248,13 @@ never retried:
   Concentratord transmits only what it enqueued and acks it `OK`, on which
   ChirpStack deletes the item, so such a record is inconsistent; a re-send
   would deliver the same open twice.
-- The command was delivered, but ChirpStack still holds another item for the
-  valve, such as a second open: `the open was delivered, but ChirpStack still
-  holds ...`.
+- The command was delivered, on time or late, but ChirpStack still holds
+  another item for the valve, such as a second open: `the open was delivered,
+  but ChirpStack still holds ...`. After a late delivery this is checked
+  before the close-out reports, which would otherwise carry it.
+- The command was delivered on time, but ChirpStack still holds its item:
+  `the open was delivered on time, but ChirpStack still holds queue item
+  <id>`.
 - The item left ChirpStack's queue, Concentratord logged a decision, and the
   command never reached the model: `open command lost`. Its expectation stays
   pending for its allowance, so a second open would leave the valve's OPEN
@@ -296,6 +302,11 @@ each written as its source is read:
 - `valve-queue.log` has the valve's expectations with their queue items and
   report evidence, and the ChirpStack queue rows, as they stand after the
   case.
+
+The radio log keeps the newest selected lines up to 900,000 bytes, so its
+hex-encoded console reply fits the 2,000,000-byte console buffer; when older
+lines are left out, the receipt says how many. A persistent log that cannot
+be read in full keeps the lines read and counts as incomplete.
 
 A source that could not be read is marked `[incomplete]` in its file and noted
 in `harness-events.log`. A capture that fails outside those reads, for example

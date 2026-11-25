@@ -72,8 +72,40 @@ PERSISTENT_LOGS = '''persistent_logs() {
 '''
 
 
-RADIO_LOG = PERSISTENT_LOGS + r"""persistent_logs | awk '$7 == "osi-radio-suite:" || $7 ~ /^chirpstack(-concentratord-sx1302|-mqtt-forwarder)?\[[0-9]+\]:$/'
+# Guest.command hex-encodes a reply and Guest.expect keeps the last 2,000,000
+# console bytes, so the selected radio lines stay below half of that.
+RADIO_LOG_LIMIT = 900000
+RADIO_LOG_TRUNCATED = 'osi-radio-log-truncated'
+RADIO_LOG_READ_FAILED = 3
+
+
+def _radio_log(limit=RADIO_LOG_LIMIT):
+    """The guest script for the radio log: newest selected lines up to limit bytes.
+
+    A persistent log that cannot be read in full makes the script exit
+    RADIO_LOG_READ_FAILED and keeps what was read. When older lines are left
+    out to fit, the last line names how many.
+    """
+    return r"""failed=/tmp/osi-radio-log-failed.$$
+rm -f "$failed"
+for file in /data/log/osi-system.log?* /data/log/osi-system.log; do
+    if [ -r "$file" ]; then cat "$file" || echo "$file" >> "$failed"; fi
+done | awk -v limit=""" + str(int(limit)) + r""" -v mark=""" + RADIO_LOG_TRUNCATED + r""" '
+    BEGIN { n = 0; first = 0; total = 0 }
+    $7 == "osi-radio-suite:" || $7 ~ /^chirpstack(-concentratord-sx1302|-mqtt-forwarder)?\[[0-9]+\]:$/ {
+        line[n++] = $0; total += length($0) + 1
+    }
+    END {
+        while (total > limit && first < n) { total -= length(line[first]) + 1; first++ }
+        for (i = first; i < n; i++) print line[i]
+        if (first) print mark, first
+    }'
+if [ -s "$failed" ]; then rm -f "$failed"; exit """ + str(RADIO_LOG_READ_FAILED) + r"""; fi
+rm -f "$failed"
 """
+
+
+RADIO_LOG = _radio_log()
 
 
 class LocalOnly(urllib.request.HTTPRedirectHandler):
@@ -522,7 +554,7 @@ def _bind_downlink(frames, count, delays, queue_id, kept):
             return Binding('no open-command downlink logged', False)
         return Binding(f'no ChirpStack downlink command in the window; Concentratord logged downlink IDs '
                        f'{", ".join(logged)}, none bound to queue item {queue_id}', False)
-    if len(set(frames.commands)) != 1:
+    if len(frames.commands) != 1:
         return Binding(f'{len(frames.commands)} ChirpStack downlink commands in the window '
                        f'({", ".join(frames.commands)}); none can be bound to queue item {queue_id}', False)
     downlink = frames.commands[0]
@@ -778,9 +810,8 @@ SQL""")
 
 
 def _claim(expectation):
-    """The command the edge says it queued for this open: FPort and payload."""
-    return (expectation.f_port if expectation.f_port is not None else str(OPEN_COMMAND[0]),
-            expectation.payload or OPEN_COMMAND[1])
+    """The command the edge says it queued for this open: FPort and payload, as its effect snapshot records them."""
+    return expectation.f_port, expectation.payload
 
 
 def _valve_edge(edge, before, carried=None):
@@ -802,6 +833,9 @@ def _valve_edge(edge, before, carried=None):
     row = rows[-1]
     if row.phase != 'ACCEPTED' or not row.queue_id:
         return None, f'the edge transport phase is {row.phase} with no queue item', row
+    if row.f_port is None or not row.payload:
+        return None, (f'the edge recorded no FPort and payload in the effect snapshot of queue item {row.queue_id}, '
+                      'so the command it queued is unknown'), row
     claim = _claim(row)
     if claim != (str(OPEN_COMMAND[0]), OPEN_COMMAND[1]):
         return None, (f'the edge queued FPort {claim[0]} payload {claim[1]} for the one-minute open, '
@@ -947,11 +981,18 @@ def valve_diagnostics(vm, eui=VALVE):
     problems = []
     try:
         code, radio = vm.command(RADIO_LOG)
-        problem = f'radio log read exited {code}' if code else ''
+        problem = ('a persistent log could not be read in full' if code == RADIO_LOG_READ_FAILED else
+                   f'radio log read exited {code}' if code else '')
     except Exception as error:
         radio, problem = '', f'radio log unreadable: {error!r}'
     if problem:
         problems.append(problem)
+    lines = radio.rstrip('\n').split('\n')
+    if lines[-1].startswith(RADIO_LOG_TRUNCATED + ' '):
+        radio = '\n'.join(lines[:-1])
+        problems.append(f'radio log truncated: the oldest {lines[-1].split()[-1]} radio lines were left out to fit '
+                        'the console reply')
+        problem = '; '.join(filter(None, (problem, problems[-1])))
     (vm.receipts/'valve-radio.log').write_text(radio.rstrip('\n') + '\n' + (f'[incomplete] {problem}\n' if problem else ''))
     with (vm.receipts/'valve-queue.log').open('w') as log:
         _section(log, f'edge valve_actuation_expectations for {eui}:', 'edge',
@@ -1351,11 +1392,15 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
         raise RuntimeError(f'{VALVE}: incomplete valve receipt: ' + '; '.join(f'{name}: {reason}' for name, reason in missing))
     if not binding.creditable:
         raise RuntimeError(f'{VALVE}: {binding.text}; the attempt is not credited')
+    if (packet is not None or late) and (
+            extra := [item for item in queue_after.items if item.id != row.queue_id]):
+        raise RuntimeError(f'{VALVE}: the open was delivered, but ChirpStack still holds '
+                           f'{"; ".join(_queue_item_text(item) for item in extra)} for the valve, which the '
+                           'next uplink would deliver')
     if packet is not None:
-        if extra := [item for item in queue_after.items if item.id != row.queue_id]:
-            raise RuntimeError(f'{VALVE}: the open was delivered, but ChirpStack still holds '
-                               f'{"; ".join(_queue_item_text(item) for item in extra)} for the valve, which the '
-                               'next uplink would deliver')
+        if holds:
+            raise RuntimeError(f'{VALVE}: the open was delivered on time, but ChirpStack still holds queue item '
+                               f'{row.queue_id}, which the next uplink would deliver again: {binding.text}')
         return Attempt(receipt.number, 'received', '', binding.text, holds, row, len(frames.matched))
     if late and holds:
         # Concentratord transmits only a packet it enqueued and acks it OK, and
@@ -1472,9 +1517,9 @@ def run_valve(vm, air, session, gui_open, *, log=print):
     frames_received, failures, earlier = 0, [], []
     carried = None
     for attempt in range(1, VALVE_ATTEMPTS + 1):
-        air.begin_case()
         receipt = Receipt(attempt, 'resend' if carried else 'open')
         try:
+            air.begin_case()
             before = EdgeState() if carried else _edge_expectations(vm, VALVE)
             if before.error:
                 receipt.add('edge before', None, before.error)
