@@ -61,8 +61,23 @@ def cache_locked_packages(release, out):
 OFFLINE_COMPANIONS = ('deploy-offline-runtime.js', 'deploy-archive.js', 'deploy-local-server.js')
 
 
+def missing_companions(release):
+    """Companions the release's deploy-offline.sh needs but its tree lacks.
+
+    An older launcher runs on its own and needs none; one that runs the Node
+    launcher fails at once on the gateway without all three.
+    """
+    launcher = release/'scripts/deploy-offline.sh'
+    if not launcher.is_file() or OFFLINE_COMPANIONS[0] not in launcher.read_text():
+        return []
+    return [name for name in OFFLINE_COMPANIONS if not (release/'scripts'/name).exists()]
+
+
 def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     """Package the candidate with its own deployment scripts on a read-only USB disk."""
+    missing = missing_companions(release)
+    if missing:
+        raise ValueError('deploy-offline.sh needs files the release lacks: ' + ', '.join(missing))
     out=directory/'upgrade'
     out.mkdir()
     env=dict(os.environ, REPO_ROOT=str(release),OUT_DIR=str(out),BUNDLE_SHA=revision[:8])

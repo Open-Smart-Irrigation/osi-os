@@ -405,7 +405,10 @@ Reading straight through the script, in order:
     the new flows. It still proves only that Node-RED served the route, not that
     the SPA works in a browser.
 12. Replaces the tailscale boot init. This runs last, after the identity
-    supervisor and only when the payload passed its health check. The init file
+    supervisor, once the health check has passed or left the start
+    unverified (no failure observed; the next deploy checks it). A failed
+    check rolls back and exits before this step, so a refused or rolled-back
+    deploy never touches the init. The init file
     of tailscale 1.80.3-r1 runs `tailscaled --cleanup` before the daemon, with
     no time limit, at `START=80`; a cleanup that does not return keeps every
     later boot service from starting, ChirpStack and Node-RED included. The OSI
@@ -419,7 +422,10 @@ Reading straight through the script, in order:
     installs the copy only while the gateway's `/etc/init.d/tailscale` still
     is the package file (`TAILSCALE_PACKAGE_INIT_SHA256`) or already the OSI
     copy. A single boot link is renamed to `S99tailscale` in one step;
-    several links get `S99tailscale` first and then lose the others. A
+    several links get `S99tailscale` first and then lose the others. An
+    `S99tailscale` that already points at the init is kept as it is (BusyBox
+    `ln -sf` unlinks before it links), and one that does not is replaced by
+    a rename. A
     service that is disabled at boot stays disabled. Tailscale is not restarted,
     because that would drop an operator's session; the change applies at the
     next boot. The step never fails the deploy. A refused or failed install

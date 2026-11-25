@@ -1824,7 +1824,20 @@ class TailscaleBootTests(unittest.TestCase):
     def test_a_cleanup_the_real_binary_hangs_on_is_reported_as_cut_short(self):
         log = self.normal_log().replace(self.line(20, self.RC + 'S99tailscale: flushing log.'),
                                         self.line(35, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it'))
+        log = log.replace(self.line(21, self.DAEMON), self.line(36, self.DAEMON))
         self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
+
+    def test_a_daemon_that_starts_before_its_cleanup_ended_fails_the_normal_verdict(self):
+        cleanup, _flush, daemon = self.normal_log().splitlines()[1:4]
+        gave_up = self.line(35, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it')
+        nr = self.normal_log().splitlines()[0]
+        for label, lines in [
+            ['daemon before the give-up', [nr, cleanup, daemon, gave_up]],
+            ['daemon before the flush', [nr, cleanup, daemon, self.line(22, self.RC + 'S99tailscale: flushing log.')]],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, 'did not start after its cleanup had ended'):
+                    tailscale_boot.normal_verdict('\n'.join(lines), 15)
 
     def test_a_normal_verdict_names_what_is_wrong(self):
         for label, log, reason in [
@@ -1959,6 +1972,14 @@ class TailscaleBootTests(unittest.TestCase):
         for shell in ('sh', 'bash'):
             self.assertEqual(subprocess.run([shell, '-n', '-c', restart]).returncode, 0)
         receipt = tailscale_boot.lock_verdict('done 33', 'survivors=2 holders=0 lock=present', 'done 32')
+        with self.assertRaisesRegex(RuntimeError, 'exited with an error'):
+            tailscale_boot.lock_verdict('done 33', 'survivors=2 holders=0 lock=present', 'failed 32 rc=1')
+        status = subprocess.run(['bash', '-c', restart.replace('/etc/init.d/tailscale restart', 'sh -c "exit 3"')],
+                                capture_output=True, text=True, timeout=30)
+        self.assertRegex(status.stdout.strip(), r'^failed \d+ rc=3$')
+        ok = subprocess.run(['bash', '-c', restart.replace('/etc/init.d/tailscale restart', 'true')],
+                            capture_output=True, text=True, timeout=30)
+        self.assertRegex(ok.stdout.strip(), r'^done \d+$')
         self.assertIn('2 surviving cleanup', receipt)
         self.assertIn('none holding the procd lock', receipt)
         for label, first, holders, second, reason in [
@@ -2001,7 +2022,9 @@ class TailscaleBootTests(unittest.TestCase):
             bin_dir = Path(directory)/'bin'
             bin_dir.mkdir()
             # A logger whose line lands in the file a second later, as logread -F does.
-            (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{log}) &\n')
+            # Its output is closed, so the captured pipes end with the shell
+            # under test and the time measured is that shell's wait.
+            (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{log}) </dev/null >/dev/null 2>&1 &\n')
             (bin_dir/'logger').chmod(0o755)
             # The image's BusyBox sleep takes whole seconds only.
             real_sleep = shutil.which('sleep')
@@ -2022,6 +2045,36 @@ class TailscaleBootTests(unittest.TestCase):
             self.assertEqual(lost.returncode, 3)
             self.assertGreaterEqual(time.monotonic() - began, 1.9, 'a lost marker is waited for, not polled in a busy loop')
             self.assertIn('-le 20 ] || exit 3; sleep 1', tailscale_boot.mark_script('x'))
+
+    def test_osi_bootstrap_must_end_before_s99tailscale_on_a_patched_boot(self):
+        start = 'Sun Apr 13 16:52:22 2025 user.notice osi-test-bootstrap: start uptime=47.15 stamp=yes'
+        end = 'Sun Apr 13 16:52:22 2025 user.notice osi-test-bootstrap: end uptime=47.24 rc=0'
+        ts = self.line(23, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}')
+        self.assertTrue(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, end, ts])))
+        self.assertFalse(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, ts, end])))
+        self.assertFalse(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, end])))
+        good = [(f'boot {n}', [(0.1, 'yes', 0)], True if n < 2 else None) for n in range(4)]
+        self.assertIn('4 stamped boots', tailscale_boot.bootstrap_verdict(good))
+        with self.assertRaisesRegex(RuntimeError, 'S99tailscale ran before osi-bootstrap'):
+            tailscale_boot.bootstrap_verdict([good[0], ('boot 1', [(0.1, 'yes', 0)], False), *good[2:]])
+
+    def test_the_media_build_refuses_a_launcher_without_its_companions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/'scripts').mkdir()
+            launcher = release/'scripts/deploy-offline.sh'
+            launcher.write_text('#!/bin/sh\nexec node "$script_dir/deploy-offline-runtime.js" "$@"\n')
+            (release/'scripts/deploy-offline-runtime.js').write_text('')
+            self.assertEqual(upgrade_suite.missing_companions(release), ['deploy-archive.js', 'deploy-local-server.js'])
+            with self.assertRaisesRegex(ValueError, 'needs files the release lacks: deploy-archive.js'):
+                upgrade_suite.build_media(release, release, revision='a' * 40)
+            for name in upgrade_suite.OFFLINE_COMPANIONS:
+                (release/'scripts'/name).write_text('')
+            self.assertEqual(upgrade_suite.missing_companions(release), [])
+            launcher.write_text('#!/bin/sh\n# a self-contained launcher\n')
+            for name in upgrade_suite.OFFLINE_COMPANIONS:
+                (release/'scripts'/name).unlink()
+            self.assertEqual(upgrade_suite.missing_companions(release), [], 'an older launcher needs none')
 
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')
@@ -2149,12 +2202,15 @@ class TailscaleBootTests(unittest.TestCase):
 
     def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
         vm = Mock()
-        vm.command.return_value = (0, 'S80tailscale\ndigest a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56')
+        vm.command.return_value = (0, 'S80tailscale\ndigest=a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56')
         self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest a874f9fd1032')
-        vm.command.return_value = (0, 'S99tailscale\ndigest ')
+        # Guest.command() strips its output, so an empty digest arrives as `digest=`.
+        vm.command.return_value = (0, 'S99tailscale\ndigest=')
         self.assertEqual(tailscale_boot.image_receipt(vm), 'S99tailscale, init digest absent')
-        vm.command.return_value = (0, 'digest ')
+        vm.command.return_value = (0, 'digest=')
         self.assertEqual(tailscale_boot.image_receipt(vm), 'no boot link, init digest absent')
+        vm.command.return_value = (0, 'S80tailscale\ndigest')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest absent')
         vm.command.side_effect = RuntimeError('no shell')
         self.assertIn('unreadable', tailscale_boot.image_receipt(vm))
 

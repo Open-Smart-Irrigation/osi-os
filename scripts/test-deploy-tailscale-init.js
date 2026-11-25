@@ -281,11 +281,49 @@ test('a second deploy on a finished gateway changes nothing and downloads nothin
   const fixture = makeFixture({ init: 'ours', links: ['S99tailscale'] });
   try {
     const before = snapshot(fixture);
+    const linkInode = inode(path.join(fixture.rcDir, 'S99tailscale'));
     const result = run(fixture);
+    // The link is kept, not re-created: `ln -sf` unlinks first, and a deploy
+    // cut there would leave tailscale disabled at boot from then on.
+    assert.equal(inode(path.join(fixture.rcDir, 'S99tailscale')), linkInode, 'the S99 link was kept');
+    assert.deepEqual(fs.readdirSync(fixture.rcDir), ['S99tailscale'], 'no staging link is left');
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(result.fetches, []);
     assert.deepEqual(snapshot(fixture), before);
     assert.equal(result.warning, '');
+  } finally { cleanup(fixture); }
+});
+
+test('a repeat deploy cut inside ln still leaves tailscale enabled at boot', () => {
+  // BusyBox `ln -sf` unlinks the target and then creates the link
+  // (coreutils/ln.c in 1.36.1). This stand-in does the unlink and then dies,
+  // as a deploy cut at that point does. A finished gateway must keep its link,
+  // and the next deploy must not take it for a disabled service.
+  const fixture = makeFixture({ init: 'ours', links: ['S99tailscale'] });
+  try {
+    const bin = path.join(fixture.dir, 'cut-ln');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ln'), '#!/bin/sh\nfor last in "$@"; do :; done\nrm -f "$last"\nexit 137\n', { mode: 0o755 });
+    const PATH = `${bin}:${process.env.OSI_TEST_GATEWAY_PATH || process.env.PATH}`;
+    const cut = run(fixture, { pathOverride: PATH });
+    assert.equal(cut.status, 0, cut.stderr);
+    assert.deepEqual(snapshot(fixture).links, ONLY_S99, 'the S99 link survives the cut');
+    const next = run(fixture);
+    assert.equal(next.status, 0, next.stderr);
+    assert.doesNotMatch(next.stdout, /disabled at boot/);
+    assert.deepEqual(snapshot(fixture).links, ONLY_S99);
+  } finally { cleanup(fixture); }
+});
+
+test('an S99 link with another target is replaced in one rename', () => {
+  const fixture = makeFixture({ init: 'ours', links: ['S80tailscale'] });
+  try {
+    fs.symlinkSync('/etc/init.d/tailscale', path.join(fixture.rcDir, 'S99tailscale'));
+    const result = run(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.warning, '');
+    assert.deepEqual(snapshot(fixture).links, ONLY_S99);
+    assert.deepEqual(fs.readdirSync(fixture.rcDir), ['S99tailscale'], 'no staging link is left');
   } finally { cleanup(fixture); }
 });
 

@@ -85,12 +85,13 @@ exec /usr/sbin/tailscaled.real "$@"
 """
 SURVIVORS = "pgrep -f 'sleep 10000[0]'"
 # One restart, run in the background so a blocked one is seen and ended: it
-# prints "done <seconds>" or "blocked <seconds>".
+# prints "done <seconds>", "failed <seconds> rc=<status>" or "blocked <seconds>".
 RESTART = """/etc/init.d/tailscale restart >/tmp/osi-test-restart.log 2>&1 &
 p=$!
 i=0
 while kill -0 "$p" 2>/dev/null && [ "$i" -lt RESTART_LIMIT ]; do sleep 1; i=$((i + 1)); done
-if kill -0 "$p" 2>/dev/null; then echo "blocked $i"; kill "$p"; else echo "done $i"; fi
+if kill -0 "$p" 2>/dev/null; then echo "blocked $i"; kill "$p"
+else wait "$p"; rc=$?; if [ "$rc" = 0 ]; then echo "done $i"; else echo "failed $i rc=$rc"; fi; fi
 """
 RESTART_LIMIT = 90
 # How many surviving children hold the procd lock of the service.
@@ -231,9 +232,14 @@ def normal_verdict(log, limit):
     daemon = next((position for position, line in enumerate(lines) if DAEMON_START.search(line)), None)
     if cut is None and flushed is None:
         raise RuntimeError('the cleanup neither finished nor was cut short')
-    if daemon is None or daemon <= cleanup:
-        raise RuntimeError('the tailscale daemon did not start after its cleanup')
-    if cut is not None:
+    # The first sign that the cleanup ended: its own "flushing log." or the
+    # init giving up on it. The daemon must start after that, not before.
+    done = min(position for position in (cut, flushed) if position is not None)
+    if done <= cleanup:
+        raise RuntimeError('the cleanup ended before it started')
+    if daemon is None or daemon <= done:
+        raise RuntimeError('the tailscale daemon did not start after its cleanup had ended')
+    if cut is not None and (flushed is None or cut < flushed):
         return f'cleanup was cut short after {limit} s and the daemon started'
     return 'cleanup finished with "flushing log." and the daemon started'
 
@@ -292,10 +298,28 @@ def bootstrap_runs(log):
     return runs
 
 
+def bootstrap_before_tailscale(log):
+    """Whether osi-bootstrap's timed run ended before the first S99tailscale output."""
+    lines = log.splitlines()
+    end = next((n for n, line in enumerate(lines)
+                if (match := BOOTSTRAP_LINE.search(line)) and match.group(1) == 'end'), None)
+    tailscale = next((n for n, line in enumerate(lines)
+                      if (match := RC_LINE.search(line)) and match.group(1) == '99'), None)
+    return end is not None and tailscale is not None and end < tailscale
+
+
 def bootstrap_verdict(measured):
-    """Judge every timed boot: [(label, [(seconds, stamp, rc), ...]), ...]."""
-    flat = [(label, run) for label, runs in measured for run in runs]
-    missing = [label for label, runs in measured if len(runs) != 1]
+    """Judge every timed boot: [(label, [(seconds, stamp, rc), ...], ordered), ...].
+
+    `ordered` is None for a boot whose tailscale is not at S99 (the held
+    package-init boots), else whether osi-bootstrap ended before S99tailscale.
+    """
+    measured = [entry if len(entry) == 3 else (*entry, None) for entry in measured]
+    early = [label for label, _, ordered in measured if ordered is False]
+    if early:
+        raise RuntimeError('S99tailscale ran before osi-bootstrap had finished: ' + ', '.join(early))
+    flat = [(label, run) for label, runs, _ in measured for run in runs]
+    missing = [label for label, runs, _ in measured if len(runs) != 1]
     if missing:
         raise RuntimeError('a measured boot did not time exactly one osi-bootstrap run: ' + ', '.join(missing))
     if len(flat) < 4:
@@ -315,6 +339,8 @@ def lock_verdict(first, holders, second):
     fields = dict(word.partition('=')[::2] for word in holders.split())
     state1, seconds1 = (first.split() + ['', ''])[:2]
     state2, seconds2 = (second.split() + ['', ''])[:2]
+    if state1 == 'failed' or state2 == 'failed':
+        raise RuntimeError(f'a restart exited with an error: first {first}; second {second}')
     if state1 != 'done':
         raise RuntimeError(f'the first restart did not finish: {first}')
     if fields.get('lock') != 'present':
@@ -397,11 +423,12 @@ def image_receipt(vm):
     """What the factory image's read-only root carries; never fails a run."""
     try:
         lines = vm.command("ls /rom/etc/rc.d/ | grep -E '^[SK][0-9][0-9]tailscale$'; "
-                           "echo digest $(sha256sum /rom/etc/init.d/tailscale 2>/dev/null | cut -d' ' -f1)")[1].splitlines()
+                           "echo digest=$(sha256sum /rom/etc/init.d/tailscale 2>/dev/null | cut -d' ' -f1)")[1].splitlines()
     except Exception as error:  # diagnostics only
         return f'unreadable ({error!r})'
-    digest = next((line[7:] for line in lines if line.startswith('digest ')), '')
-    links = [line for line in lines if not line.startswith('digest ')]
+    # `digest=` survives the strip of an empty value; a bare `digest ` does not.
+    digest = next((line[7:] for line in lines if line.startswith('digest=')), '')
+    links = [line for line in lines if re.fullmatch(r'[SK]\d\dtailscale', line)]
     return f'{",".join(links) or "no boot link"}, init digest {digest[:12] or "absent"}'
 
 
@@ -623,12 +650,14 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
             raise RuntimeError('offline installer did not reach the candidate version')
         return 'package file replaced, boot link S80 to S99, tailscaled kept pid ' + after_deploy['daemon']
 
-    def timed(vm, token, label):
+    def timed(vm, token, label, at_s99=False):
         log = boot_log(vm, token)
         (run_dir/f'tailscale-bootstrap-{label.replace(" ", "-")}.syslog').write_text(log)
         runs = bootstrap_runs(log)
-        bootstrap_timed.append((label, runs))
-        record(f'{label}: osi-bootstrap start to end (seconds, stamp, exit): {runs}')
+        ordered = bootstrap_before_tailscale(log) if at_s99 else None
+        bootstrap_timed.append((label, runs, ordered))
+        record(f'{label}: osi-bootstrap start to end (seconds, stamp, exit): {runs}'
+               + ('' if ordered is None else f'; ended before S99tailscale: {ordered}'))
 
     def stalled_boot():
         install_stall(upgraded)
@@ -641,7 +670,7 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         ready(upgraded)
         page = since_boot(upgraded)
         receipt = judged(upgraded, token, stall_verdict, 'stall')
-        timed(upgraded, token, 'upgraded guest, stalled cleanup')
+        timed(upgraded, token, 'upgraded guest, stalled cleanup', at_s99=True)
         record(f'boot with the stalled cleanup: login prompt {prompt:.0f} s, farm page and ChirpStack '
                f'{page:.0f} s after the boot began')
         record_processes(upgraded, 'tailscaled.real', 'boot with the stalled cleanup', record)
@@ -660,7 +689,7 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         ready(upgraded)
         page = since_boot(upgraded)
         receipt = judged(upgraded, token, normal_verdict, 'normal')
-        timed(upgraded, token, 'upgraded guest, normal boot')
+        timed(upgraded, token, 'upgraded guest, normal boot', at_s99=True)
         remove_bootstrap_timer(upgraded)
         record(f'boot without the stall: login prompt {prompt:.0f} s, farm page and ChirpStack '
                f'{page:.0f} s after the boot began')
@@ -784,6 +813,8 @@ sed -n '/--- Tailscale boot init ---/,$p' "$f" """)
         # Two rounds: the runbook's line, then the on-site document's.
         vm = guest('fallback', fixture_archive('0.8.0'))
         port = free_port()
+        while port == vm.port:  # the guest's own forward took the same number
+            port = free_port()
         vm.extra_hostfwd.append((port, 22))
         key, public = ssh_key(scratch)
 
@@ -817,16 +848,18 @@ sync""")
             vm.stop()
 
     try:
-        test(INSTALLED_CASE, chained(installed_by_deploy))
-        test(STALL_CASE, chained(stalled_boot))
-        test(NORMAL_CASE, chained(normal_boot))
-        test(LOCK_CASE, chained(restart_with_survivor))
-        test(REFUSAL_CASE, chained(left_alone))
-    finally:
-        healthy[0] = False
-        upgraded.stop()
-    try:
+        try:
+            test(INSTALLED_CASE, chained(installed_by_deploy))
+            test(STALL_CASE, chained(stalled_boot))
+            test(NORMAL_CASE, chained(normal_boot))
+            test(LOCK_CASE, chained(restart_with_survivor))
+            test(REFUSAL_CASE, chained(left_alone))
+        finally:
+            healthy[0] = False
+            upgraded.stop()
         test(FALLBACK_CASE, fallback)
         test(BOOTSTRAP_CASE, lambda: bootstrap_verdict(bootstrap_timed))
     finally:
+        # Also when a guest's stop fails: scratch, and QEMU's stderr with it,
+        # is deleted after the run.
         keep_stderr()
