@@ -155,6 +155,10 @@ class Guest:
         self.send(b'\n')
         self.expect(b':~#',40)
         self.send(b'stty -echo; dmesg -n 1\n')
+        self.console_ready()
+
+    def console_ready(self):
+        """Run once the console of a normal boot answers; a board may record its guest here."""
         self.command('true')
 
     def stderr(self, filename, mode):
@@ -209,9 +213,10 @@ class Guest:
             trace.write(state['tail'])
         state['tail'] = bytearray()
 
-    def note(self, line):
+    def note(self, line, name='harness-events.log'):
+        """Append a harness note to a receipt file; private guests keep none."""
         if not self.private:
-            with (self.receipts/'harness-events.log').open('a') as log:
+            with (self.receipts/name).open('a') as log:
                 print(f'boot={self.boots} {line}', file=log)
 
     def send(self, data):

@@ -132,8 +132,8 @@ downlink, matched by its scheduled `count_us`:
 (the queue reached it after its time), `refused by concentratord at enqueue:
 too late` with the lead time it had or how far past its time it was, or
 `Concentratord scheduled the join-accept for TX`. One retained 0.8.3 run lost
-a join-accept to the first case, with no counter wrap. The valve case needs at
-least one matching `Frame received` line in its own window.
+a join-accept to the first case, with no counter wrap. The valve case has its
+own receipt, under [Valve open and outcome](#valve-open-and-outcome).
 
 `radio-diagnostics.log` counts selected log lines in both sinks (including
 `Scheduled packet is too old`), lists ChirpStack's DevNonce count and DevAddr
@@ -155,6 +155,165 @@ radio traffic. The counts for the rotated file come from the gate's
 per-attempt evidence analysis. This repository's own read of that disk could
 not extract the rotated file, so it checked only the active file's window at
 16:45:57.
+
+### Valve open and outcome
+
+The valve case proves three things about one open: the edge queued exactly the
+timed open, the radio delivered that command to the emulated valve, and the
+edge attributed the valve's OPEN report to that open. An emulator loss of the
+downlink leads to a bounded retry. Every other failure ends the case on the
+attempt where it shows.
+
+Each attempt follows the same steps:
+
+1. The runner notes the active persistent log, then issues the one-minute open
+   from the GUI. A re-send skips this step: ChirpStack still holds the item.
+2. On a fresh open, no downlink for the valve may reach the model in the next
+   2 s. One that does fails the attempt, and its line names the decoded frame.
+   A re-send skips this check, so its receipt has no such part.
+3. The edge's own database must show an accepted queue item for this open: the
+   newest expectation the read before the issue did not hold, or the
+   expectation carrying the re-sent item. Its `effect_snapshot` must record
+   FPort 2 and payload `4101`; a snapshot without them fails, and the runner
+   never fills them in.
+4. ChirpStack's `device_queue_item` must hold that item as FPort 2, payload
+   `4101`, with `is_encrypted 0` and `is_pending 0`, as the first item for the
+   device. ChirpStack 4.12.1 builds the next downlink from the first queue
+   item and stores an edge enqueue as plaintext. On a fresh open the item must
+   not carry `f_cnt_down` yet. Nothing is sent until steps 3 and 4 hold.
+5. The runner sends one uplink and waits 40 s for the command at the model.
+   Every downlink for the valve that carries an application port is decoded,
+   on time or late, and must be FPort 2 with payload `4101`. MAC-only frames
+   and FPort 0 frames are left alone. On a miss the runner keeps reading the
+   socket until 150 s after the uplink, so a wrapped command and any later
+   copy of it leave the socket before the next attempt.
+6. The runner reads the Concentratord and MQTT forwarder window of the
+   attempt, then ChirpStack's queue again.
+
+An attempt counts, as a delivery or as grounds for a retry, only when the
+decision is bound to the downlink ChirpStack built for the attempt's own queue
+item:
+
+- the window holds exactly one ChirpStack downlink command, as the forwarder
+  logs it (`Received downlink command, downlink_id: N`);
+- Concentratord took that downlink ID in RX1 or RX2 of this uplink and logged
+  a refusal for it, or a TX in the slot where it was enqueued. A `Scheduled
+  packet is too old` line names no downlink ID and counts for nothing. RX1 opens `RXDelay1` seconds after the
+  uplink, as the join-accept told the valve (0 means 1 s), and RX2 one second
+  later. A session without `RXDelay1` fails before anything is sent;
+- the queue after the attempt agrees with the gateway's ack for that ID
+  (`Received ack, items: [...]`): ChirpStack deletes an unconfirmed item only
+  on an `OK` ack;
+- an item still queued carries `f_cnt_down`. ChirpStack writes it on an
+  unencrypted item each time it builds a downlink from that item. On a fresh
+  open, where the item had none before the uplink, that shows the window's
+  downlink came from the item. On a re-send the counter predates the attempt,
+  and the tie rests on the exact receive slot of this uplink and on ChirpStack
+  building the downlink from the head of the queue;
+- a delivered frame carries the `f_cnt_down` ChirpStack recorded for the item
+  before the attempt, compared on the low 16 bits the wire carries.
+
+At most three attempts run. A counted fresh open leads to another attempt
+when the command was late or absent at the model. A re-send leads to another
+attempt only when the command reached the model late; a re-send that missed
+fails the case with its receipt, so a decision for another downlink can never
+add an attempt.
+
+A retry re-sends while ChirpStack's queue still holds the item: the next
+uplink alone opens a receive window for it, and the edge's expectation stays
+the same one. Once ChirpStack has consumed the item and the valve got the
+command late, the valve reports that run before another open is issued: it
+sends the OPEN report, waits until the timed open has ended, and sends the
+CLOSED report. With the clock not synchronised, the edge attaches an OPEN
+report to the one pending open that has no report, and to none when two are
+pending (`workers.js`, `attachUntrustedReportTx`). An expectation whose OPEN
+and CLOSED reports arrived is closed to later reports. The runner waits for
+both reports on that expectation and for the device to show `CLOSED` before
+the next GUI open.
+
+These outcomes fail the case on their attempt, with the receipt, and are
+never retried:
+
+- No downlink was logged at all: `no open-command downlink logged`. Decisions
+  without a ChirpStack downlink command, two commands in one window, or a
+  command Concentratord never took name the IDs involved and end with `the
+  attempt is not credited`.
+- ChirpStack's downlink was taken at another offset: `unsupported or unknown
+  RX timing`, with the offset. This holds when the command arrived on time,
+  too.
+- A re-send of a still-queued item missed the model: `the re-send of queue
+  item <id> on attempt N missed`.
+- A copy reached the model late while ChirpStack still holds the item: `a late
+  copy of the open arrived, but ChirpStack still holds queue item <id>`.
+  Concentratord transmits only what it enqueued and acks it `OK`, on which
+  ChirpStack deletes the item, so such a record is inconsistent; a re-send
+  would deliver the same open twice.
+- The command was delivered, on time or late, but ChirpStack still holds
+  another item for the valve, such as a second open: `the open was delivered,
+  but ChirpStack still holds ...`. After a late delivery this is checked
+  before the close-out reports, which would otherwise carry it.
+- The command was delivered on time, but ChirpStack still holds its item:
+  `the open was delivered on time, but ChirpStack still holds queue item
+  <id>`.
+- The item left ChirpStack's queue, Concentratord logged a decision, and the
+  command never reached the model: `open command lost`. Its expectation stays
+  pending for its allowance, so a second open would leave the valve's OPEN
+  report unattributed.
+
+Three attempts without an on-time delivery, each late or a refused fresh open
+followed by a late re-send, end the case with `open command not received after
+3 attempts`.
+
+The outcome is bound to the attempt that succeeded. The device must show
+`CLOSED` before that attempt's OPEN report and `OPEN` after it, the
+expectation of that attempt must hold the OPEN report, trusted or not, and
+every expectation reported over before a re-issue must keep its row, its
+trusted `observed_open_at` and `observed_close_at` times and its untrusted
+report exactly as they stood then. A change is named field by field. The GUI
+outcome step reads the valve's reported state, which belongs to the device.
+
+Each attempt logs one line whatever its outcome, so a refused GUI open, a
+refused model uplink, a wrong payload and a downlink before the receive window
+each leave a line with the reason and the parts collected until then. A
+delivered attempt looks like this:
+
+`A840410000000001 valve open attempt 1/3 (open, queue item <id>): received | edge: queue item <id> ACCEPTED at 2025-04-13T16:49:14.498Z, FPort 2 payload 4101; queued: ChirpStack holds queue item <id> next before the receive window: FPort 2 payload 4101 is_pending 0 is_encrypted 0; model: WM1302 model delivered=1; downlink: open command FPort 2 payload 4101 FCnt 1 received after 1.00 s; frame: Concentratord uplink_id 1902493660 (count_us 247517304) at 902300000 Hz, 125000 Hz, SF7, model stamp <stamp>; concentratord: ChirpStack downlink 3000953403, ack ["OK", "IGNORED"]: Concentratord took it at RX1 +1 s with 140.5 ms lead at enqueue; Scheduled packet for TX; queue after: ChirpStack queue after the attempt: empty`
+
+A failed attempt says `missing <parts>` or `failed: <reason>` and gives
+`MISSING (<reason>)` for each absent part. The Concentratord part names
+ChirpStack's downlink ID and the gateway's ack, then each receive slot where
+Concentratord took it and what it did: `Scheduled packet for TX`, refused at
+enqueue (`too late`), or dropped (`too old`). The lead is `counter_us -
+current_counter_us` of the `Enqueueing timestamped packet` line, wrap-safe.
+
+The case row reports a pass on a later attempt with the count and the
+reasons:
+
+`Valve open and outcome     PASS    <time>  WM1302 model delivered=5, Concentratord frames received=5; passed on attempt 2/3 after 1 retry (attempt 1: open command late after 139.31 s (drained); ChirpStack downlink 3000953403, ack ["OK", "IGNORED"]: Concentratord took it at RX1 +1 s with 140.5 ms lead at enqueue; Scheduled packet for TX); 1 late open reported over before a re-issue`
+
+After the case, pass or fail, the candidate directory holds two more files,
+each written as its source is read:
+
+- `valve-radio.log` has every Concentratord and MQTT forwarder line and every
+  harness marker of the persistent logs, in order across a rotation. Node-RED
+  lines and the device-profile import are left out. ChirpStack itself writes
+  no syslog line in these images; the forwarder's `Received downlink command`
+  and `Received ack` lines are its downlink record.
+- `valve-queue.log` has the valve's expectations with their queue items and
+  report evidence, and the ChirpStack queue rows, as they stand after the
+  case.
+
+The radio log keeps the newest selected lines up to 900,000 bytes, so its
+hex-encoded console reply fits the 2,000,000-byte console buffer; when older
+lines are left out, the receipt says how many. A persistent log that cannot
+be read in full keeps the lines read and counts as incomplete.
+
+A source that could not be read is marked `[incomplete]` in its file and noted
+in `harness-events.log`. A capture that fails outside those reads, for example
+on an unwritable receipt file, is named `capture failed: <error>`. After a pass
+the case row ends with `evidence capture incomplete: <what>`; the verdict does
+not change. The read of the edge's expectations before the open belongs to the
+attempt: a failure there leaves the attempt's line and sends nothing.
 
 The runner boots the factory image and reads its immutable
 `/rom/etc/init.d/node-red` before selecting cases. The script's

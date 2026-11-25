@@ -643,7 +643,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
 
 def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=False):
-    from radio_suite import Radio, VALVE, radio_diagnostics, run_uplinks, run_valve
+    from radio_suite import Radio, VALVE, radio_diagnostics, run_uplinks, run_valve, valve_diagnostics
 
     def boot():
         ready(vm)
@@ -678,9 +678,23 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
             radio_diagnostics(vm)
             raise
     test('WM1302 uplinks',uplinks)
+    problems=[]
     def valve():
-        evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE))
-        gui(vm,password,'outcome',VALVE)
+        nonlocal problems
+        try:
+            evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE), log=log)
+            gui(vm,password,'outcome',VALVE)
+        finally:
+            try:
+                problems = valve_diagnostics(vm)
+            except Exception as error:
+                problems = [f'capture failed: {error!r}']
+                try:
+                    vm.note(f'valve diagnostics failed: {error!r}')
+                except Exception:
+                    pass
+        if problems:
+            evidence += '; evidence capture incomplete: ' + ', '.join(problems)
         return evidence
     test('Valve open and outcome',valve)
     def reboot():
