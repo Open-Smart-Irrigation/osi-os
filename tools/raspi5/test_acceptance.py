@@ -1876,7 +1876,16 @@ class TailscaleBootTests(unittest.TestCase):
         self.assertEqual(tailscale_boot.process_starts('chirpstack: no process found\n', 100), {})
         self.assertEqual(tailscale_boot.held_state('\n\nage=235\n'), ('', []))
         self.assertEqual(tailscale_boot.held_state('2833\nage=99\n'), ('2833', []))
-        self.assertEqual(tailscale_boot.held_state('\nnode-red\ngui-up\nage=99\n'), ('', ['node-red', 'gui-up']))
+        self.assertEqual(tailscale_boot.held_state('\nnodered-up\ngui-up\nage=99\n'), ('', ['nodered-up', 'gui-up']))
+
+    def test_no_ssh_probe_matches_its_own_command_line(self):
+        # dropbear runs each line as `sh -c <line>`; `ps w` shows that line.
+        for name in ('MILESTONES', 'HELD_STATE', 'STALLED_CLEANUP', 'PS_LOOKUP', 'ONSITE_LOOKUP', 'HANG_AGE'):
+            text = getattr(tailscale_boot, name)
+            for pattern in re.findall(r"grep -q '([^']+)'|grep '([^']+)'|pgrep -f '([^']+)'|awk '/([^/]+)/", text):
+                pattern = next(part for part in pattern if part)
+                with self.subTest(name=name, pattern=pattern):
+                    self.assertNotRegex('sh -c ' + text, pattern)
 
     def test_the_verdicts_read_real_fixture_lines(self):
         # Copied from the 0.8.0 fixture's persistent log (gate bc561582).
@@ -1916,6 +1925,16 @@ class TailscaleBootTests(unittest.TestCase):
             for shell in ('sh', 'bash'):
                 run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
                 self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_the_usb_media_carries_the_offline_launcher_companions(self):
+        repo = Path(__file__).resolve().parents[2]
+        launcher = (repo/'scripts/deploy-offline.sh').read_text()
+        runtime = (repo/'scripts/deploy-offline-runtime.js').read_text()
+        self.assertIn('deploy-offline-runtime.js', launcher)
+        for name in re.findall(r"require\('\./([^']+)'\)", runtime):
+            self.assertIn(name + '.js', upgrade_suite.OFFLINE_COMPANIONS)
+        push = (repo/'scripts/deploy-push-bundle.sh').read_text()
+        self.assertIn('for companion in ' + ' '.join(upgrade_suite.OFFLINE_COMPANIONS) + '; do', push)
 
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')

@@ -47,7 +47,9 @@ MILESTONES = ("echo \"daemon=$(pidof tailscaled.real) chirpstack=$(pidof chirpst
 HANG_AGE = ("p=$(pgrep -f 'tailscaled --cleanu[p]'); "
             "echo $(( $(cut -d. -f1 /proc/uptime) - $(cut -d' ' -f22 /proc/$p/stat) / 100 ))")
 # What must be absent while the boot is held, and how long the cleanup has run.
-HELD_STATE = ("pidof chirpstack; ps w | grep -q '[n]ode-red' && echo node-red; "
+# Over SSH the whole line is the command line of a `sh -c`, which `ps w`
+# lists: no word here may match a pattern it greps for.
+HELD_STATE = ("pidof chirpstack; ps w | grep -q '[n]ode-red' && echo nodered-up; "
               "wget -q -T 2 -O /dev/null http://127.0.0.1:1880/gui/ && echo gui-up; echo age=$(" + HANG_AGE + ")")
 
 # One process, blocked in open(2) on a FIFO that no writer opens.

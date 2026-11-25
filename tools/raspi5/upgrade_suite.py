@@ -58,6 +58,9 @@ def cache_locked_packages(release, out):
     return archive
 
 
+OFFLINE_COMPANIONS = ('deploy-offline-runtime.js', 'deploy-archive.js', 'deploy-local-server.js')
+
+
 def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     """Package the candidate with its own deployment scripts on a read-only USB disk."""
     out=directory/'upgrade'
@@ -73,6 +76,12 @@ def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     checksum.write_text(digest+'  candidate.tar.gz\n')
     files = {'npm-cache.tar': cache, 'candidate.tar.gz': bundle,
              'install.sh': release/'scripts/deploy-offline.sh', 'candidate.tar.gz.sha256': checksum}
+    # deploy-offline.sh runs its Node launcher from its own directory, with
+    # the companions deploy-push-bundle.sh pushes beside it.
+    for companion in OFFLINE_COMPANIONS:
+        source = release/'scripts'/companion
+        if source.exists():
+            files[companion] = source
     if extra_files:
         files.update(extra_files)
     disk = out/'upgrade-usb.img'
