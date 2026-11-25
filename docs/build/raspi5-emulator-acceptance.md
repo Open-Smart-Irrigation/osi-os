@@ -224,10 +224,9 @@ from 0.8.0 to the release:
 
 - after the install, the init file has the release digest, `S99tailscale` is
   the only boot link, and `tailscaled` kept its pid;
-- with the stand-in, the next boot reaches its login prompt and `/gui/`, and
-  the persistent syslog shows Node-RED's flows commit before the stall, the
-  init giving up 15 to 19 s after the stall began, and the daemon starting
-  after that;
+- with the stand-in, the next boot reaches `/gui/`, and the persistent syslog
+  shows Node-RED's init before the stall, the init giving up 15 to 23 s after
+  the stall began, and the daemon starting after that;
 - without the stand-in, the next boot shows the real cleanup finishing, or
   cut short if the real binary stalls, and then the daemon starting;
 - an init file that is neither the 1.80.3-r1 package file nor the OSI copy,
@@ -237,14 +236,19 @@ from 0.8.0 to the release:
 
 The fifth case boots the untouched 0.8.0 fixture with the stand-in, twice.
 The package init holds the boot at `S80tailscale`. The case reaches the
-gateway over SSH through an extra host forward to its LAN address. `pgrep`,
+gateway over SSH through an extra host forward to its LAN address, with a
+key the case installs on the first boot. The console prompt comes up while
+the boot is held, as on the field image, so all evidence of the hold comes
+over SSH. `pgrep`,
 `ps w | awk` and the lookup of the on-site instructions must each name the
 stalled cleanup and nothing else, which also shows that no lookup matches
 the shell running it. The case waits 60 s with the stalled cleanup present
-and no service started. It ends the first boot with the runbook's line and
+and no ChirpStack, Node-RED or farm page. It ends the first boot with the runbook's line and
 the second with the line of the on-site instructions. After each kill it
 records the seconds until the Tailscale daemon, ChirpStack, the Node-RED
-process and the farm page are up. It needs `ssh` on the host.
+process and the farm page are up. It needs `ssh` and `ssh-keygen` on the
+host. QEMU's stderr files are copied into the case receipts, because the
+scratch directory is deleted at the end.
 
 The run also records, for the two boots of the upgraded guest, when the
 login prompt and the farm page came up and when the tailscale daemon,

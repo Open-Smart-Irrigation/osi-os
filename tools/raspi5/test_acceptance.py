@@ -1742,23 +1742,27 @@ class TailscaleBootTests(unittest.TestCase):
         return f'Sun Apr 13 16:50:{second:02d} 2025 ' + text
 
     RC = 'daemon.notice procd: /etc/rc.d/'
+    # As logd writes them on the 0.8.0 fixture (gate bc561582, diag/inspect):
+    # the daemon logs through its procd instance, BusyBox logger adds no pid.
+    DAEMON = ('daemon.err tailscaled[4302]: 2025/04/13 16:50:35 Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: '
+              '[]string{"/usr/sbin/tailscaled", "--port", "41641", "--state", "/etc/tailscale/tailscaled.state"}')
 
     def stall_log(self, *, gave_up_after=15, link='S99tailscale'):
         lines = [
-            self.line(0, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+            self.line(0, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci'),
             self.line(20, self.RC + f'{link}: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
-            self.line(20, 'user.notice osi-test-cleanup[4211]: cleanup stall started'),
-            self.line(20 + gave_up_after, 'daemon.notice tailscale[4210]: cleanup did not finish in 15 s; continuing without it'),
-            self.line(20 + gave_up_after, self.RC + f'{link}: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled.real", "--port", "41641"}'),
+            self.line(20, 'user.notice osi-test-cleanup: cleanup stall started'),
+            self.line(20 + gave_up_after, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it'),
+            self.line(20 + gave_up_after, self.DAEMON),
         ]
         return '\n'.join(lines)
 
     def normal_log(self):
         return '\n'.join([
-            self.line(0, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+            self.line(0, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci'),
             self.line(20, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
             self.line(20, self.RC + 'S99tailscale: flushing log.'),
-            self.line(21, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--port", "41641"}'),
+            self.line(21, self.DAEMON),
         ])
 
     def test_the_limit_is_read_from_the_shipped_init(self):
@@ -1798,11 +1802,16 @@ class TailscaleBootTests(unittest.TestCase):
             ['no stall announcement', self.stall_log().replace('cleanup stall started', 'x'), 15, 'did not announce'],
             # syslog is chronological: a later line is a later event.
             ['Node-RED after tailscale', '\n'.join(self.stall_log().splitlines()[1:]
-                                                  + [self.line(45, 'user.notice node-red.init: committed flows.json digest=' + 'a' * 64 + ' stamp=x')]),
+                                                  + [self.line(45, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci')]),
              15, 'order is wrong'],
             ['gave up late', self.stall_log(gave_up_after=40), 15, '40 s after the stall began'],
+            ['gave up early', self.stall_log(gave_up_after=10), 15, '10 s after the stall began'],
             ['ran from S80', self.stall_log(link='S80tailscale'), 15, 'S80tailscale instead of S99tailscale'],
             ['daemon not started', self.stall_log().replace('--port', '--no-port'), 15, 'daemon did not start'],
+            ['only a flows commit from Node-RED', self.stall_log().replace(
+                'chirpstack config CHIRPSTACK_APP_SENSORS source=uci', 'INFO: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+             15, 'did not log its start'],
+            ['give-up from another tag', self.stall_log().replace('user.notice tailscale:', 'user.notice other:'), 15, 'did not give up'],
             ['cut short at another limit', self.stall_log(gave_up_after=15), 30, 'did not give up'],
         ]:
             with self.subTest(label):
@@ -1814,14 +1823,14 @@ class TailscaleBootTests(unittest.TestCase):
 
     def test_a_cleanup_the_real_binary_hangs_on_is_reported_as_cut_short(self):
         log = self.normal_log().replace(self.line(20, self.RC + 'S99tailscale: flushing log.'),
-                                        self.line(35, 'daemon.notice tailscale[4210]: cleanup did not finish in 15 s; continuing without it'))
+                                        self.line(35, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it'))
         self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
 
     def test_a_normal_verdict_names_what_is_wrong(self):
         for label, log, reason in [
             ['cleanup never ran', self.line(0, 'daemon.notice procd: /etc/rc.d/S99node-red: x'), 'real cleanup did not run'],
             ['neither finished nor cut short', '\n'.join(self.normal_log().splitlines()[:2]), 'neither finished nor'],
-            ['still the stand-in', self.normal_log() + '\n' + self.line(1, 'user.notice osi-test-cleanup[4211]: cleanup stall started'),
+            ['still the stand-in', self.normal_log() + '\n' + self.line(1, 'user.notice osi-test-cleanup: cleanup stall started'),
              'stand-in was still installed'],
             ['ran from S80', self.normal_log().replace('S99tailscale', 'S80tailscale'), 'S80tailscale instead of S99tailscale'],
             ['daemon missing', '\n'.join(self.normal_log().splitlines()[:3]), 'daemon did not start'],
@@ -1868,6 +1877,57 @@ class TailscaleBootTests(unittest.TestCase):
         self.assertEqual(tailscale_boot.held_state('\n\nage=235\n'), ('', []))
         self.assertEqual(tailscale_boot.held_state('2833\nage=99\n'), ('2833', []))
         self.assertEqual(tailscale_boot.held_state('\nnode-red\ngui-up\nage=99\n'), ('', ['node-red', 'gui-up']))
+
+    def test_the_verdicts_read_real_fixture_lines(self):
+        # Copied from the 0.8.0 fixture's persistent log (gate bc561582).
+        real = ('Sun Apr 13 16:48:01 2025 daemon.err tailscaled[2079]: 2025/04/13 16:48:01 Program starting: '
+                'v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--port", "41641", "--state", '
+                '"/etc/tailscale/tailscaled.state"}')
+        self.assertRegex(real, tailscale_boot.DAEMON_START)
+        self.assertNotRegex(real.replace('"--port", "41641", ', ''), tailscale_boot.DAEMON_START)
+        self.assertRegex('Sun Apr 13 16:50:02 2025 user.notice node-red.init: chirpstack config '
+                         'CHIRPSTACK_APP_SENSORS source=uci', tailscale_boot.NODE_RED_INIT)
+        rc = ('Sun Apr 13 16:50:08 2025 daemon.notice procd: /etc/rc.d/S80tailscale: 2025/04/13 16:50:08 Program '
+              'starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}')
+        self.assertEqual(tailscale_boot.tail_rc([rc])[0][1], 'S80tailscale')
+        self.assertNotRegex(rc, tailscale_boot.GAVE_UP)
+
+    def test_the_console_prompt_of_a_held_boot_is_drained_and_not_judged(self):
+        class Console:
+            def __init__(self):
+                self.buf = b''
+                self.chunks = [b'procd: - init -\r\n' + tailscale_boot.CONSOLE + b'.\r\n']
+
+            def expect(self, pattern, timeout):
+                if self.chunks:
+                    self.buf += self.chunks.pop(0)
+                raise TimeoutError('guest serial timed out')
+
+        console = Console()
+        self.assertTrue(tailscale_boot.drain_console(console, 0.05))
+        self.assertEqual(console.buf, b'.\r\n')
+        self.assertFalse(tailscale_boot.drain_console(console, 0.05))
+
+    def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
+        media = Path('/nonexistent/upgrade.img')
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        def make_guest(work, image, qemu, ram, **options):
+            seen.update(options)
+            raise Stop
+
+        args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4})()
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/tailscale_boot.INIT).parent.mkdir(parents=True)
+            (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
+            with self.assertRaises(Stop):
+                tailscale_boot.run(args, release, release, release, make_guest, None, print,
+                                   lambda old: release/'fixture.img.gz', lambda: media, None)
+        self.assertEqual(seen['upgrade'], media)
 
     def test_the_focused_mode_expects_exactly_the_tailscale_cases(self):
         args = SimpleNamespace(tailscale_boot_only=True)
@@ -1949,14 +2009,14 @@ class TailscaleBootTests(unittest.TestCase):
                 vm.launch()
             self.assertEqual(vm.boots, 1)
             vm.buf = b'Linux version ...\r\n'
-            # Nothing on the console yet: hold reads it until its time is up.
+            # Nothing on the console yet: the drain reads it until its time is up.
             with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')) as expect:
-                self.assertFalse(tailscale_boot.hold(vm, 0.05))
+                self.assertFalse(tailscale_boot.drain_console(vm, 0.05))
             self.assertEqual(expect.call_args_list[0].args[0], tailscale_boot.NO_MATCH)
-            # The login prompt arrives: hold reports it and leaves it consumed.
+            # The login prompt arrives: the drain reports it and leaves it consumed.
             with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')):
                 vm.buf += tailscale_boot.CONSOLE + b'\r\nlogin:'
-                self.assertTrue(tailscale_boot.hold(vm, 5))
+                self.assertTrue(tailscale_boot.drain_console(vm, 0.05))
             self.assertEqual(vm.buf, b'\r\nlogin:')
             with patch.object(vm, 'expect', return_value=Mock()) as expect, patch.object(vm, 'command') as command:
                 vm.shell()
