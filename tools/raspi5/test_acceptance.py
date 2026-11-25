@@ -1936,6 +1936,24 @@ class TailscaleBootTests(unittest.TestCase):
         push = (repo/'scripts/deploy-push-bundle.sh').read_text()
         self.assertIn('for companion in ' + ' '.join(upgrade_suite.OFFLINE_COMPANIONS) + '; do', push)
 
+    def test_the_boot_log_starts_at_the_last_marker_and_stays_fast_on_a_large_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old, current = Path(directory)/'old.log', Path(directory)/'current.log'
+            filler = ''.join(f'Sun Apr 13 16:00:00 2025 daemon.info dnsmasq[1]: line {n}\n' for n in range(200_000))
+            old.write_text(filler + 'x osi-test: OSI-TAILSCALE-aaaa\nx tailscale: before\n')
+            current.write_text(filler + 'x osi-test: OSI-TAILSCALE-aaaa\n' + filler
+                               + 'x user.notice tailscale: after\nx node-red.init: chirpstack config A source=uci\n')
+            script = tailscale_boot.boot_log_script('OSI-TAILSCALE-aaaa', (str(old), str(current)))
+            began = time.monotonic()
+            run = subprocess.run(['sh', '-c', script], capture_output=True, text=True, timeout=60)
+            self.assertLess(time.monotonic() - began, 20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout.splitlines(), ['x osi-test: OSI-TAILSCALE-aaaa', 'x user.notice tailscale: after',
+                                                       'x node-red.init: chirpstack config A source=uci'])
+            missing = subprocess.run(['sh', '-c', tailscale_boot.boot_log_script('OSI-TAILSCALE-bbbb', (str(old),))],
+                                     capture_output=True, text=True, timeout=60)
+            self.assertEqual((missing.returncode, missing.stdout), (0, ''))
+
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')
         seen = {}

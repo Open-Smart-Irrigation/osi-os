@@ -211,11 +211,27 @@ def mark(vm):
     return token
 
 
+SYSLOG_FILES = ('/data/log/osi-system.log.old', '/data/log/osi-system.log')
+
+
+def boot_log_script(token, files=SYSLOG_FILES):
+    """Shell that prints the tailscale-related syslog lines from the last marker on.
+
+    It finds the marker's line number and tails from there: the persistent log
+    runs to megabytes, and an awk that rebuilds one string per line takes
+    minutes on the image's BusyBox.
+    """
+    names = ' '.join("'" + name + "'" for name in files)
+    return (f"set -- {names}\n"
+            f"n=$(cat \"$@\" 2>/dev/null | grep -n -F '{token}' | tail -n 1 | cut -d: -f1)\n"
+            "[ -n \"$n\" ] || exit 0\n"
+            "cat \"$@\" 2>/dev/null | tail -n +\"$n\" | "
+            "grep -E 'tailscale|Tailscale|node-red\\.init: chirpstack config|osi-test'")
+
+
 def boot_log(vm, token):
     """Syslog lines after the marker, from the file node-red.init keeps on /data."""
-    return checked(vm, """cat /data/log/osi-system.log.old /data/log/osi-system.log 2>/dev/null |
-awk -v token=""" + "'" + token + "'" + """ 'index($0, token) { kept = "" } { kept = kept $0 "\\n" } END { printf "%s", kept }' |
-grep -E 'tailscale|Tailscale|node-red\\.init: chirpstack config|osi-test' """)
+    return checked(vm, boot_log_script(token), 180)
 
 
 def init_state(vm):
