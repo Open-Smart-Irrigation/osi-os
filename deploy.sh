@@ -788,11 +788,13 @@ install_tailscale_init() {
     fi
     # Several links: S99 first, so a deploy cut in between leaves two links,
     # never none. An S99 link that is already right is kept; any other is
-    # replaced by a rename, since `ln -sf` unlinks before it links.
+    # replaced by a rename, since `ln -sf` unlinks before it links. `mv -T`
+    # refuses a directory at S99 instead of moving the link into it. The
+    # cleanup is best effort: this step never fails the deploy.
     if [ "$(readlink "$TAILSCALE_RC_D/S99tailscale" 2>/dev/null)" != "../init.d/tailscale" ] &&
         ! { ln -sf ../init.d/tailscale "$TAILSCALE_RC_D/.S99tailscale.osi-new" &&
-            mv -f "$TAILSCALE_RC_D/.S99tailscale.osi-new" "$TAILSCALE_RC_D/S99tailscale"; }; then
-        rm -f "$TAILSCALE_RC_D/.S99tailscale.osi-new"
+            mv -f -T "$TAILSCALE_RC_D/.S99tailscale.osi-new" "$TAILSCALE_RC_D/S99tailscale"; }; then
+        rm -f "$TAILSCALE_RC_D/.S99tailscale.osi-new" 2>/dev/null || :
         tailscale_init_warning="WARN: tailscale boot protection installed, but NOT moved to S99: could not create $TAILSCALE_RC_D/S99tailscale; tailscale keeps its boot position"
         echo "$tailscale_init_warning" >&2
         return 0
