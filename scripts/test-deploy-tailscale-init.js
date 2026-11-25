@@ -327,6 +327,24 @@ test('an S99 link with another target is replaced in one rename', () => {
   } finally { cleanup(fixture); }
 });
 
+test('a wrong-target S99 alone survives a deploy cut inside ln', () => {
+  // The same cut as above, on an S99 that the installer has to replace: only
+  // the staged link may be at risk. A plain `ln -sf` onto S99 behind the
+  // readlink check would lose the only link here (Opus r3 review).
+  const fixture = makeFixture({ init: 'ours', links: [] });
+  try {
+    fs.symlinkSync('/etc/init.d/tailscale', path.join(fixture.rcDir, 'S99tailscale'));
+    const bin = path.join(fixture.dir, 'cut-ln');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ln'), '#!/bin/sh\nfor last in "$@"; do :; done\nrm -f "$last"\nexit 137\n', { mode: 0o755 });
+    run(fixture, { pathOverride: `${bin}:${process.env.OSI_TEST_GATEWAY_PATH || process.env.PATH}` });
+    assert.ok(fs.lstatSync(path.join(fixture.rcDir, 'S99tailscale'), { throwIfNoEntry: false })?.isSymbolicLink(), 'S99 survives the cut');
+    run(fixture);
+    assert.deepEqual(snapshot(fixture).links, ONLY_S99);
+    assert.deepEqual(fs.readdirSync(fixture.rcDir), ['S99tailscale']);
+  } finally { cleanup(fixture); }
+});
+
 test('any other boot position gives way to S99 alone', () => {
   const fixture = makeFixture({ init: 'ours', links: ['S80tailscale', 'S85tailscale'] });
   try {
