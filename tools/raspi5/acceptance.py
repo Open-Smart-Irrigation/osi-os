@@ -688,6 +688,7 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
             try:
                 problems = valve_diagnostics(vm)
             except Exception as error:
+                problems = [f'capture failed: {error!r}']
                 try:
                     vm.note(f'valve diagnostics failed: {error!r}')
                 except Exception:

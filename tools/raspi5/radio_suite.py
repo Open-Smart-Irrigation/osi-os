@@ -29,7 +29,6 @@ VALVE_DRAIN_WINDOW = JOIN_DRAIN_WINDOW
 VALVE_ATTEMPTS = JOIN_ATTEMPTS
 OPEN_COMMAND = (2, '4101')
 OPEN_SECONDS = 60
-UNKNOWN_TIMING_SPAN = 10000000
 
 
 @dataclass(frozen=True)
@@ -217,6 +216,8 @@ class Frames:
     matched: list = field(default_factory=list)    # (uplink ID, count_us) at the sent channel
     other: list = field(default_factory=list)      # (uplink ID, freq, bw, dr) elsewhere
     downlinks: list = field(default_factory=list)  # Downlink entries
+    commands: list = field(default_factory=list)  # IDs of the ChirpStack downlink commands the forwarder logged
+    acks: list = field(default_factory=list)      # (ack items, downlink ID) the forwarder logged
     marked: bool = False
     ram_matched: int = 0                           # RAM ring fallback, diagnostic only
     error: str = ''
@@ -279,7 +280,17 @@ frames() {{
         else {{ if ($8 == marker "-end") closed = 1; seen = 0 }}
         next
     }}
-    !seen || $7 !~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ {{ next }}
+    !seen {{ next }}
+    $7 ~ /^chirpstack-mqtt-forwarder\[[0-9]+\]:$/ {{
+        if ($8 == "Received" && $9 == "downlink" && $10 == "command,") print "dl command", value("downlink_id:")
+        else if ($8 == "Received" && $9 == "ack,") {{
+            items = ""
+            for (i = 10; i < NF; i++) {{ if ($i == "downlink_id:") break; items = items (items ? " " : "") $i }}
+            print "dl ack", items, value("downlink_id:")
+        }}
+        next
+    }}
+    $7 !~ /^chirpstack-concentratord-sx1302\[[0-9]+\]:$/ {{ next }}
     $6 == "user.info" && $8 == "Frame" && $9 == "received," && $10 == "uplink_id:" {{
         id = value("uplink_id:")
         if (id !~ /^[0-9]+$/ || id in uplinks) next
@@ -328,6 +339,10 @@ printf 'ram %s\n' "$(logread 2>/dev/null | frames | grep -c '^match ')"
             frames.matched.append((words[1], int(words[2])))
         elif words[:1] == ['other'] and len(words) >= 2:
             frames.other.append(tuple(words[1:]))
+        elif words[:2] == ['dl', 'command'] and len(words) == 3 and words[2].isdecimal():
+            frames.commands.append(words[2])
+        elif words[:2] == ['dl', 'ack'] and len(words) >= 4 and words[-1].isdecimal():
+            frames.acks.append((' '.join(words[2:-1]).removeprefix('items: ').rstrip(','), words[-1]))
         elif words[:1] == ['dl'] and len(words) == 5 and words[3].isdecimal():
             frames.downlinks.append(Downlink(words[1], words[2], int(words[3]),
                                              int(words[4]) if words[4].isdecimal() else None))
@@ -455,44 +470,105 @@ def rx_delays(session):
     """US915 class A receive slots after an uplink, in count_us.
 
     RX1 opens RXDelay1 seconds after the uplink, as the join-accept told the
-    device (0 means 1 s); RX2 opens one second later.
+    device (0 means 1 s); RX2 opens one second later. A session without that
+    value cannot place its slots.
     """
     delay = getattr(session, 'rx_delay', None)
-    delay = delay if isinstance(delay, int) and delay >= 1 else 1
+    if isinstance(delay, bool) or not isinstance(delay, int) or delay < 0:
+        raise ValueError(f'the session carries no RXDelay1 (rx_delay {delay!r}), so its receive slots cannot be placed')
+    delay = delay or 1
     return delay * 1000000, (delay + 1) * 1000000
 
 
 @dataclass(frozen=True)
-class Decisions:
-    """What Concentratord logged for the receive slots after one uplink."""
+class Binding:
+    """How the attempt's queue item, ChirpStack's downlink and Concentratord's handling were tied together."""
 
     text: str
-    scheduled: bool       # a scheduling decision sits in a receive slot of this session
+    creditable: bool           # one ChirpStack downlink, taken in a receive slot of this uplink, with a decision on it, and the queue after in agreement with the gateway's ack
+    ack_ok: bool | None = None       # the gateway acked that downlink OK; None when no ack was logged
 
 
-def _valve_downlinks(frames, count, delays):
-    """Say what Concentratord did with the receive slots after the valve's uplink.
+def _bind_downlink(frames, count, delays, queue_id, kept):
+    """Tie the attempt's queue item to the Concentratord downlink that carried it.
 
-    A decision outside both slots is reported as RX timing this receipt does
-    not support, apart from a downlink Concentratord never logged.
+    ChirpStack answers an uplink with at most one downlink, built from the
+    first usable queue item (chirpstack 4.12.1, downlink/data.rs,
+    _handle_response); the check before the uplink made sure that item is the
+    attempt's. The MQTT forwarder logs each downlink command with its
+    downlink_id, then the gateway's ack items for it. Concentratord logs the
+    downlink it took under the same ID, at which counter, and what it did with
+    it. ChirpStack deletes an unconfirmed item only on an OK ack
+    (downlink/tx_ack.rs), so the queue after the attempt must agree with that
+    ack. A decision is credited only when every step names one and the same
+    downlink ID.
+
+    kept is the attempt's queue item as it stands after the attempt, or None
+    once ChirpStack let go of it. ChirpStack writes f_cnt_down on an
+    unencrypted item when it builds a downlink from it (downlink/data.rs,
+    update_device_queue_item), so an item still queued without one was never
+    the source of a downlink, and nothing in the window is credited to it.
     """
+    holds = kept is not None
+    logged = sorted({event.id for event in frames.downlinks if event.id != '-'})
+    if not frames.commands:
+        if not logged:
+            return Binding('no open-command downlink logged', False)
+        return Binding(f'no ChirpStack downlink command in the window; Concentratord logged downlink IDs '
+                       f'{", ".join(logged)}, none bound to queue item {queue_id}', False)
+    if len(set(frames.commands)) != 1:
+        return Binding(f'{len(frames.commands)} ChirpStack downlink commands in the window '
+                       f'({", ".join(frames.commands)}); none can be bound to queue item {queue_id}', False)
+    downlink = frames.commands[0]
+    ack = next((items for items, identifier in frames.acks if identifier == downlink), None)
+    ack_ok = None if ack is None else 'OK' in re.findall(r'[A-Z_]+', ack)
+    head = f'ChirpStack downlink {downlink}, ack {ack or "not logged"}'
     if count is None:
-        return Decisions('no Concentratord frame to schedule against', False)
-    notes = []
-    for slot, delay in zip(('RX1', 'RX2'), delays):
-        fate = _downlink_fate(frames, (count + delay) % COUNTER_WRAP, 'open command', lead=True)
-        if fate:
-            notes.append(f'{slot} +{delay // 1000000} s: {fate}')
-    if notes:
-        return Decisions('; '.join(notes), True)
-    later = sorted({_signed_us(event.count - count) for event in frames.downlinks} - {0})
-    after_frame = [offset for offset in later if 0 < offset <= UNKNOWN_TIMING_SPAN]
-    if after_frame:
-        offsets = ', '.join(f'+{offset / 1000000:g} s' for offset in after_frame)
-        return Decisions(f'unsupported or unknown RX timing: a downlink decision is logged {offsets} after the '
-                         f'frame, outside this session\'s RX1 at +{delays[0] // 1000000} s and '
-                         f'RX2 at +{delays[1] // 1000000} s', False)
-    return Decisions('no open-command downlink logged', False)
+        return Binding(f'{head}: no Concentratord frame to place the receive slots', False, ack_ok)
+    slots = {(count + delay) % COUNTER_WRAP: (slot, delay // 1000000)
+             for slot, delay in zip(('RX1', 'RX2'), delays)}
+    others = sorted(set(logged) - {downlink})
+    taken = [event for event in frames.downlinks if event.id == downlink and event.kind in ('enqueue', 'too-late')]
+    if not taken:
+        return Binding(f'{head}: Concentratord logged no enqueue for it in RX1 +{delays[0] // 1000000} s or '
+                       f'RX2 +{delays[1] // 1000000} s'
+                       + (f'; its decisions are for downlink IDs {", ".join(others)}' if others else ''),
+                       False, ack_ok)
+    if not any(event.count in slots for event in taken):
+        offsets = ', '.join(f'+{_signed_us(event.count - count) / 1000000:g} s' for event in taken)
+        return Binding(f'{head}: Concentratord took it {offsets} after the frame, outside this session\'s '
+                       f'RX1 at +{delays[0] // 1000000} s and RX2 at +{delays[1] // 1000000} s '
+                       '(unsupported or unknown RX timing)', False, ack_ok)
+    handling, decided = [], False
+    for scheduled, (slot, seconds) in slots.items():
+        for event in (event for event in frames.downlinks if event.count == scheduled):
+            if event.kind == 'too-late' and event.id == downlink and event.current is not None:
+                margin = _signed_us(scheduled - event.current) / 1000
+                handling.append(f'Concentratord refused it at {slot} +{seconds} s: too late, ' + (
+                    f'only {margin:.1f} ms lead time' if margin >= 0 else f'{-margin:.1f} ms past its TX time'))
+                decided = True
+            elif event.kind == 'enqueue' and event.id == downlink:
+                lead = (f' with {_signed_us(scheduled - event.current) / 1000:.1f} ms lead at enqueue'
+                        if event.current is not None else '')
+                handling.append(f'Concentratord took it at {slot} +{seconds} s{lead}')
+            elif event.kind == 'tx' and event.id == downlink:
+                handling.append('Scheduled packet for TX')
+                decided = True
+            elif event.kind == 'too-old' and event.current is not None:
+                handling.append(f'Concentratord dropped it as too old, '
+                                f'{_signed_us(event.current - scheduled) / 1000:.1f} ms after its TX time')
+                decided = True
+    problems = []
+    if not decided:
+        problems.append('no TX, refusal or drop logged for it')
+    if holds and not kept.f_cnt:
+        problems.append(f'ChirpStack still holds queue item {queue_id} with no f_cnt_down, so it built no downlink from it')
+    if ack_ok and holds:
+        problems.append(f'the gateway acked OK but ChirpStack still holds queue item {queue_id}')
+    if ack_ok is not True and not holds:
+        problems.append(f'queue item {queue_id} left ChirpStack\'s queue without an OK ack')
+    return Binding(f'{head}: ' + '; '.join(handling + problems), not problems, ack_ok)
+
 @dataclass(frozen=True)
 class ChirpStackState:
     nonces: tuple = ()          # DevNonces recorded for this DevEUI and JoinEUI
@@ -562,11 +638,18 @@ def _chirpstack_part(before, after, dev_eui, devnonce, accept):
 
 @dataclass(frozen=True)
 class QueueItem:
-    """One device_queue_item row of ChirpStack 4.12.1: its ID, FPort, payload in hex and is_pending as stored."""
+    """One device_queue_item row of ChirpStack 4.12.1.
+
+    Fields as stored: ID, FPort, payload in hex, is_pending, is_encrypted, and
+    the downlink frame counter ChirpStack used for the item ('' until it built
+    a downlink for it).
+    """
     id: str
     f_port: str
     data: str
     pending: str
+    encrypted: str
+    f_cnt: str
 
 
 @dataclass(frozen=True)
@@ -587,9 +670,23 @@ class Expectation:
     f_port: str | None = None        # effect_snapshot.fPort
     payload: str | None = None       # effect_snapshot.bytes_hex, upper-cased
     seconds: int | None = None       # effect_snapshot.encoded_duration_seconds
-    open_evidence: bool = False      # an OPEN report, trusted or not, is attached
-    close_evidence: bool = False     # a CLOSED report, trusted or not, is attached
+    open_at: str = ''                # observed_open_at, as stored
+    close_at: str = ''               # observed_close_at, as stored
     report: str = ''                 # untrusted_report as canonical JSON, '' when none
+
+    def _reported(self, kind):
+        report = json.loads(self.report) if self.report else None
+        return isinstance(report, dict) and isinstance(report.get(kind), dict)
+
+    @property
+    def open_evidence(self):
+        """An OPEN report, trusted or not, is attached."""
+        return bool(self.open_at) or self._reported('open')
+
+    @property
+    def close_evidence(self):
+        """A CLOSED report, trusted or not, is attached."""
+        return bool(self.close_at) or self._reported('closed')
 
 
 @dataclass(frozen=True)
@@ -599,24 +696,25 @@ class EdgeState:
 
 
 def _chirpstack_queue(vm, dev_eui):
-    """Read ChirpStack's device queue for one DevEUI.
+    """Read ChirpStack's device queue for one DevEUI, oldest item first.
 
     The edge stores the ID ChirpStack returns for an accepted enqueue as the
     expectation's transport_json queue_id, so that ID names the row here.
-    ChirpStack 4.12.1 removes an unconfirmed item once the gateway has taken
-    it. Whether a refused item stays is read here, not assumed. Never selects
-    key columns.
+    ChirpStack 4.12.1 removes an unconfirmed item once the gateway acked its
+    downlink, and writes the frame counter on the item when it builds the
+    downlink. Whether a refused item stays is read here, not assumed. Never
+    selects key columns.
     """
     if not re.fullmatch(r'[0-9A-Fa-f]{16}', dev_eui):
         raise ValueError('invalid device identifier')
     code, output = vm.command(f"""sqlite3 -readonly -batch -bail -cmd '.timeout 5000' {CHIRPSTACK_DB} <<'SQL'
-SELECT id, f_port, hex(data), is_pending FROM device_queue_item WHERE dev_eui = x'{dev_eui}' ORDER BY created_at;
+SELECT id, f_port, hex(data), is_pending, is_encrypted, coalesce(f_cnt_down, '') FROM device_queue_item WHERE dev_eui = x'{dev_eui}' ORDER BY created_at;
 SQL""")
     try:
         if code:
             raise ValueError
         rows = [line.split('|') for line in output.splitlines()]
-        if not all(len(row) == 4 and all(row) for row in rows):
+        if not all(len(row) == 6 and all(row[:5]) for row in rows):
             raise ValueError
     except ValueError:
         return QueueState(error='ChirpStack database unreadable')
@@ -627,15 +725,15 @@ def _expectation(identifier, state, opened, closed, transport):
     """Build one Expectation from a hex-encoded transport_json.
 
     A transport_json that is not a JSON object yields the row's state and
-    report times only.
+    report times only. The times are kept as stored, so that a later read can
+    be compared with this one value for value.
     """
     try:
         transport = json.loads(bytes.fromhex(transport) or b'null')
     except ValueError:
         transport = None
-    evidence = (bool(opened), bool(closed))
     if not isinstance(transport, dict):
-        return Expectation(identifier, state, open_evidence=evidence[0], close_evidence=evidence[1])
+        return Expectation(identifier, state, open_at=opened, close_at=closed)
     snapshot = transport.get('effect_snapshot')
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     report = transport.get('untrusted_report')
@@ -646,9 +744,7 @@ def _expectation(identifier, state, opened, closed, transport):
         None if snapshot.get('fPort') is None else str(snapshot['fPort']),
         None if snapshot.get('bytes_hex') is None else str(snapshot['bytes_hex']).upper(),
         seconds if isinstance(seconds, int) and not isinstance(seconds, bool) else None,
-        evidence[0] or isinstance(report, dict) and isinstance(report.get('open'), dict),
-        evidence[1] or isinstance(report, dict) and isinstance(report.get('closed'), dict),
-        json.dumps(report, sort_keys=True) if report is not None else '')
+        opened, closed, json.dumps(report, sort_keys=True) if report is not None else '')
 
 
 def _edge_expectations(vm, eui):
@@ -703,32 +799,53 @@ def _valve_edge(edge, before, carried=None):
     return f'queue item {row.queue_id} {row.phase} at {row.accepted_at}, FPort {claim[0]} payload {claim[1]}', None, row
 
 
+def _queue_item_text(item, named=True):
+    """One queue item as stored; named as the receipts quote it inside a sentence."""
+    return (f'{"item " if named else ""}{item.id} FPort {item.f_port} data {item.data} is_pending {item.pending} '
+            f'is_encrypted {item.encrypted}' + (f' f_cnt_down {item.f_cnt}' if item.f_cnt else ''))
+
+
 def _queue_items(queue):
-    return '; '.join(f'item {item.id} FPort {item.f_port} data {item.data} is_pending {item.pending}'
-                     for item in queue.items) or 'empty'
+    return '; '.join(_queue_item_text(item) for item in queue.items) or 'empty'
 
 
 def _valve_queued(queue, queue_id, claim):
-    """Say whether ChirpStack holds exactly the queued command before the receive window."""
+    """Say whether ChirpStack's queue holds the attempt's command, as the next item to go out.
+
+    Returns (text, missing reason, the frame counter ChirpStack recorded for
+    the item or ''). ChirpStack sends the first usable queue item, and the
+    edge enqueues the timed open unencrypted, so its plaintext is comparable.
+    """
     if queue.error:
-        return None, queue.error
+        return None, queue.error, ''
     held = [item for item in queue.items if item.id == queue_id]
     if not held:
-        return None, f'ChirpStack does not hold queue item {queue_id} before the receive window: {_queue_items(queue)}'
-    seen = (held[0].f_port, held[0].data.upper())
+        return None, f'ChirpStack does not hold queue item {queue_id} before the receive window: {_queue_items(queue)}', ''
+    item = held[0]
+    if item.encrypted != '0':
+        return None, (f'ChirpStack holds queue item {queue_id} encrypted (is_encrypted {item.encrypted}), '
+                      'so its plaintext cannot be checked'), item.f_cnt
+    seen = (item.f_port, item.data.upper())
     if seen != claim:
         return None, (f'ChirpStack holds queue item {queue_id} as FPort {seen[0]} payload {seen[1]}, '
-                      f'not the queued FPort {claim[0]} payload {claim[1]}')
-    return (f'ChirpStack holds queue item {queue_id} before the receive window: '
-            f'FPort {seen[0]} payload {seen[1]} is_pending {held[0].pending}'), None
+                      f'not the queued FPort {claim[0]} payload {claim[1]}'), item.f_cnt
+    if item.pending != '0':
+        return None, f'ChirpStack holds queue item {queue_id} pending an earlier transmission (is_pending {item.pending})', item.f_cnt
+    if queue.items[0].id != queue_id:
+        return None, (f'ChirpStack holds queue item {queue_id}, but queue item {queue.items[0].id} is next '
+                      'for the device, and ChirpStack sends the first item of the queue'), item.f_cnt
+    return (f'ChirpStack holds queue item {queue_id} next before the receive window: '
+            f'FPort {seen[0]} payload {seen[1]} is_pending {item.pending} is_encrypted {item.encrypted}'
+            + (f' f_cnt_down {item.f_cnt}' if item.f_cnt else '')), None, item.f_cnt
 
 
 def _valve_queue(queue, queue_id):
-    """Describe ChirpStack's device queue after an attempt; say whether it still holds the edge's item."""
+    """Describe ChirpStack's device queue after an attempt; return the edge's item while it still holds it, else None."""
     if queue.error:
-        return None, queue.error, False
-    return f'ChirpStack queue after the attempt: {_queue_items(queue)}', None, any(
-        item.id == queue_id for item in queue.items)
+        return None, queue.error, None
+    return f'ChirpStack queue after the attempt: {_queue_items(queue)}', None, next(
+        (item for item in queue.items if item.id == queue_id), None)
+
 def radio_diagnostics(vm):
     # Write fixed labels, counts and process IDs only. Application logs can
     # contain credentials; the ChirpStack query never selects key columns.
@@ -829,8 +946,7 @@ def valve_diagnostics(vm, eui=VALVE):
                 problems)
         _section(log, f'ChirpStack device_queue_item for {eui}:', 'ChirpStack',
                 lambda: _chirpstack_queue(vm, eui),
-                lambda state: [f'{item.id} FPort {item.f_port} data {item.data} is_pending {item.pending}'
-                               for item in state.items],
+                lambda state: [_queue_item_text(item, named=False) for item in state.items],
                 problems)
     if problems:
         try:
@@ -1020,14 +1136,30 @@ def _valve_data(devaddr):
 
 
 def _decode(valve, packet, claim):
-    """Decode one downlink against the queued command. Returns (text, missing reason)."""
+    """Decode one downlink against the queued command. Returns (text, missing reason, FCnt)."""
     try:
         command = valve.downlink(packet)
     except ValueError as error:
-        return None, f'a downlink that failed verification ({error})'
+        return None, f'a downlink that failed verification ({error})', None
     seen = (str(command['fport']), command['payload'].hex().upper())
     text = f'FPort {seen[0]} payload {seen[1]}'
-    return text, None if seen == claim else f'{text} is not the queued command FPort {claim[0]} payload {claim[1]}'
+    return text, None if seen == claim else f'{text} is not the queued command FPort {claim[0]} payload {claim[1]}', \
+        command['fcnt']
+
+
+def _frame_counter(recorded, fcnt, queue_id):
+    """Whether a delivered frame carries the counter ChirpStack recorded for its queue item.
+
+    ChirpStack writes the downlink frame counter on the item when it builds the
+    downlink for it (downlink/data.rs, update_device_queue_item) and advances
+    the counter only on an OK ack (downlink/tx_ack.rs), so an item that stayed
+    queued after a refusal carries the counter of its next delivery. The wire
+    carries the low 16 bits.
+    """
+    if recorded and fcnt != int(recorded) % 65536:
+        return (f"the delivered frame's FCnt {fcnt} is not f_cnt_down {recorded}, which ChirpStack "
+                f'recorded for queue item {queue_id}')
+    return None
 
 
 @dataclass
@@ -1062,8 +1194,8 @@ class Attempt:
 
     number: int
     outcome: str               # received, late or absent
-    reason: str                # the downlink part when the command did not arrive in its window
-    decision: str              # what Concentratord logged for the receive slots
+    reason: str                # the delivery part when the command did not arrive in its window
+    decision: str              # how the queue item, ChirpStack's downlink and Concentratord's handling were tied together
     holds: bool                # ChirpStack's queue still holds the edge's item
     expectation: Expectation
     frames: int                # Concentratord frames bound in the attempt's window
@@ -1094,11 +1226,18 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     """Run one attempt to deliver the queued open; return how it ended, or raise.
 
     Nothing is sent until the edge names an accepted queue item for this
-    attempt and ChirpStack's queue holds that item as the timed open. Every
-    downlink for the valve that carries an application port is decoded, on time
-    or late, and must be that command. An attempt is left open for a retry only
-    when Concentratord logged a decision in a receive slot of this session.
+    attempt and ChirpStack's queue holds that item, as the timed open, next in
+    line. Every downlink for the valve that carries an application port is
+    decoded, on time or late, and must be that command. The attempt counts,
+    as a delivery or as grounds for a retry, only when Concentratord's decision
+    is tied to the downlink ChirpStack built for that item; see
+    _bind_downlink. Any other outcome fails the case on that attempt.
     """
+    try:
+        delays = rx_delays(valve)
+    except ValueError as error:
+        receipt.failure = f'session: {error}'
+        raise RuntimeError(f'{VALVE}: {error}') from None
     data = _valve_data(valve.devaddr)
     marker = _mark_attempt(vm)
     if carried is None:
@@ -1113,7 +1252,7 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
         except TimeoutError:
             pass
         else:
-            text, mismatch = _decode(valve, early, (str(OPEN_COMMAND[0]), OPEN_COMMAND[1]))
+            text, mismatch, _ = _decode(valve, early, (str(OPEN_COMMAND[0]), OPEN_COMMAND[1]))
             receipt.failure = 'downlink before receive window'
             receipt.add('downlink', None, f'{text or "an undecodable downlink"} received '
                                            f'{time.monotonic() - opened:.2f} s after the GUI open, before the receive window'
@@ -1125,10 +1264,10 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     if edge_missing:
         raise RuntimeError(f'{VALVE}: {edge_missing}; no uplink was sent')
     claim = _claim(row)
-    queued = _valve_queued(_chirpstack_queue(vm, VALVE), row.queue_id, claim)
-    receipt.add('queued', *queued)
-    if queued[1]:
-        raise RuntimeError(f'{VALVE}: {queued[1]}; no uplink was sent')
+    queued_text, queued_missing, recorded = _valve_queued(_chirpstack_queue(vm, VALVE), row.queue_id, claim)
+    receipt.add('queued', queued_text, queued_missing)
+    if queued_missing:
+        raise RuntimeError(f'{VALVE}: {queued_missing}; no uplink was sent')
     sent = time.monotonic()
     try:
         delivered = uplink(STREGA)
@@ -1148,21 +1287,35 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
             except TimeoutError:
                 break
             arrival = time.monotonic() if arrival is None else arrival
-    if packet is not None:
-        text, mismatch = _decode(valve, packet, claim)
-        delay = time.monotonic() - sent
+
+    def checked_frame(copy):
+        """Decode one delivered frame against the queued command.
+
+        Returns (what fails, 'payload' or 'counter' or None, the failure text,
+        the decoded text, the FCnt).
+        """
+        text, mismatch, fcnt = _decode(valve, copy, claim)
         if mismatch:
-            receipt.failure = f'downlink: {mismatch}'
-            receipt.add('downlink', None, f'{mismatch}, received {delay:.2f} s after the uplink')
-            raise RuntimeError(f'timed-open downlink payload mismatch: {mismatch}')
-        receipt.add('downlink', f'open command {text} received after {delay:.2f} s')
+            return 'payload', mismatch, text, fcnt
+        counter = _frame_counter(recorded, fcnt, row.queue_id)
+        return ('counter' if counter else None), counter, text, fcnt
+
+    if packet is not None:
+        delay = time.monotonic() - sent
+        fails, reason, text, fcnt = checked_frame(packet)
+        if fails:
+            receipt.failure = f'downlink: {reason}'
+            receipt.add('downlink', None, f'{reason}, received {delay:.2f} s after the uplink')
+            raise RuntimeError(f'timed-open downlink {"frame counter" if fails == "counter" else "payload"} '
+                               f'mismatch: {reason}, received {delay:.2f} s after the uplink')
+        receipt.add('downlink', f'open command {text} FCnt {fcnt} received after {delay:.2f} s')
     else:
         for position, copy in enumerate(late, 1):
-            text, mismatch = _decode(valve, copy, claim)
-            if mismatch:
-                receipt.failure = f'late downlink: {mismatch}'
-                receipt.add('downlink', None, f'{mismatch}, drained as late copy {position}')
-                raise RuntimeError(f'late open command failed verification: {mismatch}')
+            fails, reason, _, _ = checked_frame(copy)
+            if reason:
+                receipt.failure = f'late downlink: {reason}'
+                receipt.add('downlink', None, f'{reason}, drained as late copy {position}')
+                raise RuntimeError(f'late open command failed verification: {reason}, drained as late copy {position}')
         reason = (f'open command late after {arrival - sent:.2f} s (drained' +
                   (f' with {len(late) - 1} later copy)' if len(late) > 1 else ')') if late else
                   f'open command absent after {time.monotonic() - sent:.2f} s')
@@ -1170,22 +1323,23 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     frames = _concentratord_frames(vm, marker)
     frame_text, frame_missing, count = _uplink_frame(frames, stamp)
     receipt.add('frame', frame_text, frame_missing)
-    decisions = _valve_downlinks(frames, count, rx_delays(valve))
-    receipt.add('concentratord', decisions.text)
-    after_text, after_missing, holds = _valve_queue(_chirpstack_queue(vm, VALVE), row.queue_id)
+    after_text, after_missing, kept = _valve_queue(_chirpstack_queue(vm, VALVE), row.queue_id)
+    holds = kept is not None
+    binding = _bind_downlink(frames, count, delays, row.queue_id, kept)
+    receipt.add('concentratord', binding.text)
     receipt.add('queue after', after_text, after_missing)
     if missing := [(name, reason) for name, (_, reason) in receipt.parts.items() if reason and name != 'downlink']:
         raise RuntimeError(f'{VALVE}: incomplete valve receipt: ' + '; '.join(f'{name}: {reason}' for name, reason in missing))
+    if not binding.creditable:
+        raise RuntimeError(f'{VALVE}: {binding.text}; the attempt is not credited')
     if packet is not None:
-        return Attempt(receipt.number, 'received', '', decisions.text, holds, row, len(frames.matched))
-    if not decisions.scheduled:
-        raise RuntimeError(f'{VALVE}: {decisions.text}; the open command is not retried')
+        return Attempt(receipt.number, 'received', '', binding.text, holds, row, len(frames.matched))
     if not late and not holds:
-        raise RuntimeError(f'{VALVE}: open command lost: {decisions.text}; it never reached the model and '
+        raise RuntimeError(f'{VALVE}: open command lost: {binding.text}; it never reached the model and '
                            'ChirpStack has consumed it, so its expectation stays pending and a second open '
                            'could not be attributed')
     return Attempt(receipt.number, 'late' if late else 'absent', receipt.parts['downlink'][1],
-                   decisions.text, holds, row, len(frames.matched), arrival)
+                   binding.text, holds, row, len(frames.matched), arrival)
 
 
 def _close_out_earlier(vm, air, valve, uplink, attempt, log):
@@ -1227,6 +1381,23 @@ def _close_out_earlier(vm, air, valve, uplink, attempt, log):
     return standing
 
 
+REPORT_VALUES = ('open_at', 'close_at', 'report')
+
+
+def _changed(was, now):
+    """Name each report value of an expectation that differs between two reads.
+
+    The trusted observed times and the untrusted report are compared as
+    stored. The reconciliation state and transport phase are left out: the
+    edge may move them on its own schedule once both reports are attached.
+    """
+    if now is None:
+        return 'its row is gone'
+    changed = [f'{name}: {getattr(was, name)!r} -> {getattr(now, name)!r}'
+               for name in REPORT_VALUES if getattr(was, name) != getattr(now, name)]
+    return '; '.join(changed) or 'no difference'
+
+
 def run_valve(vm, air, session, gui_open, *, log=print):
     """Open the valve from the GUI and check the outcome the edge reports.
 
@@ -1234,11 +1405,12 @@ def run_valve(vm, air, session, gui_open, *, log=print):
     ChirpStack still holds, then sends one uplink and waits VALVE_WINDOW for
     the open command at the model. On a miss it drains late deliveries until
     VALVE_DRAIN_WINDOW after the uplink, as for a join-accept (#736). At most
-    VALVE_ATTEMPTS run, and only an attempt whose frame, queue item and queue
-    state were read, whose downlink Concentratord decided in a receive slot and
-    whose command was late or absent leads to another. Any other outcome fails
-    the case on that attempt. Every attempt logs a receipt whatever its
-    outcome.
+    VALVE_ATTEMPTS run. An attempt counts only when its frame and queue state
+    were read and Concentratord's decision is tied to the ChirpStack downlink
+    of the attempt's own queue item (_bind_downlink); that holds for a delivery
+    on time as much as for a miss. A credited miss leads to another attempt
+    only when the command was late or absent. Every attempt logs a receipt
+    whatever its outcome.
 
     A retry re-sends while ChirpStack's queue holds the edge's item. Once
     ChirpStack has consumed the item and the valve got the command late, the
@@ -1250,9 +1422,9 @@ def run_valve(vm, air, session, gui_open, *, log=print):
     The outcome is bound to the successful attempt: the valve must report
     CLOSED before that attempt's OPEN report and OPEN after it, the
     expectation of that attempt must hold the OPEN report, and every earlier
-    expectation must hold exactly what it held before the re-issue. The result
-    of a pass on a later attempt names the retries and why each earlier
-    attempt failed.
+    expectation must keep its report times and report as they stood before the
+    re-issue. The result of a pass on a later attempt names the retries and why
+    each earlier attempt failed.
     """
     if VALVE not in session:
         raise RuntimeError('no authenticated valve radio session')
@@ -1269,9 +1441,17 @@ def run_valve(vm, air, session, gui_open, *, log=print):
     for attempt in range(1, VALVE_ATTEMPTS + 1):
         air.begin_case()
         receipt = Receipt(attempt, 'resend' if carried else 'open')
-        before = EdgeState() if carried else _edge_expectations(vm, VALVE)
         try:
+            before = EdgeState() if carried else _edge_expectations(vm, VALVE)
+            if before.error:
+                receipt.add('edge before', None, before.error)
+                raise RuntimeError(f'{VALVE}: the edge\'s expectations could not be read before the open '
+                                   f'({before.error}); no uplink was sent')
             result = _valve_attempt(vm, air, valve, gui_open, uplink, receipt, carried=carried, before=before)
+        except Exception as error:
+            if not receipt.failure and not receipt.missing():
+                receipt.failure = f'{type(error).__name__}: {error}'
+            raise
         finally:
             log(receipt.line())
         frames_received += result.frames
@@ -1300,10 +1480,10 @@ def run_valve(vm, air, session, gui_open, *, log=print):
             raise RuntimeError(f'{VALVE}: incomplete valve receipt: {standing.error}')
         rows = {standing_row.id: standing_row for standing_row in standing.rows}
         for was in earlier:
-            now = rows.get(was.id)
-            if now is None or (now.open_evidence, now.close_evidence, now.report) != (
-                    was.open_evidence, was.close_evidence, was.report):
-                raise RuntimeError(f'{VALVE}: the earlier open {was.id} changed while attempt {attempt} was reported')
+            difference = _changed(was, rows.get(was.id))
+            if difference != 'no difference':
+                raise RuntimeError(f'{VALVE}: the earlier open {was.id} changed while attempt {attempt} '
+                                   f'was reported: {difference}')
     report_text, report_missing, _ = _uplink_frame(_concentratord_frames(vm, report_marker), air.last_stamp)
     if report_missing:
         raise RuntimeError(f'{VALVE}: incomplete open report receipt: {report_missing}')
