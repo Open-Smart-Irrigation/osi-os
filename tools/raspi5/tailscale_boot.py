@@ -329,10 +329,28 @@ def lock_verdict(first, holders, second):
             f'child(ren), none holding the procd lock; second restart {seconds2} s')
 
 
+def mark_script(token, files=None):
+    """logger, then wait until the line is in the persistent log.
+
+    logd keeps the line in its ring; a separate `logread -F` writer appends it
+    to the file later. A reboot right after `logger` can lose it.
+    """
+    names = ' '.join("'" + name + "'" for name in (files or SYSLOG_FILES))
+    return (f'logger -t osi-test "{token}"\n'
+            'i=0\n'
+            f'until cat {names} 2>/dev/null | grep -qF \'{token}\'; do\n'
+            '    i=$((i + 1)); [ "$i" -le 40 ] || exit 3; sleep 0.5\n'
+            'done\n'
+            'sync')
+
+
 def mark(vm):
-    """Write a marker to syslog and return it; a case reads its boot's log after it."""
+    """Write a marker to the persistent syslog and return it; a case reads its boot's log after it."""
     token = 'OSI-TAILSCALE-' + secrets.token_hex(6)
-    checked(vm, f'logger -t osi-test "{token}"; sync')
+    try:
+        checked(vm, mark_script(token), 60)
+    except RuntimeError as error:
+        raise RuntimeError('the marker did not reach the persistent syslog within 20 s') from error
     return token
 
 
