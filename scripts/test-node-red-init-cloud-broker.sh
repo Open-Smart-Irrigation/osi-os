@@ -105,11 +105,14 @@ sed \
 
 # ---------------------------------------------------------------------------
 # Part 1b: the cloud endpoint scheme policy in the resolver. A ws:// or
-# mqtt:// address is used only for a loopback host; any other, like any
-# address with a scheme that is not TLS (in any letter case), is ignored with
-# a WARN, so the next source takes over. Without a server_host, a refused
-# address for a host other than the default broker hands the gateway to the
-# name that never resolves: its credential belongs to another cloud.
+# mqtt:// address is used only for a loopback host. Any other stored value is
+# ignored with a WARN, so the next source takes over: an address with a
+# scheme that is not TLS (in any letter case), and a value the init cannot
+# use as given (no scheme, whitespace, a control character). Without a
+# server_host, a refused value for a host other than the default broker hands
+# the gateway to the name that never resolves: its credential belongs to
+# another cloud. The default broker host is compared without regard to
+# letter case.
 # ---------------------------------------------------------------------------
 (
     . "$SANDBOX/node-red.init"
@@ -174,18 +177,52 @@ sed \
     done
     resolve_cloud_broker_url "TCP://server.opensmartirrigation.org:1883" ""
     scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a non-TLS scheme in any case on the default broker host: default broker"
-    # A value without a scheme stays an unusable value, as before.
-    resolve_cloud_broker_url "broker.example.net" ""
-    scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a value without a scheme: default broker"
-    scheme_eq "default" "$CLOUD_BROKER_URL_SOURCE" "a value without a scheme: source"
 
-    # The loopback test reads the host of the address only.
+    # Any stored value the init does not use as given counts as refused: one
+    # without a scheme, and one with whitespace or a control character, even
+    # when its scheme and host alone would pass.
+    TAB=$(printf '\t')
+    CTL_LOW=$(printf '\001')
+    CTL_DEL=$(printf '\177')
+    for url in "broker.example.net" "broker.example.net:1883" "ws://broker.example.net/mqtt " "mqtt://broker.example.net${TAB}/mqtt" \
+        "wss://broker.example${TAB}net/mqtt" "mqtt://127.0.0.1:1883 " "wss://broker.example${CTL_LOW}net/mqtt" "mqtt://127.0.0.1:1883${CTL_DEL}" \
+        "ws${CTL_LOW}://broker.example.net/mqtt"; do
+        resolve_cloud_broker_url "$url" ""
+        scheme_eq "$UNLINKED_URL" "$CLOUD_BROKER_URL" "a value that is not used as given, for another host, with no server_host: the name that never resolves"
+        scheme_eq "refused" "$CLOUD_BROKER_URL_SOURCE" "a value that is not used as given, with no server_host: source"
+        resolve_cloud_broker_url "$url" "cloud.example.org"
+        scheme_eq "wss://cloud.example.org/mqtt" "$CLOUD_BROKER_URL" "a value that is not used as given, with a server_host: the server_host broker"
+    done
+    for url in "server.opensmartirrigation.org:1883" "mqtt://server.opensmartirrigation.org:1883 "; do
+        resolve_cloud_broker_url "$url" ""
+        scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a value that is not used as given on the default broker host: default broker"
+        scheme_eq "default" "$CLOUD_BROKER_URL_SOURCE" "a value that is not used as given on the default broker host: source"
+    done
+
+    # The default broker host is compared without regard to letter case. A
+    # host that only looks like it is still another host.
+    for url in "WS://SERVER.OPENSMARTIRRIGATION.ORG/mqtt" "mqtt://Server.OpenSmartIrrigation.Org:1883" "TCP://SERVER.OPENSMARTIRRIGATION.ORG:1883"; do
+        resolve_cloud_broker_url "$url" ""
+        scheme_eq "$DEFAULT_URL" "$CLOUD_BROKER_URL" "a refused value on the default broker host in upper or mixed case: default broker"
+        scheme_eq "default" "$CLOUD_BROKER_URL_SOURCE" "a refused value on the default broker host in upper or mixed case: source"
+    done
+    for url in "ws://SERVER.OPENSMARTIRRIGATION.ORG.EXAMPLE.NET/mqtt" "ws://server.opensmartirrigation.org.example/mqtt" "ws://server.opensmartirrigation.org./mqtt" "ws://SERVER.OPENSMARTIRRIGATION.ORGX/mqtt"; do
+        resolve_cloud_broker_url "$url" ""
+        scheme_eq "$UNLINKED_URL" "$CLOUD_BROKER_URL" "a refused value for a host that only looks like the default broker host, in any case: the name that never resolves"
+    done
+
+    # The loopback test reads the host of the address only. A value with
+    # whitespace or a control character shows each such byte as "?".
+    shown() {
+        printf '%s' "$1" | tr -c '[:print:]' '?'
+    }
     for url in "ws://[::1]" "mqtt://127.0.0.1" "ws://127.0.0.2:8081/mqtt?x=1" "Ws://[::1]:8081/mqtt" "MQTT://127.0.0.1:1883"; do
-        cloud_broker_url_is_loopback "$url" || scheme_note "loopback: $url"
+        cloud_broker_url_is_loopback "$url" || scheme_note "loopback: $(shown "$url")"
     done
     for url in "wss://broker.example.net/mqtt" "mqtt://[::1.5]:1883" "mqtt://::1:1883" "ws://localhost.:1883" "mqtt://127.0.0.1.5:1883" "WS://broker.example.net/mqtt" \
-        'mqtt://other.example.test\@127.0.0.1:1883/' 'ws://other.example.test\@127.0.0.1/' 'mqtt://127.0.0.1\@127.0.0.1:1883/' 'mqtt://127.0.0.1\@other.example.test:1883/'; do
-        if cloud_broker_url_is_loopback "$url"; then scheme_note "not loopback: $url"; fi
+        'mqtt://other.example.test\@127.0.0.1:1883/' 'ws://other.example.test\@127.0.0.1/' 'mqtt://127.0.0.1\@127.0.0.1:1883/' 'mqtt://127.0.0.1\@other.example.test:1883/' \
+        "mqtt://127.0.0.1:1883 " "ws://127.0.0.1${TAB}/mqtt" "ws${CTL_LOW}://127.0.0.1/mqtt" "mqtt://127.0.0.1:1883${CTL_DEL}"; do
+        if cloud_broker_url_is_loopback "$url"; then scheme_note "not loopback: $(shown "$url")"; fi
     done
     [ "$scheme_failures" -eq 0 ] || exit 1
 ) || scheme_note "the resolver does not apply the cloud endpoint scheme policy (misses above)"
@@ -389,6 +426,56 @@ write_flows "$PLACEHOLDER"
 run_start "mqtt://127.0.0.1:1883" "cloud.example.org"
 scheme_eq "mqtt://127.0.0.1:1883" "$(exported_url)" "a plain broker address on loopback is exported as configured"
 scheme_lacks "WARN" "a plain broker address on loopback logs no WARN"
+
+# ---------------------------------------------------------------------------
+# A literal in an older flows.json never outlives a stored value that was not
+# used: the broker chosen at start takes its place, also when that is the
+# default broker. The default with nothing stored leaves the literal alone.
+# ---------------------------------------------------------------------------
+PLAIN_LITERAL="mqtt://server.opensmartirrigation.org:1883"
+write_flows "$PLAIN_LITERAL"
+run_start "mqtt://server.opensmartirrigation.org:1883" ""
+scheme_eq "$DEFAULT_URL" "$(exported_url)" "a refused plain address on the default broker host: the default broker is exported"
+scheme_eq "$DEFAULT_URL" "$(broker_field)" "older flows.json: a refused plain address on the default broker host, the plain literal gives way to the default broker"
+scheme_has "cloud MQTT broker $DEFAULT_URL source=default" "a refused plain address on the default broker host: the start log names the default broker"
+
+write_flows "$PLAIN_LITERAL"
+run_start "WS://SERVER.OPENSMARTIRRIGATION.ORG/mqtt" ""
+scheme_eq "$DEFAULT_URL" "$(exported_url)" "a refused plain address on the default broker host in upper case: the default broker is exported"
+scheme_eq "$DEFAULT_URL" "$(broker_field)" "older flows.json: a refused plain address on the default broker host in upper case, the plain literal gives way"
+
+write_flows "$PLAIN_LITERAL"
+run_start "server.opensmartirrigation.org:1883" ""
+scheme_eq "$DEFAULT_URL" "$(exported_url)" "a value without a scheme on the default broker host: the default broker is exported"
+scheme_eq "$DEFAULT_URL" "$(broker_field)" "older flows.json: a value without a scheme on the default broker host, the plain literal gives way"
+
+write_flows "$PLAIN_LITERAL"
+run_start "broker.example.net" ""
+scheme_eq "$UNLINKED_URL" "$(exported_url)" "a value without a scheme for another host: the name that never resolves"
+scheme_has "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)" "a value without a scheme logs the WARN"
+scheme_has "cloud MQTT broker $UNLINKED_URL source=refused" "a value without a scheme: the start log names the name that never resolves"
+scheme_eq "$UNLINKED_URL" "$(broker_field)" "older flows.json: a value without a scheme for another host, the plain literal gives way to the name that never resolves"
+
+write_flows "$PLAIN_LITERAL"
+run_start "ws://broker.example.net/mqtt " "cloud.example.org"
+scheme_eq "wss://cloud.example.org/mqtt" "$(exported_url)" "a value with whitespace and a server_host: the server_host broker"
+scheme_has "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace or control characters)" "a value with whitespace logs its WARN"
+scheme_eq "wss://cloud.example.org/mqtt" "$(broker_field)" "older flows.json: a value with whitespace, the plain literal gives way to the server_host broker"
+
+write_flows "$PLAIN_LITERAL"
+run_start "wss://broker.example$(printf '\t')net/mqtt" ""
+scheme_eq "$UNLINKED_URL" "$(exported_url)" "a TLS address with whitespace in it is not used: the name that never resolves"
+
+write_flows "$PLACEHOLDER"
+run_start "broker.example$(printf '\001')net" ""
+scheme_eq "$UNLINKED_URL" "$(exported_url)" "a value with a control character for another host: the name that never resolves"
+scheme_has "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace or control characters)" "a value with a control character logs its WARN"
+
+# The ordinary default: nothing stored, so the literal stays.
+write_flows "$PLAIN_LITERAL"
+run_start "" ""
+scheme_eq "$DEFAULT_URL" "$(exported_url)" "nothing stored: the default broker is exported"
+scheme_eq "$PLAIN_LITERAL" "$(broker_field)" "nothing stored: a plain literal is left as it is"
 
 # ---------------------------------------------------------------------------
 # Part 3 (#766): an unlinked gateway gets no cloud broker. Its credentials

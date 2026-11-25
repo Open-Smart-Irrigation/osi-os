@@ -125,14 +125,18 @@ cloud REST traffic verifies the same way.
 
 A stored `ws://` or `mqtt://` broker address is used only for a loopback host.
 The scheme is read without regard to letter case; any other scheme that is
-not TLS counts as plain. For such a host `node-red.init` ignores the address
-with one warning that does not print the address, and
-`wss://<server_host>/mqtt` takes over. Without a `server_host`, the default
-broker takes over only when the ignored address named the default broker's
-host; otherwise the gateway gets the broker name that never resolves until it
-is relinked, because its credential belongs to another cloud. Account link
-refuses such an address in the cloud's reply. It reads the address the way
-the MQTT client does as well, so none is stored.
+not TLS counts as plain. Any other stored value that `node-red.init` does not
+use as given is treated the same way, a value without a scheme or with
+whitespace or a control character included: it is ignored with one warning
+that does not print the value, and `wss://<server_host>/mqtt` takes over.
+Without a `server_host`, the default broker takes over only when the ignored
+value named the default broker's host, letter case aside; otherwise the
+gateway gets the broker name that never resolves until it is relinked,
+because its credential belongs to another cloud. Whenever a stored value is
+not used, a literal broker address in an older `flows.json` is replaced by
+the broker chosen at start. Account link refuses such an address in the
+cloud's reply, and one with whitespace or a control character inside it. It
+reads the address the way the MQTT client does as well, so none is stored.
 
 The topic table stays in `AGENTS.md`.
 

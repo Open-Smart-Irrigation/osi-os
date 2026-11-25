@@ -780,16 +780,26 @@ function emptyMqttConfig() {
 }
 
 // The cloud endpoint scheme policy for the broker address in the cloud's
-// link reply: TLS unless the host is loopback. The address is read twice,
-// with the URL class and with the parser the MQTT client uses; a plain
-// address passes only when both read the same loopback host (osi-cloud-http
-// compares them). Null when the address passes or cannot be parsed here;
-// linkMqttConfig still rejects one it cannot parse.
+// link reply: TLS unless the host is loopback. An address with whitespace or
+// a control character inside is refused first: the address that is stored
+// must be the one that was checked. The address is then read twice, with the
+// URL class and with the parser the MQTT client uses; a plain address passes
+// only when both read the same loopback host (osi-cloud-http compares them).
+// Null when the address passes or cannot be parsed here; linkMqttConfig
+// still rejects one it cannot parse.
+const UNPRINTABLE_IN_ADDRESS = /[\s\u0000-\u001f\u007f-\u009f]/;
+
 function cloudBrokerRefusal(mqttBrokerUrl) {
+  const text = String(mqttBrokerUrl);
+  if (UNPRINTABLE_IN_ADDRESS.test(text)) {
+    return Object.assign(new Error('Server authentication returned an invalid MQTT broker URL'), {
+      code: 'invalid_mqtt_broker_url', statusCode: 502,
+    });
+  }
   let broker;
   let clientReading;
-  try { broker = new URL(String(mqttBrokerUrl)); } catch (error) { return null; }
-  try { clientReading = nodeUrl.parse(String(mqttBrokerUrl)); } catch (error) { clientReading = null; }
+  try { broker = new URL(text); } catch (error) { return null; }
+  try { clientReading = nodeUrl.parse(text); } catch (error) { clientReading = null; }
   const refusal = cloudHttp.cloudEndpointRefusal(broker.protocol, broker.hostname, {
     quiet: true, clientHostname: clientReading && clientReading.hostname,
   });
@@ -804,10 +814,10 @@ function linkMqttConfig(state) {
   const mqttBrokerUrl = String(state.get('al_mqtt_broker_url') || '').trim();
   const gateway = normalizeGatewayDeviceEui(state.get('al_gateway_device_eui'));
   if (!mqttPassword || !gateway) throw new Error('Linked account response is missing MQTT credentials or gateway identity');
-  const broker = new URL(mqttBrokerUrl);
-  if (!broker.host || !['mqtt:', 'mqtts:', 'ws:', 'wss:'].includes(broker.protocol)) throw new Error('Invalid MQTT broker URL');
   const brokerRefusal = cloudBrokerRefusal(mqttBrokerUrl);
   if (brokerRefusal) throw brokerRefusal;
+  const broker = new URL(mqttBrokerUrl);
+  if (!broker.host || !['mqtt:', 'mqtts:', 'ws:', 'wss:'].includes(broker.protocol)) throw new Error('Invalid MQTT broker URL');
   return { server_host: broker.host, mqtt_password: mqttPassword, mqtt_broker_url: mqttBrokerUrl, link_gateway_device_eui: gateway };
 }
 
