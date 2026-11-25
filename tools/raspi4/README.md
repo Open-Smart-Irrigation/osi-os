@@ -12,6 +12,13 @@ The HAT uses GPIO8 for SPI chip select, GPIO17 for reset and I²C1 for the
 STTS751 temperature sensor. The shared SX1302 model exchanges simulated
 packets over a Unix socket. The BCM2835 SPI driver uses programmed I/O.
 
+The model's Ethernet port carries the fixed address 52:54:00:27:11:04. The
+launcher writes it into the device tree as `local-mac-address`, because the
+bcmgenet driver reads eth0's address only there on a device-tree boot, and
+passes it to QEMU on `-nic`. The Pi 5 model keeps QEMU's default,
+52:54:00:12:34:56. The gateway derives its provisional EUI from the address,
+so it stays the same on every boot. The runbook lists what each run records.
+
 ## Build on Linux
 
 Install the compiler and QEMU prerequisites on the build host. For Ubuntu

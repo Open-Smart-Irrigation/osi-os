@@ -1,6 +1,7 @@
 """Run shared candidate checks on the ARMv7 BCM2711 guest."""
 from pathlib import Path
 import os
+import re
 import select
 import shutil
 import signal
@@ -17,6 +18,70 @@ from upgrade_suite import checked
 
 DTB = 'bcm2711-rpi-4-b.dtb'
 FDT_ADDRESS = 0x3000000
+
+
+class Ethernet:
+    """The fixed address the launcher gives the model's Ethernet port.
+
+    The shipped bcm2711 DTB carries no MAC for GENET. On a device-tree boot
+    the bcmgenet driver takes eth0's address only from the device tree and
+    picks a random one when it is absent: its register fallback needs an ACPI
+    companion. The gateway derives its provisional EUI from that address, so
+    a random one changes the flows rewrite on every boot. The Pi 5 model keeps
+    QEMU's default, 52:54:00:12:34:56, which its macb driver reads from the
+    emulated controller. This address differs from it.
+    """
+
+    NODE = '/scb/ethernet@7d580000'
+    MAC = '52:54:00:27:11:04'
+
+
+IDENTITY = r'''for interface in eth0 br-lan wlan0; do
+    address=$(cat "/sys/class/net/$interface/address" 2>/dev/null) && [ -n "$address" ] && echo "mac-$interface=$address"
+done
+if dmesg >/dev/null 2>&1; then
+    echo "random-mac=$(dmesg | grep -c 'using random Ethernet MAC' || :)"
+else
+    echo random-mac=unreadable
+fi
+echo "uci-eui=$(uci -q get osi-server.cloud.device_eui)"
+echo "uci-source=$(uci -q get osi-server.cloud.device_eui_source)"
+'''
+
+
+def provisional_eui(mac):
+    """The EUI osi-gateway-identity.sh derives from a MAC: its first three bytes, FFFE, its last three."""
+    digits = re.sub(r'[^0-9A-Fa-f]', '', mac).upper()
+    if len(digits) != 12:
+        raise ValueError(f'invalid MAC {mac!r}')
+    return digits[:6] + 'FFFE' + digits[6:]
+
+
+def guest_identity(vm):
+    """Read the address each interface carries, the kernel's random-MAC fallbacks and the stored EUI."""
+    lines = [line for line in checked(vm, IDENTITY, 30).splitlines() if line]
+    if any('=' not in line for line in lines):
+        raise RuntimeError('gateway identity unreadable')
+    return dict(line.split('=', 1) for line in lines)
+
+
+def record_identity(guest, identity):
+    """Note what a boot's console showed: the kernel's addresses and the EUI derived from eth0's."""
+    mac, eui = identity.get('mac-eth0', '-'), identity.get('uci-eui') or '-'
+    guest.note(f'eth0 {mac}, observed provisional EUI {provisional_eui(mac) if mac != "-" else "-"}; '
+               f'random-MAC warnings {identity.get("random-mac", "-")}; '
+               f'uci device_eui {eui} source {identity.get("uci-source") or "-"}', name='gateway-identity.log')
+
+
+def record_launch(guest, inspection):
+    """Note the EUI the device tree gives a launch. Nothing has observed it yet.
+
+    An inspection boot has no console hook, so its line stays the only one.
+    """
+    guest.note(f'{"inspection launch" if inspection else "launch"}: device tree {Ethernet.NODE} '
+               f'local-mac-address {Ethernet.MAC}: expected provisional EUI {provisional_eui(Ethernet.MAC)} '
+               '(not observed' + ('' if inspection else ' until the console answers') + ')',
+               name='gateway-identity.log')
 
 
 class Pi4(Guest):
@@ -40,6 +105,8 @@ class Pi4(Guest):
         # Upstream BCM2835 SPI exposes the FIFO and IRQ, but no DMA requests.
         for name in ('dmas', 'dma-names'):
             subprocess.run([put, '-d', dtb, '/soc/spi@7e204000', name], check=True)
+        subprocess.run([put, '-t', 'bx', dtb, Ethernet.NODE, 'local-mac-address', *Ethernet.MAC.split(':')],
+                       check=True)
         # C0 stepping exposes the native DMA window on eMMC2.
         prop('x', '/emmc2bus', 'dma-ranges', '0', '0', '0', '0', '80000000')
         source = work/'armstub.bin'
@@ -64,6 +131,10 @@ class Pi4(Guest):
         if code:
             raise RuntimeError(f'QEMU exited with status {code} during guest reboot')
 
+    def console_ready(self):
+        super().console_ready()
+        record_identity(self, guest_identity(self))
+
     def qemu_args(self, wire_fd, disk, cmdline, inspection):
         # AArch32 starts through the raw loader, so Linux takes bootargs from
         # the DTB. Use a separate DTB for the inspection-only PID 1.
@@ -74,12 +145,13 @@ class Pi4(Guest):
             dtb = Path(shutil.copyfile(dtb, self.work/'inspect.dtb'))
         put = shutil.which('fdtput') or self.qemu.with_name('fdtput')
         subprocess.run([put, '-t', 's', dtb, '/chosen', 'bootargs', cmdline], check=True)
+        record_launch(self, inspection)
         return [self.qemu, '-M', 'raspi4b', '-m', f'{self.ram}G',
                 '-global', 'cortex-a72-arm-cpu.aarch64=off',
                 '-global', 'cortex-a72-arm-cpu.cntfrq=54000000',
                 '-global', 'arm_gic.has-security-extensions=on',
                 '-no-reboot', '-display', 'none', '-monitor', 'none', '-serial', 'stdio',
-                '-nic', f'socket,fd={wire_fd}',
+                '-nic', f'socket,fd={wire_fd},mac={Ethernet.MAC}',
                 '-drive', disk,
                 '-device', 'nec-usb-xhci,id=xhci,bus=pcie.1,addr=0,msi=off,msix=off',
                 '-device', 'loader,file=armstub.bin,addr=0,force-raw=on,cpu-num=0',
@@ -92,7 +164,10 @@ def verify(vm):
 grep -q 'Raspberry Pi 4 Model B' /proc/device-tree/model &&
 test "$(grep -c '^processor' /proc/cpuinfo)" = 4 &&
 test "$(basename "$(readlink -f /sys/class/net/eth0/device/driver)")" = bcmgenet &&
-grep -qi xhci /sys/bus/usb/devices/usb*/product""")
+    grep -qi xhci /sys/bus/usb/devices/usb*/product""")
+    identity = guest_identity(vm)
+    if identity.get('mac-eth0') != Ethernet.MAC or identity.get('random-mac') not in ('0', 'unreadable'):
+        raise RuntimeError(f'eth0 does not carry the fixed MAC {Ethernet.MAC}: {identity}')
 
 
 def terminate(_signum, _frame):
