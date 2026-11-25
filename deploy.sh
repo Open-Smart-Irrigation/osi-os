@@ -713,7 +713,8 @@ enable_osi_bootstrap() {
 # tailscale's package init (1.80.3-r1) runs `tailscaled --cleanup` before the
 # daemon, with no time limit, at START=80. A cleanup that does not return
 # then holds every later boot service, ChirpStack and Node-RED included. The
-# OSI copy time-limits that cleanup and starts the service last. It replaces
+# OSI copy time-limits that cleanup and starts the service at S99, after
+# ChirpStack, Node-RED and osi-bootstrap. It replaces
 # the package file only while that file still has the package digest: a
 # package that ships a different init brings its own and is left alone.
 # Nothing here restarts tailscale, which would drop an operator's session;
@@ -722,7 +723,7 @@ enable_osi_bootstrap() {
 # boot protection was not installed and why; the closing banner repeats it.
 TAILSCALE_INIT="${TAILSCALE_INIT:-/etc/init.d/tailscale}"
 TAILSCALE_RC_D="${TAILSCALE_RC_D:-/etc/rc.d}"
-TAILSCALE_INIT_SHA256="2faa5325efb4069c1d939920a3f7e4ba6932cfc742dc4b500fc8e4c6129b11f3"
+TAILSCALE_INIT_SHA256="da01bb4b08ea043301d9b4172eca66b8756f72bd698641bfbcfe84e92082a328"
 TAILSCALE_PACKAGE_INIT_SHA256="a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56"
 
 install_tailscale_init() {
@@ -763,18 +764,30 @@ install_tailscale_init() {
         sync 2>/dev/null || true
         echo "OK: OSI tailscale init installed (cleanup time-limited, START=99)"
     fi
-    tailscale_link_present=0
+    tailscale_link_count=0
+    tailscale_link_only=""
     for tailscale_link in "$TAILSCALE_RC_D"/S[0-9][0-9]tailscale; do
         if [ -e "$tailscale_link" ] || [ -L "$tailscale_link" ]; then
-            tailscale_link_present=1
+            tailscale_link_count=$((tailscale_link_count + 1))
+            tailscale_link_only="$tailscale_link"
         fi
     done
-    if [ "$tailscale_link_present" != 1 ]; then
+    if [ "$tailscale_link_count" = 0 ]; then
         # Disabled on purpose stays disabled: only the boot position moves.
         echo "OK: tailscale is disabled at boot; left disabled"
         return 0
     fi
-    # S99 first: a deploy cut in between leaves two links, never none.
+    # One link, as the package leaves it: one rename moves it, so a deploy cut
+    # here leaves one link, never two or none. If the rename fails, the steps
+    # below try again with a new link.
+    if [ "$tailscale_link_count" = 1 ] && [ -L "$tailscale_link_only" ] &&
+        [ "$tailscale_link_only" != "$TAILSCALE_RC_D/S99tailscale" ] &&
+        mv -f "$tailscale_link_only" "$TAILSCALE_RC_D/S99tailscale"; then
+        echo "OK: tailscale starts at S99 from the next boot (after ChirpStack and Node-RED); it was not restarted"
+        return 0
+    fi
+    # Several links: S99 first, so a deploy cut in between leaves two links,
+    # never none.
     if ! ln -sf ../init.d/tailscale "$TAILSCALE_RC_D/S99tailscale"; then
         tailscale_init_warning="WARN: tailscale boot protection installed, but NOT moved to S99: could not create $TAILSCALE_RC_D/S99tailscale; tailscale keeps its boot position"
         echo "$tailscale_init_warning" >&2

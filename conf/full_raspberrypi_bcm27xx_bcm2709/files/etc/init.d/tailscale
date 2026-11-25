@@ -5,10 +5,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # OSI OS copy of the init file of the tailscale package (1.80.3-r1). It
-# differs from the package file in two ways: the cleanup is cut short after
-# OSI_CLEANUP_LIMIT seconds, and the service starts last.
+# differs from the package file in three ways: the cleanup is cut short after
+# OSI_CLEANUP_LIMIT seconds, the cleanup does not hold procd's lock on this
+# service, and the service starts at 99 instead of 80.
 
 USE_PROCD=1
+# ChirpStack, its forwarders, Node-RED and osi-bootstrap also start at 99, and
+# procd runs the boot links in name order: S99chirpstack*, S99node-red,
+# S99osi-bootstrap, S99sudo, then S99tailscale. The farm services never wait
+# for tailscale. Remote access waits for osi-bootstrap, briefly on a
+# provisioned gateway: its boot start checks its stamp first (two file tests
+# and one grep of a local file) and returns. Only a boot that still
+# provisions ChirpStack waits there longer, up to 120 s for ChirpStack and
+# then for the bootstrap script.
 START=99
 
 # Seconds a cleanup may take. tailscaled repeats the cleanup when it starts,
@@ -19,10 +28,13 @@ OSI_CLEANUP_LIMIT=15
 # OSI_CLEANUP_LIMIT seconds have passed. The BusyBox on the image has no
 # timeout applet. Only the background shell waits for the cleanup: a process
 # that cannot be killed must not keep this script, and with it the boot,
-# from moving on.
+# from moving on. That shell first closes fd 1000, on which procd.sh holds
+# this service's lock for the whole init call; a cleanup that outlives its
+# kill must not keep later start, stop and restart calls waiting on it.
 osi_tailscale_cleanup() {
   osi_dir="$(mktemp -d /tmp/tailscale-cleanup.XXXXXX)" || return 0
   (
+    exec 1000>&-
     /usr/sbin/tailscaled --cleanup &
     echo $! >"$osi_dir/pid"
     wait $!
