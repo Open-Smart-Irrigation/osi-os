@@ -119,13 +119,16 @@ at the cut, although the cut itself is correct. With the fixed address both
 boots write the same bytes, so that check holds.
 
 Each run records the identity of every boot in the case directory's
-`gateway-identity.log`. At launch it notes the address written into the device
-tree and the EUI derived from it. When the console answers it adds the address
-the kernel gave each interface, the number of `using random Ethernet MAC`
+`gateway-identity.log`, in two kinds of line. A launch line says which address
+the device tree carries and calls the EUI derived from it expected, not
+observed; an inspection launch is named as such. A console line, written when
+a boot's console answers, says what the kernel gave each interface, the
+observed EUI derived from eth0, the number of `using random Ethernet MAC`
 warnings in the kernel ring, and the EUI and source stored in UCI at that
-moment. A boot cut before its console answers keeps only the launch line. The
-cold boot fails with `eth0 does not carry the fixed MAC …` when eth0 has
-another address or the kernel logged the random fallback.
+moment. A boot cut before its console answers, and every inspection boot,
+keeps only the expected line. The cold boot fails with `eth0 does not carry
+the fixed MAC …` when eth0 has another address or the kernel logged the random
+fallback.
 
 The real-device sheet covers early EEPROM and VideoCore firmware, VL805
 firmware, USB timing, real radio behavior, SD power loss and physical

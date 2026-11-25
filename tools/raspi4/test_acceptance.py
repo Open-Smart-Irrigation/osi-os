@@ -238,9 +238,13 @@ class Pi4Tests(unittest.TestCase):
             self.assertTrue(any(str(arg).startswith('loader,file=inspect.dtb,') for arg in args))
             self.assertEqual((vm.work/DTB).read_bytes(), b'dtb')
             self.assertEqual(args[args.index('-nic') + 1], f'socket,fd=5,mac={pi4.Ethernet.MAC}')
-            self.assertEqual((vm.receipts/'gateway-identity.log').read_text(), (
-                f'boot=4 device tree {pi4.Ethernet.NODE} local-mac-address {pi4.Ethernet.MAC}, '
-                f'provisional EUI {pi4.provisional_eui(pi4.Ethernet.MAC)}\n'))
+            expected = (f'device tree {pi4.Ethernet.NODE} local-mac-address {pi4.Ethernet.MAC}: expected provisional EUI '
+                        f'{pi4.provisional_eui(pi4.Ethernet.MAC)}')
+            with patch('pi4.subprocess.run'):
+                vm.qemu_args(5, disk, cmdline, False)
+            self.assertEqual((vm.receipts/'gateway-identity.log').read_text().splitlines(), [
+                f'boot=4 inspection launch: {expected} (not observed)',
+                f'boot=4 launch: {expected} (not observed until the console answers)'])
 
     def test_qemu_argv_carries_a_fixed_mac_distinct_from_the_pi5_model(self):
         """The fixed MAC reaches QEMU on -nic and is not QEMU's default, which the Pi 5 model keeps."""
@@ -286,7 +290,7 @@ class Pi4Tests(unittest.TestCase):
             for needle in ('/sys/class/net/$interface/address', 'using random Ethernet MAC', 'osi-server.cloud.device_eui'):
                 self.assertIn(needle, script)
             self.assertEqual((vm.receipts/'gateway-identity.log').read_text(), (
-                f'boot=7 eth0 52:54:00:27:11:04, provisional EUI {pi4.provisional_eui(pi4.Ethernet.MAC)}; '
+                f'boot=7 eth0 52:54:00:27:11:04, observed provisional EUI {pi4.provisional_eui(pi4.Ethernet.MAC)}; '
                 'random-MAC warnings 0; uci device_eui - source -\n'))
             vm.private, vm.boots = True, 8
             with patch.object(Guest, 'command', side_effect=[(0, ''), answer]):

@@ -40,6 +40,7 @@ class LoRaWAN10:
         self.devnonce=int.from_bytes(os.urandom(2),'little') if devnonce is None else devnonce
         if not 0 <= self.devnonce <= 65535: raise ValueError("DevNonce out of range")
         self.devaddr=self.nwk_s_key=self.app_s_key=None
+        self.rx_delay=None
 
     def join_request(self) -> bytes:
         body=b'\x00'+self.app_eui[::-1]+self.dev_eui[::-1]+self.devnonce.to_bytes(2,'little')
@@ -53,6 +54,7 @@ class LoRaWAN10:
         if not hmac.compare_digest(_cmac(self.app_key,body)[:4],mic): raise ValueError("join-accept MIC mismatch")
         appnonce=raw[0:3]; netid=raw[3:6]; devaddr=int.from_bytes(raw[6:10],'little'); dl=raw[10]
         self.devaddr=devaddr
+        self.rx_delay=raw[11]
         self.nwk_s_key=_aes(self.app_key,b'\x01'+appnonce+netid+self.devnonce.to_bytes(2,'little')+bytes(7))
         self.app_s_key=_aes(self.app_key,b'\x02'+appnonce+netid+self.devnonce.to_bytes(2,'little')+bytes(7))
         return {"devaddr":devaddr,"appnonce":appnonce,"netid":netid,"dl_settings":dl,"rx_delay":raw[11]}

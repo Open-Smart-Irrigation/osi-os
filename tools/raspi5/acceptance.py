@@ -678,19 +678,23 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
             radio_diagnostics(vm)
             raise
     test('WM1302 uplinks',uplinks)
+    problems=[]
     def valve():
+        nonlocal problems
         try:
             evidence = run_valve(vm,air,session,lambda: gui(vm,password,'open',VALVE), log=log)
             gui(vm,password,'outcome',VALVE)
-            return evidence
         finally:
             try:
-                valve_diagnostics(vm)
+                problems = valve_diagnostics(vm)
             except Exception as error:
                 try:
                     vm.note(f'valve diagnostics failed: {error!r}')
                 except Exception:
                     pass
+        if problems:
+            evidence += '; evidence capture incomplete: ' + ', '.join(problems)
+        return evidence
     test('Valve open and outcome',valve)
     def reboot():
         sql(vm,"INSERT OR REPLACE INTO app_settings(key,value) VALUES('emulator_persistence','retain');")

@@ -66,11 +66,22 @@ def guest_identity(vm):
 
 
 def record_identity(guest, identity):
-    """Note the MAC-derived EUI of one boot in gateway-identity.log."""
+    """Note what a boot's console showed: the kernel's addresses and the EUI derived from eth0's."""
     mac, eui = identity.get('mac-eth0', '-'), identity.get('uci-eui') or '-'
-    guest.note(f'eth0 {mac}, provisional EUI {provisional_eui(mac) if mac != "-" else "-"}; '
+    guest.note(f'eth0 {mac}, observed provisional EUI {provisional_eui(mac) if mac != "-" else "-"}; '
                f'random-MAC warnings {identity.get("random-mac", "-")}; '
                f'uci device_eui {eui} source {identity.get("uci-source") or "-"}', name='gateway-identity.log')
+
+
+def record_launch(guest, inspection):
+    """Note the EUI the device tree gives a launch. Nothing has observed it yet.
+
+    An inspection boot has no console hook, so its line stays the only one.
+    """
+    guest.note(f'{"inspection launch" if inspection else "launch"}: device tree {Ethernet.NODE} '
+               f'local-mac-address {Ethernet.MAC}: expected provisional EUI {provisional_eui(Ethernet.MAC)} '
+               '(not observed' + ('' if inspection else ' until the console answers') + ')',
+               name='gateway-identity.log')
 
 
 class Pi4(Guest):
@@ -134,8 +145,7 @@ class Pi4(Guest):
             dtb = Path(shutil.copyfile(dtb, self.work/'inspect.dtb'))
         put = shutil.which('fdtput') or self.qemu.with_name('fdtput')
         subprocess.run([put, '-t', 's', dtb, '/chosen', 'bootargs', cmdline], check=True)
-        self.note(f'device tree {Ethernet.NODE} local-mac-address {Ethernet.MAC}, '
-                  f'provisional EUI {provisional_eui(Ethernet.MAC)}', name='gateway-identity.log')
+        record_launch(self, inspection)
         return [self.qemu, '-M', 'raspi4b', '-m', f'{self.ram}G',
                 '-global', 'cortex-a72-arm-cpu.aarch64=off',
                 '-global', 'cortex-a72-arm-cpu.cntfrq=54000000',
