@@ -345,6 +345,36 @@ test('a wrong-target S99 alone survives a deploy cut inside ln', () => {
   } finally { cleanup(fixture); }
 });
 
+test('a directory at S99tailscale is refused and the old link stays', () => {
+  // `mv` onto a directory moves the source into it and succeeds. The swap
+  // must refuse instead, keep S80 and say the boot link was not moved.
+  const fixture = makeFixture({ init: 'ours', links: ['S80tailscale'] });
+  try {
+    fs.mkdirSync(path.join(fixture.rcDir, 'S99tailscale'));
+    const result = run(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.warning, `WARN: tailscale boot protection installed, but NOT moved to S99: could not create ${fixture.rcDir}/S99tailscale; tailscale keeps its boot position`);
+    assert.deepEqual(snapshot(fixture).links, ['S80tailscale -> ../init.d/tailscale', 'S85tailscale absent', 'S99tailscale is a directory']);
+    assert.deepEqual(fs.readdirSync(path.join(fixture.rcDir, 'S99tailscale')), [], 'nothing was moved into the directory');
+    assert.deepEqual(fs.readdirSync(fixture.rcDir).sort(), ['S80tailscale', 'S99tailscale'], 'no staging link is left');
+  } finally { cleanup(fixture); }
+});
+
+test('a staging link that cannot be removed does not fail the deploy', { skip: process.getuid?.() === 0 && 'a read-only directory does not stop root' }, () => {
+  // A cut deploy left the staging link, and rc.d is now read-only: ln, mv
+  // and the cleanup all fail. The step still warns and returns 0 under the
+  // deploy's `set -eu`, with the links as they were.
+  const fixture = makeFixture({ init: 'ours', links: ['S80tailscale', 'S85tailscale'] });
+  try {
+    fs.symlinkSync('../init.d/tailscale', path.join(fixture.rcDir, '.S99tailscale.osi-new'));
+    const result = run(fixture, { readOnlyRcD: true });
+    assert.equal(result.status, 0, result.stderr);
+    assert.notEqual(result.warning, 'aborted', 'the step ran to its end');
+    assert.equal(result.warning, `WARN: tailscale boot protection installed, but NOT moved to S99: could not create ${fixture.rcDir}/S99tailscale; tailscale keeps its boot position`);
+    assert.deepEqual(snapshot(fixture).links, ['S80tailscale -> ../init.d/tailscale', 'S85tailscale -> ../init.d/tailscale', 'S99tailscale absent']);
+  } finally { cleanup(fixture); }
+});
+
 test('any other boot position gives way to S99 alone', () => {
   const fixture = makeFixture({ init: 'ours', links: ['S80tailscale', 'S85tailscale'] });
   try {

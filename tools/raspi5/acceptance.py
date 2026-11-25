@@ -668,10 +668,12 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
         ready(vm)
         if verify_board is not None:
             verify_board(vm)
-        log('Factory image tailscale init: ' + tailscale_boot.image_receipt(vm))
         versions=checked(vm,'uci get osi-server.cloud.firmware_version; chirpstack --version')
         if versions.splitlines()!=[args.osi_version, f'chirpstack {args.chirpstack_version}']:
             raise RuntimeError('unexpected versions '+versions)
+        # Diagnostics only, after the version check: image_receipt() never
+        # fails the case unless the guest shell stops answering.
+        log('Factory image tailscale init: ' + tailscale_boot.image_receipt(vm))
         return f'OSI {args.osi_version}, ChirpStack {args.chirpstack_version}, /gui/ served, integrity ok'
     test('Cold boot',boot)
     password=None

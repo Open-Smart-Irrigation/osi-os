@@ -58,7 +58,7 @@ HELD_STATE = ("pidof chirpstack; ps w | grep -q '[n]ode-red' && echo nodered-up;
 STALL_WRAPPER = """#!/bin/sh
 # Test stand-in: the cleanup blocks; everything else runs the real binary.
 if [ "$1" = "--cleanup" ]; then
-    logger -t osi-test-cleanup "cleanup stall started"
+    logger -t osi-test-cleanup "cleanup stall started uptime=$(cut -d' ' -f1 /proc/uptime)"
     mkfifo /tmp/osi-cleanup-stall.fifo
     exec 3</tmp/osi-cleanup-stall.fifo
     exit 0
@@ -213,6 +213,39 @@ def stall_verdict(log, limit):
             'the daemon started with ' + daemon_text[daemon_text.index('--port'):].strip())
 
 
+STALL_UPTIME = re.compile(r'cleanup stall started uptime=(\d+(?:\.\d+)?)')
+# Start of each process in seconds of guest uptime, from /proc/<pid>/stat
+# (field 22, in clock ticks of 1/100 s), the clock the stall marker uses.
+PROCESS_UPTIMES = """p=$(pidof chirpstack | cut -d' ' -f1)
+[ -n "$p" ] && echo "chirpstack $(cut -d' ' -f22 /proc/$p/stat)"
+p=$(pgrep -f 'node-re[d]' | head -1)
+[ -n "$p" ] && echo "node-red $(cut -d' ' -f22 /proc/$p/stat)"
+"""
+
+
+def start_order_verdict(log, processes):
+    """ChirpStack and the Node-RED process started before the stalled cleanup began.
+
+    `processes` is PROCESS_UPTIMES output. Both sides are guest uptime.
+    """
+    match = next((m for line in log.splitlines() if (m := STALL_UPTIME.search(line))), None)
+    if not match:
+        raise RuntimeError('the stalled cleanup did not log its uptime')
+    stall = float(match.group(1))
+    starts = {}
+    for line in processes.splitlines():
+        name, _, ticks = line.partition(' ')
+        if ticks.strip().isdigit():
+            starts[name] = int(ticks) / 100
+    for name in ('chirpstack', 'node-red'):
+        if name not in starts:
+            raise RuntimeError(f'{name} is not running after the stalled boot')
+        if starts[name] >= stall:
+            raise RuntimeError(f'{name} started at {starts[name]:.2f} s, after the stall began at {stall:.2f} s')
+    return (f'ChirpStack started at {starts["chirpstack"]:.2f} s and Node-RED at {starts["node-red"]:.2f} s '
+            f'of uptime, before the stall at {stall:.2f} s')
+
+
 def normal_verdict(log, limit):
     """Judge a boot with the real cleanup; return its receipt."""
     lines = log.splitlines()
@@ -240,6 +273,9 @@ def normal_verdict(log, limit):
     if daemon is None or daemon <= done:
         raise RuntimeError('the tailscale daemon did not start after its cleanup had ended')
     if cut is not None and (flushed is None or cut < flushed):
+        waited = (line_seconds(lines[cut]) - line_seconds(lines[cleanup])) % 86400
+        if not limit <= waited <= limit + GIVE_UP_SLACK:
+            raise RuntimeError(f'the init gave up {waited} s after the real cleanup began, not {limit} s')
         return f'cleanup was cut short after {limit} s and the daemon started'
     return 'cleanup finished with "flushing log." and the daemon started'
 
@@ -423,8 +459,15 @@ def image_receipt(vm):
     """What the factory image's read-only root carries; never fails a run."""
     try:
         lines = vm.command("ls /rom/etc/rc.d/ | grep -E '^[SK][0-9][0-9]tailscale$'; "
-                           "echo digest=$(sha256sum /rom/etc/init.d/tailscale 2>/dev/null | cut -d' ' -f1)")[1].splitlines()
+                           "echo digest=$(sha256sum /rom/etc/init.d/tailscale 2>/dev/null | cut -d' ' -f1)", 30)[1].splitlines()
     except Exception as error:  # diagnostics only
+        # A timed-out read can leave the shell busy for the next case: stop
+        # it and make sure the shell answers before handing it back.
+        try:
+            vm.send(b'\x03\n')
+            vm.command('true', 30)
+        except Exception as again:
+            raise RuntimeError(f'the shell did not answer after the image receipt failed ({error!r})') from again
         return f'unreadable ({error!r})'
     # `digest=` survives the strip of an empty value; a bare `digest ` does not.
     digest = next((line[7:] for line in lines if line.startswith('digest=')), '')
@@ -628,10 +671,14 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
                 raise
         return run_case
 
-    # `media` builds the offline release once and returns its path.
-    upgraded = guest('upgraded', fixture_archive('0.8.0'), upgrade=media())
+    # Built inside the first case, so a release the media cannot be built from
+    # fails that case and the fallback case, which needs no media, still runs.
+    upgraded = None
 
     def installed_by_deploy():
+        nonlocal upgraded
+        # `media` builds the offline release once and returns its path.
+        upgraded = guest('upgraded', fixture_archive('0.8.0'), upgrade=media())
         upgraded.start()
         ready(upgraded)
         before = init_state(upgraded)
@@ -674,10 +721,12 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         record(f'boot with the stalled cleanup: login prompt {prompt:.0f} s, farm page and ChirpStack '
                f'{page:.0f} s after the boot began')
         record_processes(upgraded, 'tailscaled.real', 'boot with the stalled cleanup', record)
+        order = start_order_verdict(boot_log(upgraded, token), checked(upgraded, PROCESS_UPTIMES))
+        record(f'boot with the stalled cleanup: {order}')
         if upgraded.command(STALLED_CLEANUP)[1]:
             raise RuntimeError('the stalled cleanup is still running')
         daemon_runs(upgraded, 'tailscaled.real')
-        return receipt
+        return receipt + '; ' + order
 
     def normal_boot():
         remove_stall(upgraded)
@@ -856,7 +905,8 @@ sync""")
             test(REFUSAL_CASE, chained(left_alone))
         finally:
             healthy[0] = False
-            upgraded.stop()
+            if upgraded is not None:
+                upgraded.stop()
         test(FALLBACK_CASE, fallback)
         test(BOOTSTRAP_CASE, lambda: bootstrap_verdict(bootstrap_timed))
     finally:

@@ -3475,7 +3475,7 @@ class TailscaleBootTests(unittest.TestCase):
             # A logger whose line lands in the file a second later, as logread -F does.
             # Its output is closed, so the captured pipes end with the shell
             # under test and the time measured is that shell's wait.
-            (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{log}) </dev/null >/dev/null 2>&1 &\n')
+            (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{quote(str(log))}) </dev/null >/dev/null 2>&1 &\n')
             (bin_dir/'logger').chmod(0o755)
             # The image's BusyBox sleep takes whole seconds only.
             real_sleep = shutil.which('sleep')
@@ -3527,6 +3527,38 @@ class TailscaleBootTests(unittest.TestCase):
                 (release/'scripts'/name).unlink()
             self.assertEqual(upgrade_suite.missing_companions(release), [], 'an older launcher needs none')
 
+    def test_chirpstack_and_node_red_must_start_before_the_stall(self):
+        log = self.stall_log().replace('cleanup stall started', 'cleanup stall started uptime=47.40')
+        receipt = tailscale_boot.start_order_verdict(log, 'chirpstack 2210\nnode-red 4605\n')
+        self.assertIn('ChirpStack started at 22.10 s and Node-RED at 46.05 s', receipt)
+        for label, processes, reason in [
+            ['Node-RED after the stall', 'chirpstack 2210\nnode-red 6100\n', 'node-red started at 61.00 s, after the stall'],
+            ['ChirpStack after the stall', 'chirpstack 4800\nnode-red 4605\n', 'chirpstack started at 48.00 s'],
+            ['Node-RED missing', 'chirpstack 2210\n', 'node-red is not running'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.start_order_verdict(log, processes)
+        with self.assertRaisesRegex(RuntimeError, 'did not log its uptime'):
+            tailscale_boot.start_order_verdict(self.stall_log(), 'chirpstack 2210\nnode-red 4605\n')
+        self.assertIn("uptime=$(cut -d' ' -f1 /proc/uptime)", tailscale_boot.STALL_WRAPPER)
+
+    def test_a_real_cleanup_cut_off_must_come_at_the_limit(self):
+        nr, cleanup = self.normal_log().splitlines()[:2]  # the cleanup starts at 16:50:20
+
+        def at(second, text):
+            return f'Sun Apr 13 16:{50 + second // 60:02d}:{second % 60:02d} 2025 ' + text
+
+        for after, ok in [(15, True), (23, True), (60, False), (10, False)]:
+            gave_up = at(20 + after, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it')
+            log = '\n'.join([nr, cleanup, gave_up, at(21 + after, self.DAEMON)])
+            with self.subTest(after=after):
+                if ok:
+                    self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f'gave up {after} s after the real cleanup began'):
+                        tailscale_boot.normal_verdict(log, 15)
+
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')
         seen = {}
@@ -3535,18 +3567,56 @@ class TailscaleBootTests(unittest.TestCase):
             pass
 
         def make_guest(work, image, qemu, ram, **options):
-            seen.update(options)
+            seen.setdefault(Path(work).name, options)
             raise Stop
+
+        outcome = {}
+
+        def test(label, fn):
+            try:
+                outcome[label] = fn()
+            except Exception as error:  # the runner's test() records, never raises
+                outcome[label] = error
 
         args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4})()
         with tempfile.TemporaryDirectory() as directory:
             release = Path(directory)
             (release/tailscale_boot.INIT).parent.mkdir(parents=True)
             (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
-            with self.assertRaises(Stop):
-                tailscale_boot.run(args, release, release, release, make_guest, None, print,
-                                   lambda old: release/'fixture.img.gz', lambda: media, None)
-        self.assertEqual(seen['upgrade'], media)
+            tailscale_boot.run(args, release, release, release, make_guest, test, print,
+                               lambda old: release/'fixture.img.gz', lambda: media, None)
+        self.assertEqual(seen['tailscale-upgraded']['upgrade'], media)
+        self.assertIsInstance(outcome[tailscale_boot.INSTALLED_CASE], Stop)
+
+    def test_a_release_the_media_cannot_be_built_from_still_runs_the_fallback(self):
+        built = []
+
+        def make_guest(work, image, qemu, ram, **options):
+            built.append(Path(work).name)
+            raise RuntimeError('stop here')
+
+        outcome = {}
+
+        def test(label, fn):
+            try:
+                outcome[label] = fn()
+            except Exception as error:
+                outcome[label] = error
+
+        def media():
+            raise ValueError('deploy-offline.sh needs files the release lacks: deploy-archive.js')
+
+        args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4})()
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/tailscale_boot.INIT).parent.mkdir(parents=True)
+            (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
+            tailscale_boot.run(args, release, release, release, make_guest, test, print,
+                               lambda old: release/'fixture.img.gz', media, None)
+        self.assertIn('needs files the release lacks', str(outcome[tailscale_boot.INSTALLED_CASE]))
+        self.assertIn('not run', str(outcome[tailscale_boot.STALL_CASE]))
+        self.assertEqual(built, ['tailscale-fallback'], 'the fallback guest was still built')
+        self.assertIn(tailscale_boot.FALLBACK_CASE, outcome)
 
     def test_the_focused_mode_expects_exactly_the_tailscale_cases(self):
         args = SimpleNamespace(tailscale_boot_only=True)
@@ -3662,8 +3732,15 @@ class TailscaleBootTests(unittest.TestCase):
         self.assertEqual(tailscale_boot.image_receipt(vm), 'no boot link, init digest absent')
         vm.command.return_value = (0, 'S80tailscale\ndigest')
         self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest absent')
-        vm.command.side_effect = RuntimeError('no shell')
+        # A failed read whose shell answers again is diagnostics only.
+        vm.command.side_effect = [TimeoutError('guest serial timed out'), (0, '')]
         self.assertIn('unreadable', tailscale_boot.image_receipt(vm))
+        vm.send.assert_called_with(b'\x03\n')
+        self.assertEqual(vm.command.call_args_list[-1], call('true', 30))
+        # A shell that stays busy is not handed to the next query.
+        vm.command.side_effect = [TimeoutError('guest serial timed out'), TimeoutError('guest serial timed out')]
+        with self.assertRaisesRegex(RuntimeError, 'did not answer after the image receipt'):
+            tailscale_boot.image_receipt(vm)
 
 
 if __name__ == '__main__':
