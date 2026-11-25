@@ -177,8 +177,8 @@ Each attempt follows the same steps:
 4. ChirpStack's `device_queue_item` must hold that item as FPort 2, payload
    `4101`, with `is_encrypted 0` and `is_pending 0`, as the first item for the
    device. ChirpStack 4.12.1 builds the next downlink from the first queue
-   item and stores an edge enqueue as plaintext. Nothing is sent until steps 3
-   and 4 hold.
+   item and stores an edge enqueue as plaintext. On a fresh open the item must
+   not carry `f_cnt_down` yet. Nothing is sent until steps 3 and 4 hold.
 5. The runner sends one uplink and waits 40 s for the command at the model.
    Every downlink for the valve that carries an application port is decoded,
    on time or late, and must be FPort 2 with payload `4101`. MAC-only frames
@@ -195,21 +195,27 @@ item:
 - the window holds exactly one ChirpStack downlink command, as the forwarder
   logs it (`Received downlink command, downlink_id: N`);
 - Concentratord took that downlink ID in RX1 or RX2 of this uplink and logged
-  a TX, a refusal or a drop for it. RX1 opens `RXDelay1` seconds after the
+  a refusal for it, or a TX in the slot where it was enqueued. A `Scheduled
+  packet is too old` line names no downlink ID and counts for nothing. RX1 opens `RXDelay1` seconds after the
   uplink, as the join-accept told the valve (0 means 1 s), and RX2 one second
   later. A session without `RXDelay1` fails before anything is sent;
 - the queue after the attempt agrees with the gateway's ack for that ID
   (`Received ack, items: [...]`): ChirpStack deletes an unconfirmed item only
   on an `OK` ack;
 - an item still queued carries `f_cnt_down`. ChirpStack writes it on an
-  unencrypted item when it builds a downlink from that item, so an item
-  without it was not the source of the downlink;
+  unencrypted item each time it builds a downlink from that item. On a fresh
+  open, where the item had none before the uplink, that shows the window's
+  downlink came from the item. On a re-send the counter predates the attempt,
+  and the tie rests on the exact receive slot of this uplink and on ChirpStack
+  building the downlink from the head of the queue;
 - a delivered frame carries the `f_cnt_down` ChirpStack recorded for the item
   before the attempt, compared on the low 16 bits the wire carries.
 
-A decision for any other downlink never authorizes a retry. At most three
-attempts run, and a counted attempt leads to another only when the command
-was late or absent at the model.
+At most three attempts run. A counted fresh open leads to another attempt
+when the command was late or absent at the model. A re-send leads to another
+attempt only when the command reached the model late; a re-send that missed
+fails the case with its receipt, so a decision for another downlink can never
+add an attempt.
 
 A retry re-sends while ChirpStack's queue still holds the item: the next
 uplink alone opens a receive window for it, and the edge's expectation stays
@@ -233,13 +239,19 @@ never retried:
 - ChirpStack's downlink was taken at another offset: `unsupported or unknown
   RX timing`, with the offset. This holds when the command arrived on time,
   too.
+- A re-send of a still-queued item missed the model: `the re-send of queue
+  item <id> on attempt N missed`.
+- The command was delivered, but ChirpStack still holds another item for the
+  valve, such as a second open: `the open was delivered, but ChirpStack still
+  holds ...`.
 - The item left ChirpStack's queue, Concentratord logged a decision, and the
   command never reached the model: `open command lost`. Its expectation stays
   pending for its allowance, so a second open would leave the valve's OPEN
   report unattributed.
 
-Three late or re-sent attempts in a row end the case with `open command not
-received after 3 attempts`.
+Three attempts without an on-time delivery, each late or a refused fresh open
+followed by a late re-send, end the case with `open command not received after
+3 attempts`.
 
 The outcome is bound to the attempt that succeeded. The device must show
 `CLOSED` before that attempt's OPEN report and `OPEN` after it, the

@@ -501,13 +501,19 @@ def _bind_downlink(frames, count, delays, queue_id, kept):
     it. ChirpStack deletes an unconfirmed item only on an OK ack
     (downlink/tx_ack.rs), so the queue after the attempt must agree with that
     ack. A decision is credited only when every step names one and the same
-    downlink ID.
+    downlink ID: a TX counts only in the slot where that ID was enqueued, and
+    a "too old" drop, whose line names no downlink ID, never counts.
 
     kept is the attempt's queue item as it stands after the attempt, or None
     once ChirpStack let go of it. ChirpStack writes f_cnt_down on an
-    unencrypted item when it builds a downlink from it (downlink/data.rs,
+    unencrypted item each time it builds a downlink from it (downlink/data.rs,
     update_device_queue_item), so an item still queued without one was never
-    the source of a downlink, and nothing in the window is credited to it.
+    the source of a downlink. That proves this window's downlink came from the
+    item only on a fresh attempt, where the item carried no f_cnt_down before
+    the uplink (_valve_queued). On a re-send the counter predates the attempt,
+    and the tie rests on the exact receive slot of this uplink and on
+    ChirpStack building the downlink from the head of the queue; run_valve
+    therefore never retries after a re-send that missed.
     """
     holds = kept is not None
     logged = sorted({event.id for event in frames.downlinks if event.id != '-'})
@@ -540,6 +546,7 @@ def _bind_downlink(frames, count, delays, queue_id, kept):
                        f'RX1 at +{delays[0] // 1000000} s and RX2 at +{delays[1] // 1000000} s '
                        '(unsupported or unknown RX timing)', False, ack_ok)
     handling, decided = [], False
+    enqueued = {event.count for event in taken if event.kind == 'enqueue'}
     for scheduled, (slot, seconds) in slots.items():
         for event in (event for event in frames.downlinks if event.count == scheduled):
             if event.kind == 'too-late' and event.id == downlink and event.current is not None:
@@ -552,12 +559,15 @@ def _bind_downlink(frames, count, delays, queue_id, kept):
                         if event.current is not None else '')
                 handling.append(f'Concentratord took it at {slot} +{seconds} s{lead}')
             elif event.kind == 'tx' and event.id == downlink:
-                handling.append('Scheduled packet for TX')
-                decided = True
+                if scheduled in enqueued:
+                    handling.append('Scheduled packet for TX')
+                    decided = True
+                else:
+                    handling.append(f'Scheduled packet for TX at {slot} +{seconds} s, where it was not enqueued')
             elif event.kind == 'too-old' and event.current is not None:
-                handling.append(f'Concentratord dropped it as too old, '
-                                f'{_signed_us(event.current - scheduled) / 1000:.1f} ms after its TX time')
-                decided = True
+                handling.append(f'Concentratord dropped a packet at {slot} +{seconds} s as too old, '
+                                f'{_signed_us(event.current - scheduled) / 1000:.1f} ms after its TX time; '
+                                'the line names no downlink ID, so it is no decision for this one')
     problems = []
     if not decided:
         problems.append('no TX, refusal or drop logged for it')
@@ -809,12 +819,15 @@ def _queue_items(queue):
     return '; '.join(_queue_item_text(item) for item in queue.items) or 'empty'
 
 
-def _valve_queued(queue, queue_id, claim):
+def _valve_queued(queue, queue_id, claim, fresh=False):
     """Say whether ChirpStack's queue holds the attempt's command, as the next item to go out.
 
     Returns (text, missing reason, the frame counter ChirpStack recorded for
     the item or ''). ChirpStack sends the first usable queue item, and the
     edge enqueues the timed open unencrypted, so its plaintext is comparable.
+    On a fresh attempt the item must carry no f_cnt_down yet, so that one
+    written during the window shows ChirpStack built this window's downlink
+    from it (_bind_downlink).
     """
     if queue.error:
         return None, queue.error, ''
@@ -834,6 +847,10 @@ def _valve_queued(queue, queue_id, claim):
     if queue.items[0].id != queue_id:
         return None, (f'ChirpStack holds queue item {queue_id}, but queue item {queue.items[0].id} is next '
                       'for the device, and ChirpStack sends the first item of the queue'), item.f_cnt
+    if fresh and item.f_cnt:
+        return None, (f'ChirpStack holds the fresh queue item {queue_id} with f_cnt_down {item.f_cnt} already '
+                      'written, so a downlink built from it in this window could not be told from an earlier one'), \
+            item.f_cnt
     return (f'ChirpStack holds queue item {queue_id} next before the receive window: '
             f'FPort {seen[0]} payload {seen[1]} is_pending {item.pending} is_encrypted {item.encrypted}'
             + (f' f_cnt_down {item.f_cnt}' if item.f_cnt else '')), None, item.f_cnt
@@ -1264,7 +1281,8 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     if edge_missing:
         raise RuntimeError(f'{VALVE}: {edge_missing}; no uplink was sent')
     claim = _claim(row)
-    queued_text, queued_missing, recorded = _valve_queued(_chirpstack_queue(vm, VALVE), row.queue_id, claim)
+    queued_text, queued_missing, recorded = _valve_queued(_chirpstack_queue(vm, VALVE), row.queue_id, claim,
+                                                          fresh=carried is None)
     receipt.add('queued', queued_text, queued_missing)
     if queued_missing:
         raise RuntimeError(f'{VALVE}: {queued_missing}; no uplink was sent')
@@ -1323,7 +1341,8 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     frames = _concentratord_frames(vm, marker)
     frame_text, frame_missing, count = _uplink_frame(frames, stamp)
     receipt.add('frame', frame_text, frame_missing)
-    after_text, after_missing, kept = _valve_queue(_chirpstack_queue(vm, VALVE), row.queue_id)
+    queue_after = _chirpstack_queue(vm, VALVE)
+    after_text, after_missing, kept = _valve_queue(queue_after, row.queue_id)
     holds = kept is not None
     binding = _bind_downlink(frames, count, delays, row.queue_id, kept)
     receipt.add('concentratord', binding.text)
@@ -1333,6 +1352,10 @@ def _valve_attempt(vm, air, valve, gui_open, uplink, receipt, *, carried, before
     if not binding.creditable:
         raise RuntimeError(f'{VALVE}: {binding.text}; the attempt is not credited')
     if packet is not None:
+        if extra := [item for item in queue_after.items if item.id != row.queue_id]:
+            raise RuntimeError(f'{VALVE}: the open was delivered, but ChirpStack still holds '
+                               f'{"; ".join(_queue_item_text(item) for item in extra)} for the valve, which the '
+                               'next uplink would deliver')
         return Attempt(receipt.number, 'received', '', binding.text, holds, row, len(frames.matched))
     if not late and not holds:
         raise RuntimeError(f'{VALVE}: open command lost: {binding.text}; it never reached the model and '
@@ -1408,9 +1431,12 @@ def run_valve(vm, air, session, gui_open, *, log=print):
     VALVE_ATTEMPTS run. An attempt counts only when its frame and queue state
     were read and Concentratord's decision is tied to the ChirpStack downlink
     of the attempt's own queue item (_bind_downlink); that holds for a delivery
-    on time as much as for a miss. A credited miss leads to another attempt
-    only when the command was late or absent. Every attempt logs a receipt
-    whatever its outcome.
+    on time as much as for a miss. A credited fresh open leads to another
+    attempt when the command was late or absent; a re-send leads to another
+    only when the command reached the model late, and a re-send that missed
+    fails the case. A delivered attempt fails while ChirpStack still holds any
+    other item for the valve. Every attempt logs a receipt whatever its
+    outcome.
 
     A retry re-sends while ChirpStack's queue holds the edge's item. Once
     ChirpStack has consumed the item and the valve got the command late, the
@@ -1457,6 +1483,10 @@ def run_valve(vm, air, session, gui_open, *, log=print):
         frames_received += result.frames
         if result.outcome == 'received':
             break
+        if carried and result.outcome == 'absent':
+            raise RuntimeError(f'{VALVE}: the re-send of queue item {carried} on attempt {attempt} missed: '
+                               f'{result.reason}; {result.decision}. A miss on a re-send is no ground for '
+                               'another attempt')
         failures.append(f'attempt {attempt}: {result.reason}; {result.decision}')
         if result.holds:
             carried = result.expectation.queue_id

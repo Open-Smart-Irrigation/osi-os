@@ -476,15 +476,17 @@ class RadioTests(unittest.TestCase):
             (radio_suite.VALVE_STATE, 'OPEN'), (self.query('e1', 'open', bound=True), 'yes')])
 
     def test_open_command_concentratord_refuses_still_fails_after_the_resends(self):
-        """A refusal at enqueue on every window fails after the bounded attempts; none is masked by a retry."""
+        """A refusal on the first window earns one re-send; a refusal on the re-send fails the case with its receipt."""
         row = self.expectation_row('e1', self.QUEUE)
         case = self.valve_case(
-            [[None]] * 3, error='open command not received after 3 attempts',
+            [[None]] * 3, error=f'the re-send of queue item {self.QUEUE} on attempt 2 missed: open command absent '
+                                f'after 150.00 s; {self.REFUSED}. A miss on a re-send is no ground for another attempt',
             frames=[self.window(self.refused(n), n) for n in (1, 2, 3)], edges=['', row, row, row],
             held=[self.HELD, self.TAKEN, self.TAKEN], after=[self.TAKEN] * 3)
         case.gui_open.assert_called_once()
-        self.assertEqual(self.sent(case), [b'trigger'] * 3)
-        self.assertEqual(case.clock(), 152 + 2 * 150)
+        self.assertEqual(self.sent(case), [b'trigger'] * 2)
+        self.assertEqual(case.clock(), 152 + 150)
+        self.assertEqual(len(case.lines), 2)
         for number, line in enumerate(case.lines, 1):
             kind = 'open' if number == 1 else 'resend'
             self.assertIn(f'attempt {number}/3 ({kind}, queue item {self.QUEUE}): missing downlink | ', line)
@@ -718,7 +720,17 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(
             bind(radio_suite.Frames(downlinks=dropped, commands=['3000953403']), count, delays, 'q1', None).text,
             'ChirpStack downlink 3000953403, ack not logged: Concentratord took it at RX1 +1 s with 140.5 ms lead at '
-            'enqueue; Concentratord dropped it as too old, 19.9 ms after its TX time; queue item q1 left ChirpStack\'s queue without an OK ack')
+            'enqueue; Concentratord dropped a packet at RX1 +1 s as too old, 19.9 ms after its TX time; the line names '
+            'no downlink ID, so it is no decision for this one; no TX, refusal or drop logged for it; queue item q1 left '
+            'ChirpStack\'s queue without an OK ack')
+        across = [radio_suite.Downlink('enqueue', '3000953403', count + 1000000, count + 1000000 - 140454),
+                  radio_suite.Downlink('tx', '3000953403', count + 2000000, None)]
+        self.assertEqual(
+            bind(radio_suite.Frames(downlinks=across, commands=['3000953403'],
+                                    acks=[('["OK", "IGNORED"]', '3000953403')]), count, delays, 'q1', None),
+            radio_suite.Binding('ChirpStack downlink 3000953403, ack ["OK", "IGNORED"]: Concentratord took it at RX1 +1 s '
+                               'with 140.5 ms lead at enqueue; Scheduled packet for TX at RX2 +2 s, where it was not '
+                               'enqueued; no TX, refusal or drop logged for it', False, True))
         self.assertEqual(bind(radio_suite.Frames(commands=['7']), None, delays, 'q1', kept).text,
                          'ChirpStack downlink 7, ack not logged: no Concentratord frame to place the receive slots')
         too_far = [radio_suite.Downlink('tx', '7', count - 2000000, None),
@@ -1138,14 +1150,71 @@ class RadioTests(unittest.TestCase):
         self.assertEqual(case.lines, [f'{radio_suite.VALVE} valve open attempt 1/3 (open, queue item -): '
                                      'missing edge before | edge before: MISSING (edge database unreadable)'])
 
-    def test_another_items_presence_in_the_queue_after_a_delivery_does_not_fail_the_case(self):
-        """Only the attempt's own item still being queued disagrees with the gateway's OK ack."""
+    def test_any_other_item_left_queued_after_a_delivery_fails_the_case(self):
+        """Review r3 probe, inverted: a second open, or any other item, behind the delivered one fails the case."""
         row = self.expectation_row('e1', self.QUEUE)
-        case = self.valve_case([[1.0]], edges=['', row], held=[self.HELD], after=['old|3|4101|0|0|'],
-                               frames=[self.window(self.scheduled(1), 1), self.window('', 2)])
-        self.assertEqual(case.result, 'WM1302 model delivered=2, Concentratord frames received=2')
-        self.assertIn('concentratord: ' + self.BINDS + '; queue after: ChirpStack queue after the attempt: item old '
-                      'FPort 3 data 4101 is_pending 0 is_encrypted 0', case.lines[0])
+        for extra in ('dup|2|4101|0|0|', 'old|3|4101|0|0|'):
+            with self.subTest(extra=extra):
+                item = extra.split('|')
+                case = self.valve_case(
+                    [[1.0]], error=f'the open was delivered, but ChirpStack still holds item {item[0]} FPort {item[1]} '
+                                   'data 4101 is_pending 0 is_encrypted 0 for the valve, which the next uplink would deliver',
+                    edges=['', row], held=[self.HELD + '\n' + extra], after=[extra],
+                    frames=[self.window(self.scheduled(1), 1), self.window('', 2)])
+                self.assertEqual(self.sent(case), [b'trigger'])
+
+    def test_a_fresh_item_that_already_carries_a_counter_is_not_injected(self):
+        """Review r3 probe, inverted: a fresh item with f_cnt_down written before the uplink sends nothing."""
+        row = self.expectation_row('e1', self.QUEUE)
+        foreign = self.refused(1).replace(self.DOWNLINK, '99')
+        case = self.valve_case(
+            [[None], [1.0]], error=f'ChirpStack holds the fresh queue item {self.QUEUE} with f_cnt_down 1 already written, '
+                                   'so a downlink built from it in this window could not be told from an earlier one; '
+                                   'no uplink was sent',
+            frames=[self.window(foreign, 1), self.window(self.scheduled(2), 2), self.window('', 3)],
+            edges=['', row, row, row], held=[self.TAKEN, self.TAKEN], after=[self.TAKEN, ''])
+        self.assertEqual(self.sent(case), [])
+
+    def test_a_missed_resend_is_no_ground_for_another_attempt(self):
+        """Review r3 probes, inverted: a foreign refusal, or a foreign TX without an ack, on the re-send fails the case."""
+        row = self.expectation_row('e1', self.QUEUE)
+        slot = self.slot(2)
+        foreign = {'refusal': self.refused(2).replace(self.DOWNLINK, '99'),
+                   'tx without ack': self.command('99') + f'dl enqueue 99 {slot} {slot - 140454}\ndl tx 99 {slot} -\n'}
+        for name, events in foreign.items():
+            with self.subTest(name=name):
+                case = self.valve_case(
+                    [[None], [None], [1.0]],
+                    error=f'the re-send of queue item {self.QUEUE} on attempt 2 missed: open command absent after 150.00 s; '
+                          'ChirpStack downlink 99',
+                    frames=[self.window(self.refused(1), 1), self.window(events, 2), self.window(self.scheduled(3), 3),
+                            self.window('', 4)],
+                    edges=['', row, row, row], held=[self.HELD, self.TAKEN, self.TAKEN], after=[self.TAKEN, self.TAKEN, ''])
+                self.assertEqual(self.sent(case), [b'trigger', b'trigger'])
+                case.gui_open.assert_called_once()
+
+    def test_a_resend_delivered_late_still_leads_to_a_reissue(self):
+        """A late, authenticated delivery on the re-send is a genuine late delivery: reported over, then a fresh open."""
+        row, reported = self.expectation_row('e1', self.QUEUE), self.reported('e1', self.QUEUE)
+        second, second_reported = self.expectation_row('e2', 'q2'), self.reported('e2', 'q2')
+        case = self.valve_case(
+            [[None], [139.31], [1.0]],
+            frames=[self.window(self.refused(1), 1), self.window(self.scheduled(2), 2), self.window('', 3, 4),
+                    self.window(self.scheduled(5), 5), self.window('', 6)],
+            edges=['', row, row, reported, reported, reported + '\n' + second, reported + '\n' + second_reported],
+            held=[self.HELD, self.TAKEN, 'q2|2|4101|0|0|'], after=[self.TAKEN, '', ''])
+        self.assertIn('passed on attempt 3/3 after 2 retries', case.result)
+        self.assertEqual(case.gui_open.call_count, 2)
+
+    def test_an_earlier_row_that_disappears_fails_the_case(self):
+        """The earlier expectation must still exist when the successful attempt is reported."""
+        closed = self.reported('e1', self.QUEUE)
+        second, second_reported = self.expectation_row('e2', 'q2'), self.reported('e2', 'q2')
+        case = self.reissue(edges=['', self.expectation_row('e1', self.QUEUE), closed, closed, closed + '\n' + second,
+                                   second_reported],
+                            error='the earlier open e1 changed while attempt 2 was reported: its row is gone')
+        self.assertEqual(self.sent(case), [b'trigger', b'opened', b'closed', b'trigger', b'opened'])
+
     def test_no_output_or_message_names_crc_ok(self):
         # Concentratord, its HAL wrapper and libconcentratord never log the
         # string "CRC_OK", so a count of it always reads 0.
