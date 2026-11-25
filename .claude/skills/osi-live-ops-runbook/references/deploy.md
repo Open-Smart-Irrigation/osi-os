@@ -67,6 +67,39 @@ case "$(uci -q get osi-server.cloud.mqtt_password)" in *[![:space:]]*) echo pres
 On `MISSING`, do not deploy: stop and escalate. The same check applies to the
 bundle path ([deploying over a flaky link](../../../../docs/operations/deploying-over-a-flaky-link.md)).
 
+**Before a release that carries the tailscale boot init (0.8.5),** read two
+things on the gateway; both checks change nothing.
+
+The tailscale init and its boot link:
+
+```sh
+sha256sum /etc/init.d/tailscale | cut -c1-12; ls /etc/rc.d | grep tailscale
+```
+
+`a874f9fd1032` is the 1.80.3-r1 package file, which the deploy replaces;
+`da01bb4b08ea` is the OSI copy already in place. Any other digest gets the
+`WARN: tailscale boot protection NOT installed` line and no protection: the
+deploy goes on, but escalate before relying on the fix. No `S??tailscale`
+link means tailscale is disabled at boot and stays so.
+
+The osi-bootstrap stamp. tailscale now starts after `S99osi-bootstrap`,
+which returns at once only on a stamped gateway:
+
+```sh
+[ -f /etc/osi-bootstrap.done ] && echo stamp-present || echo stamp-MISSING
+grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null && echo env-provisioned || echo env-NOT-provisioned
+```
+
+- `stamp-present` and `env-provisioned`: deploy.
+- `stamp-MISSING` with `env-provisioned`: ChirpStack is provisioned but not
+  stamped, so every boot reruns the bootstrap before tailscale starts. Stamp
+  it as `deploy.sh` does when it enables the service on such a gateway,
+  `touch /etc/osi-bootstrap.done && sync`, with the deploy owner's go (it is
+  a write), and read both lines again.
+- `env-NOT-provisioned`: the gateway is not provisioned. Every boot then
+  waits up to 120 s for ChirpStack and then for the bootstrap script before
+  tailscale, and with it remote access, starts. Do not deploy: escalate.
+
 1. **Build the GUI.**
    ```bash
    cd web/react-gui && npm run build
@@ -371,7 +404,36 @@ Reading straight through the script, in order:
     whole pair, so the `/gui` probe exercises the new GUI bundle together with
     the new flows. It still proves only that Node-RED served the route, not that
     the SPA works in a browser.
-12. Prints the final summary: `=== Deploy complete. ===`, the payload path
+12. Replaces the tailscale boot init. This runs last, after the identity
+    supervisor, once the health check has passed or left the start
+    unverified (no failure observed; the next deploy checks it). A failed
+    check rolls back and exits before this step, so a refused or rolled-back
+    deploy never touches the init. The init file
+    of tailscale 1.80.3-r1 runs `tailscaled --cleanup` before the daemon, with
+    no time limit, at `START=80`; a cleanup that does not return keeps every
+    later boot service from starting, ChirpStack and Node-RED included. The OSI
+    copy (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale`,
+    pinned by `TAILSCALE_INIT_SHA256`) cuts that cleanup short after 15 s,
+    keeps a cleanup that outlives its kill off procd's lock for the service
+    (fd 1000), and starts the service at `START=99`. procd runs the `S99`
+    links in name order, so tailscale starts after ChirpStack, Node-RED and
+    osi-bootstrap; on a provisioned gateway osi-bootstrap returns after its
+    stamp test, so remote access waits for it only briefly. `deploy.sh`
+    installs the copy only while the gateway's `/etc/init.d/tailscale` still
+    is the package file (`TAILSCALE_PACKAGE_INIT_SHA256`) or already the OSI
+    copy. A single boot link is renamed to `S99tailscale` in one step;
+    several links get `S99tailscale` first and then lose the others. An
+    `S99tailscale` that already points at the init is kept as it is (BusyBox
+    `ln -sf` unlinks before it links), and one that does not is replaced by
+    a rename. A
+    service that is disabled at boot stays disabled. Tailscale is not restarted,
+    because that would drop an operator's session; the change applies at the
+    next boot. The step never fails the deploy. A refused or failed install
+    leaves the old init untouched and prints one `WARN` of the form
+    `WARN: tailscale boot protection NOT installed: <reason>; <state>`, and
+    the closing banner repeats it. When the file is in place but a boot link
+    could not be moved, the line says that instead.
+13. Prints the final summary: `=== Deploy complete. ===`, the payload path
     annotated "(flipped + local health self-checked)", a rollback note
     (automatic for payload failure; committed DB migration restore is the 1.B1
     operator path, not automatic), and the ChirpStack reprovisioning reminder.

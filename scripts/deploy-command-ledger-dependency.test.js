@@ -293,6 +293,8 @@ test('the deploy script uses a pinned staged dependency installer and seed insta
     ['COMMAND_LEDGER_HELPER_SHA256', HELPER_PATH],
     ['COMMAND_LEDGER_PACKAGE_SHA256', path.join(LEDGER, 'package.json')],
     ['COMMAND_LEDGER_INDEX_SHA256', path.join(LEDGER, 'index.js')],
+    ['TAILSCALE_INIT_SHA256', path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale')],
+    ['TAILSCALE_PACKAGE_INIT_SHA256', path.join(ROOT, 'scripts/fixtures/tailscale-package-init/1.80.3-r1.init')],
     ['COMMAND_LEDGER_BINDING_SHA256', path.join(BINDING, 'canonicalization.js')],
     ['DEPLOY_GUI_ARCHIVE_SHA256', path.join(ROOT, 'scripts/deploy-archive.js')],
   ]) {

@@ -80,6 +80,10 @@ INSPECTION_INIT = (
 
 class Guest:
     usb_storage = 'usb-storage,drive=update'
+    # Extra host-loopback forwards to the guest's 192.0.2.15, as
+    # (host port, guest port) pairs, for cases that reach the guest before
+    # its boot reaches a shell.
+    extra_hostfwd = ()
     load_boot = staticmethod(boot_config.load)
     boot_files = ('kernel_2712.img', 'bcm2712-rpi-5-b.dtb', 'cmdline.txt')
     console_args = 'console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
@@ -97,6 +101,7 @@ class Guest:
         self.direct_io = direct_io
         self.process = self.bridge = self.radio = None
         self.boots = 0
+        self.extra_hostfwd = []
         prepare(image, self.work, self.qemu.with_name('dtmerge'), quiet=private,
                 load_boot=self.load_boot)
         with socket.socket() as port:
@@ -112,6 +117,36 @@ class Guest:
                 self.qemu.with_name('rpi5-bl31.bin'), '-append', cmdline]
 
     def start(self, *, before_console=None, inspection=False, flow_cut=None):
+        self.launch(inspection=inspection, flow_cut=flow_cut)
+        if inspection:
+            report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
+            if report.group(1) != b'READY':
+                raise RuntimeError('inspection shell could not mount the persistent overlay')
+            self.send(b'stty -echo\n')
+            return
+        return self.console(before_console)
+
+    def console(self, before_console=None):
+        if before_console is not None:
+            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
+        self.expect(b'Please press Enter to activate this console',180)
+        self.shell()
+
+    # A usable shell once the login prompt has been read.
+    def shell(self):
+        self.send(b'\n')
+        self.expect(b':~#',40)
+        self.send(b'stty -echo; dmesg -n 1\n')
+        self.console_ready()
+
+    def console_ready(self):
+        """Run once the console of a normal boot answers; a board may record its guest here."""
+        self.command('true')
+
+    # Starts QEMU and the bridge for the next boot and returns at once. The
+    # console must then be read without a pause: a pipe nobody reads fills,
+    # and the guest blocks on its next console write.
+    def launch(self, *, inspection=False, flow_cut=None):
         if self.process is not None or self.bridge is not None:
             raise RuntimeError('previous guest or bridge has not been reaped')
         self.boots += 1
@@ -130,36 +165,22 @@ class Guest:
             cmdline += f' init=/bin/sh loglevel=7 -- -c "{INSPECTION_INIT}"'
         a, b = socket.socketpair()
         self.radio, air = socket.socketpair()
+        user = f'user,id=local,restrict=on,net=192.0.2.0/24,hostfwd=tcp:127.0.0.1:{self.port}-192.0.2.15:1880'
+        for host_port, guest_port in self.extra_hostfwd:
+            user += f',hostfwd=tcp:127.0.0.1:{host_port}-192.0.2.15:{guest_port}'
         with a, b, air, self.stderr('bridge.stderr', 'ab') as err:
             args = self.qemu_args(b.fileno(), disk, cmdline, inspection)
             # A fresh connected pair ties the radio to this QEMU boot and
             # keeps the host out of the AF_UNIX pathname namespace.
             args.extend(['-chardev', f'socket,id=wm1302-air,fd={air.fileno()},server=off'])
             self.bridge = subprocess.Popen(['qemu-system-x86_64','-machine','none','-nodefaults','-display','none','-monitor','none','-serial','none',
-                '-netdev',f'socket,id=wire,fd={a.fileno()}','-netdev',f'user,id=local,restrict=on,net=192.0.2.0/24,hostfwd=tcp:127.0.0.1:{self.port}-192.0.2.15:1880',
+                '-netdev',f'socket,id=wire,fd={a.fileno()}','-netdev',user,
                 '-netdev','hubport,id=a,hubid=0,netdev=wire','-netdev','hubport,id=b,hubid=0,netdev=local'],pass_fds=(a.fileno(),),stdout=subprocess.DEVNULL,stderr=err)
             if self.upgrade and not inspection:
                 media = str(self.upgrade).replace(',', ',,')
                 args.extend(['-drive',f'if=none,id=update,format=raw,readonly=on,file={media}','-device',self.usb_storage])
             with self.stderr(f'qemu-{self.boots}.stderr', 'wb') as stderr:
                 self.process=subprocess.Popen(args,cwd=d,pass_fds=(b.fileno(), air.fileno()),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr)
-        if inspection:
-            report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
-            if report.group(1) != b'READY':
-                raise RuntimeError('inspection shell could not mount the persistent overlay')
-            self.send(b'stty -echo\n')
-            return
-        if before_console is not None:
-            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
-        self.expect(b'Please press Enter to activate this console',180)
-        self.send(b'\n')
-        self.expect(b':~#',40)
-        self.send(b'stty -echo; dmesg -n 1\n')
-        self.console_ready()
-
-    def console_ready(self):
-        """Run once the console of a normal boot answers; a board may record its guest here."""
-        self.command('true')
 
     def stderr(self, filename, mode):
         return open(os.devnull, mode) if self.private else (self.work/filename).open(mode)
@@ -331,7 +352,10 @@ class Guest:
     def wait_for_reboot(self):
         self.process.wait(timeout=600)
 
-    def upgrade_reboot(self, shell, *, before_console=None):
+    # launch_only returns once the next boot runs, before any console
+    # marker: a boot that is held before its shell needs its console read
+    # by the caller instead.
+    def upgrade_reboot(self, shell, *, before_console=None, launch_only=False):
         self.send((shell+'\n').encode())
         self.wait_for_reboot()
         self.stop()
@@ -342,6 +366,9 @@ class Guest:
                            self.qemu.with_name('dtmerge'), quiet=self.private)
             for name in self.boot_files:
                 (Path(tmp)/name).replace(self.work/name)
+        if launch_only:
+            self.launch()
+            return None
         return self.start(before_console=before_console)
 
     def flows_receipt(self):

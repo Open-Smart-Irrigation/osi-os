@@ -18,7 +18,7 @@ import tempfile
 from types import SimpleNamespace
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import acceptance
 from archives import verified_archive
@@ -28,6 +28,7 @@ import minimal_flows
 import radio_suite
 import run
 from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
+import tailscale_boot
 import upgrade_suite
 
 
@@ -3183,6 +3184,563 @@ class ProgressTests(unittest.TestCase):
         error, rows = self.exercise(['0', '', '2 1 1 0 7'])
         self.assertIn('installer returned 7', error)
         self.assertEqual(rows[-1]['installer_rc'], 7)
+
+
+class TailscaleBootTests(unittest.TestCase):
+    # Syslog lines as the image's persistent sink writes them.
+    @staticmethod
+    def line(second, text):
+        return f'Sun Apr 13 16:50:{second:02d} 2025 ' + text
+
+    RC = 'daemon.notice procd: /etc/rc.d/'
+    # As logd writes them on the 0.8.0 fixture (gate bc561582, diag/inspect):
+    # the daemon logs through its procd instance, BusyBox logger adds no pid.
+    DAEMON = ('daemon.err tailscaled[4302]: 2025/04/13 16:50:35 Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: '
+              '[]string{"/usr/sbin/tailscaled", "--port", "41641", "--state", "/etc/tailscale/tailscaled.state"}')
+
+    def stall_log(self, *, gave_up_after=15, link='S99tailscale'):
+        lines = [
+            self.line(0, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci'),
+            self.line(20, self.RC + f'{link}: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
+            self.line(20, 'user.notice osi-test-cleanup: cleanup stall started'),
+            self.line(20 + gave_up_after, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it'),
+            self.line(20 + gave_up_after, self.DAEMON),
+        ]
+        return '\n'.join(lines)
+
+    def normal_log(self):
+        return '\n'.join([
+            self.line(0, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci'),
+            self.line(20, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}'),
+            self.line(20, self.RC + 'S99tailscale: flushing log.'),
+            self.line(21, self.DAEMON),
+        ])
+
+    def test_the_limit_is_read_from_the_shipped_init(self):
+        repo = Path(__file__).resolve().parents[2]
+        init = (repo/tailscale_boot.INIT).read_text()
+        self.assertEqual(tailscale_boot.cleanup_limit(init), 15)
+        package = (repo/'scripts/fixtures/tailscale-package-init/1.80.3-r1.init').read_text()
+        with self.assertRaisesRegex(ValueError, 'OSI_CLEANUP_LIMIT'):
+            tailscale_boot.cleanup_limit(package)
+
+    def test_the_stall_stand_in_is_one_blocked_process_and_runs_the_real_daemon(self):
+        self.assertNotIn('&', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('exec 3</tmp/osi-cleanup-stall.fifo', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('exec /usr/sbin/tailscaled.real "$@"', tailscale_boot.STALL_WRAPPER)
+        self.assertIn('--cleanup', tailscale_boot.STALL_WRAPPER)
+        # The technician command finds the stand-in, and not the shell running the command.
+        pattern = 'tailscaled --cleanu[p]'
+        self.assertRegex('/bin/sh /usr/sbin/tailscaled --cleanup', pattern)
+        self.assertNotRegex(f"sh -c kill -9 $(pgrep -f '{pattern}')", pattern)
+
+    def test_the_runbook_carries_the_technician_command_the_harness_runs(self):
+        repo = Path(__file__).resolve().parents[2]
+        recipe = (repo/'.claude/skills/osi-live-ops-runbook/references/repair.md').read_text()
+        for command in (tailscale_boot.TECHNICIAN_COMMAND, tailscale_boot.ALTERNATE_COMMAND):
+            self.assertIn(command, recipe)
+        self.assertEqual(tailscale_boot.ALTERNATE_COMMAND, 'kill -9 $(' + tailscale_boot.PS_LOOKUP + ')')
+
+    def test_a_stalled_cleanup_is_cut_short_after_the_limit_and_node_red_came_first(self):
+        receipt = tailscale_boot.stall_verdict(self.stall_log(), 15)
+        self.assertIn('stalled 15 s', receipt)
+        self.assertIn('Node-RED init came first', receipt)
+        self.assertIn('--port', receipt)
+
+    def test_a_stall_verdict_names_what_is_wrong(self):
+        for label, log, limit, reason in [
+            ['no give-up', '\n'.join(self.stall_log().splitlines()[:3]), 15, 'did not give up'],
+            ['no stall announcement', self.stall_log().replace('cleanup stall started', 'x'), 15, 'did not announce'],
+            # syslog is chronological: a later line is a later event.
+            ['Node-RED after tailscale', '\n'.join(self.stall_log().splitlines()[1:]
+                                                  + [self.line(45, 'user.notice node-red.init: chirpstack config CHIRPSTACK_APP_SENSORS source=uci')]),
+             15, 'order is wrong'],
+            ['gave up late', self.stall_log(gave_up_after=40), 15, '40 s after the stall began'],
+            ['gave up early', self.stall_log(gave_up_after=10), 15, '10 s after the stall began'],
+            ['ran from S80', self.stall_log(link='S80tailscale'), 15, 'S80tailscale instead of S99tailscale'],
+            ['daemon not started', self.stall_log().replace('--port', '--no-port'), 15, 'daemon did not start'],
+            ['only a flows commit from Node-RED', self.stall_log().replace(
+                'chirpstack config CHIRPSTACK_APP_SENSORS source=uci', 'INFO: committed flows.json digest=' + 'a' * 64 + ' stamp=x'),
+             15, 'did not log its start'],
+            ['give-up from another tag', self.stall_log().replace('user.notice tailscale:', 'user.notice other:'), 15, 'did not give up'],
+            ['cut short at another limit', self.stall_log(gave_up_after=15), 30, 'did not give up'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.stall_verdict(log, limit)
+
+    def test_a_normal_boot_finishes_its_cleanup_and_starts_the_daemon(self):
+        self.assertIn('flushing log.', tailscale_boot.normal_verdict(self.normal_log(), 15))
+
+    def test_a_cleanup_the_real_binary_hangs_on_is_reported_as_cut_short(self):
+        log = self.normal_log().replace(self.line(20, self.RC + 'S99tailscale: flushing log.'),
+                                        self.line(35, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it'))
+        log = log.replace(self.line(21, self.DAEMON), self.line(36, self.DAEMON))
+        self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
+
+    def test_a_daemon_that_starts_before_its_cleanup_ended_fails_the_normal_verdict(self):
+        cleanup, _flush, daemon = self.normal_log().splitlines()[1:4]
+        gave_up = self.line(35, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it')
+        nr = self.normal_log().splitlines()[0]
+        for label, lines in [
+            ['daemon before the give-up', [nr, cleanup, daemon, gave_up]],
+            ['daemon before the flush', [nr, cleanup, daemon, self.line(22, self.RC + 'S99tailscale: flushing log.')]],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, 'did not start after its cleanup had ended'):
+                    tailscale_boot.normal_verdict('\n'.join(lines), 15)
+
+    def test_a_normal_verdict_names_what_is_wrong(self):
+        for label, log, reason in [
+            ['cleanup never ran', self.line(0, 'daemon.notice procd: /etc/rc.d/S99node-red: x'), 'real cleanup did not run'],
+            ['neither finished nor cut short', '\n'.join(self.normal_log().splitlines()[:2]), 'neither finished nor'],
+            ['still the stand-in', self.normal_log() + '\n' + self.line(1, 'user.notice osi-test-cleanup: cleanup stall started'),
+             'stand-in was still installed'],
+            ['ran from S80', self.normal_log().replace('S99tailscale', 'S80tailscale'), 'S80tailscale instead of S99tailscale'],
+            ['daemon missing', '\n'.join(self.normal_log().splitlines()[:3]), 'daemon did not start'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.normal_verdict(log, 15)
+
+    def test_the_syslog_time_of_day_is_read_across_the_minute(self):
+        self.assertEqual(tailscale_boot.line_seconds('Sun Apr 13 16:50:58 2025 x'), 16 * 3600 + 50 * 60 + 58)
+        gave_up = tailscale_boot.stall_verdict(self.stall_log(gave_up_after=15).replace('16:50:35', '16:51:03')
+                                               .replace('16:50:20', '16:50:48'), 15)
+        self.assertIn('stalled 15 s', gave_up)
+
+    def test_every_command_sent_to_the_guest_parses_as_shell(self):
+        # Over LAN SSH goes one line; the process-start script goes over the console.
+        over_ssh = ('MILESTONES', 'HELD_STATE', 'STALLED_CLEANUP', 'PS_LOOKUP', 'ONSITE_LOOKUP', 'ONSITE_COMMAND', 'HANG_AGE')
+        for name in (*over_ssh, 'PROCESS_STARTS', 'SURVIVOR_WRAPPER', 'LOCK_HOLDERS', 'BOOTSTRAP_TIMER', 'RESTART'):
+            text = getattr(tailscale_boot, name).replace('DAEMON', 'tailscaled')
+            for shell in ('sh', 'bash'):
+                run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, f'{name} under {shell}: {run.stderr}')
+            if name in over_ssh:
+                self.assertNotIn('\n', text, f'{name} is one line')
+
+    def test_the_on_site_line_is_pinned_and_differs_from_the_runbook_line_only_in_its_lookup(self):
+        self.assertEqual(tailscale_boot.ONSITE_COMMAND,
+                         "kill -9 $(ps w | grep '[t]ailscaled --cleanup' | awk '{print $1}')")
+        self.assertEqual(tailscale_boot.ONSITE_LOOKUP, tailscale_boot.ONSITE_COMMAND[len('kill -9 $('):-1])
+        self.assertEqual(tailscale_boot.ALTERNATE_COMMAND, 'kill -9 $(' + tailscale_boot.PS_LOOKUP + ')')
+        self.assertEqual(tailscale_boot.TECHNICIAN_COMMAND, 'kill -9 $(' + tailscale_boot.STALLED_CLEANUP + ')')
+        # Each lookup's pattern, applied to the text of the lookup itself, must not match.
+        for lookup in (tailscale_boot.STALLED_CLEANUP, tailscale_boot.PS_LOOKUP, tailscale_boot.ONSITE_LOOKUP):
+            self.assertNotRegex(lookup, 'tailscaled --cleanup')
+        self.assertRegex('/usr/sbin/tailscaled --cleanup', 'tailscaled --cleanup')
+        self.assertRegex('/bin/sh /usr/sbin/tailscaled --cleanup', 'tailscaled --cleanup')
+
+    def test_field_and_start_readings(self):
+        self.assertEqual(tailscale_boot.parse_fields('daemon= chirpstack=2833 node=up gui=\nage=235'),
+                         {'chirpstack': '2833', 'node': 'up', 'age': '235'})
+        self.assertEqual(tailscale_boot.process_starts('tailscaled.real 79\nchirpstack 76\nnode-red 72\n', 100),
+                         {'tailscaled.real': 21, 'chirpstack': 24, 'node-red': 28})
+        self.assertEqual(tailscale_boot.process_starts('chirpstack: no process found\n', 100), {})
+        self.assertEqual(tailscale_boot.held_state('\n\nage=235\n'), ('', []))
+        self.assertEqual(tailscale_boot.held_state('2833\nage=99\n'), ('2833', []))
+        self.assertEqual(tailscale_boot.held_state('\nnodered-up\ngui-up\nage=99\n'), ('', ['nodered-up', 'gui-up']))
+
+    def test_no_ssh_probe_matches_its_own_command_line(self):
+        # dropbear runs each line as `sh -c <line>`; `ps w` shows that line.
+        for name in ('MILESTONES', 'HELD_STATE', 'STALLED_CLEANUP', 'PS_LOOKUP', 'ONSITE_LOOKUP', 'HANG_AGE'):
+            text = getattr(tailscale_boot, name)
+            for pattern in re.findall(r"grep -q '([^']+)'|grep '([^']+)'|pgrep -f '([^']+)'|awk '/([^/]+)/", text):
+                pattern = next(part for part in pattern if part)
+                with self.subTest(name=name, pattern=pattern):
+                    self.assertNotRegex('sh -c ' + text, pattern)
+
+    def test_the_verdicts_read_real_fixture_lines(self):
+        # Copied from the 0.8.0 fixture's persistent log (gate bc561582).
+        real = ('Sun Apr 13 16:48:01 2025 daemon.err tailscaled[2079]: 2025/04/13 16:48:01 Program starting: '
+                'v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--port", "41641", "--state", '
+                '"/etc/tailscale/tailscaled.state"}')
+        self.assertRegex(real, tailscale_boot.DAEMON_START)
+        self.assertNotRegex(real.replace('"--port", "41641", ', ''), tailscale_boot.DAEMON_START)
+        self.assertRegex('Sun Apr 13 16:50:02 2025 user.notice node-red.init: chirpstack config '
+                         'CHIRPSTACK_APP_SENSORS source=uci', tailscale_boot.NODE_RED_INIT)
+        rc = ('Sun Apr 13 16:50:08 2025 daemon.notice procd: /etc/rc.d/S80tailscale: 2025/04/13 16:50:08 Program '
+              'starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}')
+        self.assertEqual(tailscale_boot.tail_rc([rc])[0][1], 'S80tailscale')
+        self.assertNotRegex(rc, tailscale_boot.GAVE_UP)
+
+    def test_the_console_prompt_of_a_held_boot_is_drained_and_not_judged(self):
+        class Console:
+            def __init__(self):
+                self.buf = b''
+                self.chunks = [b'procd: - init -\r\n' + tailscale_boot.CONSOLE + b'.\r\n']
+
+            def expect(self, pattern, timeout):
+                if self.chunks:
+                    self.buf += self.chunks.pop(0)
+                raise TimeoutError('guest serial timed out')
+
+        console = Console()
+        self.assertTrue(tailscale_boot.drain_console(console, 0.05))
+        self.assertEqual(console.buf, b'.\r\n')
+        self.assertFalse(tailscale_boot.drain_console(console, 0.05))
+
+    def test_the_traced_install_keeps_the_steps_and_the_installer_output(self):
+        self.assertTrue(tailscale_boot.TRACED_INSTALL.startswith('exec 2>/tmp/osi-install.trace\nset -x\n'))
+        self.assertIn('--wait >/tmp/osi-install.out 2>&1', tailscale_boot.TRACED_INSTALL)
+        self.assertNotIn('/dev/null 2>&1', tailscale_boot.TRACED_INSTALL)
+        for text in (tailscale_boot.TRACED_INSTALL, tailscale_boot.INSTALL_DIAGNOSTICS):
+            for shell in ('sh', 'bash'):
+                run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_the_usb_media_carries_the_offline_launcher_companions(self):
+        repo = Path(__file__).resolve().parents[2]
+        launcher = (repo/'scripts/deploy-offline.sh').read_text()
+        runtime = (repo/'scripts/deploy-offline-runtime.js').read_text()
+        self.assertIn('deploy-offline-runtime.js', launcher)
+        for name in re.findall(r"require\('\./([^']+)'\)", runtime):
+            self.assertIn(name + '.js', upgrade_suite.OFFLINE_COMPANIONS)
+        push = (repo/'scripts/deploy-push-bundle.sh').read_text()
+        self.assertIn('for companion in ' + ' '.join(upgrade_suite.OFFLINE_COMPANIONS) + '; do', push)
+
+    def test_the_boot_log_starts_at_the_last_marker_and_stays_fast_on_a_large_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old, current = Path(directory)/'old.log', Path(directory)/'current.log'
+            filler = ''.join(f'Sun Apr 13 16:00:00 2025 daemon.info dnsmasq[1]: line {n}\n' for n in range(200_000))
+            old.write_text(filler + 'x osi-test: OSI-TAILSCALE-aaaa\nx tailscale: before\n')
+            current.write_text(filler + 'x osi-test: OSI-TAILSCALE-aaaa\n' + filler
+                               + 'x user.notice tailscale: after\nx node-red.init: chirpstack config A source=uci\n')
+            script = tailscale_boot.boot_log_script('OSI-TAILSCALE-aaaa', (str(old), str(current)))
+            began = time.monotonic()
+            run = subprocess.run(['sh', '-c', script], capture_output=True, text=True, timeout=60)
+            self.assertLess(time.monotonic() - began, 20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout.splitlines(), ['x osi-test: OSI-TAILSCALE-aaaa', 'x user.notice tailscale: after',
+                                                       'x node-red.init: chirpstack config A source=uci'])
+            missing = subprocess.run(['sh', '-c', tailscale_boot.boot_log_script('OSI-TAILSCALE-bbbb', (str(old),))],
+                                     capture_output=True, text=True, timeout=60)
+            self.assertEqual((missing.returncode, missing.stdout), (0, ''))
+
+    def test_the_restart_probe_parses_and_its_verdict_needs_a_survivor_off_the_lock(self):
+        restart = tailscale_boot.RESTART.replace('RESTART_LIMIT', '90')
+        for shell in ('sh', 'bash'):
+            self.assertEqual(subprocess.run([shell, '-n', '-c', restart]).returncode, 0)
+        receipt = tailscale_boot.lock_verdict('done 33', 'survivors=2 holders=0 lock=present', 'done 32')
+        with self.assertRaisesRegex(RuntimeError, 'exited with an error'):
+            tailscale_boot.lock_verdict('done 33', 'survivors=2 holders=0 lock=present', 'failed 32 rc=1')
+        status = subprocess.run(['bash', '-c', restart.replace('/etc/init.d/tailscale restart', 'sh -c "exit 3"')],
+                                capture_output=True, text=True, timeout=30)
+        self.assertRegex(status.stdout.strip(), r'^failed \d+ rc=3$')
+        ok = subprocess.run(['bash', '-c', restart.replace('/etc/init.d/tailscale restart', 'true')],
+                            capture_output=True, text=True, timeout=30)
+        self.assertRegex(ok.stdout.strip(), r'^done \d+$')
+        self.assertIn('2 surviving cleanup', receipt)
+        self.assertIn('none holding the procd lock', receipt)
+        for label, first, holders, second, reason in [
+            ['blocked', 'done 33', 'survivors=2 holders=2 lock=present', 'blocked 90', 'hold the procd lock'],
+            ['second blocked only', 'done 33', 'survivors=2 holders=0 lock=present', 'blocked 90', 'waited on the lock'],
+            ['no survivor', 'done 33', 'survivors=0 holders=0 lock=present', 'done 32', 'no cleanup outlived'],
+            ['no lock taken', 'done 33', 'survivors=2 holders=0 lock=', 'done 32', 'did not take the service lock'],
+            ['first blocked', 'blocked 90', 'survivors=2 holders=0 lock=present', 'done 1', 'first restart did not finish'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.lock_verdict(first, holders, second)
+
+    def test_the_bootstrap_timer_is_read_per_boot_and_judged_over_all_of_them(self):
+        log = '\n'.join([
+            'Sun Apr 13 16:51:24 2025 user.notice osi-test-bootstrap: start uptime=46.12 stamp=yes',
+            'Sun Apr 13 16:51:24 2025 user.notice osi-test-bootstrap: end uptime=46.31 rc=0',
+        ])
+        self.assertEqual(tailscale_boot.bootstrap_runs(log), [(0.19, 'yes', 0)])
+        good = [(f'boot {n}', [(0.2 + n / 10, 'yes', 0)]) for n in range(4)]
+        receipt = tailscale_boot.bootstrap_verdict(good)
+        self.assertIn('4 stamped boots', receipt)
+        self.assertIn('worst 0.50 s (boot 3)', receipt)
+        for label, measured, reason in [
+            ['unstamped', good[:3] + [('boot 3', [(0.3, 'no', 0)])], 'stamp=no'],
+            ['slow', good[:3] + [('boot 3', [(7.5, 'yes', 0)])], 'took 7.5 s'],
+            ['not timed', good[:3] + [('boot 3', [])], 'exactly one'],
+            ['too few', good[:3], 'only 3 boots'],
+            ['failed', good[:3] + [('boot 3', [(0.3, 'yes', 1)])], 'exited 1'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.bootstrap_verdict(measured)
+
+    def test_the_marker_waits_until_the_persistent_log_has_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory)/'osi-system.log'
+            log.write_text('older line\n')
+            script = tailscale_boot.mark_script('OSI-TAILSCALE-cccc', (str(log),))
+            bin_dir = Path(directory)/'bin'
+            bin_dir.mkdir()
+            # A logger whose line lands in the file a second later, as logread -F does.
+            # Its output is closed, so the captured pipes end with the shell
+            # under test and the time measured is that shell's wait.
+            (bin_dir/'logger').write_text(f'#!/bin/sh\n(sleep 1; echo "x osi-test: $3" >>{quote(str(log))}) </dev/null >/dev/null 2>&1 &\n')
+            (bin_dir/'logger').chmod(0o755)
+            # The image's BusyBox sleep takes whole seconds only.
+            real_sleep = shutil.which('sleep')
+            (bin_dir/'sleep').write_text('#!/bin/sh\ncase "$1" in *[!0-9]*) echo "sleep: invalid number \'$1\'" >&2; exit 1 ;; esac\n'
+                                       f'exec {real_sleep} "$1"\n')
+            (bin_dir/'sleep').chmod(0o755)
+            env = dict(os.environ, PATH=f'{bin_dir}:{os.environ["PATH"]}')
+            began = time.monotonic()
+            run = subprocess.run(['sh', '-c', script], env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertGreaterEqual(time.monotonic() - began, 0.9, 'it waited for the writer')
+            self.assertIn('OSI-TAILSCALE-cccc', log.read_text())
+            (bin_dir/'logger').write_text('#!/bin/sh\nexit 0\n')
+            self.assertNotIn('sleep: invalid number', run.stderr)
+            began = time.monotonic()
+            lost = subprocess.run(['sh', '-c', tailscale_boot.mark_script('OSI-TAILSCALE-dddd', (str(log),)).replace('-le 20', '-le 2')],
+                                  env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(lost.returncode, 3)
+            self.assertGreaterEqual(time.monotonic() - began, 1.9, 'a lost marker is waited for, not polled in a busy loop')
+            self.assertIn('-le 20 ] || exit 3; sleep 1', tailscale_boot.mark_script('x'))
+
+    def test_osi_bootstrap_must_end_before_s99tailscale_on_a_patched_boot(self):
+        start = 'Sun Apr 13 16:52:22 2025 user.notice osi-test-bootstrap: start uptime=47.15 stamp=yes'
+        end = 'Sun Apr 13 16:52:22 2025 user.notice osi-test-bootstrap: end uptime=47.24 rc=0'
+        ts = self.line(23, self.RC + 'S99tailscale: Program starting: v1.80.3-1 (OpenWrt), Go 1.23.8: []string{"/usr/sbin/tailscaled", "--cleanup"}')
+        self.assertTrue(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, end, ts])))
+        self.assertFalse(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, ts, end])))
+        self.assertFalse(tailscale_boot.bootstrap_before_tailscale('\n'.join([start, end])))
+        good = [(f'boot {n}', [(0.1, 'yes', 0)], True if n < 2 else None) for n in range(4)]
+        self.assertIn('4 stamped boots', tailscale_boot.bootstrap_verdict(good))
+        with self.assertRaisesRegex(RuntimeError, 'S99tailscale ran before osi-bootstrap'):
+            tailscale_boot.bootstrap_verdict([good[0], ('boot 1', [(0.1, 'yes', 0)], False), *good[2:]])
+
+    def test_the_media_build_refuses_a_launcher_without_its_companions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/'scripts').mkdir()
+            launcher = release/'scripts/deploy-offline.sh'
+            launcher.write_text('#!/bin/sh\nexec node "$script_dir/deploy-offline-runtime.js" "$@"\n')
+            (release/'scripts/deploy-offline-runtime.js').write_text('')
+            self.assertEqual(upgrade_suite.missing_companions(release), ['deploy-archive.js', 'deploy-local-server.js'])
+            with self.assertRaisesRegex(ValueError, 'needs files the release lacks: deploy-archive.js'):
+                upgrade_suite.build_media(release, release, revision='a' * 40)
+            for name in upgrade_suite.OFFLINE_COMPANIONS:
+                (release/'scripts'/name).write_text('')
+            self.assertEqual(upgrade_suite.missing_companions(release), [])
+            launcher.write_text('#!/bin/sh\n# a self-contained launcher\n')
+            for name in upgrade_suite.OFFLINE_COMPANIONS:
+                (release/'scripts'/name).unlink()
+            self.assertEqual(upgrade_suite.missing_companions(release), [], 'an older launcher needs none')
+
+    def test_chirpstack_and_node_red_must_start_before_the_stall(self):
+        log = self.stall_log().replace('cleanup stall started', 'cleanup stall started uptime=47.40')
+        receipt = tailscale_boot.start_order_verdict(log, 'chirpstack 2210\nnode-red 4605\n')
+        self.assertIn('ChirpStack started at 22.10 s and Node-RED at 46.05 s', receipt)
+        for label, processes, reason in [
+            ['Node-RED after the stall', 'chirpstack 2210\nnode-red 6100\n', 'node-red started at 61.00 s, after the stall'],
+            ['ChirpStack after the stall', 'chirpstack 4800\nnode-red 4605\n', 'chirpstack started at 48.00 s'],
+            ['Node-RED missing', 'chirpstack 2210\n', 'node-red is not running'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.start_order_verdict(log, processes)
+        with self.assertRaisesRegex(RuntimeError, 'did not log its uptime'):
+            tailscale_boot.start_order_verdict(self.stall_log(), 'chirpstack 2210\nnode-red 4605\n')
+        self.assertIn("uptime=$(cut -d' ' -f1 /proc/uptime)", tailscale_boot.STALL_WRAPPER)
+
+    def test_a_real_cleanup_cut_off_must_come_at_the_limit(self):
+        nr, cleanup = self.normal_log().splitlines()[:2]  # the cleanup starts at 16:50:20
+
+        def at(second, text):
+            return f'Sun Apr 13 16:{50 + second // 60:02d}:{second % 60:02d} 2025 ' + text
+
+        for after, ok in [(15, True), (23, True), (60, False), (10, False)]:
+            gave_up = at(20 + after, 'user.notice tailscale: cleanup did not finish in 15 s; continuing without it')
+            log = '\n'.join([nr, cleanup, gave_up, at(21 + after, self.DAEMON)])
+            with self.subTest(after=after):
+                if ok:
+                    self.assertIn('cut short after 15 s', tailscale_boot.normal_verdict(log, 15))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f'gave up {after} s after the real cleanup began'):
+                        tailscale_boot.normal_verdict(log, 15)
+
+    def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
+        media = Path('/nonexistent/upgrade.img')
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        def make_guest(work, image, qemu, ram, **options):
+            seen.setdefault(Path(work).name, options)
+            raise Stop
+
+        outcome = {}
+
+        def test(label, fn):
+            try:
+                outcome[label] = fn()
+            except Exception as error:  # the runner's test() records, never raises
+                outcome[label] = error
+
+        args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4})()
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/tailscale_boot.INIT).parent.mkdir(parents=True)
+            (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
+            tailscale_boot.run(args, release, release, release, make_guest, test, print,
+                               lambda old: release/'fixture.img.gz', lambda: media, None)
+        self.assertEqual(seen['tailscale-upgraded']['upgrade'], media)
+        self.assertIsInstance(outcome[tailscale_boot.INSTALLED_CASE], Stop)
+
+    def test_a_release_the_media_cannot_be_built_from_still_runs_the_fallback(self):
+        built = []
+
+        def make_guest(work, image, qemu, ram, **options):
+            built.append(Path(work).name)
+            raise RuntimeError('stop here')
+
+        outcome = {}
+
+        def test(label, fn):
+            try:
+                outcome[label] = fn()
+            except Exception as error:
+                outcome[label] = error
+
+        def media():
+            raise ValueError('deploy-offline.sh needs files the release lacks: deploy-archive.js')
+
+        args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4})()
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/tailscale_boot.INIT).parent.mkdir(parents=True)
+            (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
+            tailscale_boot.run(args, release, release, release, make_guest, test, print,
+                               lambda old: release/'fixture.img.gz', media, None)
+        self.assertIn('needs files the release lacks', str(outcome[tailscale_boot.INSTALLED_CASE]))
+        self.assertIn('not run', str(outcome[tailscale_boot.STALL_CASE]))
+        self.assertEqual(built, ['tailscale-fallback'], 'the fallback guest was still built')
+        self.assertIn(tailscale_boot.FALLBACK_CASE, outcome)
+
+    def test_the_focused_mode_expects_exactly_the_tailscale_cases(self):
+        args = SimpleNamespace(tailscale_boot_only=True)
+        self.assertEqual(set(acceptance.expected_cases(args, None, False)), set(tailscale_boot.CASES))
+        plain = SimpleNamespace(tailscale_boot_only=False, flows_power_cut_only=False, customer_fixture_only=False,
+                                upgrade_boot_safety_only=False)
+        self.assertFalse(set(tailscale_boot.CASES) & set(acceptance.expected_cases(plain, None, False)))
+
+    def test_the_focused_run_requires_a_pass_from_every_case_and_needs_no_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init = root/tailscale_boot.INIT
+            init.parent.mkdir(parents=True)
+            init.write_text((Path(__file__).resolve().parents[2]/tailscale_boot.INIT).read_text())
+            args = SimpleNamespace(fixtures=root, qemu=None, ram=8, release_revision='a' * 40, osi_version='0.8.5',
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False, tailscale_boot_only=True)
+            def held(*call):
+                for label in tailscale_boot.CASES:
+                    call[5](label, Mock(side_effect=RuntimeError('held')))
+
+            with (redirect_stdout(io.StringIO()), patch.object(tailscale_boot, 'run', side_effect=held) as run,
+                  redirect_stderr(io.StringIO())):
+                status = acceptance.run_cases(args, root, root, root, 'recovery', False)
+            self.assertEqual(status, 1)
+            run.assert_called_once()
+            result = (root/'results.log').read_text()
+            for label in tailscale_boot.CASES:
+                self.assertIn(f'{label} | REQUIRED | FAIL | FAIL', result)
+            self.assertIn('Focused acceptance: FAIL', result)
+
+    @staticmethod
+    def unguest(directory):
+        # A Guest without an image: launch() only needs these attributes.
+        vm = Guest.__new__(Guest)
+        vm.work = vm.receipts = Path(directory)
+        vm.qemu = vm.work/'qemu'
+        vm.process = vm.bridge = vm.radio = None
+        vm.boots = 0
+        vm.ram = 8
+        vm.private = False
+        vm.direct_io = False
+        vm.upgrade = None
+        vm.extra_hostfwd = []
+        (vm.work/'cmdline.txt').write_text('root=/dev/mmcblk0p2')
+        vm.qemu.mkdir()
+        for name in ('dtmerge', 'rpi5-bl31.bin'):
+            (vm.qemu/name).write_bytes(b'')
+        return vm
+
+    def test_an_extra_host_forward_reaches_the_guest_lan_address(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            vm.extra_hostfwd.append((43210, 22))
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
+                vm.launch()
+            vm.stop()
+            argv = popen.call_args_list[0].args[0]
+            bridge = ' '.join(argv)
+            # Every netdev definition follows its own -netdev flag; QEMU reads a
+            # bare one as a disk image and the bridge exits.
+            for position, word in enumerate(argv):
+                if word.startswith(('user,', 'socket,', 'hubport,')):
+                    self.assertEqual(argv[position - 1], '-netdev', word)
+            self.assertIn('hostfwd=tcp:127.0.0.1:43210-192.0.2.15:22', bridge)
+            self.assertIn('hostfwd=tcp:127.0.0.1:49152-192.0.2.15:1880', bridge)
+            self.assertIn('restrict=on', bridge)
+
+    def test_a_launch_without_extra_forwards_keeps_the_bridge_as_before(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
+                vm.launch()
+            vm.stop()
+            argv = popen.call_args_list[0].args[0]
+            self.assertEqual(' '.join(argv).count('hostfwd='), 1)
+            user = next(position for position, word in enumerate(argv) if word.startswith('user,'))
+            self.assertEqual(argv[user - 1], '-netdev')
+
+    def test_launch_returns_before_the_console_and_the_shell_follows_the_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.unguest(directory)
+            vm.port = 49152
+            with patch('suite_vm.subprocess.Popen', return_value=Mock()):
+                vm.launch()
+            self.assertEqual(vm.boots, 1)
+            vm.buf = b'Linux version ...\r\n'
+            # Nothing on the console yet: the drain reads it until its time is up.
+            with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')) as expect:
+                self.assertFalse(tailscale_boot.drain_console(vm, 0.05))
+            self.assertEqual(expect.call_args_list[0].args[0], tailscale_boot.NO_MATCH)
+            # The login prompt arrives: the drain reports it and leaves it consumed.
+            with patch.object(vm, 'expect', side_effect=TimeoutError('guest serial timed out')):
+                vm.buf += tailscale_boot.CONSOLE + b'\r\nlogin:'
+                self.assertTrue(tailscale_boot.drain_console(vm, 0.05))
+            self.assertEqual(vm.buf, b'\r\nlogin:')
+            with patch.object(vm, 'expect', return_value=Mock()) as expect, patch.object(vm, 'command') as command:
+                vm.shell()
+            vm.stop()
+            self.assertEqual(expect.call_args_list, [call(b':~#', 40)])
+            command.assert_called_once_with('true')
+
+    def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
+        vm = Mock()
+        vm.command.return_value = (0, 'S80tailscale\ndigest=a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest a874f9fd1032')
+        # Guest.command() strips its output, so an empty digest arrives as `digest=`.
+        vm.command.return_value = (0, 'S99tailscale\ndigest=')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S99tailscale, init digest absent')
+        vm.command.return_value = (0, 'digest=')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'no boot link, init digest absent')
+        vm.command.return_value = (0, 'S80tailscale\ndigest')
+        self.assertEqual(tailscale_boot.image_receipt(vm), 'S80tailscale, init digest absent')
+        # A failed read whose shell answers again is diagnostics only.
+        vm.command.side_effect = [TimeoutError('guest serial timed out'), (0, '')]
+        self.assertIn('unreadable', tailscale_boot.image_receipt(vm))
+        vm.send.assert_called_with(b'\x03\n')
+        self.assertEqual(vm.command.call_args_list[-1], call('true', 30))
+        # A shell that stays busy is not handed to the next query.
+        vm.command.side_effect = [TimeoutError('guest serial timed out'), TimeoutError('guest serial timed out')]
+        with self.assertRaisesRegex(RuntimeError, 'did not answer after the image receipt'):
+            tailscale_boot.image_receipt(vm)
 
 
 if __name__ == '__main__':

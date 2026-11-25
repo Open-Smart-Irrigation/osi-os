@@ -58,8 +58,26 @@ def cache_locked_packages(release, out):
     return archive
 
 
+OFFLINE_COMPANIONS = ('deploy-offline-runtime.js', 'deploy-archive.js', 'deploy-local-server.js')
+
+
+def missing_companions(release):
+    """Companions the release's deploy-offline.sh needs but its tree lacks.
+
+    An older launcher runs on its own and needs none; one that runs the Node
+    launcher fails at once on the gateway without all three.
+    """
+    launcher = release/'scripts/deploy-offline.sh'
+    if not launcher.is_file() or OFFLINE_COMPANIONS[0] not in launcher.read_text():
+        return []
+    return [name for name in OFFLINE_COMPANIONS if not (release/'scripts'/name).exists()]
+
+
 def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     """Package the candidate with its own deployment scripts on a read-only USB disk."""
+    missing = missing_companions(release)
+    if missing:
+        raise ValueError('deploy-offline.sh needs files the release lacks: ' + ', '.join(missing))
     out=directory/'upgrade'
     out.mkdir()
     env=dict(os.environ, REPO_ROOT=str(release),OUT_DIR=str(out),BUNDLE_SHA=revision[:8])
@@ -73,6 +91,12 @@ def build_media(release, directory, *, revision, extra_files=None, quiet=False):
     checksum.write_text(digest+'  candidate.tar.gz\n')
     files = {'npm-cache.tar': cache, 'candidate.tar.gz': bundle,
              'install.sh': release/'scripts/deploy-offline.sh', 'candidate.tar.gz.sha256': checksum}
+    # deploy-offline.sh runs its Node launcher from its own directory, with
+    # the companions deploy-push-bundle.sh pushes beside it.
+    for companion in OFFLINE_COMPANIONS:
+        source = release/'scripts'/companion
+        if source.exists():
+            files[companion] = source
     if extra_files:
         files.update(extra_files)
     disk = out/'upgrade-usb.img'
