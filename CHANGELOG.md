@@ -14,6 +14,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   certificate the bundled Node root store does not verify stops reporting
   over MQTT and retries automatically; it reconnects by itself once the
   broker serves a verifying chain again.
+- Cloud endpoints require TLS. `osi-cloud-http` sends to an `http:` address
+  only for a loopback host (`127.0.0.0/8`, `::1`, `localhost`), and the zone
+  environment summary applies the same rule to its cloud call. Account link
+  refuses an `mqtt:`/`ws:` broker address outside loopback in the cloud's
+  reply, reading the address the way the MQTT client does as well. At start,
+  `node-red.init` uses a stored `ws://`/`mqtt://` broker address only for a
+  loopback host; the scheme is read without regard to letter case. For any
+  other value with a scheme that is not TLS it logs one warning and
+  `wss://<server_host>/mqtt` takes over. Without a `server_host`, the default
+  broker takes over only when the ignored address named the default broker's
+  host; otherwise the gateway gets the broker name that never resolves until
+  it is relinked, because its credential belongs to another cloud. A gateway
+  linked over a plain address before this change keeps its link and fails its
+  cloud requests until it is relinked with its `https` address; the first
+  refused request of a start logs that fix once.
+- Cloud broker fallback hardening. A stored broker value that `node-red.init`
+  does not use, whatever its form (no scheme, whitespace or a control
+  character included), now counts as refused: without a `server_host` the
+  default broker is used only when the value named the default broker's host,
+  letter case aside. Whenever a stored value is not used, a literal broker
+  address in an older `flows.json` is replaced by the broker chosen at start.
+  Account link refuses a broker address with whitespace or a control
+  character inside it.
 - A boot no longer waits on the Tailscale cleanup. The init file of tailscale
   1.80.3-r1 runs `tailscaled --cleanup` before the daemon with no time limit,
   at `START=80`, so a cleanup that did not return kept ChirpStack and

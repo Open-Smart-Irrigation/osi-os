@@ -98,6 +98,7 @@ jobs:
           node --test scripts/test-account-link-restart-obligation.js
           node --test scripts/test-unlink-stops-cloud-reporting.js
           node scripts/test-audit-schema.js
+          node --test scripts/test-cloud-endpoint-scheme.js
           node scripts/test-command-ack-mark-delivered.js
           node scripts/test-delete-device-flow.js
           node scripts/test-deploy-init-log-check.js

@@ -159,6 +159,14 @@ resolve_chirpstack_value() {
 #   1. osi-server.cloud.mqtt_broker_url  (the cloud's own answer at account link)
 #   2. wss://<osi-server.cloud.server_host>/mqtt  (the host HTTPS sync was linked to)
 #   3. OSI_DEFAULT_CLOUD_BROKER_URL  (the URL flows.json carried as a literal before)
+# The scheme of a value from 1 is read without regard to letter case. A ws://
+# or mqtt:// value is used only for a loopback host. Any other value from 1
+# is ignored with a WARN (the cloud endpoint scheme policy): an address with
+# a scheme that is not TLS, and a value the init cannot use as given. Then 2
+# or 3 takes over. 3 only when the ignored value named the default broker's
+# host, letter case aside: otherwise the credential belongs to another cloud,
+# and the gateway gets OSI_UNLINKED_CLOUD_BROKER_URL instead. Either way a
+# literal broker URL in an older flows.json is replaced; see start_service().
 # A gateway linked to the default host gets byte-identical behaviour to the
 # old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
@@ -204,25 +212,116 @@ cloud_broker_url_for_log() {
     esac
 }
 
+# The host of a broker URL as written, without userinfo, port, path, query
+# or fragment; the brackets of an IPv6 address are left out. Sets
+# CLOUD_BROKER_URL_HOST. Pure, no subshell.
+cloud_broker_url_host() {
+    local rest="${1#*://}"
+    local host="${rest%%/*}"
+    host="${host%%\?*}"
+    host="${host%%\#*}"
+    host="${host##*@}"
+    case "$host" in
+        "["*) host="${host#\[}"; host="${host%%\]*}" ;;
+        *) host="${host%%:*}" ;;
+    esac
+    CLOUD_BROKER_URL_HOST="$host"
+}
+
+# The first and the last byte of the C0 control range, and DEL. A shell
+# pattern cannot spell them portably, so they are built once here.
+CLOUD_BROKER_CTL_LOW="$(printf '\001')"
+CLOUD_BROKER_CTL_HIGH="$(printf '\037')"
+CLOUD_BROKER_CTL_DEL="$(printf '\177')"
+
+# Whether a value holds ASCII whitespace or a control character (C0 or DEL).
+# Returns 0 when it does. Pure, no subshell.
+cloud_broker_value_unprintable() {
+    case "$1" in
+        *[[:space:]]*|*["$CLOUD_BROKER_CTL_LOW"-"$CLOUD_BROKER_CTL_HIGH"$CLOUD_BROKER_CTL_DEL]*) return 0 ;;
+    esac
+    return 1
+}
+
+# Whether the host of a broker URL is loopback: 127.0.0.0/8, ::1 or localhost
+# (any letter case), the same hosts osi-cloud-http allows without TLS. Reads
+# the host only: userinfo, port, path, query and fragment are left out. An
+# address the MQTT client would read differently from this function is never
+# loopback here, and neither is one with whitespace or a control character; an
+# IPv4 address is written without leading zeros. Account link may accept such
+# an address. Pure, no subshell.
+cloud_broker_url_is_loopback() {
+    local host rest part
+    case "$1" in *'\'*) return 1 ;; esac
+    if cloud_broker_value_unprintable "$1"; then return 1; fi
+    cloud_broker_url_host "$1"
+    host="$CLOUD_BROKER_URL_HOST"
+    case "$host" in
+        [lL][oO][cC][aA][lL][hH][oO][sS][tT]|::1) return 0 ;;
+        127.*.*.*) ;;
+        *) return 1 ;;
+    esac
+    rest="${host#127.}"
+    for part in 1 2 3; do
+        host="${rest%%.*}"
+        if [ "$part" = 3 ]; then host="$rest"; fi
+        # Each is 0 to 255, written without a leading zero.
+        case "$host" in
+            0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+            *) return 1 ;;
+        esac
+        rest="${rest#*.}"
+    done
+    return 0
+}
+
 # Sets CLOUD_BROKER_URL and CLOUD_BROKER_URL_SOURCE (mqtt_broker_url,
-# server_host or default). Pure apart from logging; no subshell, so the
-# caller sees both variables.
+# server_host, default or refused), and CLOUD_BROKER_URL_REFUSED (1 when a
+# stored value was not used as given). Apart from logging and one `tr` in a
+# command substitution for the host comparison it is pure, and it runs in
+# the caller's shell, so the caller sees every variable.
 resolve_cloud_broker_url() {
     local configured_url="$1"
     local server_host="$2"
+    local refused_host=""
+    local default_host
+
+    CLOUD_BROKER_URL_REFUSED=0
 
     if [ -n "$configured_url" ]; then
+        if cloud_broker_value_unprintable "$configured_url"; then
+            logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace or control characters)"
+        else
+            case "$configured_url" in
+                [Ww][Ss][Ss]://?*|[Mm][Qq][Tt][Tt][Ss]://?*)
+                    CLOUD_BROKER_URL="$configured_url"
+                    CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
+                    return 0
+                    ;;
+                [Ww][Ss]://?*|[Mm][Qq][Tt][Tt]://?*)
+                    if cloud_broker_url_is_loopback "$configured_url"; then
+                        CLOUD_BROKER_URL="$configured_url"
+                        CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
+                        return 0
+                    fi
+                    logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (ws:// or mqtt:// outside loopback; the cloud broker needs wss:// or mqtts://)"
+                    ;;
+                *)
+                    # Another scheme, or none.
+                    logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)"
+                    ;;
+            esac
+        fi
+        # Every value that is not used as given is refused.
+        CLOUD_BROKER_URL_REFUSED=1
+        # A value the MQTT client would read differently never counts as the
+        # default broker's. The host of any other value is read in lower case.
         case "$configured_url" in
-            *[[:space:]]*) ;;
-            wss://?*|ws://?*|mqtts://?*|mqtt://?*)
-                CLOUD_BROKER_URL="$configured_url"
-                CLOUD_BROKER_URL_SOURCE="mqtt_broker_url"
-                return 0
+            *'\'*) refused_host="" ;;
+            *)
+                cloud_broker_url_host "$configured_url"
+                refused_host="$(printf '%s' "$CLOUD_BROKER_URL_HOST" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
                 ;;
-        esac
-        case "$configured_url" in
-            *[[:space:]]*) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)" ;;
-            *) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)" ;;
         esac
     fi
 
@@ -236,8 +335,24 @@ resolve_cloud_broker_url() {
                 return 0
                 ;;
         esac
-        # Falls back to the default broker, like an unlinked gateway.
-        logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host")); MQTT uses the default broker"
+        if [ "$CLOUD_BROKER_URL_REFUSED" = 1 ]; then
+            logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host"))"
+        else
+            logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host")); MQTT uses the default broker"
+        fi
+    fi
+
+    if [ "$CLOUD_BROKER_URL_REFUSED" = 1 ]; then
+        # The MQTT credential belongs to the cloud that answered the ignored
+        # value. When that is not the default cloud, it must not go to the
+        # default broker, so the gateway gets the name that never resolves.
+        cloud_broker_url_host "$OSI_DEFAULT_CLOUD_BROKER_URL"
+        default_host="$CLOUD_BROKER_URL_HOST"
+        if [ "$refused_host" != "$default_host" ]; then
+            CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
+            CLOUD_BROKER_URL_SOURCE="refused"
+            return 0
+        fi
     fi
 
     CLOUD_BROKER_URL="$OSI_DEFAULT_CLOUD_BROKER_URL"
@@ -483,14 +598,20 @@ start_service() {
     else
         CLOUD_BROKER_URL="$OSI_UNLINKED_CLOUD_BROKER_URL"
         CLOUD_BROKER_URL_SOURCE="unlinked"
+        CLOUD_BROKER_URL_REFUSED=0
     fi
     logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
-    # Only a URL that came from UCI may replace a literal in an older
-    # flows.json (a rollback payload); with nothing usable configured, or
-    # when unlinked, that literal stays and flows.json is not rewritten.
+    # A literal in an older flows.json (a rollback payload) is replaced when
+    # the exported URL came from UCI, and when it is the default broker after
+    # a stored value was refused: the literal must not keep that value. With
+    # nothing configured, or when unlinked, the literal stays and flows.json
+    # is not rewritten.
     local cloud_broker_patch_url=""
     case "$CLOUD_BROKER_URL_SOURCE" in
-        default|unlinked) ;;
+        unlinked) ;;
+        default)
+            if [ "$CLOUD_BROKER_URL_REFUSED" = 1 ]; then cloud_broker_patch_url="$CLOUD_BROKER_URL"; fi
+            ;;
         *) cloud_broker_patch_url="$CLOUD_BROKER_URL" ;;
     esac
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
@@ -952,9 +1073,9 @@ try {
   }
   // Current flows carry the env placeholder and Node-RED substitutes
   // OSI_CLOUD_BROKER_URL at start: leave it alone. An older flows.json with a
-  // literal URL (a rollback payload) gets the URL resolve_cloud_broker_url()
-  // derived from UCI, so it reaches the same broker. Empty (source=default)
-  // changes nothing, as before.
+  // literal URL (a rollback payload) gets the broker chosen for this start
+  // (CLOUD_MQTT_BROKER_URL_VALUE), so it reaches the same broker. Empty (with
+  // nothing stored, or when unlinked) changes nothing, as before.
   if (cloudBroker && cloudMqttBrokerUrl && cloudBroker.broker !== '${OSI_CLOUD_BROKER_URL}'
     && cloudBroker.broker !== cloudMqttBrokerUrl) {
     cloudBroker.broker = cloudMqttBrokerUrl;
