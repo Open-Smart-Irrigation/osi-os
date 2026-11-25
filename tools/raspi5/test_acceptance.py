@@ -1,6 +1,6 @@
 """Host-only tests for the Pi 5 acceptance runner."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing, nullcontext, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, closing, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import replace
 import hashlib
 import io
@@ -23,10 +23,12 @@ from unittest.mock import Mock, call, patch
 import acceptance
 from archives import verified_archive
 import boot_safety
+import boot_timing
 import customer_fixture
 import minimal_flows
 import radio_suite
 import run
+import suite_vm
 from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
 import tailscale_boot
 import upgrade_suite
@@ -2303,7 +2305,7 @@ sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }
             result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
             return result.returncode, result.stdout.strip()
 
-        upgrade_suite.wait_for_api(SimpleNamespace(command=command))
+        upgrade_suite.wait_for_api(SimpleNamespace(command=command, API_WAIT_SECONDS=420, private=True))
 
     def test_candidate_gate_fails_when_pi5_workload_omits_a_required_case(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3716,10 +3718,16 @@ class TailscaleBootTests(unittest.TestCase):
                 self.assertTrue(tailscale_boot.drain_console(vm, 0.05))
             self.assertEqual(vm.buf, b'\r\nlogin:')
             with patch.object(vm, 'expect', return_value=Mock()) as expect, patch.object(vm, 'command') as command:
+                command.return_value = (0, '27')
                 vm.shell()
             vm.stop()
             self.assertEqual(expect.call_args_list, [call(b':~#', 40)])
-            command.assert_called_once_with('true')
+            # The same probe that proves the shell answers says where the
+            # guest's persistent syslog stood when this boot's console came up.
+            command.assert_called_once_with(Guest.LOG_COUNT)
+            self.assertEqual(vm.log_from, 27)
+            self.assertEqual(vm.waits, ('login prompt ready after 0.0 s (budget 180 s)',
+                                        'shell prompt ready after 0.0 s (budget 40 s)'))
 
     def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
         vm = Mock()
@@ -3741,6 +3749,571 @@ class TailscaleBootTests(unittest.TestCase):
         vm.command.side_effect = [TimeoutError('guest serial timed out'), TimeoutError('guest serial timed out')]
         with self.assertRaisesRegex(RuntimeError, 'did not answer after the image receipt'):
             tailscale_boot.image_receipt(vm)
+
+
+class BootWaitTests(unittest.TestCase):
+    """Every boot wait notes its elapsed time against its budget; a slow API wait keeps the boot's timing."""
+
+    def guest(self, directory, cls=Guest, *, private=False):
+        # A Guest without an image: only what a wait and its notes need.
+        vm = cls.__new__(cls)
+        vm.receipts = Path(directory)
+        vm.process = vm.bridge = vm.radio = None
+        vm.boots = 3
+        vm.private = private
+        vm.command, vm.send = Mock(), Mock()
+        vm.start, vm.stop, vm.reboot, vm.verify_cut_disk = Mock(), Mock(), Mock(), Mock()
+        return vm
+
+    @staticmethod
+    def polls_until(answer_at):
+        """A guest command stand-in that runs a poll script on the host; the first 401 comes at poll `answer_at`."""
+        def command(script, timeout):
+            # With fast curls and two seconds between polls, each poll stands for two seconds.
+            fixture = (f'polls=0\ncurl() {{ [ "$polls" -ge {answer_at - 1} ] && printf 401; }}\n'
+                       'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n')
+            result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+            return result.returncode, result.stdout.strip()
+        return command
+
+    @staticmethod
+    def noted(vm):
+        """The guest's boot-wait notes, each elapsed time masked: a loaded host can round 0.0 s up."""
+        return [re.sub(r'\d+\.\d s', 'T s', note) for note in vm.waits]
+
+    def test_pi5_api_wait_polls_420_s_and_notes_its_elapsed_time(self):
+        self.assertEqual(Guest.API_WAIT_SECONDS, 420)
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            # The measured 246 s factory first boot is the 124th poll.
+            vm.command.side_effect = self.polls_until(124)
+            self.assertRegex(upgrade_suite.wait_for_api(vm), r'^\w{3} \w{3} +\d+ \d\d:\d\d:\d\d \d{4}$')
+            script, timeout = vm.command.call_args.args
+            self.assertEqual(timeout, 420)
+            self.assertIn('seq 1 210', script)
+            self.assertRegex(vm.waits[0], r'^api ready after \d+\.\d s \(budget 420 s\)$')
+            self.assertEqual((vm.receipts/'harness-events.log').read_text(), f'boot=3 {vm.waits[0]}\n')
+
+    def test_a_board_class_sets_its_own_api_wait_budget(self):
+        class SlowBoard(Guest):
+            API_WAIT_SECONDS = 900
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, SlowBoard)
+            # Past every poll the Pi 5 budget has, and the last one this budget has.
+            vm.command.side_effect = self.polls_until(450)
+            upgrade_suite.wait_for_api(vm)
+            script, timeout = vm.command.call_args.args
+            self.assertEqual(timeout, 900)
+            self.assertIn('seq 1 450', script)
+            self.assertRegex(vm.waits[0], r'^api ready after \d+\.\d s \(budget 900 s\)$')
+
+    def test_an_api_wait_past_the_budget_fails_and_is_noted_as_not_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            # The loop runs out by itself, then the host budget runs out first.
+            vm.command.side_effect = self.polls_until(300)
+            with self.assertRaisesRegex(RuntimeError, 'guest command returned 1'):
+                upgrade_suite.wait_for_api(vm)
+            vm.command.side_effect = TimeoutError('guest serial timed out')
+            with self.assertRaisesRegex(TimeoutError, 'guest serial timed out'):
+                upgrade_suite.wait_for_api(vm)
+            self.assertEqual(self.noted(vm), ['api not ready after T s (budget 420 s)'] * 2)
+
+    def test_a_private_guest_keeps_no_wait_note(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=True)
+            vm.command.side_effect = self.polls_until(1)
+            upgrade_suite.wait_for_api(vm)
+            vm.command.side_effect = TimeoutError('guest serial timed out')
+            with self.assertRaises(TimeoutError):
+                upgrade_suite.wait_for_api(vm)
+            self.assertEqual(vm.waits, ())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_an_unwritable_receipt_is_said_on_the_results_line_and_fails_no_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.receipts = Path(directory)/'removed'
+            vm.command.side_effect = self.polls_until(1)
+            upgrade_suite.wait_for_api(vm)
+            self.assertRegex(vm.waits[0], r'^api ready after \d+\.\d s \(budget 420 s\)$')
+            self.assertRegex(vm.waits[1], r"^harness-events\.log write failed: FileNotFoundError\(")
+
+    def test_login_and_schema_init_waits_note_their_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.return_value = (0, '')
+            upgrade_suite.wait_for_login(vm)
+            boot_safety.wait_for_schema_init(vm)
+            self.assertEqual(self.noted(vm), ['login ready after T s (budget 600 s)',
+                                              'schema init ready after T s (budget 300 s)'])
+            self.assertEqual([call.args[1] for call in vm.command.call_args_list], [600, 300])
+
+    def test_readiness_waits_note_their_elapsed_time_and_host_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.return_value = (0, '')
+            with patch.object(acceptance, 'sql', return_value='ok'):
+                acceptance.ready(vm)
+                acceptance.ready(vm, budget=SLOW_BOOT_SECONDS)
+            self.assertEqual(self.noted(vm), ['farm page ready after T s (budget 800 s)',
+                                              f'farm page ready after T s (budget {acceptance.ready_host_timeout(900)} s)'])
+
+    def test_console_waits_note_their_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.return_value = (0, '12')
+            marker = re.search(rb'(digest=[0-9a-f]{64})', COMMIT)
+            with patch.object(vm, 'expect', return_value=marker) as expect:
+                self.assertEqual(vm.console(before_console=FLOWS_COMMITTED), marker.groups())
+                vm.console()
+            with (patch.object(vm, 'launch'),
+                  patch.object(vm, 'expect', return_value=re.search(rb'(READY)', b'READY'))):
+                Guest.start(vm, inspection=True)
+            self.assertEqual(self.noted(vm), ['console marker ready after T s (budget 900 s)',
+                                              'login prompt ready after T s (budget 180 s)',
+                                              'shell prompt ready after T s (budget 40 s)',
+                                              'inspection console ready after T s (budget 180 s)'])
+            # Each wait keeps the budget it had: the flows-commit marker its slow-boot budget.
+            self.assertEqual([(call.args[0] is FLOWS_COMMITTED, call.args[1]) for call in expect.call_args_list],
+                             [(True, 900), (False, 180), (False, 40)])
+
+    def test_the_upgrade_gui_wait_notes_its_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.return_value = (0, '')
+            with (patch.object(upgrade_suite, 'checked', side_effect=['0.8.1', 'synthetic', '', '0.8.3', '']) as checked,
+                  patch.object(upgrade_suite, 'sql', side_effect=['', 'a\nb\nc\nd', 'a\nb\nc\nd', 'ok']),
+                  patch.object(upgrade_suite, 'wait_for_login'),
+                  patch('radio_suite._api', return_value={'token': 'synthetic'})):
+                upgrade_suite.run(vm, '0.8.1', '0.8.3')
+            vm.reboot.assert_called_once_with()
+            self.assertEqual(self.noted(vm), ['farm page ready after T s (budget 600 s)'])
+            self.assertEqual(checked.call_args_list[2].args[2], 600)
+
+    def test_the_held_boot_marker_wait_notes_its_elapsed_time(self):
+        prior, zeros = (b'a'*64, b'20261121T050922Z'), (b'b'*64, b'20261121T050922Z')
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.flows_receipt = Mock(side_effect=[prior, prior, zeros, zeros])
+            with (patch.object(boot_safety, 'wait_for_schema_init'), patch.object(boot_safety, 'wait_for_api'),
+                  patch.object(boot_safety, 'zero_live_flows', return_value=zeros),
+                  patch.object(boot_safety, 'checked', side_effect=['', '', '', 'held for redeploy']) as checked):
+                boot_safety.verify_missing_pristine_hold(vm)
+            self.assertEqual(self.noted(vm), ['held boot marker ready after T s (budget 300 s)'])
+            self.assertIn('HELD: Node-RED stopped.', checked.call_args_list[2].args[1])
+            self.assertEqual(checked.call_args_list[2].args[2], 300)
+
+    def test_the_account_case_api_poll_notes_its_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+
+            def test(label, case, **_options):
+                if label == 'First account and login':
+                    case()
+
+            with (patch.object(acceptance, 'checked', side_effect=['synthetic', '']) as checked,
+                  patch.object(acceptance, 'sql', side_effect=['0', 'researcher']),
+                  patch.object(acceptance, 'gui', return_value='{"mode":"setup"}')):
+                acceptance.stock_cases(vm, SimpleNamespace(osi_version='0.8.3', chirpstack_version='4.12.1'),
+                                       test, log=Mock())
+            self.assertEqual(self.noted(vm), ['api ready after T s (budget 90 s)'])
+            # The poll runs under checked's own timeout.
+            self.assertEqual(len(checked.call_args_list[1].args), 2)
+
+    def test_a_slow_api_wait_keeps_the_boot_timing_in_the_case_receipts(self):
+        log = BootTimingTests().first_boot()
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.log_from = 26
+
+            def command(script, timeout):
+                if 'seq 1 210' in script:
+                    return 0, 'Sun Apr 13 16:51:09 2025'
+                # Only this boot's syslog is read: the lines after the 26 the file held at the console.
+                self.assertIn('tail -n +27', script)
+                return 0, log
+
+            vm.command.side_effect = command
+            with patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]):
+                upgrade_suite.wait_for_api(vm)
+            self.assertEqual(vm.waits, (
+                'api ready after 917.3 s (budget 420 s)',
+                'boot timing: first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 154 s, '
+                'Node-RED 4187 node load not finished, Node-RED 6749 node load 92 s, first /api/me answer 16:51:09'))
+            self.assertEqual((vm.receipts/'boot-timing-3.syslog').read_text(), log + '\n')
+            self.assertEqual((vm.receipts/'boot-timing-3.txt').read_text(), boot_timing.format_phases(
+                boot_timing.boot_phases(log, 'Sun Apr 13 16:51:09 2025')) + '\n')
+
+    def test_boot_timing_says_when_the_api_wait_printed_no_guest_clock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.side_effect = [(0, ''), (0, BootTimingTests().first_boot())]
+            with patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]):
+                upgrade_suite.wait_for_api(vm)
+            # The wait passed, so /api/me answered; only its place on the guest clock is unknown.
+            self.assertTrue(vm.waits[-1].endswith('Node-RED 6749 node load 92 s, no first /api/me answer; '
+                                           'the API wait printed no guest clock'), vm.waits[-1])
+
+    def test_an_api_wait_within_600_s_keeps_no_boot_timing(self):
+        self.assertEqual(boot_timing.SLOW_API_SECONDS, 600)
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.side_effect = self.polls_until(1)
+            with (patch('time.monotonic', side_effect=[100.0, 700.0, 700.0]),
+                  patch.object(boot_timing, 'keep') as keep):
+                upgrade_suite.wait_for_api(vm)
+            keep.assert_not_called()
+
+    def test_boot_timing_that_cannot_be_read_is_said_on_the_results_line_and_fails_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.log_from = 0
+            vm.command.side_effect = [(0, 'Sun Apr 13 16:51:09 2025'), TimeoutError('guest serial timed out')]
+            with patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]):
+                upgrade_suite.wait_for_api(vm)
+            self.assertEqual(vm.waits[-1], "boot timing not kept: TimeoutError('guest serial timed out')")
+            self.assertEqual([path.name for path in Path(directory).iterdir()], ['harness-events.log'])
+            self.assertIn('boot timing not kept', (vm.receipts/'harness-events.log').read_text())
+
+    def test_a_slow_api_wait_on_a_private_guest_reads_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory, private=True)
+            vm.command.side_effect = [(0, ''), AssertionError('a private guest is not read for timing')]
+            with (patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]),
+                  patch.object(boot_timing, 'keep', wraps=boot_timing.keep) as keep):
+                upgrade_suite.wait_for_api(vm)
+            keep.assert_called_once()
+            self.assertEqual(vm.waits, ())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def suite(self, root, make, args, cases, upgrade):
+        """run_cases over synthetic 0.8.0 and 0.8.1 fixtures, with every guest action but the notes patched."""
+        for version in acceptance.UPGRADE_VERSIONS:
+            folder = root/f'v{version}'
+            folder.mkdir()
+            (folder/'rpi5.img.gz').write_bytes(b'fixture')
+            (folder/'SHA256SUMS').write_text(f'{hashlib.sha256(b"fixture").hexdigest()}  rpi5.img.gz\n')
+        with (redirect_stdout(io.StringIO()), ExitStack() as stack,
+              patch.object(acceptance, 'verified_archive', side_effect=lambda source, *_args, **_options: source),
+              patch.object(acceptance, 'build_media'), patch.object(acceptance, 'ready'),
+              patch.object(acceptance, 'upgrade', side_effect=upgrade)):
+            for case in cases:
+                stack.enter_context(case)
+            status = acceptance.run_cases(args, root, root, root, 'recovery', False, guest_class=make)
+        return status, (root/'results.log').read_text()
+
+    def test_each_results_line_lists_the_boot_waits_noted_since_the_last_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root/'rpi5.img.gz'
+            image.write_bytes(b'fixture')
+            made = []
+
+            def console_waits(vm):
+                suite_vm.note_wait(vm, 'login prompt ready after 17.3 s (budget 180 s)')
+                suite_vm.note_wait(vm, 'shell prompt ready after 0.1 s (budget 40 s)')
+
+            def make(_work, _image, *_args, **_options):
+                folder = root/f'guest-{len(made)}'
+                folder.mkdir()
+                vm = self.guest(folder)
+                if not made:
+                    vm.start.side_effect = lambda: console_waits(vm)
+                made.append(vm)
+                return vm
+
+            def stock(vm, _args, test, **_options):
+                def case(label):
+                    if label == 'Cold boot':
+                        # The console waits were noted before this case began.
+                        suite_vm.note_wait(vm, 'farm page ready after 433.9 s (budget 800 s)')
+                        return 'OSI 0.8.3'
+                    return 'synthetic'
+                for label in acceptance.BASE_CASES[:-2]:
+                    test(label, lambda label=label: case(label))
+
+            def upgrade(vm, *_args, **_options):
+                suite_vm.note_wait(vm, 'login prompt ready after 17.4 s (budget 180 s)')
+                suite_vm.note_wait(vm, 'farm page ready after 500.1 s (budget 971 s)')
+
+            args = SimpleNamespace(candidate=image, candidate_sha256=hashlib.sha256(b'fixture').hexdigest(),
+                                   fixtures=root, qemu=None, ram=8, release_revision='a'*40, osi_version='0.8.3',
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            status, result = self.suite(
+                root, make, args,
+                (patch.object(acceptance, 'stock_cases', side_effect=stock),
+                 patch.object(acceptance, 'checked', return_value=PINNED_CAPABILITY),
+                 patch.object(acceptance, 'cut_after_flows_patch', return_value='recovered'),
+                 patch.object(acceptance, 'verify_zero_recovery'),
+                 patch.object(acceptance, 'verify_missing_pristine_hold')), upgrade)
+            self.assertEqual(status, 0, result)
+            # A wait noted before a case began lands on the next results line; none is listed twice.
+            self.assertRegex(result, r'(?m)^Cold boot\s+PASS\s+[\d.]+s\s+OSI 0\.8\.3; boot waits: login prompt ready after '
+                                     r'17\.3 s \(budget 180 s\), shell prompt ready after 0\.1 s \(budget 40 s\), '
+                                     r'farm page ready after 433\.9 s \(budget 800 s\)$')
+            self.assertRegex(result, r'(?m)^First account and login\s+PASS\s+[\d.]+s\s+synthetic$')
+            # A case without a receipt of its own: the waits follow the case time.
+            self.assertRegex(result, r'(?m)^Upgrade 0\.8\.1\s+PASS\s+[\d.]+s\s+boot waits: login prompt ready after 17\.4 s '
+                                     r'\(budget 180 s\), farm page ready after 500\.1 s \(budget 971 s\)$')
+            self.assertEqual(result.count('login prompt ready after 17.3 s'), 1)
+            self.assertEqual(result.count('shell prompt ready after 0.1 s'), 1)
+            self.assertGreater(len(made), 3)
+
+    def test_a_failed_results_line_keeps_its_error_and_lists_the_wait_that_ran_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            made = []
+
+            def make(_work, _image, *_args, **_options):
+                folder = root/f'guest-{len(made)}'
+                folder.mkdir()
+                vm = self.guest(folder)
+                made.append(vm)
+                return vm
+
+            def cut(vm, first_boot):
+                suite_vm.note_wait(vm, 'console marker ready after 296.0 s (budget 900 s)')
+                if first_boot:
+                    suite_vm.note_wait(vm, 'api ready after 512.3 s (budget 900 s)')
+                    return 'clone held complete old or new flows and /api/me returned 401'
+                raise RuntimeError('recovery left the candidate payload')
+
+            def upgrade(vm, *_args, **_options):
+                suite_vm.note_wait(vm, 'api not ready after 900.0 s (budget 900 s)')
+                raise TimeoutError('guest serial timed out')
+
+            args = SimpleNamespace(fixtures=root, candidate=None, qemu=None, ram=8,
+                                   flows_power_cut_only=True, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False, release_revision='a'*40, osi_version='0.8.3')
+            status, result = self.suite(
+                root, make, args, (patch.object(acceptance, 'cut_after_flows_patch', side_effect=cut),), upgrade)
+            self.assertEqual(status, 1, result)
+            self.assertRegex(result, r'(?m)^Flows cut on first boot\s+PASS\s+[\d.]+s\s+clone held complete old or new flows '
+                                     r'and /api/me returned 401; boot waits: console marker ready after 296\.0 s '
+                                     r'\(budget 900 s\), api ready after 512\.3 s \(budget 900 s\)$')
+            self.assertRegex(result, r'(?m)^Flows cut on later boot\s+FAIL\s+[\d.]+s\s+recovery left the candidate payload; '
+                                     r'boot waits: console marker ready after 296\.0 s \(budget 900 s\)$')
+            self.assertRegex(result, r'(?m)^Flows cut after upgrade\s+FAIL\s+[\d.]+s\s+guest serial timed out; boot waits: '
+                                     r'api not ready after 900\.0 s \(budget 900 s\)$')
+            # A results line without a boot wait keeps its shape.
+            self.assertRegex(result, r'(?m)^Flows cut on later boot \| REQUIRED \| FAIL \| FAIL \|  \| $')
+
+
+class BootTimingTests(unittest.TestCase):
+    """boot_timing on a guest syslog: the phases of a first boot, and of a boot still inside them."""
+
+    RC = 'daemon.notice procd: /etc/rc.d/'
+    NODE = 'daemon.info node['
+    # The kept syslog of the 0.8.4 Pi 4 re-take's failed restart, recovered from the guest disk.
+    KEPT = os.environ.get('OSI_RASPI5_TEST_BOOT_SYSLOG')
+
+    @staticmethod
+    def line(clock, text):
+        hour, minute, second = (int(part) for part in clock.split(':'))
+        return f'Sun Apr 13 {hour:02d}:{minute:02d}:{second:02d} 2025 ' + text
+
+    def first_boot(self):
+        """A first boot that finishes: osi-bootstrap, a Node-RED start it restarts, the device import, the API up."""
+        return '\n'.join([
+            self.line('16:41:56', 'user.notice node-red.init: persistent syslog sink already set (log_file=/data/log/osi-system.log)'),
+            self.line('16:43:47', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            self.line('16:43:47', self.RC + 'S99osi-bootstrap: <!doctype html>'),
+            self.line('16:44:02', self.RC + 'S99osi-bootstrap: [ 1/5 ] API key'),
+            self.line('16:44:16', 'user.notice osi-bootstrap: bootstrap completed successfully'),
+            self.line('16:44:17', 'user.notice osi-bootstrap: Node-RED restart requested after bootstrap'),
+            self.line('16:44:48', self.NODE + '4187]: Welcome to Node-RED'),
+            self.line('16:44:48', self.NODE + '4187]: ==================='),
+            self.line('16:44:49', self.NODE + '4187]: 13 Apr 16:44:49 - [info] Node-RED version: v3.1.15'),
+            self.line('16:45:27', self.NODE + '4187]: 13 Apr 16:45:27 - [info] Loading palette nodes'),
+            self.line('16:45:32', 'daemon.info procd: Instance node-red::instance1 pid 4187 not stopped on SIGTERM, sending SIGKILL instead'),
+            self.line('16:45:52', self.RC + 'S99zzz-lorawan-devices.init: 2025-04-13T16:45:52.0Z  INFO chirpstack: first'),
+            self.line('16:46:50', self.NODE + '6749]: Welcome to Node-RED'),
+            self.line('16:46:50', self.NODE + '6749]: ==================='),
+            self.line('16:47:08', self.NODE + '6749]: 13 Apr 16:47:08 - [info] Loading palette nodes'),
+            self.line('16:48:26', self.RC + 'S99zzz-lorawan-devices.init: 2025-04-13T16:48:26.0Z  INFO chirpstack: last'),
+            self.line('16:48:40', self.NODE + '6749]: 13 Apr 16:48:40 - [info] Settings file  : /srv/node-red/settings.js'),
+            self.line('16:48:41', self.NODE + '6749]: 13 Apr 16:48:41 - [info] Server now running at http://127.0.0.1:1880/'),
+        ])
+
+    FIRST_BOOT = {
+        'log': {'lines': 18, 'first': '16:41:56', 'last': '16:48:41'},
+        'first_boot_work': {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279},
+        'osi_bootstrap': {'start': '16:43:47', 'end': '16:44:17', 'seconds': 30},
+        'device_import': {'start': '16:45:52', 'end': '16:48:26', 'seconds': 154},
+        'node_red': [
+            {'pid': '4187', 'started': '16:44:48', 'node_load_start': '16:45:27', 'node_load_end': None,
+             'node_load_seconds': None, 'listening': None},
+            {'pid': '6749', 'started': '16:46:50', 'node_load_start': '16:47:08', 'node_load_end': '16:48:40',
+             'node_load_seconds': 92, 'listening': '16:48:41'},
+        ],
+        'api_answer': None,
+    }
+
+    def test_a_finished_first_boot_is_timed_from_its_syslog(self):
+        self.assertEqual(boot_timing.boot_phases(self.first_boot()), self.FIRST_BOOT)
+        # The guest clock at the first 401 comes from the API wait, which alone observes it.
+        phases = dict(self.FIRST_BOOT, api_answer='16:51:09')
+        self.assertEqual(boot_timing.boot_phases(self.first_boot(), 'Sun Apr 13 16:51:09 2025'), phases)
+        self.assertEqual(boot_timing.format_phases(phases).splitlines(), [
+            'guest syslog: 18 lines, 16:41:56 to 16:48:41',
+            'first-boot work: 16:43:47 to 16:48:26 (279 s)',
+            '  osi-bootstrap: 16:43:47 to 16:44:17 (30 s)',
+            '  device import: 16:45:52 to 16:48:26 (154 s)',
+            'Node-RED 4187: started 16:44:48, node load from 16:45:27, not finished in this log',
+            'Node-RED 6749: started 16:46:50, node load 16:47:08 to 16:48:40 (92 s), API listening 16:48:41',
+            'first /api/me answer: 16:51:09 (guest clock, read by the API wait)',
+        ])
+        self.assertEqual(boot_timing.summarize(phases), (
+            'first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 154 s, '
+            'Node-RED 4187 node load not finished, Node-RED 6749 node load 92 s, first /api/me answer 16:51:09'))
+
+    def test_a_log_that_ends_inside_the_first_boot_work_says_so(self):
+        lines = self.first_boot().splitlines()
+        cut = next(n for n, line in enumerate(lines) if '6749]: 13 Apr 16:47:08' in line)
+        log = '\n'.join([*lines[:cut + 1], self.line('16:48:26', self.RC + 'S99zzz-lorawan-devices.init: INFO last')])
+        phases = boot_timing.boot_phases(log)
+        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279})
+        self.assertEqual(phases['node_red'][1], {'pid': '6749', 'started': '16:46:50', 'node_load_start': '16:47:08',
+                                                  'node_load_end': None, 'node_load_seconds': None, 'listening': None})
+        text = boot_timing.format_phases(phases)
+        self.assertIn('Node-RED 6749: started 16:46:50, node load from 16:47:08, not finished in this log', text)
+        self.assertIn('first /api/me answer: none in this evidence', text)
+        self.assertEqual(boot_timing.summarize(phases), (
+            'first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 154 s, '
+            'Node-RED 4187 node load not finished, Node-RED 6749 node load not finished, no first /api/me answer'))
+
+    def test_a_bootstrap_that_never_ends_is_not_finished(self):
+        lines = self.first_boot().splitlines()
+        open_ = [line for line in lines if ' osi-bootstrap: ' in line and 'requested after bootstrap' not in line
+                 and 'completed successfully' not in line]
+        phases = boot_timing.boot_phases('\n'.join(open_))
+        self.assertEqual(phases['osi_bootstrap'], {'start': '16:43:47', 'end': None, 'seconds': None})
+        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': None, 'seconds': None})
+        self.assertEqual(phases['node_red'], [])
+        self.assertIn('first-boot work: 16:43:47, not finished in this log', boot_timing.format_phases(phases))
+        self.assertEqual(boot_timing.summarize(phases), (
+            'first-boot work 16:43:47, not finished, osi-bootstrap not finished, Node-RED did not start in the log, '
+            'no first /api/me answer'))
+
+    def test_an_ordinary_boot_has_no_first_boot_work(self):
+        lines = [line for line in self.first_boot().splitlines()
+                 if 'osi-bootstrap' not in line and 'lorawan-devices' not in line and '4187' not in line]
+        phases = boot_timing.boot_phases('\n'.join(lines), 'Sun Apr 13 16:49:02 2025')
+        self.assertIsNone(phases['first_boot_work'])
+        self.assertIsNone(phases['osi_bootstrap'])
+        self.assertIsNone(phases['device_import'])
+        self.assertEqual([run['pid'] for run in phases['node_red']], ['6749'])
+        self.assertEqual(boot_timing.format_phases(phases).splitlines(), [
+            'guest syslog: 6 lines, 16:41:56 to 16:48:41',
+            'first-boot work: none in this log',
+            'Node-RED 6749: started 16:46:50, node load 16:47:08 to 16:48:40 (92 s), API listening 16:48:41',
+            'first /api/me answer: 16:49:02 (guest clock, read by the API wait)',
+        ])
+        # An answer the wait did not read in the syslog clock format is not placed on the timeline.
+        self.assertIsNone(boot_timing.boot_phases('\n'.join(lines), 'Thu Nov 26 00:01:02 CET 2026')['api_answer'])
+
+    def test_times_are_read_across_the_hour_and_past_midnight(self):
+        log = '\n'.join([
+            self.line('23:59:50', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            self.line('00:00:20', 'user.notice osi-bootstrap: bootstrap failed, will retry next boot'),
+            self.line('00:00:22', self.NODE + '99]: Welcome to Node-RED'),
+            self.line('00:00:24', self.NODE + '99]: 14 Apr 00:00:24 - [info] Loading palette nodes'),
+            self.line('00:00:59', self.NODE + '99]: 14 Apr 00:00:59 - [info] Settings file  : /srv/node-red/settings.js'),
+        ])
+        phases = boot_timing.boot_phases(log)
+        self.assertEqual(phases['osi_bootstrap']['seconds'], 30)
+        self.assertEqual(phases['node_red'][0]['node_load_seconds'], 35)
+        self.assertEqual(phases['first_boot_work'], {'start': '23:59:50', 'end': '00:00:20', 'seconds': 30})
+
+    def test_the_helper_reads_a_kept_log_by_hand(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory)/'syslog'
+            log.write_text(self.first_boot())
+            for extra, expected in (([], 'first /api/me answer: none in this evidence'),
+                                    (['--api-answer', 'Sun Apr 13 16:51:09 2025'],
+                                     'first /api/me answer: 16:51:09 (guest clock, read by the API wait)')):
+                with self.subTest(extra=extra):
+                    done = subprocess.run(['python3', str(boot_timing.__file__), str(log), *extra],
+                                          capture_output=True, text=True)
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertIn('osi-bootstrap: 16:43:47 to 16:44:17 (30 s)', done.stdout)
+                    self.assertIn(expected, done.stdout.splitlines())
+            done = subprocess.run(['python3', str(boot_timing.__file__), str(log), '--json'],
+                                  capture_output=True, text=True)
+            self.assertEqual(json.loads(done.stdout), self.FIRST_BOOT)
+
+    @unittest.skipUnless(KEPT, 'set OSI_RASPI5_TEST_BOOT_SYSLOG to the kept syslog of the 0.8.4 Pi 4 re-take')
+    def test_the_kept_syslog_of_the_pi4_retake_names_where_the_restart_boot_stood(self):
+        # The 0.8.4 re-take, Pi 4 run 2: the restart after a factory first-boot cut
+        # ran past the 420 s API wait. Its disk holds the boot up to the device import.
+        phases = boot_timing.boot_phases(Path(self.KEPT).read_text(errors='replace'))
+        self.assertEqual(phases['log'], {'lines': 4113, 'first': '16:42:19', 'last': '16:48:26'})
+        self.assertEqual(phases['osi_bootstrap'], {'start': '16:43:47', 'end': '16:44:17', 'seconds': 30})
+        # The device import began two seconds after the bootstrap asked for the Node-RED
+        # restart and was still writing when the log ends.
+        self.assertEqual(phases['device_import'], {'start': '16:44:19', 'end': '16:48:26', 'seconds': 247})
+        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279})
+        self.assertEqual([(run['pid'], run['started'], run['node_load_start'], run['node_load_end'])
+                          for run in phases['node_red']],
+                         [('4187', '16:44:48', '16:45:27', None), ('6749', '16:46:50', '16:47:08', None)])
+        self.assertIsNone(phases['api_answer'])
+        self.assertEqual(boot_timing.summarize(phases), (
+            'first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 247 s, '
+            'Node-RED 4187 node load not finished, Node-RED 6749 node load not finished, no first /api/me answer'))
+
+
+class BootTimingReadTests(unittest.TestCase):
+    """The guest read behind the automatic boot timing: this boot's phase lines, small enough for the console."""
+
+    RC = 'daemon.notice procd: /etc/rc.d/S99zzz-lorawan-devices.init: '
+    PREVIOUS = [BootTimingTests.line('16:10:00', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+                BootTimingTests.line('16:10:01', 'daemon.info node[11]: Welcome to Node-RED'),
+                BootTimingTests.line('16:10:02', 'user.notice node-red.init: persistent syslog sink enabled')]
+    BOOT = [BootTimingTests.line('16:43:18', 'user.notice node-red.init: persistent syslog sink already set'),
+            BootTimingTests.line('16:43:47', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            BootTimingTests.line('16:45:52', RC + 'INFO first'),
+            BootTimingTests.line('16:46:00', RC + 'INFO second'),
+            BootTimingTests.line('16:46:10', RC + 'INFO third'),
+            BootTimingTests.line('16:46:50', 'daemon.info node[6749]: Welcome to Node-RED'),
+            BootTimingTests.line('16:48:26', RC + 'INFO last'),
+            BootTimingTests.line('16:47:08', 'daemon.info node[6749]: 13 Apr 16:47:08 - [info] Loading palette nodes')]
+    # Each phase line once, and of each run of import lines the first and the last.
+    PHASE_LINES = [BOOT[1], BOOT[2], BOOT[4], BOOT[5], BOOT[6], BOOT[7]]
+
+    def read(self, current, rotated, first, *, ring=''):
+        script = boot_timing.read_script(first).replace(boot_timing.SYSLOG, quote(str(current)))
+        done = subprocess.run(['sh', '-c', ring + script], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.splitlines()
+
+    def test_the_read_starts_after_the_lines_the_console_found_and_keeps_the_import_ends(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            current.write_text('\n'.join([*self.PREVIOUS, *self.BOOT]) + '\n')
+            self.assertEqual(self.read(current, None, len(self.PREVIOUS) + 1), self.PHASE_LINES)
+
+    def test_a_log_rotated_since_the_console_answers_reads_on_from_the_rotated_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            rotated = Path(directory)/'osi-system.log.old'
+            # The console found 5 lines; the import then filled the file and logd started a new one.
+            rotated.write_text('\n'.join([*self.PREVIOUS, *self.BOOT[:6]]) + '\n')
+            current.write_text('\n'.join(self.BOOT[6:]) + '\n')
+            self.assertEqual(self.read(current, rotated, 5), self.PHASE_LINES)
+
+    def test_a_guest_without_a_persistent_syslog_is_read_from_the_ring(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ring = 'logread() {\n' + ''.join(f'  echo {quote(line)}\n' for line in (self.BOOT[1], self.BOOT[7])) + '}\n'
+            self.assertEqual(self.read(Path(directory)/'osi-system.log', None, 1, ring=ring), [self.BOOT[1], self.BOOT[7]])
+
+    def test_the_console_probe_reads_the_persistent_log_line_count(self):
+        self.assertEqual(suite_vm.line_count('27'), 27)
+        # No persistent syslog on the guest: the read starts at the first line.
+        self.assertEqual(suite_vm.line_count(''), 0)
+        self.assertEqual(suite_vm.line_count('wc: read error'), 0)
+        self.assertIn('-f /data/log/osi-system.log', Guest.LOG_COUNT)
 
 
 if __name__ == '__main__':

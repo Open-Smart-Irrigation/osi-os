@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 
+from suite_vm import timed
 from upgrade_suite import CANDIDATE_INSTALL, READ, checked, sql, wait_for_api, wait_for_login
 
 
@@ -87,7 +88,8 @@ def assert_migrated_triggers(vm, expected, phase):
 
 
 def wait_for_schema_init(vm):
-    checked(vm, """for i in $(seq 1 100); do
+    with timed(vm, 'schema init', 300):
+        checked(vm, """for i in $(seq 1 100); do
     logread | grep -Fq 'sync-init: schema init complete' && exit 0
     sleep 2
 done
@@ -185,7 +187,9 @@ JS""")
     vm.stop(cut=True)
     vm.verify_cut_disk('missing pristine copy with zeroed live flows', zeros, inspect=missing_on_disk)
     vm.start()
-    checked(vm, rf"""set -e
+    # Only the call's first line moves: the guest script keeps its bytes.
+    with timed(vm, 'held boot marker', 300):
+        checked(vm, rf"""set -e
 for i in $(seq 1 100); do
     if logread | grep -F 'HELD: Node-RED stopped.' | grep -Fq '{HOLD_INSTRUCTION}'; then
         break

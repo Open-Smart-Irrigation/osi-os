@@ -15,7 +15,8 @@ from unittest.mock import Mock, call, patch
 import pi4
 from pi4 import DTB, Pi4, acceptance, boot_config
 from minimal_flows import ATOMIC_PUBLISH, CUT_RECEIPT
-from suite_vm import INSPECTION_INIT, Guest
+from suite_vm import INSPECTION_INIT, SLOW_BOOT_SECONDS, Guest
+import upgrade_suite
 
 
 def write_upgrade_fixtures(root, data):
@@ -25,6 +26,17 @@ def write_upgrade_fixtures(root, data):
         folder.mkdir()
         (folder/'rpi4.img.gz').write_bytes(data)
         (folder/'SHA256SUMS').write_text(f'{digest}  rpi4.img.gz\n')
+
+
+def api_poll_answer(answer_at):
+    """A guest command stand-in that runs the API poll on the host; the first 401 comes at poll `answer_at`."""
+    def command(script, timeout):
+        # With fast curls and two seconds between polls, each poll stands for two seconds.
+        fixture = (f'polls=0\ncurl() {{ [ "$polls" -ge {answer_at - 1} ] && printf 401; }}\n'
+                   'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n')
+        result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
+        return result.returncode, result.stdout.strip()
+    return command
 
 
 class Pi4Tests(unittest.TestCase):
@@ -285,7 +297,7 @@ class Pi4Tests(unittest.TestCase):
             vm.receipts, vm.boots, vm.private = Path(directory), 7, False
             with patch.object(Guest, 'command', side_effect=[(0, ''), answer]) as command:
                 vm.console_ready()
-            self.assertEqual(command.call_args_list[0].args[0], 'true')
+            self.assertEqual(command.call_args_list[0].args[0], Guest.LOG_COUNT)
             script = command.call_args_list[1].args[0]
             for needle in ('/sys/class/net/$interface/address', 'using random Ethernet MAC', 'osi-server.cloud.device_eui'):
                 self.assertIn(needle, script)
@@ -362,6 +374,44 @@ class Pi4Tests(unittest.TestCase):
             self.assertRegex(result, re.escape('Upgrade 0.8.1') + r'\s+PASS')
             self.assertIn('Case totals: 9 passed / 10 required', result)
             self.assertIn('Historical diagnostics: FAIL', result)
+
+    def test_api_wait_budget_is_the_slow_boot_budget(self):
+        """A Pi 4 guest waits 900 s for the first /api/me answer: the budget #742 gave the 0.8.1 boot."""
+        self.assertEqual(Pi4.API_WAIT_SECONDS, 900)
+        self.assertEqual(Pi4.API_WAIT_SECONDS, SLOW_BOOT_SECONDS)
+        self.assertEqual(Guest.API_WAIT_SECONDS, 420)
+        with tempfile.TemporaryDirectory() as directory:
+            vm = Pi4.__new__(Pi4)
+            vm.receipts, vm.boots, vm.private = Path(directory), 3, False
+            seen = []
+
+            def command(script, timeout):
+                # One poll per two seconds, and the host waits the whole budget.
+                self.assertIn('seq 1 450', script)
+                seen.append(timeout)
+                return 0, ''
+
+            vm.command = command
+            upgrade_suite.wait_for_api(vm)
+            self.assertEqual((vm.receipts/'harness-events.log').read_text(),
+                             f'boot=3 {vm.waits[0]}\n')
+            self.assertRegex(vm.waits[0], r'^api ready after \d+\.\d s \(budget 900 s\)$')
+        self.assertEqual(seen, [900])
+
+    def test_pi4_api_wait_still_polls_after_the_pi5_budget_is_spent(self):
+        """The 0.8.4 re-take's Pi 4 restart needed more than the Pi 5's 210 polls."""
+        for board, answer_at, answers in ((Pi4, 450, True), (Pi4, 451, False), (Guest, 300, False)):
+            with self.subTest(board=board.__name__, answer_at=answer_at), tempfile.TemporaryDirectory() as directory:
+                vm = board.__new__(board)
+                vm.receipts, vm.boots, vm.private = Path(directory), 3, False
+                vm.command = api_poll_answer(answer_at)
+                if answers:
+                    upgrade_suite.wait_for_api(vm)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'guest command returned 1'):
+                        upgrade_suite.wait_for_api(vm)
+                outcome = 'ready' if answers else 'not ready'
+                self.assertRegex(vm.waits[0], rf'^api {outcome} after \d+\.\d s \(budget {board.API_WAIT_SECONDS} s\)$')
 
     def test_wrapper_refuses_nested_slot(self):
         wrapper = Path(__file__).with_name('acceptance.sh')

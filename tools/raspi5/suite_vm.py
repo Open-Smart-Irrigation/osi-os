@@ -1,4 +1,5 @@
 """Disposable Raspberry Pi guests with a serial shell and loopback browser access."""
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
@@ -56,6 +57,45 @@ def reap(process, cut=False):
 # ready() and up to 204 s to the marker.
 SLOW_BOOT_SECONDS = 900
 
+
+@contextmanager
+def timed(vm, name, budget):
+    """Time one bounded wait on a guest; its note says how long the wait took against its budget.
+
+    The note reads "<name> ready after 512.3 s (budget 900 s)", or "<name> not
+    ready after 900.0 s (budget 900 s)" when the wait raises, and the exception
+    goes on. Yields the monotonic time the wait began.
+    """
+    began = time.monotonic()
+    try:
+        yield began
+    except BaseException:
+        note_wait(vm, f'{name} not ready after {time.monotonic() - began:.1f} s (budget {budget} s)')
+        raise
+    note_wait(vm, f'{name} ready after {time.monotonic() - began:.1f} s (budget {budget} s)')
+
+
+def note_wait(vm, line):
+    """Put a boot-wait note on the results line of the case that runs the wait, and in harness-events.log.
+
+    A private guest keeps neither. The file is diagnostics: a note the results
+    line already carries must not fail a wait that passed, so a receipt that
+    cannot be written is said on the results line instead.
+    """
+    if vm.private:
+        return
+    vm.waits += (line,)
+    try:
+        vm.note(line)
+    except OSError as error:
+        vm.waits += (f'harness-events.log write failed: {error!r}',)
+
+
+def line_count(output):
+    """What the console's line-count probe read, or 0 for a guest without a persistent syslog."""
+    return int(output) if output.strip().isdigit() else 0
+
+
 # PID 1 runs only the shell and the setup needed by mount_root. OpenWrt
 # normally creates block nodes through procd, which must stay stopped here.
 INSPECTION_INIT = (
@@ -87,6 +127,21 @@ class Guest:
     load_boot = staticmethod(boot_config.load)
     boot_files = ('kernel_2712.img', 'bcm2712-rpi-5-b.dtb', 'cmdline.txt')
     console_args = 'console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
+    # Budget of the first 401 from /api/me after a start (upgrade_suite.wait_for_api).
+    # A factory first boot took 232–246 s from the console to it in QEMU. A
+    # restart after a factory first-boot cut repeats first-boot work (osi-bootstrap,
+    # a Node-RED restart and the ChirpStack device import), which the 32-bit Pi 4
+    # model ran past 420 s on a quiet host (0.8.4 re-take, Pi 4 run 2): its guest
+    # class takes SLOW_BOOT_SECONDS (raspi4/pi4.py).
+    API_WAIT_SECONDS = 420
+    # Boot waits noted on this guest by timed(), oldest first. The results line of
+    # the case that ran them lists each once (acceptance.run_cases).
+    waits = ()
+    # Read when a normal boot's console answers: the lines the guest's persistent
+    # syslog (the sink node-red.init keeps on /data) held at that moment. The
+    # lines after them are that boot's; boot_timing reads them.
+    LOG_COUNT = 'test -f /data/log/osi-system.log && wc -l < /data/log/osi-system.log'
+    log_from = 0
 
     def __init__(self, work, image, qemu, ram, upgrade=None, *, receipts=None, private=False,
                  direct_io=False):
@@ -119,7 +174,8 @@ class Guest:
     def start(self, *, before_console=None, inspection=False, flow_cut=None):
         self.launch(inspection=inspection, flow_cut=flow_cut)
         if inspection:
-            report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
+            with timed(self, 'inspection console', 180):
+                report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
             if report.group(1) != b'READY':
                 raise RuntimeError('inspection shell could not mount the persistent overlay')
             self.send(b'stty -echo\n')
@@ -128,20 +184,23 @@ class Guest:
 
     def console(self, before_console=None):
         if before_console is not None:
-            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
-        self.expect(b'Please press Enter to activate this console',180)
+            with timed(self, 'console marker', SLOW_BOOT_SECONDS):
+                return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
+        with timed(self, 'login prompt', 180):
+            self.expect(b'Please press Enter to activate this console',180)
         self.shell()
 
     # A usable shell once the login prompt has been read.
     def shell(self):
         self.send(b'\n')
-        self.expect(b':~#',40)
+        with timed(self, 'shell prompt', 40):
+            self.expect(b':~#',40)
         self.send(b'stty -echo; dmesg -n 1\n')
         self.console_ready()
 
     def console_ready(self):
         """Run once the console of a normal boot answers; a board may record its guest here."""
-        self.command('true')
+        self.log_from = line_count(self.command(self.LOG_COUNT)[1])
 
     # Starts QEMU and the bridge for the next boot and returns at once. The
     # console must then be read without a pause: a pipe nobody reads fills,

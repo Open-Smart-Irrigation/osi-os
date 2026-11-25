@@ -5,9 +5,12 @@ import json
 import tarfile
 import os
 import subprocess
+import time
 from pathlib import Path
 
+import boot_timing
 from minimal_flows import CUT_RECEIPT, INIT, verify_disk
+from suite_vm import timed
 
 DB = '/data/db/farming.db'
 SEED = """
@@ -125,7 +128,8 @@ sh install.sh /tmp/upgrade-usb/candidate.tar.gz --wait >/dev/null 2>&1
 
 
 def wait_for_login(vm):
-    checked(vm, """for i in $(seq 1 180); do
+    with timed(vm, 'login', 600):
+        checked(vm, """for i in $(seq 1 180); do
 code=$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:1880/auth/login)
 [ "$code" = 400 ] && exit 0
 sleep 2
@@ -134,14 +138,20 @@ exit 1""", 600)
 
 
 def wait_for_api(vm):
-    # Factory first boot took 232–246 s from console to the first 401 in QEMU.
-    # Allow the full 420 s command budget even when each curl returns immediately.
-    checked(vm, """for i in $(seq 1 210); do
-    code=$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)
-    [ "$code" = 401 ] && exit 0
+    budget = vm.API_WAIT_SECONDS
+    # Allow the full budget even when each curl returns immediately: one poll
+    # every two seconds. The echo leaves the guest clock at the first 401 for
+    # boot_timing, which keeps the boot's phase timing after a slow wait.
+    with timed(vm, 'api', budget) as began:
+        answer = checked(vm, f"""for i in $(seq 1 {budget // 2}); do
+    code=$(curl -s --max-time 2 -o /dev/null -w '%{{http_code}}' http://127.0.0.1:1880/api/me)
+    [ "$code" = 401 ] && {{ echo "$(date '+%a %b %e %H:%M:%S %Y')"; exit 0; }}
     sleep 2
 done
-exit 1""", 420)
+exit 1""", budget)
+    if time.monotonic() - began > boot_timing.SLOW_API_SECONDS:
+        boot_timing.keep(vm, answer)
+    return answer
 
 
 def run(vm, old_version, new_version, *, cut_at=None, transfer=None, release=None):
@@ -199,7 +209,8 @@ done""")
         raise RuntimeError('offline installer exited '+str(code)+'; '+info.replace('\n',', '))
     if cut_at is None:
         vm.reboot()
-    checked(vm,"for i in $(seq 1 180); do test -s /data/db/farming.db && wget -q -O /dev/null http://127.0.0.1:1880/gui/ && exit 0; sleep 3; done; exit 1",600)
+    with timed(vm, 'farm page', 600):
+        checked(vm,"for i in $(seq 1 180); do test -s /data/db/farming.db && wget -q -O /dev/null http://127.0.0.1:1880/gui/ && exit 0; sleep 3; done; exit 1",600)
     # The cut can precede the installer's successful health receipt and
     # its firmware version write. Check the active payload and API above.
     if cut_at is None and checked(vm,'uci get osi-server.cloud.firmware_version') != new_version:

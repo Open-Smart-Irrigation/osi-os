@@ -90,6 +90,16 @@ The release runbook lists the input artifacts, fixture selection and evidence to
 Use `--tailscale-boot-only` for the tailscale boot cases; the same page
 describes them. `OSI_HEAVY_LABEL` sets the slot label of a focused run.
 
+Every boot wait notes its elapsed time against its budget, in the case
+directory's `harness-events.log` and at the end of the case's results line:
+`api ready after 512.3 s (budget 900 s)`. The API wait after a start allows
+420 s; the Pi 4 runner gives it 900 s (`tools/raspi4/pi4.py`). An API wait
+longer than 600 s also keeps `boot-timing-N.syslog` and `boot-timing-N.txt` in
+the case directory: the boot's phase lines from the guest's persistent syslog,
+and their timing. `python3 tools/raspi5/boot_timing.py SYSLOG` gives the same
+timing for a kept syslog. `--api-answer` takes the guest clock the API wait
+printed at the first 401.
+
 The customer-line 0.7.0 fixture is **PROVISIONAL** and off by default. Release
 evidence requires a successful owner-only qualification receipt for the exact
 factory archive and 0.8.1 overlay. The receipt records that the factory ROM GUI
