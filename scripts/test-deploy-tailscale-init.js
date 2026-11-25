@@ -68,6 +68,12 @@ test('the installer never runs a service command and never fails the deploy', ()
     .filter((line) => line.trim() && !/^\s*(echo|printf)\b/.test(line));
   const commands = code.join('\n').match(/(^|[;&|(`]\s*)(restart|stop|start|reload|enable|disable|exit)\b/g) || [];
   assert.deepEqual(commands, []);
+  // The real forms name the service first: `/etc/init.d/tailscale restart`,
+  // `"$TAILSCALE_INIT" stop`, `service tailscale start`, `ubus call ...`.
+  const SERVICE_CALL = /(init\.d\/|\$\{?TAILSCALE_INIT\}?"?|rc\.d\/S|\bservice\s|\bubus\s|\/etc\/init\.d\/)\S*\s+(restart|stop|start|reload|enable|disable|boot|running|call)\b/;
+  for (const line of code) {
+    assert.doesNotMatch(line, SERVICE_CALL, `the installer never calls the service: ${line.trim()}`);
+  }
   const returns = installerSource.match(/^\s*return [1-9]/gm) || [];
   assert.deepEqual(returns, [], 'every return is a 0');
   // Every warning is one line in one grammar: what is installed, the reason,
@@ -122,7 +128,7 @@ function snapshot(fixture) {
   };
 }
 
-function run(fixture, { fetch = 'copy', source = INIT, pathOverride, syncFails, readOnlyRcD = false } = {}) {
+function run(fixture, { fetch = 'copy', source = INIT, pathOverride, syncFails, readOnlyRcD = false, trace = false } = {}) {
   // Output goes to files, not to pipes, so the result does not depend on
   // what the child leaves behind. The warning file is written last inside
   // the subshell: an abort under `set -eu` leaves it unwritten.
@@ -146,7 +152,14 @@ function run(fixture, { fetch = 'copy', source = INIT, pathOverride, syncFails, 
         if [ "$SYNC_FAILS" = after ] && [ "$staged" = no ]; then return 5; fi
         return 0
     }
+    if [ "$TRACE" = yes ]; then
+        # Only the call is traced, so the trace holds commands the installer
+        # ran, never the text of its definition.
+        exec 2>"$FIXTURE/trace"
+        set -x
+    fi
     install_tailscale_init
+    set +x
     printf '%s' "$tailscale_init_warning" >"$FIXTURE/warning"
 ) >"$FIXTURE/stdout" 2>"$FIXTURE/stderr"
 rc=$?
@@ -160,6 +173,7 @@ printf '%s' "$rc" >"$FIXTURE/status"
     FETCH_MODE: fetch,
     FETCH_SOURCE: source,
     FIXTURE: fixture.dir,
+    TRACE: trace ? 'yes' : 'no',
     SYNC_FAILS: syncFails || 'never',
     TAILSCALE_INIT: fixture.initFile,
     TAILSCALE_RC_D: fixture.rcDir,
@@ -180,7 +194,7 @@ printf '%s' "$rc" >"$FIXTURE/status"
   // The warning is one line at the end of stderr, after any error a failed
   // command printed itself, and it is what the closing banner repeats.
   const warned = stderr.split('\n').filter((line) => line.startsWith('WARN:'));
-  if (warning === 'aborted' || warning === '') assert.deepEqual(warned, [], `no warning is printed: ${stderr}`);
+  if (trace) { /* stderr went to the trace */ } else if (warning === 'aborted' || warning === '') assert.deepEqual(warned, [], `no warning is printed: ${stderr}`);
   else {
     assert.deepEqual(warned, [warning], 'exactly one WARN line, equal to the one the banner repeats');
     assert.ok(stderr.endsWith(warning + '\n'), 'the WARN is the last line of stderr');
@@ -192,6 +206,7 @@ printf '%s' "$rc" >"$FIXTURE/status"
     stderr,
     fetches: fs.existsSync(fixture.fetchLog) ? fs.readFileSync(fixture.fetchLog, 'utf8').split('\n').filter(Boolean) : [],
     syncs: fs.existsSync(path.join(fixture.dir, 'sync.log')) ? fs.readFileSync(path.join(fixture.dir, 'sync.log'), 'utf8').split('\n').filter(Boolean) : [],
+    trace: fs.existsSync(path.join(fixture.dir, 'trace')) ? fs.readFileSync(path.join(fixture.dir, 'trace'), 'utf8') : '',
   };
 }
 
@@ -210,9 +225,13 @@ function pathWithFailingSyntaxCheck(fixture) {
 const INSTALLED = 'OK: tailscale starts at S99 from the next boot (after ChirpStack and Node-RED); it was not restarted';
 const ONLY_S99 = ['S80tailscale absent', 'S85tailscale absent', 'S99tailscale -> ../init.d/tailscale'];
 
+const inode = (file) => fs.lstatSync(file).ino;
+
 test('the package file is replaced, published 0755, and its boot link moves from S80 to S99', () => {
   const fixture = makeFixture();
   try {
+    const packageInode = inode(fixture.initFile);
+    const linkInode = inode(path.join(fixture.rcDir, 'S80tailscale'));
     const result = run(fixture);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.warning, '');
@@ -221,6 +240,11 @@ test('the package file is replaced, published 0755, and its boot link moves from
     assert.equal(after.init.mode, 0o755);
     assert.deepEqual(after.links, ONLY_S99);
     assert.deepEqual(after.files, ['tailscale'], 'no stage file is left beside the init');
+    // A rename, not a copy over the package file: a copy writes into the old
+    // inode, and a cut copy leaves a half-written init.
+    assert.notEqual(inode(fixture.initFile), packageInode, 'the staged file was renamed onto the init');
+    // One rename moves the only link, so no cut leaves two links or none.
+    assert.equal(inode(path.join(fixture.rcDir, 'S99tailscale')), linkInode, 'the S80 link was renamed to S99');
     assert.deepEqual(result.fetches, [SRC]);
     // On disk complete before it replaces the package file, and durable after.
     assert.deepEqual(result.syncs, [`sync ${sha256(PACKAGE_INIT).slice(0, 12)}`, `sync ${sha256(INIT).slice(0, 12)}`]);
@@ -235,9 +259,11 @@ test('an init the deploy cut between replacing and the link move is completed wi
   const fixture = makeFixture({ init: 'ours', links: ['S80tailscale'] });
   try {
     const before = snapshot(fixture);
+    const linkInode = inode(path.join(fixture.rcDir, 'S80tailscale'));
     const result = run(fixture);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.warning, '');
+    assert.equal(inode(path.join(fixture.rcDir, 'S99tailscale')), linkInode, 'the S80 link was renamed to S99');
     assert.deepEqual(result.fetches, [], 'nothing is downloaded for a file that is already ours');
     assert.equal(snapshot(fixture).init.sha, before.init.sha);
     assert.deepEqual(snapshot(fixture).links, ONLY_S99);
@@ -389,4 +415,29 @@ test('an older boot link that cannot be removed says the service starts twice', 
     assert.equal(result.warning, warning);
     assert.deepEqual(snapshot(fixture).links, ['S80tailscale is a directory', 'S85tailscale absent', 'S99tailscale -> ../init.d/tailscale']);
   } finally { cleanup(fixture); }
+});
+
+test('no run of the installer calls the tailscale service', () => {
+  // Traced, so a call of any form is seen: `/etc/init.d/tailscale restart`,
+  // "$TAILSCALE_INIT" stop, an rc.d link, service or ubus.
+  const CALL = /(init\.d\/tailscale|rc\.d\/S\d\dtailscale|\bservice\b|\bubus\b|\bprocd\b)\S*\s+(start|stop|restart|reload|enable|disable|boot|running|call)\b/;
+  for (const [label, options] of [
+    ['package file at S80', {}],
+    ['ours at S80', { init: 'ours', links: ['S80tailscale'] }],
+    ['ours at S99', { init: 'ours', links: ['S99tailscale'] }],
+    ['two links', { init: 'ours', links: ['S80tailscale', 'S85tailscale'] }],
+    ['disabled', { links: [] }],
+    ['foreign file', { init: 'other', links: ['S85tailscale'] }],
+  ]) {
+    const fixture = makeFixture(options);
+    try {
+      const result = run(fixture, { trace: true });
+      assert.equal(result.status, 0, `${label}: ${result.trace}`);
+      const commands = result.trace.split('\n').filter((line) => /^\++ /.test(line));
+      assert.ok(commands.length > 3, `${label}: the call was traced`);
+      for (const line of commands) {
+        assert.doesNotMatch(line, CALL, `${label}: the installer called the service: ${line}`);
+      }
+    } finally { cleanup(fixture); }
+  }
 });

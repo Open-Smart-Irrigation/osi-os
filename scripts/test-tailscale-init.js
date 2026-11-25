@@ -1,11 +1,12 @@
 'use strict';
 // The OSI copy of the tailscale init time-limits the cleanup that the package
-// file runs without a limit before the daemon, and starts the service last.
-// The static tests pin it to the package file: everything but the two changes
-// must stay as the package ships it. The behavioural tests run its cleanup
-// helper with a stand-in for tailscaled on the host shell; the emulator boot
-// tests (tools/raspi5/acceptance.py, "Tailscale" cases) run it under the
-// image's own ash and procd.
+// file runs without a limit before the daemon, keeps that cleanup off procd's
+// service lock, and starts the service at 99, after ChirpStack, Node-RED and
+// osi-bootstrap. The static tests pin it to the package file: everything but
+// those changes must stay as the package ships it. The behavioural tests run
+// its cleanup helper with a stand-in for tailscaled on the host shell; the
+// emulator boot tests (tools/raspi5/acceptance.py, "Tailscale" cases) run it
+// under the image's own ash and procd.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -68,10 +69,17 @@ test('the init changes the package file only where intended', () => {
   assert.deepEqual(helper.slice(0, 2), [HELPER, 'osi_dir="$(mktemp -d /tmp/tailscale-cleanup.XXXXXX)" || return 0']);
 });
 
-test('the service starts last, after ChirpStack, Node-RED and the bootstrap', () => {
+test('the service starts after ChirpStack, Node-RED and osi-bootstrap', () => {
   // rc.d runs its S links in lexical order (procd rcS globs /etc/rc.d/S*).
+  // All of these start at 99 on the 0.8.0 and 0.8.4 images.
   const source = read(initPath(PROFILES[0]));
   assert.match(source, /^START=99$/m);
+  for (const [file, start] of [
+    ['feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init', 'START=99'],
+    ['conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap', 'START=99'],
+  ]) {
+    assert.match(read(path.join(ROOT, file)), new RegExp(`^${start}$`, 'm'), `${file} keeps ${start}`);
+  }
   assert.doesNotMatch(source, /^STOP=/m);
   const link = 'S99tailscale';
   for (const before of ['S99chirpstack', 'S99chirpstack-concentratord', 'S99node-red', 'S99osi-bootstrap', 'S98osi-identityd']) {
@@ -156,7 +164,10 @@ printf '%s' "$?" >"$FIXTURE/result"
   };
   const standinPid = () => (fs.existsSync(fixture.pidFile) ? Number(fs.readFileSync(fixture.pidFile, 'utf8')) : null);
   const started = performance.now();
-  const run = spawnSync('sh', ['-c', script], { stdio: 'ignore', env, timeout: 60_000 });
+  // bash, not sh: the helper closes fd 1000 as the image's BusyBox ash and
+  // procd.sh address it, and dash (sh on Debian and Ubuntu) has single-digit
+  // fds only; it would run `1000` as a command.
+  const run = spawnSync('bash', ['-c', script], { stdio: 'ignore', env, timeout: 60_000 });
   const seconds = (performance.now() - started) / 1000;
   if (run.error || run.signal) {
     // A helper that did not return: end its stand-in before reporting.
@@ -263,5 +274,45 @@ test('a process the kill does not reach does not keep the helper waiting', () =>
     assert.ok(run.seconds < LIMIT + 2, `returned after ${run.seconds.toFixed(2)} s`);
     assert.equal(alive(pid), true, 'the kill was refused');
     assert.deepEqual(run.log.split('\n').filter(Boolean), ['tailscale: cleanup did not finish in 2 s; continuing without it']);
+  } finally { stop(pid); fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test('osi-bootstrap returns at once on a provisioned gateway, so remote access waits for it only briefly', () => {
+  // S99osi-bootstrap runs right before S99tailscale. Its boot start must test
+  // its stamp before anything that can wait (the ChirpStack poll, node).
+  const source = read(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap'));
+  const body = (name) => {
+    const start = source.indexOf(`\n${name}() {\n`);
+    assert.ok(start >= 0, `osi-bootstrap defines ${name}()`);
+    return codeLines(source.slice(start + name.length + 6, source.indexOf('\n}\n', start)));
+  };
+  assert.deepEqual(body('boot'), ['start']);
+  assert.deepEqual(body('start').slice(0, 3), ['if stamp_valid; then', 'return 0', 'fi'],
+    'the stamp is tested first, before any wait');
+  const check = body('stamp_valid');
+  assert.equal(check.at(-1), 'return 0');
+  for (const line of check.slice(0, -1)) {
+    assert.match(line, /^(\[ -f \S+ \]|grep -q '[^']+' \S+ 2>\/dev\/null) \|\| return 1$/,
+      `the stamp test only looks at local files: ${line}`);
+  }
+});
+
+test('a cleanup that outlives the helper does not hold the service lock', { skip: !spawnSync('sh', ['-c', 'command -v flock']).stdout.length && 'no flock on this host' }, async () => {
+  // procd.sh takes this service's lock on fd 1000 for the whole init call
+  // (`exec 1000>/var/lock/procd_tailscale.lock; flock 1000`). Here the kill is
+  // a no-op, so the stand-in survives the helper, as a cleanup stuck past
+  // SIGKILL does; a later init call must still get the lock.
+  const fixture = makeFixture('lock', { hang: true });
+  const lock = path.join(fixture.dir, 'procd_tailscale.lock');
+  let pid = null;
+  try {
+    const run = runHelper(fixture, LIMIT, `exec 1000>"$FIXTURE/procd_tailscale.lock"; flock 1000\nkill() { return 0; }\n`);
+    pid = run.standinPid;
+    assert.ok(pid > 0, 'the stand-in started');
+    assert.equal(alive(pid), true, 'the cleanup outlived the helper');
+    assert.match(run.log, /continuing without it/);
+    // The next `/etc/init.d/tailscale restart` takes the same lock.
+    const next = spawnSync('flock', ['-w', '3', lock, 'true'], { stdio: 'ignore', timeout: 10_000 });
+    assert.equal(next.status, 0, 'a later init call gets the lock while the cleanup still runs');
   } finally { stop(pid); fs.rmSync(fixture.dir, { recursive: true, force: true }); }
 });

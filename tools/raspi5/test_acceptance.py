@@ -1848,7 +1848,7 @@ class TailscaleBootTests(unittest.TestCase):
     def test_every_command_sent_to_the_guest_parses_as_shell(self):
         # Over LAN SSH goes one line; the process-start script goes over the console.
         over_ssh = ('MILESTONES', 'HELD_STATE', 'STALLED_CLEANUP', 'PS_LOOKUP', 'ONSITE_LOOKUP', 'ONSITE_COMMAND', 'HANG_AGE')
-        for name in (*over_ssh, 'PROCESS_STARTS'):
+        for name in (*over_ssh, 'PROCESS_STARTS', 'SURVIVOR_WRAPPER', 'LOCK_HOLDERS', 'BOOTSTRAP_TIMER', 'RESTART'):
             text = getattr(tailscale_boot, name).replace('DAEMON', 'tailscaled')
             for shell in ('sh', 'bash'):
                 run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
@@ -1953,6 +1953,45 @@ class TailscaleBootTests(unittest.TestCase):
             missing = subprocess.run(['sh', '-c', tailscale_boot.boot_log_script('OSI-TAILSCALE-bbbb', (str(old),))],
                                      capture_output=True, text=True, timeout=60)
             self.assertEqual((missing.returncode, missing.stdout), (0, ''))
+
+    def test_the_restart_probe_parses_and_its_verdict_needs_a_survivor_off_the_lock(self):
+        restart = tailscale_boot.RESTART.replace('RESTART_LIMIT', '90')
+        for shell in ('sh', 'bash'):
+            self.assertEqual(subprocess.run([shell, '-n', '-c', restart]).returncode, 0)
+        receipt = tailscale_boot.lock_verdict('done 33', 'survivors=2 holders=0 lock=present', 'done 32')
+        self.assertIn('2 surviving cleanup', receipt)
+        self.assertIn('none holding the procd lock', receipt)
+        for label, first, holders, second, reason in [
+            ['blocked', 'done 33', 'survivors=2 holders=2 lock=present', 'blocked 90', 'hold the procd lock'],
+            ['second blocked only', 'done 33', 'survivors=2 holders=0 lock=present', 'blocked 90', 'waited on the lock'],
+            ['no survivor', 'done 33', 'survivors=0 holders=0 lock=present', 'done 32', 'no cleanup outlived'],
+            ['no lock taken', 'done 33', 'survivors=2 holders=0 lock=', 'done 32', 'did not take the service lock'],
+            ['first blocked', 'blocked 90', 'survivors=2 holders=0 lock=present', 'done 1', 'first restart did not finish'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.lock_verdict(first, holders, second)
+
+    def test_the_bootstrap_timer_is_read_per_boot_and_judged_over_all_of_them(self):
+        log = '\n'.join([
+            'Sun Apr 13 16:51:24 2025 user.notice osi-test-bootstrap: start uptime=46.12 stamp=yes',
+            'Sun Apr 13 16:51:24 2025 user.notice osi-test-bootstrap: end uptime=46.31 rc=0',
+        ])
+        self.assertEqual(tailscale_boot.bootstrap_runs(log), [(0.19, 'yes', 0)])
+        good = [(f'boot {n}', [(0.2 + n / 10, 'yes', 0)]) for n in range(4)]
+        receipt = tailscale_boot.bootstrap_verdict(good)
+        self.assertIn('4 stamped boots', receipt)
+        self.assertIn('worst 0.50 s (boot 3)', receipt)
+        for label, measured, reason in [
+            ['unstamped', good[:3] + [('boot 3', [(0.3, 'no', 0)])], 'stamp=no'],
+            ['slow', good[:3] + [('boot 3', [(7.5, 'yes', 0)])], 'took 7.5 s'],
+            ['not timed', good[:3] + [('boot 3', [])], 'exactly one'],
+            ['too few', good[:3], 'only 3 boots'],
+            ['failed', good[:3] + [('boot 3', [(0.3, 'yes', 1)])], 'exited 1'],
+        ]:
+            with self.subTest(label):
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    tailscale_boot.bootstrap_verdict(measured)
 
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')

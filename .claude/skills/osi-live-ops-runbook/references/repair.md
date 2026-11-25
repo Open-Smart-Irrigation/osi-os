@@ -931,9 +931,22 @@ broken.
 ### Boot stops at the tailscale cleanup
 
 Symptom: after a reboot, SSH and LuCI on the LAN answer, but ChirpStack and
-Node-RED never start, `/gui/` is not served, and the serial console shows no
-login prompt. `logread` ends at `S80tailscale` lines: `Program starting` for
-`tailscaled --cleanup`, and no `flushing log.`
+Node-RED never start and `/gui/` is not served. The serial console may show a
+login prompt: procd prints it while the boot scripts still run, so a prompt
+does not mean the boot finished. Judge by the processes, over LAN SSH:
+
+```sh
+ps w | grep -E '[t]ailscaled|[r]c.d/S|[n]ode-red|[c]hirpstack'
+for p in $(ps w | grep '[t]ailscaled --cleanup' | awk '{print $1}'); do echo "PID $p running for $(( $(cut -d. -f1 /proc/uptime) - $(cut -d' ' -f22 /proc/$p/stat) / 100 )) s"; done
+pidof chirpstack chirpstack-concentratord-sx1302 || echo 'ChirpStack: not running'; ps w | grep -q '[n]ode-red' && echo 'Node-RED: running' || echo 'Node-RED: not running'
+```
+
+It is this hang when the list shows `/etc/rc.d/S80tailscale boot` and
+`tailscaled --cleanup`, the cleanup has run for more than about 60 s (a
+healthy one returns within a second), and the last line prints
+`ChirpStack: not running` and `Node-RED: not running`. `logread` ends at
+`S80tailscale` lines: `Program starting` for `tailscaled --cleanup`, and no
+`flushing log.`
 
 Cause: the gateway runs the tailscale 1.80.3-r1 package init without the OSI
 copy, which runs `tailscaled --cleanup` before the daemon with no time limit.
@@ -945,7 +958,10 @@ Recovery over LAN SSH, in one line:
 kill -9 $(pgrep -f 'tailscaled --cleanu[p]')
 ```
 
-The boot then continues with the next `rc.d` script. The bracket keeps the
+The boot then continues with the next `rc.d` script. In the emulator the
+Tailscale daemon was back within 3 s of the kill, ChirpStack within 11 s and
+the farm page within about 1.5 minutes; allow 3 minutes before calling
+anything missing. The bracket keeps the
 pattern from matching the shell that runs the line. `pgrep` is part of the
 image's BusyBox. Where it is missing, `ps` gives the same pid:
 

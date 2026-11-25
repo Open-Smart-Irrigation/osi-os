@@ -1,4 +1,4 @@
-"""Tailscale boot cases: a stalled cleanup is cut short and the service starts last.
+"""Tailscale boot cases: a stalled cleanup is cut short and the service starts at S99.
 
 The tailscale 1.80.3-r1 package init runs `tailscaled --cleanup` before the
 daemon, with no time limit, at S80. The OSI copy cuts that cleanup short
@@ -24,7 +24,9 @@ STALL_CASE = 'Tailscale cleanup cut short'
 NORMAL_CASE = 'Tailscale boot without a stall'
 REFUSAL_CASE = 'Tailscale init left alone'
 FALLBACK_CASE = 'Tailscale stall before the fix'
-CASES = (INSTALLED_CASE, STALL_CASE, NORMAL_CASE, REFUSAL_CASE, FALLBACK_CASE)
+LOCK_CASE = 'Tailscale restart after a surviving cleanup'
+BOOTSTRAP_CASE = 'Stamped osi-bootstrap before tailscale'
+CASES = (INSTALLED_CASE, STALL_CASE, NORMAL_CASE, LOCK_CASE, REFUSAL_CASE, FALLBACK_CASE, BOOTSTRAP_CASE)
 
 # The one line a technician on the LAN runs over SSH; the runbook carries it
 # under "Boot stops at the tailscale cleanup". The bracket keeps the pattern
@@ -68,6 +70,56 @@ exec /usr/sbin/tailscaled.real "$@"
 # scripts still run: a boot held at the cleanup shows it too (the on-site
 # instructions saw the console about 8 s after power-on). It is never
 # evidence that the boot got past the cleanup.
+# A cleanup that outlives its kill: it leaves a child that keeps every fd it
+# inherited, as a process stuck past SIGKILL keeps its own, and then blocks.
+SURVIVOR_WRAPPER = """#!/bin/sh
+# Test stand-in: the cleanup leaves a child holding its fds, then blocks.
+if [ "$1" = "--cleanup" ]; then
+    logger -t osi-test-cleanup "surviving cleanup started"
+    sleep 100000 &
+    mkfifo /tmp/osi-cleanup-stall.fifo 2>/dev/null
+    exec 3</tmp/osi-cleanup-stall.fifo
+    exit 0
+fi
+exec /usr/sbin/tailscaled.real "$@"
+"""
+SURVIVORS = "pgrep -f 'sleep 10000[0]'"
+# One restart, run in the background so a blocked one is seen and ended: it
+# prints "done <seconds>" or "blocked <seconds>".
+RESTART = """/etc/init.d/tailscale restart >/tmp/osi-test-restart.log 2>&1 &
+p=$!
+i=0
+while kill -0 "$p" 2>/dev/null && [ "$i" -lt RESTART_LIMIT ]; do sleep 1; i=$((i + 1)); done
+if kill -0 "$p" 2>/dev/null; then echo "blocked $i"; kill "$p"; else echo "done $i"; fi
+"""
+RESTART_LIMIT = 90
+# How many surviving children hold the procd lock of the service.
+LOCK_HOLDERS = """n=0
+for p in $(""" + SURVIVORS + """); do
+    ls -l /proc/$p/fd 2>/dev/null | grep -q procd_tailscale.lock && n=$((n + 1))
+done
+echo "survivors=$(""" + SURVIVORS + """ | wc -l) holders=$n lock=$(test -e /var/lock/procd_tailscale.lock && echo present)"
+"""
+
+# The boot link of osi-bootstrap, replaced for a measured boot by a script
+# that runs the real init and logs the uptime before and after. The stamp is
+# read with the init's own test.
+BOOTSTRAP_TIMER = """#!/bin/sh
+# Test stand-in for the boot link: times the real init.
+stamp=no
+[ -f /etc/osi-bootstrap.done ] && [ -f /srv/node-red/.chirpstack.env ] &&
+    grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\\{8\\}-' /srv/node-red/.chirpstack.env 2>/dev/null && stamp=yes
+logger -t osi-test-bootstrap "start uptime=$(cut -d' ' -f1 /proc/uptime) stamp=$stamp"
+/etc/init.d/osi-bootstrap "$@"
+rc=$?
+logger -t osi-test-bootstrap "end uptime=$(cut -d' ' -f1 /proc/uptime) rc=$rc"
+exit $rc
+"""
+BOOTSTRAP_LINE = re.compile(r' osi-test-bootstrap: (start|end) uptime=(\d+\.\d+) (?:stamp=(yes|no)|rc=(\d+))')
+# A stamped boot start is two file tests and one grep; anything near this
+# would mean the stamp was not taken.
+BOOTSTRAP_LIMIT = 5.0
+
 CONSOLE = b'Please press Enter to activate this console'
 NO_MATCH = rb'OSI_CONSOLE_MARKER_THAT_NEVER_APPEARS_[0-9a-f]{40}'
 # Group 1 is the two digits of the rc.d link: S<digits>tailscale.
@@ -186,12 +238,12 @@ def normal_verdict(log, limit):
     return 'cleanup finished with "flushing log." and the daemon started'
 
 
-def install_stall(vm):
+def install_stall(vm, wrapper=STALL_WRAPPER):
     checked(vm, """set -e
 test ! -e /usr/sbin/tailscaled.real
 mv /usr/sbin/tailscaled /usr/sbin/tailscaled.real
 cat >/usr/sbin/tailscaled <<'OSI_STALL'
-""" + STALL_WRAPPER + """OSI_STALL
+""" + wrapper + """OSI_STALL
 chmod 755 /usr/sbin/tailscaled
 sync
 sha256sum /usr/sbin/tailscaled.real""")
@@ -202,6 +254,79 @@ def remove_stall(vm):
 mv -f /usr/sbin/tailscaled.real /usr/sbin/tailscaled
 sync
 test ! -e /usr/sbin/tailscaled.real""")
+
+
+def install_bootstrap_timer(vm):
+    checked(vm, """set -e
+test -L /etc/rc.d/S99osi-bootstrap
+readlink /etc/rc.d/S99osi-bootstrap >/root/osi-test-bootstrap.link
+rm /etc/rc.d/S99osi-bootstrap
+cat >/etc/rc.d/S99osi-bootstrap <<'OSI_TIMER'
+""" + BOOTSTRAP_TIMER + """OSI_TIMER
+chmod 755 /etc/rc.d/S99osi-bootstrap
+sync""")
+
+
+def remove_bootstrap_timer(vm):
+    checked(vm, """set -e
+link=$(cat /root/osi-test-bootstrap.link)
+rm -f /etc/rc.d/S99osi-bootstrap
+ln -s "$link" /etc/rc.d/S99osi-bootstrap
+rm -f /root/osi-test-bootstrap.link
+sync
+test -L /etc/rc.d/S99osi-bootstrap""")
+
+
+def bootstrap_runs(log):
+    """(seconds, stamp, rc) for each timed run of osi-bootstrap in a syslog extract."""
+    runs, started, stamp = [], None, None
+    for line in log.splitlines():
+        match = BOOTSTRAP_LINE.search(line)
+        if not match:
+            continue
+        if match.group(1) == 'start':
+            started, stamp = float(match.group(2)), match.group(3)
+        elif started is not None:
+            runs.append((round(float(match.group(2)) - started, 2), stamp, int(match.group(4))))
+            started = None
+    return runs
+
+
+def bootstrap_verdict(measured):
+    """Judge every timed boot: [(label, [(seconds, stamp, rc), ...]), ...]."""
+    flat = [(label, run) for label, runs in measured for run in runs]
+    missing = [label for label, runs in measured if len(runs) != 1]
+    if missing:
+        raise RuntimeError('a measured boot did not time exactly one osi-bootstrap run: ' + ', '.join(missing))
+    if len(flat) < 4:
+        raise RuntimeError(f'only {len(flat)} boots were timed')
+    for label, (seconds, stamp, rc) in flat:
+        if stamp != 'yes' or rc != 0:
+            raise RuntimeError(f'{label}: osi-bootstrap ran with stamp={stamp} and exited {rc}')
+    worst_label, (worst, _, _) = max(flat, key=lambda item: item[1][0])
+    if worst > BOOTSTRAP_LIMIT:
+        raise RuntimeError(f'{worst_label}: the stamped osi-bootstrap start took {worst} s')
+    return (f'{len(flat)} stamped boots; osi-bootstrap start to end '
+            + ', '.join(f'{label} {run[0]:.2f} s' for label, run in flat) + f'; worst {worst:.2f} s ({worst_label})')
+
+
+def lock_verdict(first, holders, second):
+    """Judge a restart with a surviving cleanup, from RESTART and LOCK_HOLDERS output."""
+    fields = dict(word.partition('=')[::2] for word in holders.split())
+    state1, seconds1 = (first.split() + ['', ''])[:2]
+    state2, seconds2 = (second.split() + ['', ''])[:2]
+    if state1 != 'done':
+        raise RuntimeError(f'the first restart did not finish: {first}')
+    if fields.get('lock') != 'present':
+        raise RuntimeError('procd did not take the service lock, so the case shows nothing')
+    if not fields.get('survivors', '0').isdigit() or int(fields['survivors']) < 1:
+        raise RuntimeError('no cleanup outlived its kill, so the case shows nothing: ' + holders)
+    if fields.get('holders') != '0':
+        raise RuntimeError(f'{fields.get("holders")} surviving cleanup(s) hold the procd lock: {holders}')
+    if state2 != 'done':
+        raise RuntimeError(f'the second restart waited on the lock: {second}')
+    return (f'first restart {seconds1} s with its cleanups cut short; {fields["survivors"]} surviving cleanup '
+            f'child(ren), none holding the procd lock; second restart {seconds2} s')
 
 
 def mark(vm):
@@ -399,6 +524,7 @@ def ssh_key(directory):
 def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archive, media, ready):
     limit = cleanup_limit((release/INIT).read_text())
     healthy = [True]
+    bootstrap_timed = []
     guests = []
 
     def guest(name, image, **options):
@@ -478,8 +604,16 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
             raise RuntimeError('offline installer did not reach the candidate version')
         return 'package file replaced, boot link S80 to S99, tailscaled kept pid ' + after_deploy['daemon']
 
+    def timed(vm, token, label):
+        log = boot_log(vm, token)
+        (run_dir/f'tailscale-bootstrap-{label.replace(" ", "-")}.syslog').write_text(log)
+        runs = bootstrap_runs(log)
+        bootstrap_timed.append((label, runs))
+        record(f'{label}: osi-bootstrap start to end (seconds, stamp, exit): {runs}')
+
     def stalled_boot():
         install_stall(upgraded)
+        install_bootstrap_timer(upgraded)
         token = mark(upgraded)
         upgraded.upgrade_reboot('sync && reboot', launch_only=True)
         upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
@@ -488,6 +622,7 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         ready(upgraded)
         page = since_boot(upgraded)
         receipt = judged(upgraded, token, stall_verdict, 'stall')
+        timed(upgraded, token, 'upgraded guest, stalled cleanup')
         record(f'boot with the stalled cleanup: login prompt {prompt:.0f} s, farm page and ChirpStack '
                f'{page:.0f} s after the boot began')
         record_processes(upgraded, 'tailscaled.real', 'boot with the stalled cleanup', record)
@@ -506,11 +641,30 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         ready(upgraded)
         page = since_boot(upgraded)
         receipt = judged(upgraded, token, normal_verdict, 'normal')
+        timed(upgraded, token, 'upgraded guest, normal boot')
+        remove_bootstrap_timer(upgraded)
         record(f'boot without the stall: login prompt {prompt:.0f} s, farm page and ChirpStack '
                f'{page:.0f} s after the boot began')
         record_processes(upgraded, 'tailscaled', 'boot without the stall', record)
         daemon_runs(upgraded)
         return receipt
+
+    def restart_with_survivor():
+        # A cleanup that outlives its kill must not keep procd's lock on the
+        # service: the next `/etc/init.d/tailscale restart` would wait on it.
+        install_stall(upgraded, SURVIVOR_WRAPPER)
+        restart = RESTART.replace('RESTART_LIMIT', str(RESTART_LIMIT))
+        try:
+            first = checked(upgraded, restart, RESTART_LIMIT + 60)
+            holders = checked(upgraded, LOCK_HOLDERS)
+            second = checked(upgraded, restart, RESTART_LIMIT + 60)
+            record(f'restart with a surviving cleanup: first {first}; {holders}; second {second}')
+            receipt = lock_verdict(first, holders, second)
+            daemon_runs(upgraded, 'tailscaled.real')
+            return receipt
+        finally:
+            upgraded.command('for p in $(' + SURVIVORS + '); do kill "$p"; done')
+            remove_stall(upgraded)
 
     def left_alone():
         # A package that ships another init file and another boot position.
@@ -556,6 +710,7 @@ sed -n '/--- Tailscale boot init ---/,$p' "$f" """)
         up while rc.d is still held (see CONSOLE). The console is read
         throughout so the guest never blocks on it.
         """
+        token = mark(vm)
         vm.upgrade_reboot('sync && reboot', launch_only=True)
         deadline = time.monotonic() + SLOW_BOOT_SECONDS
         stalled, error, prompted = '', '', False
@@ -594,6 +749,7 @@ sed -n '/--- Tailscale boot init ---/,$p' "$f" """)
         vm.shell()
         ready(vm)
         daemon_runs(vm, 'tailscaled.real')
+        timed(vm, token, name)
         order = (('the Tailscale daemon', 'daemon'), ('ChirpStack', 'chirpstack'), ('the Node-RED process', 'node'),
                  ('the farm page', 'gui'))
         missing = [label for label, milestone in order if milestone not in seen]
@@ -632,6 +788,7 @@ sync""")
             if said != 'osi-lan-ssh':
                 raise RuntimeError(f'LAN SSH does not reach the guest before the stall (exit {code}): {error}')
             install_stall(vm)
+            install_bootstrap_timer(vm)
             timings = [one_held_boot(vm, ssh, TECHNICIAN_COMMAND, 'fallback round 1, the runbook line'),
                        one_held_boot(vm, ssh, ONSITE_COMMAND, 'fallback round 2, the on-site document line')]
             return ('two boots held at S80tailscale, each for at least 60 s with no ChirpStack or Node-RED; pgrep, '
@@ -644,11 +801,13 @@ sync""")
         test(INSTALLED_CASE, chained(installed_by_deploy))
         test(STALL_CASE, chained(stalled_boot))
         test(NORMAL_CASE, chained(normal_boot))
+        test(LOCK_CASE, chained(restart_with_survivor))
         test(REFUSAL_CASE, chained(left_alone))
     finally:
         healthy[0] = False
         upgraded.stop()
     try:
         test(FALLBACK_CASE, fallback)
+        test(BOOTSTRAP_CASE, lambda: bootstrap_verdict(bootstrap_timed))
     finally:
         keep_stderr()
