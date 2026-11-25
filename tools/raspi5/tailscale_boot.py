@@ -256,15 +256,26 @@ def installed(state, release):
         raise RuntimeError('tailscale boot links are ' + (', '.join(state['links']) or 'none') + ', expected S99tailscale only')
 
 
+# The offline install with its trace kept on the guest: a failure before
+# deploy.sh starts (mount, checksum, cache, launcher) leaves no deploy log.
+TRACED_INSTALL = ('exec 2>/tmp/osi-install.trace\nset -x\n'
+                  + CANDIDATE_INSTALL.replace('--wait >/dev/null 2>&1', '--wait >/tmp/osi-install.out 2>&1'))
+INSTALL_DIAGNOSTICS = """sync
+echo "deploy logs: $(ls -t /data/deploy-*.log 2>/dev/null | head -3 | tr '\\n' ' ')"
+echo '--- trace'; tail -n 25 /tmp/osi-install.trace 2>/dev/null
+echo '--- installer'; tail -n 40 /tmp/osi-install.out 2>/dev/null
+f=$(ls -t /data/deploy-*.log 2>/dev/null | head -1)
+[ -n "$f" ] && { echo "--- $f"; tail -n 40 "$f"; }
+echo '--- df'; df -k /tmp /data 2>/dev/null"""
+
+
 def install_candidate(vm, release):
-    code, _ = vm.command('set -e\n' + CANDIDATE_INSTALL, 2400)
+    code, _ = vm.command('set -e\n' + TRACED_INSTALL, 2400)
     if code:
-        _, reasons = vm.command("""sync
-f=$(ls -t /data/deploy-*.log | head -1)
-for reason in ENOTCACHED ENOENT EAI_AGAIN ERESOLVE EACCES SQLITE_BUSY SQLITE_CONSTRAINT 'npm install failed' 'insufficient disk' 'payload verification failed' 'migration failed'; do
-grep -Fq "$reason" "$f" && echo "$reason"
-done""")
-        raise RuntimeError(f'offline installer exited {code}; {reasons.replace(chr(10), ", ")}')
+        _, diagnostics = vm.command(INSTALL_DIAGNOSTICS)
+        (vm.receipts/f'install-failure-{vm.boots}.log').write_text(diagnostics + '\n')
+        tail = ' | '.join(line for line in diagnostics.splitlines()[-6:] if line.strip())
+        raise RuntimeError(f'offline installer exited {code}; see install-failure-{vm.boots}.log: {tail[:400]}')
 
 
 def drain_console(vm, seconds):

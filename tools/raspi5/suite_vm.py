@@ -170,7 +170,7 @@ class Guest:
             # keeps the host out of the AF_UNIX pathname namespace.
             args.extend(['-chardev', f'socket,id=wm1302-air,fd={air.fileno()},server=off'])
             self.bridge = subprocess.Popen(['qemu-system-x86_64','-machine','none','-nodefaults','-display','none','-monitor','none','-serial','none',
-                '-netdev',f'socket,id=wire,fd={a.fileno()}',user,
+                '-netdev',f'socket,id=wire,fd={a.fileno()}','-netdev',user,
                 '-netdev','hubport,id=a,hubid=0,netdev=wire','-netdev','hubport,id=b,hubid=0,netdev=local'],pass_fds=(a.fileno(),),stdout=subprocess.DEVNULL,stderr=err)
             if self.upgrade and not inspection:
                 media = str(self.upgrade).replace(',', ',,')

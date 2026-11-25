@@ -1908,6 +1908,15 @@ class TailscaleBootTests(unittest.TestCase):
         self.assertEqual(console.buf, b'.\r\n')
         self.assertFalse(tailscale_boot.drain_console(console, 0.05))
 
+    def test_the_traced_install_keeps_the_steps_and_the_installer_output(self):
+        self.assertTrue(tailscale_boot.TRACED_INSTALL.startswith('exec 2>/tmp/osi-install.trace\nset -x\n'))
+        self.assertIn('--wait >/tmp/osi-install.out 2>&1', tailscale_boot.TRACED_INSTALL)
+        self.assertNotIn('/dev/null 2>&1', tailscale_boot.TRACED_INSTALL)
+        for text in (tailscale_boot.TRACED_INSTALL, tailscale_boot.INSTALL_DIAGNOSTICS):
+            for shell in ('sh', 'bash'):
+                run = subprocess.run([shell, '-n', '-c', text], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+
     def test_the_upgraded_guest_gets_the_media_path_not_its_builder(self):
         media = Path('/nonexistent/upgrade.img')
         seen = {}
@@ -1986,7 +1995,13 @@ class TailscaleBootTests(unittest.TestCase):
             with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
                 vm.launch()
             vm.stop()
-            bridge = ' '.join(popen.call_args_list[0].args[0])
+            argv = popen.call_args_list[0].args[0]
+            bridge = ' '.join(argv)
+            # Every netdev definition follows its own -netdev flag; QEMU reads a
+            # bare one as a disk image and the bridge exits.
+            for position, word in enumerate(argv):
+                if word.startswith(('user,', 'socket,', 'hubport,')):
+                    self.assertEqual(argv[position - 1], '-netdev', word)
             self.assertIn('hostfwd=tcp:127.0.0.1:43210-192.0.2.15:22', bridge)
             self.assertIn('hostfwd=tcp:127.0.0.1:49152-192.0.2.15:1880', bridge)
             self.assertIn('restrict=on', bridge)
@@ -1998,8 +2013,10 @@ class TailscaleBootTests(unittest.TestCase):
             with patch('suite_vm.subprocess.Popen', return_value=Mock()) as popen:
                 vm.launch()
             vm.stop()
-            bridge = ' '.join(popen.call_args_list[0].args[0])
-            self.assertEqual(bridge.count('hostfwd='), 1)
+            argv = popen.call_args_list[0].args[0]
+            self.assertEqual(' '.join(argv).count('hostfwd='), 1)
+            user = next(position for position, word in enumerate(argv) if word.startswith('user,'))
+            self.assertEqual(argv[user - 1], '-netdev')
 
     def test_launch_returns_before_the_console_and_the_shell_follows_the_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
