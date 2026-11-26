@@ -23,7 +23,7 @@ const PINNED = {
 };
 
 /** T3 tutorial: a timed open and a one-time plan written through the raised phone, then 1,801 ticks (3 checkpoints). */
-function scriptedRun() {
+function scriptedRun(sliced = false) {
   const run = createRun(defaultHeader('checkpoint-pin', TUTORIAL_SCENARIO, 3));
   const post = (path: string, body: object) => {
     const response = run.request('POST', path, body);
@@ -35,8 +35,15 @@ function scriptedRun() {
   post(PLANS_PATH + '/schedules', {kind: 'ONCE', fire_at: iso(run.now + 90 * MINUTE_MS), duration_minutes: 5});
   const planned = run.hash();
   run.apply({kind: 'phoneClose'});
-  for (let i = 0; i < 225; i++) run.step(400);
-  run.step(TICK_MS);
+  let hashSlices = 0;
+  for (let i = 0; i < 226; i++) {
+    run.step(i === 225 ? TICK_MS : 400, sliced);
+    while (run.pendingWork) {
+      if (run.pendingWork === 'checkpoint hash') hashSlices++;
+      run.resumeStep();
+    }
+  }
+  if (sliced) assert.ok(hashSlices > 3 * PINNED.checkpoints.length);
   const save = run.save();
   assert.equal(save.cursor.tick, 1801);
   return {save, hashes: {pending, planned, checkpoints: save.checkpoints, terminal: run.hash()}};
@@ -45,7 +52,26 @@ function scriptedRun() {
 test('checkpoint hashes of a short scripted run stay byte-identical', () => {
   const {save, hashes} = scriptedRun();
   assert.deepEqual(hashes, PINNED);
+  const sliced = scriptedRun(true);
+  assert.deepEqual(sliced.hashes, PINNED);
+  assert.equal(JSON.stringify(sliced.save), JSON.stringify(save));
   assert.deepEqual(loadRun(JSON.parse(JSON.stringify(save))).save().checkpoints, PINNED.checkpoints);
+});
+
+test('hashing the initial farm before play leaves its state and first checkpoint intact', () => {
+  const header = defaultHeader('boot');
+  const warmed = createRun(header);
+  const cold = createRun(header);
+  warmed.hash();
+  assert.deepEqual(warmed.save(), cold.save());
+  assert.deepEqual(warmed.eventsSince(0), cold.eventsSince(0));
+  for (let i = 0; i < 75; i++) {
+    warmed.step(400);
+    cold.step(400);
+  }
+  assert.equal(warmed.save().checkpoints.length, 1);
+  assert.deepEqual(warmed.save(), cold.save());
+  assert.equal(warmed.hash(), cold.hash());
 });
 
 /** Fails on any value whose JSON could differ from the JSON of its structured clone: only plain data passes. */
@@ -73,7 +99,9 @@ test('the checkpoint digest writes the simulator\'s live state as the bytes of i
   const check = (label: string) => {
     const live = adapter.simulatorDigestInputs();
     assertPlainData(live, label);
-    assert.equal(JSON.stringify(live), JSON.stringify(adapter.simulatorSnapshot()), label);
+    const snapshot = JSON.stringify(adapter.simulatorSnapshot());
+    assert.equal(JSON.stringify(live), snapshot, label);
+    assert.equal([...adapter.digestJson()].join(''), snapshot, label);
     for (const [key, part] of Object.entries(live)) if (part.length > 0) filled.add(key);
   };
   check('built');
@@ -88,4 +116,23 @@ test('the checkpoint digest writes the simulator\'s live state as the bytes of i
   // Every container the digest covers held data at least once, so no check above passed on empty state alone.
   assert.deepEqual([...filled].sort(), ['activeCommands', 'clockIds', 'devices', 'environmentRecords', 'outcomes',
     'readings', 'schedules', 'triggerEvaluations', 'valveSettings', 'zones']);
+});
+
+test('a save during a partial checkpoint finishes the original frame before dispatching queued input', () => {
+  const header = defaultHeader('mid-checkpoint');
+  const whole = createRun(header);
+  const sliced = createRun(header);
+  for (const run of [whole, sliced]) {
+    for (let i = 0; i < 74; i++) run.step(400);
+    run.step(100); // The eight-tick frame below has two ticks left after checkpoint 600.
+  }
+  whole.step(400);
+  assert.equal(sliced.step(400, true), false);
+  assert.equal(sliced.pendingWork, 'checkpoint hash');
+  sliced.resumeStep();
+  for (const run of [whole, sliced]) run.apply({kind: 'move', dx: 1, dy: 0});
+  assert.equal(JSON.stringify(sliced.save()), JSON.stringify(whole.save()));
+  assert.equal(sliced.pendingWork, undefined);
+  assert.equal(sliced.hash(), whole.hash());
+  assert.equal(JSON.stringify(sliced.eventsSince(0)), JSON.stringify(whole.eventsSince(0)));
 });

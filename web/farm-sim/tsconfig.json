@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -21,25 +17,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": [
-      "vite/client",
-      "node"
-    ],
+    "types": ["vite/client", "node"],
     "paths": {
-      "@osi-demo/*": [
-        "../react-gui/demo/*"
-      ],
-      "@osi-edge/*": [
-        "../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/*"
-      ]
+      "@osi-demo/*": ["../react-gui/demo/*"],
+      "@osi-edge/*": ["../../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/*"]
     }
   },
-  "include": [
-    "src/core",
-    "src/scenarios",
-    "art",
-    "scripts",
-    "tests/unit",
-    "tests/integration"
-  ]
+  "include": ["src", "art", "scripts", "tests", "vite.config.ts", "playwright.config.ts"],
+  "exclude": ["src/phone/**", "tests/unit/phone-*.test.ts"]
 }

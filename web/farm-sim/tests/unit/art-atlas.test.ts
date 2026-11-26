@@ -6,6 +6,28 @@ import {fontSprites} from '../../art/font';
 import {hedgeTileForMask, terrainSprites} from '../../art/generators/terrain';
 import {isPaletteKey, palette, ramps} from '../../art/palette';
 import {bakeAtlas, spriteFamilies} from '../../scripts/bake-atlas';
+import {decodeBakedBitmap, sampleScene} from '../../scripts/render-art-review';
+
+test('the art review scene connects both sides of the first drip tee and its vertical main', () => {
+  const {atlas, png} = bakeAtlas();
+  const {width, rgba} = sampleScene(atlas, decodeBakedBitmap(png, atlas.image));
+  const pixel = (x: number, y: number) => {
+    const offset = (y * width + x) * 4;
+    return '#' + rgba.subarray(offset, offset + 3).toString('hex');
+  };
+  for (const seam of [9 * 16, 10 * 16]) {
+    for (const x of [seam - 1, seam]) {
+      assert.equal(pixel(x, 7 * 16 + 8), palette.R, `hose top at x=${x}`);
+      assert.equal(pixel(x, 7 * 16 + 9), palette.k, `hose underside at x=${x}`);
+    }
+  }
+  for (const seam of [8, 9, 10, 11].map(y => y * 16)) {
+    for (const y of [seam - 1, seam]) {
+      assert.equal(pixel(9 * 16 + 8, y), palette.R, `hose top at y=${y}`);
+      assert.equal(pixel(9 * 16 + 9, y), palette.k, `hose underside at y=${y}`);
+    }
+  }
+});
 
 test('sprite grammar validates every frame and rejects invalid dimensions, anchors, keys and budgets', () => {
   const colors = Object.values(palette);

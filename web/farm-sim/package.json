@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.phone.json --noEmit",
+    "build": "npm run bake && npm run build:game && npm run build:phone",
+    "build:game": "vite build",
+    "build:phone": "../react-gui/node_modules/.bin/vite build --config vite.phone.config.mjs",
+    "build:phone-smoke": "vite build --mode phone-smoke",
     "bake": "node --import tsx scripts/bake-atlas.ts",
     "test": "node scripts/run-tests.mjs 'tests/unit/*.test.ts' 'tests/integration/*.test.ts'",
-    "verify": "node scripts/verify-core-purity.mjs && node scripts/verify-no-binary-art.mjs && node scripts/verify-isolation.mjs && node scripts/verify-package-hygiene.mjs && node scripts/verify-test-coverage.mjs"
+    "test:e2e": "npm run build:phone-smoke && playwright test --config playwright.config.ts",
+    "test:perf": "npm run build:phone-smoke && playwright test --config playwright.config.ts --project=perf --no-deps --reporter=list",
+    "verify": "node scripts/verify-core-purity.mjs && node scripts/verify-no-binary-art.mjs && node scripts/verify-isolation.mjs && node scripts/verify-package-hygiene.mjs && node scripts/check-budgets.mjs && node scripts/verify-test-coverage.mjs"
   },
   "dependencies": {
     "@noble/hashes": "1.8.0",

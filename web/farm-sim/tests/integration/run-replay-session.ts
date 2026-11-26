@@ -12,8 +12,13 @@ export const evening = localDayStart(start) + 18 * HOUR_MS;
 const byTank = {x: tank.x - 1, y: tank.y - 1};
 export const house = {x: FARM_SITES.houseDoor.x + 1, y: FARM_SITES.houseDoor.y + 1};
 
-export function advanceUntil(run: FarmRun, at: number) {
-  while (run.now < at) run.step(TICK_MS * 8);
+function step(run: FarmRun, ms: number, sliced: boolean) {
+  run.step(ms, sliced);
+  while (run.pendingWork) run.resumeStep();
+}
+
+export function advanceUntil(run: FarmRun, at: number, sliced = false) {
+  while (run.now < at) step(run, TICK_MS * 8, sliced);
 }
 
 export function queueWalk(run: FarmRun, from: TileRef, to: TileRef) {
@@ -27,7 +32,7 @@ export function queueWalk(run: FarmRun, from: TileRef, to: TileRef) {
   }
 }
 
-export function recordSession(poll: 'none' | 'after-write' | 'frequent') {
+export function recordSession(poll: 'none' | 'after-write' | 'frequent', sliced = false) {
   const header = defaultHeader('replay-test', TUTORIAL_SCENARIO, 3);
   const run = createRun(header);
   const read = () => {
@@ -47,10 +52,10 @@ export function recordSession(poll: 'none' | 'after-write' | 'frequent') {
   // Size the run so about 10.1 L stay in the tank after it closes (8 L/min drip), whatever the scenario's starting level.
   const startTank = TUTORIAL_SCENARIO.initial.tankLiters;
   write(VALVE_PATH, {action: 'OPEN_FOR_DURATION', duration_seconds: Math.round((startTank - 10.1) / 8 * 60)});
-  run.step(10_000);
+  step(run, 10_000, sliced);
   const duringPause = {at: run.now, open: run.isPhoneOpen(), phase: run.viewModel().valve};
   run.apply({kind: 'phoneClose'});
-  advanceUntil(run, start + 75 * MINUTE_MS);
+  advanceUntil(run, start + 75 * MINUTE_MS, sliced);
 
   const nearEmpty = run.viewModel().water.tankLiters;
   run.apply({kind: 'phoneOpen'});
@@ -63,31 +68,36 @@ export function recordSession(poll: 'none' | 'after-write' | 'frequent') {
     at: run.now, tankLitres: run.viewModel().water.tankLiters, phase: run.viewModel().valve,
     commanded: run.eventsSince(0).reverse().find(event => event.type === 'irrigation' && event.payload.kind === 'commanded'),
   };
-  run.step(10_000);
+  step(run, 10_000, sliced);
   const stillPaused = run.now;
   run.apply({kind: 'phoneClose'});
-  advanceUntil(run, start + 95 * MINUTE_MS);
+  advanceUntil(run, start + 95 * MINUTE_MS, sliced);
 
   run.apply({kind: 'phoneOpen'});
-  run.step(0);
+  step(run, 0, sliced);
   if (poll === 'frequent') {
     for (let i = 0; i < 5; i++) read();
   }
   run.apply({kind: 'phoneClose'});
-  advanceUntil(run, evening);
+  advanceUntil(run, evening, sliced);
   queueWalk(run, byTank, house);
-  run.apply({kind: 'sleep'});
-  run.step(0);
+  if (sliced) {
+    const sleep = run.sleepSteps();
+    while (!sleep.next().done) { /* Finish each overnight boundary. */ }
+  } else {
+    run.apply({kind: 'sleep'});
+    run.step(0);
+  }
   const short = run.save();
   const shortHash = run.hash();
-  run.step(400);
-  run.step(400);
+  step(run, 400, sliced);
+  step(run, 400, sliced);
   const long = run.save();
   return {duringPause, nearEmpty, beforePlan, atWrite, stillPaused, short, shortHash, long, longHash: run.hash()};
 }
 
 export function paritySequence() {
-  const {long, longHash} = recordSession('frequent');
+  const {long, longHash} = recordSession('frequent', true);
   const replay = loadRun(long);
   return {checkpoints: replay.save().checkpoints, terminal: replay.hash(), live: longHash};
 }

@@ -19,8 +19,7 @@ const MAX_TICKS = 8;
 const CHECKPOINT_TICKS = 600;
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-function digest(value: unknown): string {
-  const bytes = sha256(utf8ToBytes(JSON.stringify(value)));
+function base64(bytes: Uint8Array): string {
   let result = '';
   for (let i = 0; i < bytes.length; i += 3) {
     const [a, b = 0, c = 0] = bytes.subarray(i, i + 3);
@@ -42,6 +41,7 @@ export class FarmRun implements Run {
   private readonly eventLog = new GameLog();
   private readonly tutorial: Tutorial;
   private readonly end: number;
+  private frame?: Generator<void>;
   private tick = 0;
   private accumulator = 0;
   private completedDays = 0;
@@ -83,8 +83,13 @@ export class FarmRun implements Run {
   get phoneRevision(): number { return this.revision + this.adapter.clockRevision; }
 
   isPhoneOpen(): boolean { return this.adapter.isPhoneOpen(); }
-  phoneNow(): number { return this.adapter.phoneNow(); }
+  phoneNow(): number {
+    if (this.frame && this.isPhoneOpen()) this.finishFrame();
+    return this.adapter.phoneNow();
+  }
   request(method: string, path: string, body?: unknown): DemoResponse {
+    // A synchronous phone write must see the same completed tick as it did before slicing.
+    if (this.frame && (this.isPhoneOpen() || method.toUpperCase() !== 'GET')) this.finishFrame();
     return this.adapter.request(method, path, body);
   }
 
@@ -112,7 +117,21 @@ export class FarmRun implements Run {
     return this.dispatch(this.queue.shift()!)!;
   }
 
+  /** The interactive equivalent of queuing one sleep and stepping zero real milliseconds.
+   * The game holds input and normal steps until every queued command finishes. */
+  *sleepSteps(): Generator<void> {
+    this.finishFrame();
+    this.apply({kind: 'sleep'});
+    while (this.queue.length) yield* this.dispatchSteps(this.queue.shift()!, true);
+  }
+
   private dispatch(input: Command): DemoResponse | undefined {
+    const result = this.dispatchSteps(input, false).next();
+    if (!result.done) throw new Error('Synchronous command dispatch yielded');
+    return result.value;
+  }
+
+  private *dispatchSteps(input: Command, splitSleep: boolean): Generator<void, DemoResponse | undefined> {
     if (this.complete && !(input.kind === 'phoneClose' && this.isPhoneOpen())) {
       if (input.kind !== 'phoneRequest') return;
       // Plan 4.6 logs every refused write, never its body.
@@ -134,7 +153,10 @@ export class FarmRun implements Run {
       this.dispatchPlayer(cmd, at, advanceTo);
     }
     this.history.push({tick: this.tick, seq, cmd});
-    if (advanceTo !== null) this.adapter.advance(advanceTo);
+    if (advanceTo !== null) {
+      if (splitSleep) yield* this.adapter.sleepBoundaries(advanceTo);
+      else this.adapter.advance(advanceTo);
+    }
     this.adapter.drainNow();
     if (cmd.kind === 'phoneRequest' && response && response.status >= 200 && response.status < 300
       && cmd.path.startsWith(PLANS_PATH + '/schedules')) this.tutorial.planWritten(this.adapter);
@@ -214,22 +236,63 @@ export class FarmRun implements Run {
   }
 
   private advanceTick(): void {
+    if (this.advanceTickState()) this.checkpoints.push(this.hash());
+  }
+
+  private advanceTickState(): boolean {
     if (this.paused || this.complete) throw new Error('Replay attempted to advance a frozen run');
     this.adapter.advance(Math.min(this.end, this.now + TICK_MS * this.header.pace));
     this.tick++;
     this.collectEvents();
-    if (this.tick % CHECKPOINT_TICKS === 0) this.checkpoints.push(this.hash());
+    return this.tick % CHECKPOINT_TICKS === 0;
   }
 
-  step(realMs: number): void {
+  private *interactiveTicks(ticks: number): Generator<void> {
+    for (let i = 0; i < ticks && !this.complete; i++) {
+      if (this.advanceTickState()) {
+        const digest = sha256.create();
+        yield;
+        for (const part of this.checkpointJson()) {
+          digest.update(utf8ToBytes(part));
+          yield;
+        }
+        this.checkpoints.push(base64(digest.digest()));
+      }
+    }
+  }
+
+  get pendingWork(): 'checkpoint hash' | undefined { return this.frame ? 'checkpoint hash' : undefined; }
+
+  /** Perform one piece of the same frame. The host schedules the next call. */
+  resumeStep(): boolean {
+    if (!this.frame) return true;
+    if (!this.frame.next().done) return false;
+    this.frame = undefined;
+    return true;
+  }
+
+  private finishFrame(): void {
+    while (this.frame) this.resumeStep();
+  }
+
+  step(realMs: number, sliced = false): boolean {
+    this.finishFrame();
     this.dispatchQueued();
-    if (this.paused || this.complete) return;
+    if (this.paused || this.complete) return true;
     if (!Number.isFinite(realMs) || realMs < 0) throw new RangeError('Invalid frame duration');
     this.accumulator += realMs;
     const ticks = Math.floor(this.accumulator / TICK_MS);
     this.accumulator -= ticks * TICK_MS;
     if (ticks > MAX_TICKS) this.eventLog.append(this.now, 'slow_frame', {dropped_ms: (ticks - MAX_TICKS) * TICK_MS});
-    for (let i = 0; i < Math.min(ticks, MAX_TICKS) && !this.complete; i++) this.advanceTick();
+    const count = Math.min(ticks, MAX_TICKS);
+    if (sliced && count) {
+      const frame = this.interactiveTicks(count);
+      if (frame.next().done) return true;
+      this.frame = frame;
+      return false;
+    }
+    for (let i = 0; i < count && !this.complete; i++) this.advanceTick();
+    return true;
   }
 
   viewModel(): Readonly<ViewModel> {
@@ -246,16 +309,32 @@ export class FarmRun implements Run {
 
   eventsSince(seq: number) { return this.eventLog.since(seq); }
 
-  hash(): string {
-    return digest({
+  private checkpointHeader() {
+    return {
       header: this.header, tick: this.tick, seq: this.history.length, now: this.now,
-      phoneOpen: this.isPhoneOpen(), phoneNow: this.phoneNow(),
-      tutorial: this.tutorial.state(), world: this.adapter.world.snapshot(),
-      water: this.adapter.waterSnapshot(), simulator: this.adapter.simulatorDigestInputs(),
-    });
+      phoneOpen: this.isPhoneOpen(), phoneNow: this.adapter.phoneNow(),
+      tutorial: this.tutorial.state(),
+    };
+  }
+
+  private *checkpointJson(): Generator<string> {
+    yield JSON.stringify(this.checkpointHeader()).slice(0, -1);
+    yield ',"world":' + JSON.stringify(this.adapter.world.snapshot());
+    yield ',"water":' + JSON.stringify(this.adapter.waterSnapshot());
+    yield ',"simulator":';
+    yield* this.adapter.digestJson();
+    yield '}';
+  }
+
+  hash(): string {
+    this.finishFrame();
+    const snapshot = {...this.checkpointHeader(), world: this.adapter.world.snapshot(),
+      water: this.adapter.waterSnapshot(), simulator: this.adapter.simulatorDigestInputs()};
+    return base64(sha256(utf8ToBytes(JSON.stringify(snapshot))));
   }
 
   save(): Save {
+    this.finishFrame();
     this.dispatchQueued();
     return structuredClone({
       header: this.header, log: this.history, checkpoints: this.checkpoints,

@@ -1,0 +1,288 @@
+:root {
+  --cream: #f7ebb9;
+  --ink: #242624;
+  --deep: #182c2b;
+  --green: #244741;
+  --amber: #ffd482;
+  --frame: #759288;
+  --glass: #172c29f2;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+#farm-scene, #farm-ui {
+  position: absolute;
+  inset: 0;
+}
+
+#farm-ui { pointer-events: none; color: var(--cream); }
+#farm-ui button, #farm-ui input, #farm-ui select, .game-panel, .stick { pointer-events: auto; }
+
+button, select, input { font: inherit; }
+
+button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 .65rem;
+  border: 1px solid var(--frame);
+  border-radius: 4px;
+  color: var(--cream);
+  background: var(--deep);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:hover, button[aria-pressed=true] { background: var(--amber); border-color: var(--amber); color: var(--ink); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid white; outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: default; }
+
+.farm-canvas { touch-action: none; }
+
+.farm-hud {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock-board, .farm-totals, .game-label, .energy, .field-note, .keys-hint {
+  border: 1px solid var(--frame);
+  border-radius: 4px;
+  background: var(--glass);
+}
+
+.clock-board { min-width: 154px; padding: 8px 10px 6px; }
+.clock-face { display: flex; align-items: baseline; justify-content: space-between; gap: 9px; }
+.clock-face time { font: 700 1.06rem ui-monospace, monospace; color: var(--amber); }
+.clock-face span { color: #b0c2aa; font-size: .75rem; }
+.daylight { position: relative; margin-top: 8px; font-size: .7rem; }
+.daylight::before { content: ""; position: absolute; top: -8px; width: 100%; height: 23px; border-top: 2px solid #708b81; border-radius: 50% 50% 0 0; }
+.daylight i { position: absolute; top: -3px; left: var(--sun); transform: translate(-50%, var(--lift)); width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+.daylight span { display: block; padding-top: 4px; }
+
+.farm-totals { display: flex; gap: 12px; padding: 9px 12px; font-size: .86rem; }
+.farm-totals strong { display: block; color: var(--amber); font: 700 1.15rem ui-monospace, monospace; }
+.farm-hud .about-button { margin-left: auto; }
+.game-label, .game-panel small { font: 600 .7rem ui-monospace, monospace; color: var(--amber); }
+.game-label { padding: 4px 6px; }
+
+.tool-belt {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  display: grid;
+  gap: 5px;
+  transform: translateY(-50%);
+}
+
+.tool-belt button { display: flex; width: 61px; align-items: center; justify-content: space-between; padding: 0 4px; }
+.tool-icon { display: block; flex: 0 0 32px; height: 32px; image-rendering: pixelated; }
+.tool-belt small { font-size: .64rem; white-space: nowrap; }
+.energy { width: 61px; padding: 4px; font-size: .62rem; text-align: center; }
+.energy meter { display: block; width: 100%; height: 8px; }
+
+.action-area {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+  gap: 6px;
+}
+
+.farm-actions {
+  display: flex;
+  justify-content: end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.touch-action { display: none; }
+
+.field-note {
+  width: min(360px, 100%);
+  padding: 8px 11px;
+  border-left: 3px solid var(--amber);
+  font-size: .88rem;
+}
+
+.field-note p { margin: 0; }
+.field-note p + p { margin-top: 5px; color: #d5dcc5; }
+.field-note b { font-family: ui-monospace, monospace; color: var(--amber); margin-right: 5px; }
+.keys-hint { position: absolute; left: 12px; bottom: 12px; margin: 0; padding: 6px 8px; font-size: .71rem; }
+
+.stick {
+  display: none;
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 12px;
+  width: 78px;
+  height: 78px;
+  place-items: center;
+  border: 2px solid var(--frame);
+  border-radius: 50%;
+  background: #172c29c9;
+  touch-action: none;
+}
+
+.stick span { width: 28px; height: 28px; border-radius: 50%; background: var(--amber); }
+
+.game-panel {
+  padding: 16px;
+  border: 2px solid var(--frame);
+  border-radius: 7px;
+  background: var(--deep);
+  box-shadow: 0 8px 32px #110f0b8c;
+}
+
+.floating {
+  position: absolute;
+  z-index: 4;
+  top: max(70px, env(safe-area-inset-top));
+  right: 12px;
+  width: min(430px, calc(100% - 24px));
+  max-height: calc(100% - 85px);
+  overflow: auto;
+}
+
+.game-panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.game-panel h2 { margin: 0; font-size: 1.15rem; }
+.game-panel p { font-size: .9rem; line-height: 1.45; }
+.game-panel label { display: block; margin: .55rem 0; }
+.game-panel :is(input, select) { max-width: 100%; min-height: 44px; }
+.game-panel input[type=checkbox] { min-height: 0; }
+.facilitator label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.calculator input { width: 6rem; }
+.calculator output { font-weight: 700; }
+.panel-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 9px 0; }
+
+.report { width: min(920px, calc(100% - 24px)); }
+.report-table { overflow: auto; max-height: 54vh; }
+.report table { border-collapse: collapse; width: 100%; font-size: .83rem; }
+.report :is(th, td) { border-bottom: 1px solid #52665c; padding: 7px 9px; text-align: right; }
+.report th:first-child { text-align: left; white-space: nowrap; }
+.report tfoot { color: var(--amber); font-weight: 700; }
+
+.sleep-screen {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #121822ed;
+  pointer-events: auto;
+  animation: night-fade .2s ease-out;
+}
+
+@keyframes night-fade { from { opacity: 0; } to { opacity: 1; } }
+.bedtime { min-width: min(290px, calc(100% - 24px)); }
+.bedtime dl div { display: flex; justify-content: space-between; margin: 8px 0; }
+.bedtime dd { font-variant-numeric: tabular-nums; color: var(--amber); }
+
+#farm-phone {
+  position: absolute;
+  z-index: 3;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: 12px;
+  width: min(390px, calc(100% - 24px));
+  height: calc(100% - 78px);
+  border: 3px solid var(--frame);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--deep);
+}
+
+#farm-phone iframe { display: block; width: 100%; height: 100%; border: 0; }
+.phone-controls { position: absolute; top: 12px; right: 12px; z-index: 5; max-width: calc(100% - 24px); }
+.phone-starting {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  color: var(--cream);
+  animation: night-fade .75s ease-in-out infinite alternate;
+}
+.phone-notice { position: absolute; bottom: 12px; right: 12px; z-index: 4; }
+
+@media (max-width: 540px) {
+  #farm-phone { bottom: 64px; height: calc(100% - 130px); }
+  .phone-controls { top: auto; bottom: 12px; }
+  .phone-notice { right: auto; left: 12px; max-width: calc(100% - 154px); }
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  .stick { display: grid; }
+  .keys-hint { display: none; }
+  .action-area { left: 98px; }
+  .touch-action { display: inline-block; }
+}
+
+@media (max-width: 540px) {
+  .farm-hud { gap: 5px; left: 7px; right: 7px; }
+  .clock-board { min-width: 112px; }
+  .farm-totals { gap: 6px; padding: 7px 6px; font-size: .68rem; }
+  .farm-totals strong { font-size: .96rem; }
+  .game-label { position: absolute; top: 67px; }
+  .tool-belt { left: 7px; top: 118px; transform: none; }
+  .action-area { right: 7px; }
+}
+
+@media (max-height: 470px) {
+  .tool-belt { top: 91px; transform: none; gap: 3px; }
+  .tool-belt button { width: 51px; }
+  .energy { position: absolute; top: -28px; width: 64px; }
+}
+
+/* Portrait: status bar, farm view across the full width, tool row, then notes, actions and stick at
+   the bottom. All of them sit in one grid on #root, so none can cover the view. The scene row takes
+   the height the other rows leave, and gives it up first on a short screen, so the bottom row and
+   Sleep stay on screen. --farm-fit gives the renderer the portrait view: a whole-number scale from
+   the width, and a view as tall as the row (portraitViewport, src/view/camera.ts).
+   Panels, the phone and the sleep screen stay absolutely positioned against #root. */
+@media (orientation: portrait) {
+  #root {
+    grid-template:
+      "hud hud" auto
+      "scene scene" minmax(0, 1fr)
+      "tools tools" auto
+      "stick actions" auto / auto minmax(0, 1fr);
+    gap: 6px 8px;
+    place-items: stretch;
+    padding: max(12px, env(safe-area-inset-top)) 0 max(12px, env(safe-area-inset-bottom));
+  }
+  #farm-ui { display: contents; }
+  #farm-scene {
+    --farm-fit: width;
+    position: relative;
+    inset: auto;
+    grid-area: scene;
+    overflow: hidden;
+  }
+  .farm-hud { position: static; grid-area: hud; display: grid; grid-template-columns: auto auto 1fr; margin: 0 7px; }
+  .farm-hud .game-label { position: static; justify-self: start; }
+  .tool-belt {
+    position: static;
+    grid-area: tools;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    margin: 0 7px;
+    transform: none;
+  }
+  .tool-belt button { width: auto; flex-direction: column; justify-content: center; padding: 0; }
+  .tool-icon { width: 32px; }
+  .energy { position: static; width: auto; }
+  .stick, .keys-hint { position: static; grid-area: stick; align-self: end; margin-left: 12px; }
+  .keys-hint { max-width: 15rem; }
+  .action-area { position: static; grid-area: actions; align-self: end; margin-right: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sleep-screen, .phone-starting { animation: none; }
+}

@@ -1,0 +1,38 @@
+html, body {
+  overscroll-behavior: none;
+}
+
+#phone-notice:not([hidden]) {
+  position: fixed;
+  z-index: 1000;
+  inset: auto 12px 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 4px 24px #0002;
+  cursor: pointer;
+}
+
+/* Keep the public simulator's wrapping in the narrow app viewport. */
+#root {
+  overflow-wrap: anywhere;
+}
+
+#root :is(p, h1, h2, h3, h4, button, label, a, span):is(.truncate, .whitespace-nowrap) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* The trigger tab group immediately precedes the SWT form. */
+div:has(+ div > div > select[id^="swt-sensor-"]) > p + div > button:nth-child(2) {
+  display: none !important;
+}
+
+/* The only opener for the advanced drawer is in DendroForm. */
+div:has(> div > div > select[id^="dendro-sensitivity-"]) > div:last-child > button {
+  display: none !important;
+}

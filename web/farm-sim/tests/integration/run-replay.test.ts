@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {START_TILE} from '../../src/core/map';
 import {createRun, loadRun} from '../../src/core/replay';
-import {VALVE_PATH} from '../../src/core/osi/farm-builder';
+import {SleepJump} from '../../src/sleep-jump';
+import {PLANS_PATH, VALVE_PATH} from '../../src/core/osi/farm-builder';
 import {defaultHeader, TUTORIAL_SCENARIO} from '../../src/core/scenario';
-import {DAY_MS, localHour} from '../../src/core/time';
+import {DAY_MS, HOUR_MS, localHour, SOIL_STEP_MS} from '../../src/core/time';
 import {advanceUntil, evening, house, queueWalk, recordSession, start} from './run-replay-session';
 
 test('a write drains a queued move or can fill first, fires a due plan immediately and respects the phone pause', () => {
@@ -34,7 +35,7 @@ test('a write drains a queued move or can fill first, fires a due plan immediate
 test('no polling, immediate polls and repeated polls yield identical checkpoints and terminal hashes', () => {
   const first = recordSession('none');
   for (const poll of ['after-write', 'frequent'] as const) {
-    const candidate = recordSession(poll);
+    const candidate = recordSession(poll, true);
     assert.deepEqual(candidate.long, first.long);
     assert.equal(candidate.longHash, first.longHash);
     assert.equal(loadRun(candidate.long).hash(), first.longHash);
@@ -55,6 +56,55 @@ test('the same last command can have two distinct idle tails at the replay curso
   assert.throws(() => loadRun(bad), /cursor/);
   const badCheckpoint = {...long, checkpoints: long.checkpoints.map(() => 'wrong')};
   assert.throws(() => loadRun(badCheckpoint), /checkpoints/);
+});
+
+test('sliced sleep preserves overnight events, wake hash, checkpoints and the replay save', () => {
+  const oneShot = createRun(defaultHeader('sleep-parity', TUTORIAL_SCENARIO, 4));
+  queueWalk(oneShot, START_TILE, house);
+  advanceUntil(oneShot, evening + 3 * HOUR_MS);
+  oneShot.apply({kind: 'phoneOpen'});
+  const plan = oneShot.request('POST', PLANS_PATH + '/schedules', {
+    kind: 'ONCE', fire_at: new Date(oneShot.now + HOUR_MS).toISOString(), duration_minutes: 45,
+  });
+  assert.ok(plan.status < 300);
+  oneShot.apply({kind: 'phoneClose'});
+  const split = loadRun(oneShot.save());
+  const before = oneShot.eventsSince(0).length;
+  const bedtime = oneShot.now;
+  oneShot.apply({kind: 'sleep'});
+  oneShot.step(0);
+
+  const jump = new SleepJump(split);
+  assert.equal(jump.advance(), false);
+  assert.ok(split.now > bedtime && split.now < oneShot.now);
+  let done = false;
+  while (!done) {
+    const previous = split.now;
+    done = jump.advance();
+    assert.ok(split.now - previous <= SOIL_STEP_MS, 'one task crossed multiple soil grid intervals');
+  }
+  assert.deepEqual(split.feedback(), oneShot.feedback());
+  assert.deepEqual(split.viewModel(), oneShot.viewModel());
+  const overnight = oneShot.eventsSince(before);
+  assert.ok(overnight.some(event => event.type === 'irrigation'));
+  assert.ok(overnight.some(event => event.type === 'world_daily'));
+  assert.deepEqual(split.eventsSince(before), overnight);
+  assert.equal(split.hash(), oneShot.hash());
+  const save = split.save();
+  assert.equal(JSON.stringify(save), JSON.stringify(oneShot.save()));
+  assert.equal(save.log.filter(row => row.cmd.kind === 'sleep').length, 1);
+  assert.equal(loadRun(save).hash(), split.hash());
+
+  // Cross a new checkpoint after waking, so this also compares a digest made after the sliced sleep.
+  for (let i = 0; i < 75; i++) {
+    oneShot.step(400);
+    split.step(400, true);
+    while (split.pendingWork) split.resumeStep();
+    assert.equal(split.now, oneShot.now);
+  }
+  assert.equal(JSON.stringify(split.eventsSince(before)), JSON.stringify(oneShot.eventsSince(before)));
+  assert.equal(split.save().checkpoints.length, save.checkpoints.length + 1);
+  assert.deepEqual(split.save(), oneShot.save());
 });
 
 test('refused bodies stay out of the log and a slow frame advances at most eight ticks', () => {
