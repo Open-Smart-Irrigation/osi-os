@@ -1,9 +1,9 @@
 name: History uPlot Core
 on:
   push:
-    branches: [ main, master, 'release/0.8.4' ]
+    branches: [ main, master, 'release/0.8.4', 'release/0.8.5' ]
   pull_request:
-    branches: [ main, master, 'release/0.8.4' ]
+    branches: [ main, master, 'release/0.8.4', 'release/0.8.5' ]
 jobs:
   # web/history-uplot-core is the shared mobile history chart engine. The
   # edge GUI installs it as a packed copy (web/react-gui/.npmrc

@@ -1,9 +1,9 @@
 name: ChirpStack backup and restore
 on:
   push:
-    branches: [ main, master, 'release/0.8.4' ]
+    branches: [ main, master, 'release/0.8.4', 'release/0.8.5' ]
   pull_request:
-    branches: [ main, master, 'release/0.8.4' ]
+    branches: [ main, master, 'release/0.8.4', 'release/0.8.5' ]
 jobs:
   backup-restore:
     runs-on: ubuntu-latest
