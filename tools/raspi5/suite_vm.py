@@ -146,8 +146,16 @@ class Guest:
     # persistent syslog (the sink node-red.init keeps on /data) held, and which
     # file it is. logd rotates that file by renaming it, so the inode tells
     # boot_timing whether the lines it reads are the file the console found.
-    LOG_CHECKPOINT = ('if [ -f /data/log/osi-system.log ]; then wc -l < /data/log/osi-system.log; '
-                      'ls -i /data/log/osi-system.log; fi')
+    # logd can rename the file between the two readings, so the inode is read on
+    # both sides of the count: when it changed, the count is not the new file's
+    # and the guest answers 0 for it, which has the read start at the first line.
+    LOG_CHECKPOINT = ('f=/data/log/osi-system.log\n'
+                      'if [ -f "$f" ]; then\n'
+                      '    id() { set -- $(ls -i "$1" 2>/dev/null); echo "$1"; }\n'
+                      '    a=$(id "$f"); n=$(wc -l < "$f"); b=$(id "$f")\n'
+                      '    if [ "$a" = "$b" ]; then echo "$n"; else echo 0; fi\n'
+                      '    echo "$b"\n'
+                      'fi')
     log_from = 0
     log_inode = ''
 
@@ -184,8 +192,8 @@ class Guest:
         if inspection:
             with timed(self, 'inspection console', 180):
                 report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
-            if report.group(1) != b'READY':
-                raise RuntimeError('inspection shell could not mount the persistent overlay')
+                if report.group(1) != b'READY':
+                    raise RuntimeError('inspection shell could not mount the persistent overlay')
             self.send(b'stty -echo\n')
             return
         return self.console(before_console)

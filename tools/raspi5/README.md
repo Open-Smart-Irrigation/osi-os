@@ -94,11 +94,15 @@ Every boot wait notes its elapsed time against its budget, in the case
 directory's `harness-events.log` and at the end of the case's results line:
 `api ready after 512.3 s (budget 900 s)`. The API wait after a start allows
 420 s; the Pi 4 runner gives it 900 s (`tools/raspi4/pi4.py`). An API wait
-longer than 600 s also keeps `boot-timing-N.syslog` and `boot-timing-N.txt` in
-the case directory: the boot's phase lines from the guest's persistent syslog,
-and their timing. The read goes by that file's inode, so a log logd rotated
-since the console answered is still read. The boot begins in the log where the
-guest clock last went backwards; a phase whose start lies before that says so.
+longer than 600 s that passes also keeps `boot-timing-N.syslog` and
+`boot-timing-N.txt` in the case directory: the boot's phase lines from the
+guest's persistent syslog, and their timing. A wait that runs out keeps no such
+files, because the guest's shell is still in the poll loop. The read asks the
+guest; one that fails is said on the results line.
+
+The read goes by the file's inode, so a log logd rotated since the console
+answered is still read. The boot begins in the log where the guest clock last
+went backwards; a phase whose start lies before that says so.
 `python3 tools/raspi5/boot_timing.py SYSLOG` gives the same timing for a kept
 syslog. `--api-answer` takes the guest clock the API wait printed at the first
 401.

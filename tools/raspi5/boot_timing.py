@@ -55,7 +55,7 @@ BOOTSTRAP_DONE = re.compile(r' osi-bootstrap: (?:Node-RED restart re|identityd i
 # First-boot work besides the bootstrap: the LoRaWAN device import, which
 # arrives through procd's rc.d runner.
 DEVICE_IMPORT = re.compile(r'procd: /etc/rc\.d/S99zzz-lorawan-devices\.init: ')
-NODE_RED = re.compile(r' node\[(\d+)\]: (?:\d\d \w{3} \d\d:\d\d:\d\d - \[info\] )?'
+NODE_RED = re.compile(r' node\[(\d+)\]: (?:\d{1,2} \w{3} \d\d:\d\d:\d\d - \[info\] )?'
                       r'(Welcome to Node-RED|Loading palette nodes|Settings file|Server now running at)')
 # Node-RED logs "Settings file" first once its palette nodes are loaded, and
 # "Server now running" when /api/me can answer.

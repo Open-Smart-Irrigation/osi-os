@@ -461,6 +461,10 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
     expected = expected_cases(args, None, customer_selected, historical=historical)
 
     def summarize(*, aborted=False):
+        # Boot waits no case row took, as when the run stops before its first case.
+        waits = unlisted_waits()
+        if waits:
+            record('Boot waits no case row took: ' + ', '.join(waits))
         record('Case | Expected | Observed | Verdict | Reason | Required replacements')
         passed = required = 0
         failed = aborted or bool(results.keys() - expected.keys())

@@ -33,7 +33,8 @@ def api_poll_answer(answer_at):
     def command(script, timeout):
         # With fast curls and two seconds between polls, each poll stands for two seconds.
         fixture = (f'polls=0\ncurl() {{ [ "$polls" -ge {answer_at - 1} ] && printf 401; }}\n'
-                   'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n')
+                   'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n'
+            'date() { echo "Sun Apr 13 16:49:00 2025"; }\n')
         result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
         return result.returncode, result.stdout.strip()
     return command

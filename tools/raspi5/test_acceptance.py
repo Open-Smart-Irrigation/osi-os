@@ -3729,6 +3729,54 @@ class TailscaleBootTests(unittest.TestCase):
             self.assertEqual(vm.log_from, 27)
             self.assertEqual(BootWaitTests.noted(vm), ['shell prompt ready after T s (budget 40 s)'])
 
+    def test_the_tailscale_login_waits_use_the_wait_timer_and_not_the_bootstrap_collector(self):
+        # run() keeps a local function named timed, the osi-bootstrap collector. Called with the
+        # timer's arguments it returns nothing to enter, so the login wait would fail before the
+        # console is read.
+        outcome, made = {}, []
+
+        class Stop(Exception):
+            pass
+
+        def test(label, fn):
+            try:
+                outcome[label] = fn()
+            except Exception as error:  # the runner's test() records, never raises
+                outcome[label] = error
+
+        def make_guest(work, image, qemu, ram, **options):
+            vm = Mock()
+            vm.started = time.monotonic()
+            vm.shell.side_effect = Stop('the console was read')
+            states = []
+
+            def command(shell, _timeout=90, **_options):
+                if 'sha256sum /etc/init.d/tailscale' in shell:
+                    states.append(1)
+                    link = 'S80tailscale' if len(states) == 1 else 'S99tailscale'
+                    return 0, f'{digest}\nlink {link} ../init.d/tailscale\ndaemon 4187\n'
+                if 'uci get osi-server.cloud.firmware_version' in shell:
+                    return 0, '0.8.0' if len(states) == 1 else '0.8.5'
+                return 0, ''
+
+            vm.command.side_effect = command
+            made.append(vm)
+            return vm
+
+        args = type('Args', (), {'qemu': Path('qemu'), 'ram': 4, 'osi_version': '0.8.5'})()
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+            (release/tailscale_boot.INIT).parent.mkdir(parents=True)
+            (release/tailscale_boot.INIT).write_text('OSI_CLEANUP_LIMIT=15\n')
+            digest = hashlib.sha256((release/tailscale_boot.INIT).read_bytes()).hexdigest()
+            with (redirect_stdout(io.StringIO()), patch.object(suite_vm, 'timed', wraps=suite_vm.timed) as timer):
+                tailscale_boot.run(args, release, release, release, make_guest, test, lambda row: None,
+                                   lambda old: release/'fixture.img.gz', lambda: release/'upgrade.img', Mock())
+        upgraded = made[0]
+        self.assertIsInstance(outcome[tailscale_boot.STALL_CASE], Stop, repr(outcome[tailscale_boot.STALL_CASE]))
+        upgraded.expect.assert_called_once_with(tailscale_boot.CONSOLE, SLOW_BOOT_SECONDS)
+        timer.assert_called_once_with(upgraded, 'login prompt', SLOW_BOOT_SECONDS)
+
     def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
         vm = Mock()
         vm.command.return_value = (0, 'S80tailscale\ndigest=a874f9fd10321e57b00660af11695618e23fb622bb1a40bcd0d366dad1340e56')
@@ -3771,7 +3819,8 @@ class BootWaitTests(unittest.TestCase):
         def command(script, timeout):
             # With fast curls and two seconds between polls, each poll stands for two seconds.
             fixture = (f'polls=0\ncurl() {{ [ "$polls" -ge {answer_at - 1} ] && printf 401; }}\n'
-                       'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n')
+                       'sleep() { [ "$1" = 2 ] || exit 2; polls=$((polls + 1)); }\n'
+                       'date() { echo "Sun Apr 13 16:49:00 2025"; }\n')
             result = subprocess.run(['sh', '-c', fixture + script], capture_output=True, text=True)
             return result.returncode, result.stdout.strip()
         return command
@@ -3787,7 +3836,8 @@ class BootWaitTests(unittest.TestCase):
             vm = self.guest(directory)
             # The measured 246 s factory first boot is the 124th poll.
             vm.command.side_effect = self.polls_until(124)
-            self.assertRegex(upgrade_suite.wait_for_api(vm), r'^\w{3} \w{3} +\d+ \d\d:\d\d:\d\d \d{4}$')
+            # The guest clock at the first 401, as the image's date prints it.
+            self.assertEqual(upgrade_suite.wait_for_api(vm), 'Sun Apr 13 16:49:00 2025')
             script, timeout = vm.command.call_args.args
             self.assertEqual(timeout, 420)
             self.assertIn('seq 1 210', script)
@@ -3937,7 +3987,8 @@ class BootWaitTests(unittest.TestCase):
                 return 0, log
 
             vm.command.side_effect = command
-            with patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]):
+            # Readings: the wait begins, the wait ends, its note is written.
+            with patch('time.monotonic', side_effect=[100.0, 1017.4, 1017.3]):
                 upgrade_suite.wait_for_api(vm)
             self.assertEqual(vm.waits, (
                 'api ready after 917.3 s (budget 420 s)',
@@ -3946,6 +3997,60 @@ class BootWaitTests(unittest.TestCase):
             self.assertEqual((vm.receipts/'boot-timing-3.syslog').read_text(), log + '\n')
             self.assertEqual((vm.receipts/'boot-timing-3.txt').read_text(), boot_timing.format_phases(
                 boot_timing.boot_phases(log, 'Sun Apr 13 16:51:09 2025')) + '\n')
+
+    def test_a_slow_receipt_does_not_push_a_wait_under_the_threshold_into_a_kept_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            vm.command.side_effect = self.polls_until(1)
+            # The wait itself took 599 s; writing its note to the receipt took far longer.
+            with (patch('time.monotonic', side_effect=[100.0, 699.0, 7200.0]),
+                  patch.object(boot_timing, 'keep') as keep):
+                upgrade_suite.wait_for_api(vm)
+            keep.assert_not_called()
+            self.assertRegex(vm.waits[0], r'^api ready after 7100\.0 s \(budget 420 s\)$')
+
+    def test_a_failed_inspection_mount_is_noted_as_not_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vm = self.guest(directory)
+            failed = re.search(rb'(FAILED)', b'OSI_INSPECT_FAILED')
+            with (patch.object(vm, 'launch'), patch.object(vm, 'expect', return_value=failed)):
+                with self.assertRaisesRegex(RuntimeError, 'could not mount the persistent overlay'):
+                    Guest.start(vm, inspection=True)
+            self.assertEqual(self.noted(vm), ['inspection console not ready after T s (budget 180 s)'])
+
+    def test_a_boot_wait_noted_before_any_case_reaches_the_results_log_when_the_run_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root/'rpi5.img.gz'
+            image.write_bytes(b'fixture')
+            made = []
+
+            def make(_work, _image, *_args, **_options):
+                folder = root/f'guest-{len(made)}'
+                folder.mkdir()
+                vm = self.guest(folder)
+
+                def probe():
+                    # The factory image's console never answered; the wait ran out.
+                    suite_vm.note_wait(vm, 'login prompt not ready after 180.0 s (budget 180 s)')
+                    raise TimeoutError('guest serial timed out')
+
+                vm.start.side_effect = probe
+                made.append(vm)
+                return vm
+
+            args = SimpleNamespace(candidate=image, candidate_sha256=hashlib.sha256(b'fixture').hexdigest(),
+                                   fixtures=root, qemu=None, ram=8, release_revision='a'*40, osi_version='0.8.3',
+                                   flows_power_cut_only=False, customer_fixture_only=False,
+                                   upgrade_boot_safety_only=False)
+            with (redirect_stdout(io.StringIO()),
+                  patch.object(acceptance, 'verified_archive',
+                               side_effect=lambda source, *_args, **_options: source)):
+                self.assertEqual(acceptance.run_cases(args, root, root, root, 'recovery', False, guest_class=make), 1)
+            result = (root/'results.log').read_text()
+            self.assertIn('Factory image capability probe failed: guest serial timed out', result)
+            self.assertIn('Boot waits no case row took: login prompt not ready after 180.0 s (budget 180 s)', result)
+            self.assertEqual(result.count('login prompt not ready after 180.0 s'), 1)
 
     def test_boot_timing_says_when_the_api_wait_printed_no_guest_clock(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4259,6 +4364,16 @@ class BootTimingTests(unittest.TestCase):
         self.assertIn('  osi-bootstrap: ended 16:44:17, start not in this log', boot_timing.format_phases(phases))
         self.assertIn('osi-bootstrap ended 16:44:17, start not in the log', boot_timing.summarize(phases))
 
+    def test_node_red_lines_of_a_single_digit_day_are_read(self):
+        # Node-RED logs through util.log, which writes the day of the month without a leading zero.
+        log = '\n'.join([
+            self.line('16:46:50', self.NODE + '6749]: Welcome to Node-RED'),
+            self.line('16:47:08', self.NODE + '6749]: 3 Apr 16:47:08 - [info] Loading palette nodes'),
+            self.line('16:48:40', self.NODE + '6749]: 3 Apr 16:48:40 - [info] Settings file  : /srv/node-red/settings.js'),
+        ])
+        run = boot_timing.boot_phases(log)['node_red'][0]
+        self.assertEqual((run['node_load_start'], run['node_load_seconds']), (self.stamp('16:47:08'), 92))
+
     def test_a_backwards_clock_step_leaves_the_span_unknown(self):
         # A same-date step back inside a run is neither a day-long stall nor a missing phase.
         log = '\n'.join([self.line('00:01:01', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
@@ -4555,6 +4670,29 @@ class BootTimingReadTests(unittest.TestCase):
                              f'{BootTimingTests.stamp("00:00:20", 14)}')
             self.assertEqual(boot_timing.boot_phases(out)['osi_bootstrap']['seconds'], 30)
 
+    def test_the_console_probe_pairs_the_line_count_with_the_inode_of_one_file(self):
+        # logd can rename the file between the probe's readings. The probe reads the inode on
+        # both sides of the count and gives no checkpoint when the file changed in between.
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            self.write(current, self.BOOT[:2])
+            original = os.stat(current).st_ino
+            # A rotation lands after the count, before the next ls: the wrapper arms it at wc.
+            armed, rotated = Path(directory)/'armed', Path(directory)/'rotated'
+            race = (f'f={quote(str(current))}; armed={quote(str(armed))}; rotated={quote(str(rotated))}\n'
+                    'wc() { command wc "$@"; : > "$armed"; }\n'
+                    'ls() { if [ -e "$armed" ] && [ ! -e "$rotated" ]; then : > "$rotated"; '
+                    'mv "$f" "$f.old"; echo later > "$f"; fi; command ls "$@"; }\n')
+            probe = Guest.LOG_CHECKPOINT.replace(boot_timing.SYSLOG, quote(str(current)))
+            raced = subprocess.run(['sh', '-c', race + probe], capture_output=True, text=True)
+            self.assertEqual(raced.returncode, 0, raced.stderr)
+            replaced = os.stat(current).st_ino
+            self.assertNotEqual(original, replaced)
+            # No line count of the file it found: the read starts at that file's first line.
+            self.assertEqual(suite_vm.log_checkpoint(raced.stdout), (0, str(replaced)))
+            quiet = subprocess.run(['sh', '-c', probe], capture_output=True, text=True)
+            self.assertEqual(suite_vm.log_checkpoint(quiet.stdout), (1, str(replaced)))
+
     def test_the_console_probe_reads_the_persistent_log_checkpoint(self):
         probe = lambda output: suite_vm.log_checkpoint(f'{output}\n   5678 /data/log/osi-system.log')
         self.assertEqual(probe('27'), (27, '5678'))
@@ -4563,9 +4701,11 @@ class BootTimingReadTests(unittest.TestCase):
         self.assertEqual(suite_vm.log_checkpoint('wc: read error'), (0, ''))
         # No inode readable (the ls failed): the lines still count, and no file will match.
         self.assertEqual(suite_vm.log_checkpoint('27'), (27, ''))
-        # The image's BusyBox has ls but no stat: the inode comes from ls -i.
-        self.assertIn('wc -l < /data/log/osi-system.log; ls -i /data/log/osi-system.log', Guest.LOG_CHECKPOINT)
+        # The image's BusyBox has ls but no stat: the inode comes from ls -i, read on both
+        # sides of the count.
         self.assertNotIn('stat ', Guest.LOG_CHECKPOINT)
+        self.assertLess(Guest.LOG_CHECKPOINT.index('a=$(id "$f")'), Guest.LOG_CHECKPOINT.index('n=$(wc -l < "$f")'))
+        self.assertLess(Guest.LOG_CHECKPOINT.index('n=$(wc -l < "$f")'), Guest.LOG_CHECKPOINT.index('b=$(id "$f")'))
 
 
 if __name__ == '__main__':

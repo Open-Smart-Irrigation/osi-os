@@ -149,7 +149,10 @@ def wait_for_api(vm):
     sleep 2
 done
 exit 1""", budget)
-    if time.monotonic() - began > boot_timing.SLOW_API_SECONDS:
+        # Read before the wait's note goes to its receipt: writing that note
+        # must not turn a wait under the threshold into a kept one.
+        elapsed = time.monotonic() - began
+    if elapsed > boot_timing.SLOW_API_SECONDS:
         boot_timing.keep(vm, answer)
     return answer
 
