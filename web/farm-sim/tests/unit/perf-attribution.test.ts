@@ -83,7 +83,8 @@ test('skipped callbacks cannot dilute the render gate or hide checkpoint CPU tim
   const measured = {heapClosedBytes: 1, heapAfterBytes: 1, heapOpenBytes: 1, phoneFirstOpenMs: 1};
   const result = evaluate(summarize(snapshot, measured), 6);
   assert.deepEqual(result.problems, []);
-  assert.deepEqual(requiredFailures(result, false).map(row => [row.id, row.value]), [
+  type PerfRow = ReturnType<typeof evaluate>['rows'][number];
+  assert.deepEqual(requiredFailures(result, false).map((row: PerfRow) => [row.id, row.value]), [
     ['frameP95', 30], ['coreTickAvg', 4.02],
   ]);
   snapshot.frames[0].rendered = false;
