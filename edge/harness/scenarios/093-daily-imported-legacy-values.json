@@ -1,0 +1,111 @@
+{
+  "name": "daily-imported-legacy-values",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-No data",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "No data",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "schedule-1",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "set-empty-last-applied",
+      "sql": "UPDATE irrigation_schedules SET last_applied_at='' WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "save-with-empty-last-applied",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "save-sub-half-minute",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 0.4
+        }
+      }
+    },
+    {
+      "id": "remove-actor",
+      "sql": "UPDATE users SET username='renamed' WHERE id=1"
+    },
+    {
+      "id": "invalid-body-after-actor-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "valid-body-after-actor-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20
+        }
+      }
+    }
+  ]
+}

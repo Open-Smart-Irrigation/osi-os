@@ -1,0 +1,349 @@
+{
+  "name": "r4-unicode-number",
+  "description": "Review round 4: JS ToNumber radix overflow, toUpperCase full mapping, encoded path ids, NOT NULL timezone write.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "set-zone-gateway",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "area-hex-overflow",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "0x10000000000000000"
+        }
+      }
+    },
+    {
+      "id": "area-binary-overflow",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "0b11111111111111111111111111111111111111111111111111111111111111111"
+        }
+      }
+    },
+    {
+      "id": "area-octal-overflow",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "0o77777777777777777777777"
+        }
+      }
+    },
+    {
+      "id": "area-hex-in-range",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "0x1fffffffffffff1"
+        }
+      }
+    },
+    {
+      "id": "area-nested-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": [
+            [
+              " 0o17 "
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "text-numbers",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "cropType": 1e+21,
+          "variety": 0,
+          "soilType": 1e-07,
+          "irrigationMethod": 0.30000000000000004,
+          "notes": 123456789012345680000,
+          "calibrationKey": [
+            1,
+            [
+              2,
+              null
+            ],
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "id": "prediction-array-upper",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "predictionCardEnabled": [
+            "TRUE"
+          ]
+        }
+      }
+    },
+    {
+      "id": "prediction-leading-space",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "predictionCardEnabled": " true"
+        }
+      }
+    },
+    {
+      "id": "weather-kelvin-sign",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "weatherSource": "KIWI_SOURCE"
+        }
+      }
+    },
+    {
+      "id": "stage-dotted-capital",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "İNITIAL"
+        }
+      }
+    },
+    {
+      "id": "timezone-null",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "timezone": null
+        }
+      }
+    },
+    {
+      "id": "rename-hex-overflow-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/0x10000000000000000/name",
+        "auth": "token",
+        "body": {
+          "name": "Hex overflow"
+        }
+      }
+    },
+    {
+      "id": "rename-binary-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/0b1/name",
+        "auth": "token",
+        "body": {
+          "name": "Binary id"
+        }
+      }
+    },
+    {
+      "id": "config-encoded-slash-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1%2F2/config",
+        "auth": "token",
+        "body": {
+          "notes": "slash id"
+        }
+      }
+    },
+    {
+      "id": "list-zones",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "claim-ligature-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "a8404100000001ﬀ",
+          "name": "Ligature EUI",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-ligature-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000192",
+          "name": "Ligature key",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEﬀ"
+        }
+      }
+    },
+    {
+      "id": "claim-sharp-s-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A84041000000019ß",
+          "name": "Sharp EUI",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-array-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": [
+            "a840410000000194"
+          ],
+          "name": "Array EUI",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-hex-overflow-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000196",
+          "name": "Hex zone",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "zone_id": "0x10000000000000000"
+        }
+      }
+    },
+    {
+      "id": "list-devices",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "rename-ligature-path",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A8404100000001%EF%AC%80/name",
+        "auth": "token",
+        "body": {
+          "name": "Renamed ligature"
+        }
+      }
+    },
+    {
+      "id": "rename-sharp-s-path",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A84041000000019%C3%9F/name",
+        "auth": "token",
+        "body": {
+          "name": "Renamed sharp"
+        }
+      }
+    },
+    {
+      "id": "list-devices-after-rename",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

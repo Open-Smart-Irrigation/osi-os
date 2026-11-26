@@ -1,0 +1,219 @@
+{
+ "name": "valve-cancel-v1",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "missing-bearer",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "none",
+    "body": {}
+   }
+  },
+  {
+   "id": "invalid-token",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "Bearer bogus",
+    "body": {}
+   }
+  },
+  {
+   "id": "expired-token",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoxfQ.ywow-Ugew_qi3iEW8PEegwylhX2oNhQJ8XovBcF1W14",
+    "body": {}
+   }
+  },
+  {
+   "id": "missing-eui",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/%20/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "unknown-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000000F/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "wrong-device-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000002/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "no-active-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "unknown-expectation",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {
+     "expectation_id": "unknown"
+    }
+   }
+  },
+  {
+   "id": "seed-other-owner",
+   "sql": "INSERT INTO users(id,username,password_hash,user_uuid,role,created_at,updated_at) VALUES (2,'other','unused','b9400000-0000-4000-8000-000000000001','admin','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); UPDATE devices SET user_id=2 WHERE deveui='A840410000000001'"
+  },
+  {
+   "id": "other-owner",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "restore-owner",
+   "sql": "UPDATE devices SET user_id=1 WHERE deveui='A840410000000001'"
+  },
+  {
+   "id": "seed-ambiguous-opens",
+   "sql": "INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at) VALUES ('a','A840410000000001',1,'2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z'),('b','A840410000000001',1,'2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z');"
+  },
+  {
+   "id": "ambiguous-no-queue-items",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "clear-seeded-opens",
+   "sql": "DELETE FROM valve_actuation_expectations WHERE expectation_id IN ('a','b')"
+  },
+  {
+   "id": "single-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "versioned-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "pin-ended-id",
+   "sql": "UPDATE valve_actuation_expectations SET expectation_id='b9400000-0000-4000-8000-000000000002' WHERE reconciliation_state='CANCELLED'"
+  },
+  {
+   "id": "named-ended-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000001/cancel",
+    "auth": "token",
+    "body": {
+     "expectation_id": "b9400000-0000-4000-8000-000000000002"
+    }
+   }
+  },
+  {
+   "id": "seed-conditional-cancel-branches",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,target_state,created_at,updated_at) VALUES ('A840410000000004','Valve 4','STREGA_VALVE',1,1,'CLOSED','OPEN','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('bb545100-0000-4000-8000-000000000004','A840410000000004',1,'bb545100-0000-4000-8000-000000000004','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','PENDING_OBSERVATION','2026-11-23T06:00:00.000Z','{}');\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('bb545100-0000-4000-8000-000000000004','{{date:+0}}','06:00','A840410000000004','2026-11-23T06:00:00.000Z','bb545100-0000-4000-8000-000000000004','RESERVED');\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,target_state,created_at,updated_at) VALUES ('A840410000000005','Valve 5','STREGA_VALVE',1,1,'CLOSED','OPEN','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('bb545100-0000-4000-8000-000000000005','A840410000000005',1,'bb545100-0000-4000-8000-000000000005','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','PENDING_OBSERVATION','2026-11-23T06:00:00.000Z','{\"phase\":\"enqueue_rejected\"}');\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('bb545100-0000-4000-8000-000000000005','{{date:+0}}','06:00','A840410000000005','2026-11-23T06:00:00.000Z','bb545100-0000-4000-8000-000000000005','ATTEMPTED');\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,target_state,created_at,updated_at) VALUES ('A840410000000006','Valve 6','STREGA_VALVE',1,1,'CLOSED','OPEN','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('bb545100-0000-4000-8000-000000000006','A840410000000006',1,'bb545100-0000-4000-8000-000000000006','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','OBSERVED_RUNNING','2026-11-23T06:00:00.000Z','{\"phase\":\"ACCEPTED\"}');\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('bb545100-0000-4000-8000-000000000006','{{date:+0}}','06:00','A840410000000006','2026-11-23T06:00:00.000Z','bb545100-0000-4000-8000-000000000006','SENT');\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,target_state,created_at,updated_at) VALUES ('A840410000000007','Valve 7','STREGA_VALVE',1,1,'CLOSED','OPEN','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('bb545100-0000-4000-8000-000000000007','A840410000000007',1,'bb545100-0000-4000-8000-000000000007','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','PENDING_OBSERVATION','2026-11-23T06:00:00.000Z','{\"phase\":\"ATTEMPTED\"}');\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('bb545100-0000-4000-8000-000000000007','{{date:+0}}','06:00','A840410000000007','2026-11-23T06:00:00.000Z','bb545100-0000-4000-8000-000000000007','ATTEMPTED');"
+  },
+  {
+   "id": "conditional-local-reservation",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000004/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "conditional-rejected-before-acceptance",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000005/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "conditional-already-running",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000006/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "conditional-attempted-with-no-queue-frame",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000000007/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  }
+ ]
+}

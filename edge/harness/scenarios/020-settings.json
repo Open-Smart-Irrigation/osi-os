@@ -1,0 +1,30 @@
+{
+  "name": "settings",
+  "description": "Gateway system settings read and write on a fresh gateway: token gates, timezone and module-switch validation, the network module's auto default with and without a registered field tester, applyToAllZones with a real zone, and read-back after write (routes #4 and #5).",
+  "steps": [
+    { "id": "register", "http": { "method": "POST", "path": "/auth/register", "body": { "username": "farmer", "password": "synthetic-pass-1" } } },
+    { "id": "login", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "farmer", "password": "synthetic-pass-1" } }, "capture": { "token": "json.token" } },
+    { "id": "settings-get-fresh", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "settings-get-no-token", "http": { "method": "GET", "path": "/api/system/settings" } },
+    { "id": "settings-get-bad-token", "http": { "method": "GET", "path": "/api/system/settings", "auth": "Bearer abc.def" } },
+    { "id": "settings-put-no-token", "http": { "method": "PUT", "path": "/api/system/settings", "body": { "gatewayTimezone": "Europe/Zurich" } } },
+    { "id": "settings-put-empty", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": {} } },
+    { "id": "settings-put-bad-timezone", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Not/AZone" } } },
+    { "id": "settings-put-module-wrong-type", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "dataModuleEnabled": "yes" } } },
+    { "id": "settings-put-journal-auto-refused", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "journalModuleEnabled": "auto" } } },
+    { "id": "settings-put-ok", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich", "applyToAllZones": true } } },
+    { "id": "settings-get-after-put", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "settings-put-module-only", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "journalModuleEnabled": false } } },
+    { "id": "settings-put-two-modules", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "dataModuleEnabled": false, "gatewayHubModuleEnabled": false } } },
+    { "id": "settings-put-network-auto-absent", "why": "No stored row and no field tester: 'auto' deletes nothing and the derived default reads false.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "networkModuleEnabled": "auto" } } },
+    { "id": "settings-put-network-on", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "networkModuleEnabled": true } } },
+    { "id": "settings-put-network-auto-clears", "why": "A stored row exists now: 'auto' deletes it, so the read-back derives from gateway facts again.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "networkModuleEnabled": "auto" } } },
+    { "id": "settings-put-network-wrong-string", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "networkModuleEnabled": "false" } } },
+    { "id": "seed-zone", "sql": "INSERT INTO irrigation_zones (name, user_id, timezone, zone_uuid, gateway_device_eui, created_at, updated_at, sync_version) VALUES ('Orchard', 1, 'UTC', 'd10a7c55-0000-4000-8000-000000000001', '0016C001F1000001', '2026-11-19 08:00:00', '2026-11-19 08:00:00', 1)" },
+    { "id": "settings-put-apply-zones", "why": "applyToAllZones with one live zone on a different timezone: count-then-update inside one transaction.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich", "applyToAllZones": true } } },
+    { "id": "settings-get-zones-applied", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "seed-field-tester", "sql": "INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at, sync_version) VALUES ('A8404100000000F1', 'Field tester', 'RAK10701_FIELD_TESTER', NULL, '2026-11-19T08:00:00.000Z', '2026-11-19T08:00:00.000Z', 1)" },
+    { "id": "settings-put-network-auto-derived", "why": "No stored row, but a live RAK10701 exists: the 'auto' default now derives true.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "networkModuleEnabled": "auto" } } },
+    { "id": "settings-get-final", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } }
+  ]
+}

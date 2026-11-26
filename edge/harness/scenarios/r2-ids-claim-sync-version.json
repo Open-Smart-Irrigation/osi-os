@@ -1,0 +1,189 @@
+{
+ "name": "r2-ids-claim-sync-version",
+ "description": "fix-ids-r2 N3: claim of an existing unclaimed device whose sync_version is REAL, TEXT, NULL, negative or past 2^53; the UPDATE spells Number(v || 0) + 1 (legacy).",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "existing",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,sync_version,created_at,updated_at) VALUES ('A840410000000021','D21','KIWI_SENSOR',NULL,2.5,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000022','D22','KIWI_SENSOR',NULL,'7','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000023','D23','KIWI_SENSOR',NULL,123456789012345696,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000024','D24','KIWI_SENSOR',NULL,'abc','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000025','D25','KIWI_SENSOR',NULL,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000026','D26','KIWI_SENSOR',NULL,0,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000027','D27','KIWI_SENSOR',NULL,-3,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000028','D28','KIWI_SENSOR',NULL,1e21,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000029','D29','KIWI_SENSOR',NULL,0.30000000000000004,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000030','D30','KIWI_SENSOR',NULL,' 0x10 ','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000032','D32','KIWI_SENSOR',NULL,'','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "claim-21",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000021",
+     "name": "Dev 21",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-22",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000022",
+     "name": "Dev 22",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-23",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000023",
+     "name": "Dev 23",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-24",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000024",
+     "name": "Dev 24",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-25",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000025",
+     "name": "Dev 25",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-26",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000026",
+     "name": "Dev 26",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-27",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000027",
+     "name": "Dev 27",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-28",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000028",
+     "name": "Dev 28",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-29",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000029",
+     "name": "Dev 29",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-30",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000030",
+     "name": "Dev 30",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-32",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000032",
+     "name": "Dev 32",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  }
+ ]
+}

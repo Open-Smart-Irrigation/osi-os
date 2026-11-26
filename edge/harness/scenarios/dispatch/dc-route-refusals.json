@@ -1,0 +1,118 @@
+{
+  "name": "dc-route-refusals",
+  "description": "Dispatch-inventory probe: refusals that must come before a write on register, the daily-schedule save and zone create, and the password rehash a login may write.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "register-same-username",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-2"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Refusal zone",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "schedule-no-token",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "schedule-bad-threshold",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 500,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "rename-user",
+      "why": "The token names a username that no longer exists.",
+      "sql": "UPDATE users SET username='renamed' WHERE id=1;"
+    },
+    {
+      "id": "zone-create-user-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Orphan zone",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "restore-user",
+      "sql": "UPDATE users SET username='farmer' WHERE id=1;"
+    },
+    {
+      "id": "seed-plain-user",
+      "why": "A second local account whose stored password is not a bcrypt hash (legacy import).",
+      "sql": "INSERT INTO users(username,password_hash,created_at) VALUES ('plain','synthetic-pass-9','2026-11-23T06:00:00.000Z');"
+    },
+    {
+      "id": "login-plaintext",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "plain",
+          "password": "synthetic-pass-9"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+{
+  "name": "r4-dispatch-uplink-field-tester",
+  "_comment": "Dispatch round 4 (confirm-B2 N1). Needs CHIRPSTACK_APP_FIELD_TESTER=synthetic-field-tester-app on both sides: record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-fieldtester-node.sh and replay Go through a wrapper that runs `exec env CHIRPSTACK_APP_FIELD_TESTER=synthetic-field-tester-app <osi-edge> \"$@\"`. Process STREGA and the KIWI storage node skip an uplink from the field-tester application (applicationId trimmed and lower-cased) before their writes; Process STREGA's in-memory dedup and the KIWI uplink key drop a repeat of the same deduplicationId; later reports are processed.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+    },
+    {
+      "id": "field-tester-open",
+      "uplink": {
+        "topic": "application/synthetic-field-tester-app/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:05:00.000Z",
+          "deduplicationId": "r4-ft-open",
+          "fCnt": 1,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-field-tester-app"
+          },
+          "object": {
+            "Valve": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": "field-tester-open-padded",
+      "uplink": {
+        "topic": "application/ SYNTHETIC-FIELD-TESTER-APP\t/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:05:30.000Z",
+          "deduplicationId": "r4-ft-open-padded",
+          "fCnt": 2,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": " SYNTHETIC-FIELD-TESTER-APP\t"
+          },
+          "object": {
+            "Valve": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": "report-open",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:06:00.000Z",
+          "deduplicationId": "r4-open",
+          "fCnt": 3,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": "report-open-repeat",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:06:00.000Z",
+          "deduplicationId": "r4-open",
+          "fCnt": 3,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": "report-close",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:07:00.000Z",
+          "deduplicationId": "r4-close",
+          "fCnt": 4,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0"
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-field-tester",
+      "uplink": {
+        "topic": "application/synthetic-field-tester-app/device/a840410000000002/event/up",
+        "payload": {
+          "deduplicationId": "r4-kiwi-ft",
+          "time": "2026-11-23T06:08:00.000Z",
+          "deviceInfo": {
+            "applicationId": "synthetic-field-tester-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000002"
+          },
+          "object": {
+            "watermark1_frequency": 4330,
+            "watermark2_frequency": 293,
+            "ambient_temperature": 1.25
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-report",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000002/event/up",
+        "payload": {
+          "deduplicationId": "r4-kiwi",
+          "time": "2026-11-23T06:09:00.000Z",
+          "deviceInfo": {
+            "applicationId": "synthetic-sensors-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000002"
+          },
+          "object": {
+            "watermark1_frequency": 4330,
+            "watermark2_frequency": 293,
+            "ambient_temperature": 1.25
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-report-repeat",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000002/event/up",
+        "payload": {
+          "deduplicationId": "r4-kiwi",
+          "time": "2026-11-23T06:09:00.000Z",
+          "deviceInfo": {
+            "applicationId": "synthetic-sensors-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000002"
+          },
+          "object": {
+            "watermark1_frequency": 4330,
+            "watermark2_frequency": 293,
+            "ambient_temperature": 1.25
+          }
+        }
+      }
+    }
+  ]
+}

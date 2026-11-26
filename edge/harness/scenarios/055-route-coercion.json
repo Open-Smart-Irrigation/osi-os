@@ -1,0 +1,971 @@
+{
+  "name": "route-coercion",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-Plan zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Plan zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "seed-valves",
+      "why": "Start with owned, foreign and unclaimed device records. Radio provisioning only creates or claims a device for the caller and cannot reproduce all these starting states.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000002','Valve east','STREGA_VALVE',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','CLOSED','CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000003','Kiwi probe','KIWI_SENSOR',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z',NULL,NULL); INSERT INTO devices(deveui,name,type_id,current_state,created_at,updated_at) VALUES ('A840410000000004','Unclaimed','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000005','Foreign','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000006','Second generation','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');"
+    },
+    {
+      "id": "assign-valves",
+      "why": "Attach the fixture devices to the HTTP-created zone and configure a second hardware generation without calling ChirpStack provisioning.",
+      "sql": "UPDATE devices SET irrigation_zone_id=1 WHERE deveui IN ('A840410000000002','A840410000000003','A840410000000004','A840410000000005','A840410000000006');\n    INSERT INTO users(id,username,password_hash,user_uuid,role,created_at) VALUES(2,'other','synthetic-unused','synthetic-other','researcher','2020-01-01T00:00:00.000Z');\n    UPDATE devices SET user_id=2 WHERE deveui='A840410000000005';\n    INSERT INTO valve_settings(device_eui,strega_generation,scheduler_status) VALUES('A840410000000006','GEN2','DEACTIVATED');"
+    },
+    {
+      "id": "signed-username-me",
+      "http": {
+        "method": "GET",
+        "path": "/api/me",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo"
+      }
+    },
+    {
+      "id": "signed-username-zones",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo"
+      }
+    },
+    {
+      "id": "signed-username-zone-create",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "name": "Synthetic"
+        }
+      }
+    },
+    {
+      "id": "signed-username-zone-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/name",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "name": "Synthetic"
+        }
+      }
+    },
+    {
+      "id": "signed-username-zone-config",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "notes": "Synthetic"
+        }
+      }
+    },
+    {
+      "id": "signed-username-devices",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo"
+      }
+    },
+    {
+      "id": "signed-username-device-claim",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {}
+      }
+    },
+    {
+      "id": "signed-username-device-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A840410000000003/name",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "name": "Synthetic"
+        }
+      }
+    },
+    {
+      "id": "signed-username-valve",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "signed-username-cancel",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002/cancel",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {}
+      }
+    },
+    {
+      "id": "signed-username-valve-list",
+      "http": {
+        "method": "GET",
+        "path": "/api/valves",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo"
+      }
+    },
+    {
+      "id": "signed-username-zone-schedule",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "trigger_metric": "SWT_WM1",
+          "threshold_kpa": 10
+        }
+      }
+    },
+    {
+      "id": "manual-action",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002",
+        "auth": "token",
+        "body": {
+          "action": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "manual-minutes",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "manual-seconds",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002",
+        "auth": "token",
+        "body": {
+          "action": "OPEN",
+          "duration_seconds": [
+            {
+              "toString": null
+            }
+          ],
+          "duration_minutes": 10
+        }
+      }
+    },
+    {
+      "id": "manual-close-ignores-duration",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE",
+          "duration_seconds": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-reason",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002/cancel",
+        "auth": "token",
+        "body": {
+          "reason": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "cancel-expectation",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000002/cancel",
+        "auth": "token",
+        "body": {
+          "expectation_id": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "valve-schedule-kind",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "valve-schedule-duration_minutes",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "duration_minutes": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "valve-schedule-weekdays_mask",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": {
+            "toString": null
+          },
+          "duration_minutes": 15
+        }
+      }
+    },
+    {
+      "id": "valve-schedule-label",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "label": {
+            "toString": null
+          },
+          "duration_minutes": 15
+        }
+      }
+    },
+    {
+      "id": "zone-schedule-trigger_metric",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": {
+            "toString": null
+          },
+          "threshold_kpa": 10
+        }
+      }
+    },
+    {
+      "id": "zone-schedule-threshold_kpa",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-schedule-duration_minutes",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_WM1",
+          "threshold_kpa": 10,
+          "duration_minutes": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-schedule-response_mode",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_WM1",
+          "threshold_kpa": 10,
+          "response_mode": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-schedule-enabled",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_WM1",
+          "threshold_kpa": 10,
+          "enabled": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-config-lat",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "lat": {
+            "toString": null
+          },
+          "lon": 12
+        }
+      }
+    },
+    {
+      "id": "zone-config-efficiency",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "irrigationEfficiencyPct": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-config-stage",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": {
+            "toString": null
+          },
+          "notes": "Must not persist"
+        }
+      }
+    },
+    {
+      "id": "zone-config-calibration",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "cropType": "Must not persist",
+          "calibrationKey": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-application",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-application",
+          "time": "2026-11-01T00:00:00.000Z",
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": {
+              "toString": null
+            },
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": "KIWI",
+            "deviceName": "kiwi-1",
+            "devEui": "a840410000000003",
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-profile",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-profile",
+          "time": "2026-11-01T00:00:00.000Z",
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": "synthetic-sensors-app",
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": {
+              "toString": null
+            },
+            "deviceName": "kiwi-1",
+            "devEui": "a840410000000003",
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-eui",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-eui",
+          "time": "2026-11-01T00:00:00.000Z",
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": "synthetic-sensors-app",
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": "KIWI",
+            "deviceName": "kiwi-1",
+            "devEui": {
+              "toString": null
+            },
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-time",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-time",
+          "time": [
+            {
+              "toString": null
+            }
+          ],
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": "synthetic-sensors-app",
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": "KIWI",
+            "deviceName": "kiwi-1",
+            "devEui": "a840410000000003",
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-reading",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-reading",
+          "time": "2026-11-01T00:00:00.000Z",
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": "synthetic-sensors-app",
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": "KIWI",
+            "deviceName": "kiwi-1",
+            "devEui": "a840410000000003",
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": {
+              "toString": null
+            },
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "kiwi-legacy-date-control",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000003/event/up",
+        "payload": {
+          "deduplicationId": "kiwi-coercion-legacy-date-control",
+          "time": "{{date:+0:/}} 00:00:00 GMT",
+          "deviceInfo": {
+            "tenantId": "00000000-0000-4000-8000-00000000aaaa",
+            "tenantName": "synthetic",
+            "applicationId": "synthetic-sensors-app",
+            "applicationName": "Sensors",
+            "deviceProfileId": "ae4194a5-56f8-4ca0-a129-8ad958505e1e",
+            "deviceProfileName": "KIWI",
+            "deviceName": "kiwi-1",
+            "devEui": "a840410000000003",
+            "tags": {}
+          },
+          "devAddr": "01020304",
+          "adr": true,
+          "dr": 5,
+          "fCnt": 1,
+          "fPort": 10,
+          "confirmed": false,
+          "data": "BQQK+wYEApsJZRCjC2f/ngtojAC6Vw==",
+          "rxInfo": [
+            {
+              "gatewayId": "0016c001f1000001",
+              "uplinkId": 1,
+              "rssi": -60,
+              "snr": 7.5,
+              "channel": 0,
+              "location": {},
+              "context": "AAAAAA==",
+              "crcStatus": "CRC_OK"
+            }
+          ],
+          "txInfo": {
+            "frequency": 868100000,
+            "modulation": {
+              "lora": {
+                "bandwidth": 125000,
+                "spreadingFactor": 7,
+                "codeRate": "CR_4_5"
+              }
+            }
+          },
+          "object": {
+            "raw": "[05, 04, 0A, FB, 06, 04, 02, 9B, 09, 65, 10, A3, 0B, 67, FF, 9E, 0B, 68, 8C, 00, BA, 57]",
+            "port": "10",
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "Battery Status": {
+              "level": 3.37,
+              "eos_alert": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-valve",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Valve",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": {
+              "toString": null
+            },
+            "Battery": 91
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-tamper",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Tamper",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0",
+            "Battery": 91,
+            "Tamper": {
+              "toString": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-cable",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Cable",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0",
+            "Battery": 91,
+            "Cable": {
+              "toString": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-leakage",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Leakage",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0",
+            "Battery": 91,
+            "Leakage": {
+              "toString": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-fraud",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Fraud",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0",
+            "Battery": 91,
+            "Fraud": {
+              "toString": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "strega-temperature",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000002/event/up",
+        "payload": {
+          "time": "2026-11-23T06:01:00.000Z",
+          "deduplicationId": "valve-coercion-Temperature",
+          "fCnt": 810,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000002",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0",
+            "Battery": 91,
+            "Temperature": {
+              "toString": null
+            }
+          }
+        }
+      }
+    }
+  ]
+}

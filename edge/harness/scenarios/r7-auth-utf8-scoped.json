@@ -1,0 +1,567 @@
+{
+ "name": "r7-auth-utf8-scoped",
+ "description": "TEXT values holding invalid UTF-8 (user_uuid with unknown and colliding decodings, zone_uuid with a policy and a grant, device and zone names, gateway EUI): node-sqlite3 decodes with replacement and binds the decoded string. Record --scoped.",
+ "steps": [
+  {
+   "id": "seed",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(220,'r7-bad','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST(X'72372D62FF' AS TEXT),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(220,'Zone r7-bad',220,'UTC','z-r7-bad','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070DC','Probe','KIWI_SENSOR',220,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',220);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080DC','Valve','STREGA_VALVE',220,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',220,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(222,'r7-tgt-a','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-a' || char(65533),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(222,'Zone r7-tgt-a',222,'UTC','z-r7-tgt-a','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070DE','Probe','KIWI_SENSOR',222,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',222);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080DE','Valve','STREGA_VALVE',NULL,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',222,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(223,'r7-col-a','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST(X'752D61E282' AS TEXT),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(223,'Zone r7-col-a',223,'UTC','z-r7-col-a','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070DF','Probe','KIWI_SENSOR',223,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',223);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080DF','Valve','STREGA_VALVE',223,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',223,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(224,'r7-tgt-b','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-b' || char(65533,65533,65533),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(224,'Zone r7-tgt-b',224,'UTC','z-r7-tgt-b','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E0','Probe','KIWI_SENSOR',224,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',224);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E0','Valve','STREGA_VALVE',NULL,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',224,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(225,'r7-col-b','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST(X'752D62EDA080' AS TEXT),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(225,'Zone r7-col-b',225,'UTC','z-r7-col-b','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E1','Probe','KIWI_SENSOR',225,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',225);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E1','Valve','STREGA_VALVE',225,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',225,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(226,'r7-tgt-c','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-c' || char(65533),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(226,'Zone r7-tgt-c',226,'UTC','z-r7-tgt-c','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E2','Probe','KIWI_SENSOR',226,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',226);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E2','Valve','STREGA_VALVE',NULL,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',226,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(227,'r7-col-c','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST(X'752D63C0AF' AS TEXT),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(227,'Zone r7-col-c',227,'UTC','z-r7-col-c','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E3','Probe','KIWI_SENSOR',227,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',227);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E3','Valve','STREGA_VALVE',227,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',227,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(228,'r7-zone','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-r7-zone',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(228,CAST(X'5A6F6E65FF' AS TEXT),228,'UTC',CAST(X'7A2D7237FF' AS TEXT),'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E4','Probe','KIWI_SENSOR',228,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',228);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E4',CAST(X'56616C7665FF' AS TEXT),'STREGA_VALVE',228,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',228,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(229,'r7-grantee','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-r7-grantee',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(229,'Zone r7-grantee',229,'UTC','z-r7-grantee','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A8404100000070E5','Probe','KIWI_SENSOR',229,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',229);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A8404100000080E5','Valve','STREGA_VALVE',229,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',229,'CLOSED','MOTORIZED');\nINSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) VALUES('p-r7-zone',CAST(X'7A2D7237FF' AS TEXT),'{}','UTC',1);\nINSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES('a-r7-grant','u-r7-grantee',CAST(X'7A2D7237FF' AS TEXT),'2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,gateway_device_eui) VALUES('A840410000009F01','Unowned','KIWI_SENSOR',NULL,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',CAST(X'47572DFF' AS TEXT))"
+  },
+  {
+   "id": "check-classes",
+   "sql": "SELECT id, typeof(user_uuid) AS t, hex(user_uuid) AS h FROM users WHERE id BETWEEN 220 AND 229 ORDER BY id"
+  },
+  {
+   "id": "bad-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    }
+   }
+  },
+  {
+   "id": "bad-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    }
+   }
+  },
+  {
+   "id": "bad-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    }
+   }
+  },
+  {
+   "id": "bad-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    }
+   }
+  },
+  {
+   "id": "bad-valve-close",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080DC",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "action": "CLOSE"
+    }
+   }
+  },
+  {
+   "id": "bad-valve-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080DC",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "bad-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080DC/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "bad-weekly-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000080DC/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "bad-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A8404100000080DC/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    }
+   }
+  },
+  {
+   "id": "bad-plan-resend",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000080DC/plan/resend",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "bad-daily-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/220/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "enabled": true,
+     "trigger_metric": "SWT_AVG",
+     "threshold_kpa": 40,
+     "duration_minutes": 10,
+     "valve_deveui": "A8404100000080DC"
+    }
+   }
+  },
+  {
+   "id": "bad-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/220/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "cropType": "maize"
+    }
+   }
+  },
+  {
+   "id": "bad-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "bad-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000070DC/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "name": "Renamed 220"
+    }
+   }
+  },
+  {
+   "id": "bad-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "deveui": "A8404100000090DC",
+     "name": "Claim 220",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "bad-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/220/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "name": "Zone renamed 220"
+    }
+   }
+  },
+  {
+   "id": "bad-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "name": "Created by 220"
+    }
+   }
+  },
+  {
+   "id": "bad-once-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000080DC/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMCwidXNlcm5hbWUiOiJyNy1iYWQiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.2FMwCsDxdhIHaXgc41VtdtLcZKBVeM3vM56fjLOIDvo"
+    },
+    "body": {
+     "kind": "ONCE",
+     "fire_at": "2020-01-01T06:15:00Z",
+     "duration_minutes": 20
+    }
+   }
+  },
+  {
+   "id": "tick-once",
+   "timer": "valve-once-tick"
+  },
+  {
+   "id": "tick-clock",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "col-a-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    }
+   }
+  },
+  {
+   "id": "col-a-open-target-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080DE",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "col-a-weekly-target-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000080DE/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    },
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 1,
+     "start_time": "07:00",
+     "duration_minutes": 15
+    }
+   }
+  },
+  {
+   "id": "col-a-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    },
+    "body": {
+     "name": "Created via col-a"
+    }
+   }
+  },
+  {
+   "id": "col-a-rename-target-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/222/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    },
+    "body": {
+     "name": "Target A renamed"
+    }
+   }
+  },
+  {
+   "id": "col-a-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyMywidXNlcm5hbWUiOiJyNy1jb2wtYSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.lhc3hFZeNrEeMjI1B-9DEVDVGb-p9odlIx8Xok3OBuA"
+    },
+    "body": {
+     "deveui": "A8404100000090DF",
+     "name": "Claim col-a",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 222
+    }
+   }
+  },
+  {
+   "id": "col-b-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyNSwidXNlcm5hbWUiOiJyNy1jb2wtYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.o1YcGmSLUYaXcfF96qwFdZNnDqo-QSF-JBzaKb4XD6A"
+    }
+   }
+  },
+  {
+   "id": "col-b-open-target-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080E0",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyNSwidXNlcm5hbWUiOiJyNy1jb2wtYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.o1YcGmSLUYaXcfF96qwFdZNnDqo-QSF-JBzaKb4XD6A"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "col-c-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyNywidXNlcm5hbWUiOiJyNy1jb2wtYyIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.f7ZUdb3OZTzNFcsYRC7TxyvjRmBFN8PpSEKBK7dmuEM"
+    }
+   }
+  },
+  {
+   "id": "col-c-open-target-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080E2",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyNywidXNlcm5hbWUiOiJyNy1jb2wtYyIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.f7ZUdb3OZTzNFcsYRC7TxyvjRmBFN8PpSEKBK7dmuEM"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "col-c-open-own-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080E3",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyNywidXNlcm5hbWUiOiJyNy1jb2wtYyIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.f7ZUdb3OZTzNFcsYRC7TxyvjRmBFN8PpSEKBK7dmuEM"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "tick-clock-2",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "zone-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    }
+   }
+  },
+  {
+   "id": "zone-valves",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    }
+   }
+  },
+  {
+   "id": "zone-valve-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080E4",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "zone-daily-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/228/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "enabled": true,
+     "trigger_metric": "SWT_AVG",
+     "threshold_kpa": 40,
+     "duration_minutes": 10,
+     "valve_deveui": "A8404100000080E4"
+    }
+   }
+  },
+  {
+   "id": "zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/228/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "cropType": "maize"
+    }
+   }
+  },
+  {
+   "id": "zone-rename-same-decoded",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/228/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "name": "Zone�"
+    }
+   }
+  },
+  {
+   "id": "zone-device-rename-same-decoded",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000080E4/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "name": "Valve�"
+    }
+   }
+  },
+  {
+   "id": "zone-device-rename-new",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000080E4/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "name": "Valve new"
+    }
+   }
+  },
+  {
+   "id": "grantee-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOSwidXNlcm5hbWUiOiJyNy1ncmFudGVlIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.uHKrQRyDNkTMKr3uC6vXNnp7hRclwH7rd6na06lITqc"
+    }
+   }
+  },
+  {
+   "id": "grantee-open-granted-valve",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000080E4",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOSwidXNlcm5hbWUiOiJyNy1ncmFudGVlIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.uHKrQRyDNkTMKr3uC6vXNnp7hRclwH7rd6na06lITqc"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "grantee-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/228/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOSwidXNlcm5hbWUiOiJyNy1ncmFudGVlIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.uHKrQRyDNkTMKr3uC6vXNnp7hRclwH7rd6na06lITqc"
+    },
+    "body": {
+     "name": "Granted rename"
+    }
+   }
+  },
+  {
+   "id": "claim-unowned-invalid-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyOCwidXNlcm5hbWUiOiJyNy16b25lIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.7_vfc2ad6T9g-3vzlhCQfIK9JqD6c4lg30iUdgps7hQ"
+    },
+    "body": {
+     "deveui": "A840410000009F01",
+     "name": "Claimed unowned",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "rows",
+   "sql": "SELECT deveui, hex(name) AS name, hex(gateway_device_eui) AS gw, user_id FROM devices WHERE deveui IN ('A840410000009F01','A8404100000080E4') ORDER BY deveui"
+  },
+  {
+   "id": "ledger",
+   "sql": "SELECT command_type, result, device_eui, json_extract(result_detail,'$.reason') AS reason FROM applied_commands ORDER BY applied_at, device_eui"
+  },
+  {
+   "id": "grants",
+   "sql": "SELECT hex(user_uuid) AS u, hex(zone_uuid) AS z FROM user_zone_assignments ORDER BY created_at, assignment_uuid"
+  }
+ ]
+}

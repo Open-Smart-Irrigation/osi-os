@@ -1,0 +1,78 @@
+{
+ "name": "r3-q3-claim-empty-device-eui",
+ "description": "Fix round Q3 (new finding): post-devices-insert and post-devices-response read String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase(). With DEVICE_EUI empty, the claim of a stored '   ' writes '' and answers UNKNOWN, a stored NULL writes and answers UNKNOWN, and a new device (claim-43) is inserted with UNKNOWN. Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-empty-eui-node.sh; replay Go through a wrapper that runs `env DEVICE_EUI= <osi-edge>`. Record legacy and --scoped.",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "existing",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES ('A840410000000041','D41','KIWI_SENSOR',NULL,'   ',1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000042','D42','KIWI_SENSOR',NULL,NULL,1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');",
+   "why": "Unclaimed devices whose stored gateway_device_eui is whitespace only and NULL."
+  },
+  {
+   "id": "claim-41",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000041",
+     "name": "Dev 41",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-42",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000042",
+     "name": "Dev 42",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-43",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000043",
+     "name": "Dev 43",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  }
+ ]
+}

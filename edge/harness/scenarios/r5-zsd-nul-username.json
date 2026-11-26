@@ -1,0 +1,791 @@
+{
+ "name": "r5-zsd-nul-username",
+ "description": "B1 (zsd confirming review): a first user registered with a NUL in the username, and signed tokens whose username holds a NUL. The legacy auth nodes and the daily-schedule save splice the username into SQL text, so SQLite fails at the NUL; zones, devices and schedule routes, before and after the user owns rows.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "nul\u0000user",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "nul\u0000user",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Zone x"
+    }
+   }
+  },
+  {
+   "id": "zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "token",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "seed-zone-for-user",
+   "sql": "INSERT INTO irrigation_zones (name, user_id, created_at, updated_at, zone_uuid, timezone) VALUES ('Seeded zone', 1, '2026-11-24T00:00:00.000Z', '2026-11-24T00:00:00.000Z', '0f6c9c3e-5f0e-4a8a-9b1e-000000000001', 'UTC')"
+  },
+  {
+   "id": "seed-device-for-user",
+   "sql": "INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at) VALUES ('A840410000004010', 'Seeded device', 'KIWI_SENSOR', 1, 1, '2026-11-24T00:00:00.000Z', '2026-11-24T00:00:00.000Z')"
+  },
+  {
+   "id": "seeded-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "seeded-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Zone seeded-x"
+    }
+   }
+  },
+  {
+   "id": "seeded-zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "seeded-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "seeded-schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "seeded-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "seeded-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device seeded-x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "seeded-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve seeded-x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "seeded-device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "seeded-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "token",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "seeded-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "token",
+    "body": {
+     "name": "Renamed by nul user"
+    }
+   }
+  },
+  {
+   "id": "seeded-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "token",
+    "body": {
+     "notes": "nul user"
+    }
+   }
+  },
+  {
+   "id": "seeded-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "forged-nul-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA"
+   }
+  },
+  {
+   "id": "forged-nul-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "name": "Zone forged-nul-x"
+    }
+   }
+  },
+  {
+   "id": "forged-nul-zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "forged-nul-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-nul-schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-nul-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA"
+   }
+  },
+  {
+   "id": "forged-nul-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device forged-nul-x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-nul-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve forged-nul-x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-nul-device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-nul-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyXHUwMDAweCIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.agqEIM0AbBYkKZlThNblOo7jJzFCYKQ93tHgFn_QeiA",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q"
+   }
+  },
+  {
+   "id": "forged-quote-nul-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "name": "Zone forged-quote-nul-x"
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q"
+   }
+  },
+  {
+   "id": "forged-quote-nul-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device forged-quote-nul-x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve forged-quote-nul-x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-quote-nul-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibydudWxcdTAwMDB4IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Z7AKKc6Nq2nIUlU6qyCqWMJj3RcWdcx15JVKEo4CG9Q",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls"
+   }
+  },
+  {
+   "id": "forged-lead-nul-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "name": "Zone forged-lead-nul-x"
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls"
+   }
+  },
+  {
+   "id": "forged-lead-nul-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device forged-lead-nul-x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve forged-lead-nul-x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-lead-nul-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiXHUwMDAwbnVsIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.sce1OEMpifTJk-gubJ--xkVDyIsR0V2cSgbXRaQCwls",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40"
+   }
+  },
+  {
+   "id": "forged-match-prefix-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "name": "Zone forged-match-prefix-x"
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-zone-create-bad-name",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "name": "   "
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-schedule-save-bad-zone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/abc/schedule",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40"
+   }
+  },
+  {
+   "id": "forged-match-prefix-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "deveui": "A840410000004000",
+     "name": "Device forged-match-prefix-x",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "deveui": "A840410000004001",
+     "name": "Valve forged-match-prefix-x",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-device-claim-bad-type",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "deveui": "A840410000004002",
+     "name": "Bad type",
+     "type_id": "NOPE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "forged-match-prefix-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000004000/name",
+    "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoibnVsXHUwMDAwIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QoiST-YI3Skfq7yFxCIC5bj78vQ6uJV36ZN4OfDYa40",
+    "body": {
+     "name": "Renamed"
+    }
+   }
+  },
+  {
+   "id": "zones-final-forged-ok",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibm9ib2R5IiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.zvQCzlqZTapuIRy7wckoV1q2DGE-dTsBLA_4Pyp8R0w"
+   }
+  }
+ ]
+}

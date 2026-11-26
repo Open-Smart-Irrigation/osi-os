@@ -1,0 +1,257 @@
+{
+ "name": "r5-zsd-strega-eui",
+ "description": "B3 (zsd confirming review): STREGA claims whose DevEUI is not 16 hex digits after String(), trim and upper case. osi-valve-control refuses them in withValveWriter after provisioning; the node deletes the new ChirpStack device and answers 500 with no rows. Valid spellings and other types are controls; the list with only non-canonical EUIs still shows those devices.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "strega-15-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A84041000000600",
+     "name": "Fifteen",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-17-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A8404100000060011",
+     "name": "Seventeen",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-non-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A84041000000600Z",
+     "name": "Non hex",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-dashed-gen2",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "a8-40-41-00-00-00-60-02",
+     "name": "Dashed",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "strega_generation": "GEN2"
+    }
+   }
+  },
+  {
+   "id": "strega-array-pair",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": [
+      "A840410000006003",
+      "A840410000006003"
+     ],
+     "name": "Array pair",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-inner-space",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A8404100 00006004",
+     "name": "Inner space",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-number-17-digits",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": 12345678901234568,
+     "name": "Number",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "kiwi-15-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A84041000000601",
+     "name": "Kiwi fifteen",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uc512-non-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A84041000000601Z",
+     "name": "Uc512 non hex",
+     "type_id": "MILESIGHT_UC512",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "devices-only-noncanonical",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "strega-number",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": 1234567890123456,
+     "name": "Number",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-lower-valid",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "a840410000006010",
+     "name": "Lower valid",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-padded-valid",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "  A840410000006011\t",
+     "name": "Padded valid",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-array-single-valid",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": [
+      "A840410000006012"
+     ],
+     "name": "Array single",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "strega-over-kiwi-15-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A84041000000601",
+     "name": "Strega over kiwi",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "devices-final",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valves-final",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  }
+ ]
+}

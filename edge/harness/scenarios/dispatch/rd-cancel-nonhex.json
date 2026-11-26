@@ -1,0 +1,11 @@
+{
+  "name": "rd-cancel-nonhex",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "setup", "why": "A non-16-hex STREGA row with one active open (hostile/never-written state).",
+     "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,target_state) VALUES ('NOTAHEXEUI000003','Nonhex valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','OPEN'); INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('bb545100-0000-4000-8000-0000000000c1','NOTAHEXEUI000003',1,'bb545100-0000-4000-8000-0000000000c1',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'),600,strftime('%Y-%m-%dT%H:%M:%fZ','now','+9 minutes'),'unknown','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'),'{}');"},
+    {"id": "cancel-nonhex", "http": {"method": "POST", "path": "/api/v1/valves/NOTAHEXEUI000003/cancel", "auth": "token", "body": {}}},
+    {"id": "cancel-nonhex-named", "http": {"method": "POST", "path": "/api/valve/NOTAHEXEUI000003/cancel", "auth": "token", "body": {"expectation_id": "bb545100-0000-4000-8000-0000000000c1"}}}
+  ]
+}

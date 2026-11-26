@@ -1,0 +1,74 @@
+{
+  "name": "dc-timer-states",
+  "description": "Dispatch-inventory probe: timer refusals. A ONCE schedule 30 minutes late (grace cutoff), a clock sync whose previous push is still queued, a SKIP_TODAY from an earlier day, and a 06:00 open on a valve held by a reserved conditional occurrence.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Daily zone",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "schedule-zone",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "seed",
+      "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES (2,'Timer zone',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c12','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A1','Late once','STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A2','Clock pending','STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A3','Skip today','STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A4','Daily busy','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A5','Daily probe','KIWI_SENSOR',1,1,NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A8404100000000A5',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000a9','A8404100000000A1','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-30 minutes'),7,'UTC',1,'PENDING'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000aa','A8404100000000A2','WEEKLY',127,'06:00',10,'UTC',1); INSERT INTO valve_settings(device_eui,strega_generation,last_clock_sync_queued_at) VALUES ('A8404100000000A2','GEN1','2020-01-01T00:00:00.000Z'); INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,state,queued_at,transport_json) VALUES ('b1100000-0000-4000-8000-0000000000a2','A8404100000000A2','CLOCK_SYNC',12,'00','QUEUED',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour'),'{\"phase\":\"ACCEPTED\",\"queue_id\":\"b1100000-0000-4000-8000-0000000000b2\",\"attempted_at\":\"' || strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour') || '\",\"accepted_at\":\"' || strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour') || '\"}'); INSERT INTO valve_settings(device_eui,scheduler_status,skip_today_date) VALUES ('A8404100000000A3','SKIP_TODAY','2020-01-01'); INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('a1100000-0000-4000-8000-0000000000a4','{{date:+0}}','06:00','A8404100000000A4',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'),'a1200000-0000-4000-8000-0000000000a4','RESERVED'); INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A8404100000000A4','{\"mode\":\"CONDITIONAL\"}');",
+      "why": "Zone 2: a ONCE schedule 30 minutes late; a weekly valve whose clock sync is due by its stamp but whose previous CLOCK_SYNC push, queued an hour ago, is still unacknowledged; a SKIP_TODAY from 2020. Zone 1: a valve held by a reserved conditional occurrence, with SWT above threshold."
+    },
+    {
+      "id": "once-tick",
+      "timer": "valve-once-tick"
+    },
+    {
+      "id": "clock-tick",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "daily-tick",
+      "timer": "daily-schedule-0600"
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+ "name": "r2-ids-zone-spelled",
+ "description": "fix-ids-r2 sweep: zone id 123456789012345700 on the schedule PUT (spelled ownership, then bound lifecycle checks), zone rename and config, device rename, valve list, open and close. Record legacy and --scoped.",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zone-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Z1",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "devices",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "renumber-zone",
+   "sql": "PRAGMA foreign_keys=OFF; UPDATE irrigation_zones SET id=123456789012345700 WHERE id=1; UPDATE devices SET irrigation_zone_id=123456789012345700 WHERE irrigation_zone_id=1; INSERT INTO zone_irrigation_calibration(zone_id,valve_device_eui,measured_flow_rate_lpm,measurement_method,measured_at,created_at,updated_at) VALUES (123456789012345700,'A840410000000002',12.5,'bucket','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "zones",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "schedule-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/123456789012345700/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 30,
+     "duration_minutes": 15,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "schedule-put-double",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/123456789012345696/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 30,
+     "duration_minutes": 15,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/123456789012345700/name",
+    "auth": "token",
+    "body": {
+     "name": "Z1b"
+    }
+   }
+  },
+  {
+   "id": "zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/123456789012345700/config",
+    "auth": "token",
+    "body": {
+     "cropType": "apple"
+    }
+   }
+  },
+  {
+   "id": "device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000000002/name",
+    "auth": "token",
+    "body": {
+     "name": "V2"
+    }
+   }
+  },
+  {
+   "id": "devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valves",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valve-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "settle",
+   "waitMs": 300
+  },
+  {
+   "id": "valve-close",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "auth": "token",
+    "body": {
+     "action": "CLOSE"
+    }
+   }
+  },
+  {
+   "id": "schedule-row",
+   "sql": "INSERT INTO irrigation_schedules(irrigation_zone_id,trigger_metric,threshold_kpa,duration_minutes,enabled,response_mode,sync_version,created_at,updated_at) VALUES (123456789012345700,'SWT_1',20,20,1,'proportional',1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "zones-after",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  }
+ ]
+}

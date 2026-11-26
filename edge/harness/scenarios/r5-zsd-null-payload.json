@@ -1,0 +1,742 @@
+{
+ "name": "r5-zsd-null-payload",
+ "description": "S1 (zsd confirming review): a validly signed token whose payload is JSON null (with and without JSON whitespace), and payloads JSON.parse refuses although trim would leave \"null\" (NBSP, BOM, trailing NUL), on every zones, devices, schedule and settings route Go serves; plus signed malformed payloads on the legacy zone-config route, which reports the JSON.parse SyntaxError text.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zone-base",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Base zone"
+    }
+   }
+  },
+  {
+   "id": "device-base",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000002000",
+     "name": "Base device",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw"
+   }
+  },
+  {
+   "id": "null-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "name": "Z null"
+    }
+   }
+  },
+  {
+   "id": "null-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "name": "N null"
+    }
+   }
+  },
+  {
+   "id": "null-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "notes": "null"
+    }
+   }
+  },
+  {
+   "id": "null-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "null-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw"
+   }
+  },
+  {
+   "id": "null-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "deveui": "A840410000002001",
+     "name": "Claim null",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000002000/name",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "name": "R null"
+    }
+   }
+  },
+  {
+   "id": "null-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw"
+   }
+  },
+  {
+   "id": "null-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng"
+   }
+  },
+  {
+   "id": "null-json-ws-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "name": "Z null-json-ws"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "name": "N null-json-ws"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "notes": "null-json-ws"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng"
+   }
+  },
+  {
+   "id": "null-json-ws-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "deveui": "A840410000002001",
+     "name": "Claim null-json-ws",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000002000/name",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "name": "R null-json-ws"
+    }
+   }
+  },
+  {
+   "id": "null-json-ws-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng"
+   }
+  },
+  {
+   "id": "null-json-ws-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "Bearer IAoJbnVsbA0g.NtioyYq0q1aqBg6RgPcKkaXPEELGYAXyrLrhtWNCRng",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA"
+   }
+  },
+  {
+   "id": "null-nbsp-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "name": "Z null-nbsp"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "name": "N null-nbsp"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "notes": "null-nbsp"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA"
+   }
+  },
+  {
+   "id": "null-nbsp-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "deveui": "A840410000002001",
+     "name": "Claim null-nbsp",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000002000/name",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "name": "R null-nbsp"
+    }
+   }
+  },
+  {
+   "id": "null-nbsp-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA"
+   }
+  },
+  {
+   "id": "null-nbsp-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "Bearer wqBudWxs.JfnRyDMSYcKXtyHab4P4Ew136L9JghTBGhNZyh-RqtA",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "null-bom-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ"
+   }
+  },
+  {
+   "id": "null-bom-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "name": "Z null-bom"
+    }
+   }
+  },
+  {
+   "id": "null-bom-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "name": "N null-bom"
+    }
+   }
+  },
+  {
+   "id": "null-bom-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "notes": "null-bom"
+    }
+   }
+  },
+  {
+   "id": "null-bom-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "null-bom-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ"
+   }
+  },
+  {
+   "id": "null-bom-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "deveui": "A840410000002001",
+     "name": "Claim null-bom",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-bom-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000002000/name",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "name": "R null-bom"
+    }
+   }
+  },
+  {
+   "id": "null-bom-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ"
+   }
+  },
+  {
+   "id": "null-bom-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "Bearer 77u_bnVsbA.dmKNYSFFBKjZS4Lj9QVPMJkl0AFkwhd9801ES5k9tbQ",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "null-nul-zones-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk"
+   }
+  },
+  {
+   "id": "null-nul-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "name": "Z null-nul"
+    }
+   }
+  },
+  {
+   "id": "null-nul-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "name": "N null-nul"
+    }
+   }
+  },
+  {
+   "id": "null-nul-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "notes": "null-nul"
+    }
+   }
+  },
+  {
+   "id": "null-nul-schedule-save",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 40,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "null-nul-devices-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk"
+   }
+  },
+  {
+   "id": "null-nul-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "deveui": "A840410000002001",
+     "name": "Claim null-nul",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-nul-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000002000/name",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "name": "R null-nul"
+    }
+   }
+  },
+  {
+   "id": "null-nul-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk"
+   }
+  },
+  {
+   "id": "null-nul-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "Bearer bnVsbAA.koxdVkyNAN026EDUl_2cBhcyJUMBNHIQiL3QWRW8sLk",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "syntax-x-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer eA.U8b75n-gbM4acnWABVzRx0y75CWb2s6C2sFHQpqiulI",
+    "body": {
+     "notes": "x"
+    }
+   }
+  },
+  {
+   "id": "syntax-trailing-comma-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer WzEsXQ.j2BBsmYcdVg1wULWfZ2ZDPPeCyaQfznZ_o8eWARHXO4",
+    "body": {
+     "notes": "trailing-comma"
+    }
+   }
+  },
+  {
+   "id": "syntax-undefined-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer dW5kZWZpbmVk.avAiXKLw1Oo1Z8h7utovZtobiRMNLyzLr4VO4YVIJVk",
+    "body": {
+     "notes": "undefined"
+    }
+   }
+  },
+  {
+   "id": "syntax-nan-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer TmFO.ryIWjZk82lqy336kn2MlTsrSsx6wXpXS_5w-Y-9bHak",
+    "body": {
+     "notes": "nan"
+    }
+   }
+  },
+  {
+   "id": "syntax-accent-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer eyJhIjrDqX0.ZLkNU6XlVN6EAT7P6vi63sss8lL38iVX8yrW2OEt_bc",
+    "body": {
+     "notes": "accent"
+    }
+   }
+  },
+  {
+   "id": "syntax-ctx-start-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer wqBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh.2NG1O4NrAs5ksVOBG8pVORfFBHrSoPhsYu3D1p6eEQo",
+    "body": {
+     "notes": "ctx-start"
+    }
+   }
+  },
+  {
+   "id": "syntax-ctx-end-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer WzEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMSxd.k-HSg61NOAWU-s3MyGjKqcdGl-aHoSU7ANPMzzEKqXw",
+    "body": {
+     "notes": "ctx-end"
+    }
+   }
+  },
+  {
+   "id": "syntax-ctx-mid-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer WzEsMSwxLDEsMSwxLDEsMSwxLDEsMSx4LDEsMSwxLDEsMSwxLDEsMSwxLDEsMSwxLDEsMV0.7LMp0o6QM7iekRaeiUoP11Lhh7Og3xnlJaU-Siya56w",
+    "body": {
+     "notes": "ctx-mid"
+    }
+   }
+  },
+  {
+   "id": "syntax-array-element-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer WzEgMl0.Jrl9QFes-vfdfLF7ntzfvyEy9qp_t4rZODxF13lrGcU",
+    "body": {
+     "notes": "array-element"
+    }
+   }
+  },
+  {
+   "id": "syntax-property-value-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer eyJhIjoxICJiIn0.4xK8lsVdIWasbE_9cXSNM6LBD9AqcLkeyXh1svCXZJ8",
+    "body": {
+     "notes": "property-value"
+    }
+   }
+  },
+  {
+   "id": "syntax-property-name-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer eyJhIiAxfQ.LVvmBu-usZJqDU7jAxJ8JWc9oePfzHXlRog-wR6TOXY",
+    "body": {
+     "notes": "property-name"
+    }
+   }
+  },
+  {
+   "id": "syntax-open-object-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer ew.qL50SOKe6MieJ8vdf64aYUOuaGkUkwXc3OESDx8ry7E",
+    "body": {
+     "notes": "open-object"
+    }
+   }
+  },
+  {
+   "id": "syntax-empty-zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/config",
+    "auth": "Bearer .JwMFHrhBcLTsa3QJz4mvxjjKs23Mj7dXu5NV-iGH9Kg",
+    "body": {
+     "notes": "empty"
+    }
+   }
+  },
+  {
+   "id": "devices-final",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  }
+ ]
+}

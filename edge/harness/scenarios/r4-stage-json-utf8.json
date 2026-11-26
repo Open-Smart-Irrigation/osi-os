@@ -1,0 +1,303 @@
+{
+  "name": "r4-stage-json-utf8",
+  "description": "Review round 4: fixed stage dates, stored JSON projections, and malformed UTF-8 text reads.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "set-zone-gateway",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "stage-kiritimati-casefold",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "mid_season",
+          "timezone": " pacific/kiritimati ",
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "stage-stored-untrimmed-tz",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "late_season",
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "stage-etc-gmt-minus-14",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "dormancy",
+          "timezone": "Etc/GMT-14",
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "stage-invalid-tz",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "initial",
+          "timezone": "Mars/Base",
+          "stageStartedOn": "{{date:+0}}"
+        }
+      }
+    },
+    {
+      "id": "stage-tz-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "development",
+          "timezone": [
+            "Pacific/Kiritimati"
+          ],
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "stage-same-key-upper",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": " FRUITSET ",
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "stage-unknown-with-date",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "unknown_stage",
+          "stageStartedOn": "2026-01-02"
+        }
+      }
+    },
+    {
+      "id": "stage-explicit-leap-alias",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "initial",
+          "stage_started_on": " 2024-02-29 "
+        }
+      }
+    },
+    {
+      "id": "stage-date-invalid-leap",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "stageStartedOn": "2023-02-29"
+        }
+      }
+    },
+    {
+      "id": "stage-date-year-0100",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "stageStartedOn": "0100-01-01"
+        }
+      }
+    },
+    {
+      "id": "stage-date-year-0099",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "stageStartedOn": "0099-12-31"
+        }
+      }
+    },
+    {
+      "id": "stage-empty-tz-uses-stored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "phenologicalStage": "mid_season",
+          "timezone": "",
+          "stageStartedOn": "{{date:+1}}"
+        }
+      }
+    },
+    {
+      "id": "claim-layout-device",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000301",
+          "name": "Layout",
+          "type_id": "DRAGINO_SDI12",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "seed-layout-order",
+      "sql": "UPDATE devices SET sdi12_channel_layout_json='{\"b\":1,\"2\":[-0,1e400,0.1e-6,1E2],\"a\":\"\\ud800x\",\"1\":{\"__proto__\":{\"z\":true}},\"b\":2}' WHERE deveui='A840410000000301'"
+    },
+    {
+      "id": "list-layout-order",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-layout-bom",
+      "sql": "UPDATE devices SET sdi12_channel_layout_json=char(65279)||'{\"a\":1}' WHERE deveui='A840410000000301'"
+    },
+    {
+      "id": "list-layout-bom",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-layout-nbsp",
+      "sql": "UPDATE devices SET sdi12_channel_layout_json='{\"a\":1}'||char(160) WHERE deveui='A840410000000301'"
+    },
+    {
+      "id": "list-layout-nbsp",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-layout-whitespace",
+      "sql": "UPDATE devices SET sdi12_channel_layout_json=char(10)||' '||char(9) WHERE deveui='A840410000000301'"
+    },
+    {
+      "id": "list-layout-whitespace",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-invalid-utf8-device-name",
+      "sql": "UPDATE devices SET name=CAST(X'4C61F09F9821E28221' AS TEXT), sdi12_channel_layout_json='{}' WHERE deveui='A840410000000301'"
+    },
+    {
+      "id": "list-invalid-utf8-device-name",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-invalid-utf8-zone-name",
+      "sql": "UPDATE irrigation_zones SET name=CAST(X'5AF09F98' AS TEXT) WHERE id=1"
+    },
+    {
+      "id": "list-invalid-utf8-zone-name",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "config-invalid-utf8-zone-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": "after utf8"
+        }
+      }
+    }
+  ]
+}

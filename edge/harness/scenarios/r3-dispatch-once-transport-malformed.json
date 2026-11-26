@@ -1,0 +1,43 @@
+{
+  "name": "r3-dispatch-once-transport-malformed",
+  "_comment": "N2 (dispatch r3): a PENDING one-time intent whose expectation transport_json does not parse (workers.js transport_state_malformed) is left as it is; a healthy due open in the same tick still dispatches.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000351','Malformed','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000352','Healthy','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-000000000351','A840410000000351','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),7,'UTC',1,'PENDING');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-000000000352','A840410000000352','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),7,'UTC',1,'PENDING');INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state) VALUES ('ceaa2200-0000-4000-8000-000000000351','A840410000000351','cd000000-0000-4000-8000-000000000351','PENDING');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES ('ee000000-0000-4000-8000-000000000351','A840410000000351',1,'cd000000-0000-4000-8000-000000000351',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),420,strftime('%Y-%m-%dT%H:%M:%fZ','now','+6 minutes'),'unknown','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),'{not json');"
+    },
+    {
+      "id": "once-tick",
+      "timer": "valve-once-tick"
+    },
+    {
+      "id": "once-tick-again",
+      "timer": "valve-once-tick"
+    }
+  ]
+}

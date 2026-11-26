@@ -1,0 +1,78 @@
+{
+ "name": "r2-ids-actuator-zone",
+ "description": "fix-ids-r2 F2b: manual valve open and close on zone 123456789012345696; actuator_log spells the zone id (legacy).",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zone-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Z1",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "devices",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "renumber-zone",
+   "sql": "PRAGMA foreign_keys=OFF; UPDATE irrigation_zones SET id=123456789012345696 WHERE id=1; UPDATE devices SET irrigation_zone_id=123456789012345696 WHERE irrigation_zone_id=1"
+  },
+  {
+   "id": "valve-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "settle",
+   "waitMs": 300
+  },
+  {
+   "id": "valve-close",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "auth": "token",
+    "body": {
+     "action": "CLOSE"
+    }
+   }
+  }
+ ]
+}

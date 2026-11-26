@@ -1,0 +1,114 @@
+{
+ "name": "r5-auth-header-nbsp",
+ "description": "Node reads header bytes as latin1, so trim() removes a 0xA0 byte from the bearer token, while the UTF-8 bytes of NBSP or EM SPACE stay and fail the signature; token pre-signed with the harness secret, no exp.",
+ "steps": [
+  {
+   "id": "seed-user",
+   "why": "synthetic account for a pre-signed token",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role) VALUES(2,'nbsp-review','x','2026-01-01','admin')"
+  },
+  {
+   "id": "me-control",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7g"
+    }
+   }
+  },
+  {
+   "id": "me-trailing-nbsp",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7g "
+    }
+   }
+  },
+  {
+   "id": "me-leading-nbsp",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer  eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7g"
+    }
+   }
+  },
+  {
+   "id": "me-trailing-utf8-nbsp-bytes",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7gÂ "
+    }
+   }
+  },
+  {
+   "id": "me-trailing-utf8-em-space-bytes",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7gâ"
+    }
+   }
+  },
+  {
+   "id": "me-leading-utf8-nbsp-bytes",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer Â eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7g"
+    }
+   }
+  },
+  {
+   "id": "me-trailing-nbsp-tab",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDB9.IdzhHh245QDq0l6ilU_z_yaJFPUAB22VxAe0ZEXVn7g \t "
+    }
+   }
+  },
+  {
+   "id": "settings-get-control",
+   "why": "osi-system-settings requires exp > 0: token pre-signed with exp in 2100",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.K8pJrZqbYV2cjaAxajZ5VToDFfU34ZddWhhke0OGSRU"
+    }
+   }
+  },
+  {
+   "id": "settings-get-trailing-nbsp",
+   "why": "header byte 0xA0, trimmed",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.K8pJrZqbYV2cjaAxajZ5VToDFfU34ZddWhhke0OGSRU "
+    }
+   }
+  },
+  {
+   "id": "settings-get-trailing-utf8-nbsp-bytes",
+   "why": "header bytes C2 A0, not trimmed",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoibmJzcC1yZXZpZXciLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.K8pJrZqbYV2cjaAxajZ5VToDFfU34ZddWhhke0OGSRUÂ "
+    }
+   }
+  }
+ ]
+}

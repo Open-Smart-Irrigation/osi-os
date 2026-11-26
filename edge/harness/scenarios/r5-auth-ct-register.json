@@ -1,0 +1,72 @@
+{
+ "name": "r5-auth-ct-register",
+ "description": "Register: type-is 1.6.18 (media-typer 0.3.0) decides whether body-parser parses. A tab before \";\" leaves the JSON as a raw string (400, no account); \"application/json+\" normalizes to application/json and is parsed (201).",
+ "steps": [
+  {
+   "id": "register-tab-before-semicolon",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json\t; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "register-json-empty-suffix",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "rawBody": "{\"username\":\"ct-suffix\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json+"
+    }
+   }
+  },
+  {
+   "id": "login-after-tab-register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ct-review",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t": "json.token"
+   }
+  },
+  {
+   "id": "me-after-tab-register",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t"
+   }
+  },
+  {
+   "id": "login-suffix-account",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ct-suffix",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "s": "json.token"
+   }
+  },
+  {
+   "id": "me-suffix-account",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "s"
+   }
+  }
+ ]
+}

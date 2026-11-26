@@ -1,0 +1,222 @@
+{
+ "name": "auth-slice",
+ "description": "The paired Go/Rust comparison slice: POST /auth/register, POST /auth/login, GET /api/me (plus their CORS preflights) only.",
+ "steps": [
+  {
+   "id": "register-empty",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {}
+   }
+  },
+  {
+   "id": "register-short",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "12345"
+    }
+   }
+  },
+  {
+   "id": "register-ok",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": " farmer ",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "register-again",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "second",
+     "password": "synthetic-pass-2"
+    }
+   }
+  },
+  {
+   "id": "login-missing",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer"
+    }
+   }
+  },
+  {
+   "id": "login-wrong",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "wrong-pass"
+    }
+   }
+  },
+  {
+   "id": "login-unknown",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "nobody",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login-ok",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer ",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "me-no-token",
+   "http": {
+    "method": "GET",
+    "path": "/api/me"
+   }
+  },
+  {
+   "id": "me-bad-token",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "Bearer abc.def"
+   }
+  },
+  {
+   "id": "me-malformed",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "Bearer onlyonepart"
+   }
+  },
+  {
+   "id": "login-trailing-space-password",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1 "
+    }
+   }
+  },
+  {
+   "id": "login-non-string-password",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": 12345678
+    }
+   }
+  },
+  {
+   "id": "login-array-body",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": [
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "id": "login-invalid-json",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{not json",
+    "headers": {
+     "content-type": "application/json"
+    }
+   }
+  },
+  {
+   "id": "login-form-encoded",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=farmer&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   },
+   "capture": {
+    "formToken": "json.token"
+   }
+  },
+  {
+   "id": "me-form-token",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "formToken"
+   }
+  },
+  {
+   "id": "me-lowercase-bearer",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "bearer x.y"
+    }
+   }
+  },
+  {
+   "id": "options-login",
+   "http": {
+    "method": "OPTIONS",
+    "path": "/auth/login",
+    "headers": {
+     "origin": "http://example.invalid",
+     "access-control-request-method": "POST"
+    }
+   }
+  },
+  {
+   "id": "options-me",
+   "http": {
+    "method": "OPTIONS",
+    "path": "/api/me",
+    "headers": {
+     "origin": "http://example.invalid",
+     "access-control-request-method": "GET"
+    }
+   }
+  }
+ ]
+}

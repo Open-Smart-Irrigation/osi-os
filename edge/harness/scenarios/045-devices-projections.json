@@ -1,0 +1,94 @@
+{
+  "name": "devices-projections",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone"
+        }
+      }
+    },
+    {
+      "id": "seed-legacy-data",
+      "sql": "INSERT INTO users (id, username, password_hash, role, created_at, user_uuid) VALUES (999,'other','seed-no-login','researcher',CURRENT_TIMESTAMP,'bbed0200-0000-4000-8000-000000000009'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,sync_version,deleted_at) VALUES ('A840410000000073','Other owner','KIWI_SENSOR',999,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1,'2026-11-19T09:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,sync_version,deleted_at) VALUES ('A840410000000074','Old valve','STREGA_VALVE',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',2,'2026-11-19T09:00:00.000Z'); INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) VALUES ('A840410000000074','GEN1','{\"mode\":\"LIFECYCLE_CLEAR\",\"desired_revision\":\"review-old-revision\",\"required_push_ids\":[],\"predecessor_push_ids\":[],\"readiness\":{\"state\":\"READY\"},\"lifecycle_clear\":{\"state\":\"ACKED\"}}'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,sync_version) VALUES ('A840410000000075','SDI12','DRAGINO_SDI12',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1),('A840410000000076','Weather station','SENSECAP_S2120',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1); INSERT INTO sdi12_identify_attempts(deveui,stage,discovered_address,requested_at,updated_at) VALUES ('A840410000000075','identifying','B','2026-11-19T09:00:00.000Z','2026-11-19T09:00:00.000Z'); INSERT INTO weather_station_zones(deveui,zone_id) VALUES ('A840410000000076',1)"
+    },
+    {
+      "id": "other-owner-tombstone",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000073",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "strega-reclaim-lifecycle",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000074",
+          "name": "Review claim",
+          "type_id": "STREGA_VALVE",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "strega_generation": "GEN2"
+        }
+      }
+    },
+    {
+      "id": "get-device-projections",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-sdi12-deployment",
+      "sql": "INSERT INTO sdi12_recipe_deployments(deveui,desired_version,desired_layout_hash,desired_recipe_json,status,last_error_code,compatible_recipe_json,compatible_layout_json,updated_at) VALUES ('A840410000000075',2,'synthetic-layout','{\"frames\":[{},{}]}','degraded','queue_failed','{}','{}','2026-11-19T09:00:00.000Z')"
+    },
+    {
+      "id": "get-device-projections-with-deployment",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

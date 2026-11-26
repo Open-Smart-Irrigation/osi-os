@@ -1,0 +1,43 @@
+{
+ "name": "r6-mut-once-padded-key",
+ "description": "Mutation triage (inventory pass, valve-once/grace-cutoff and valve-clock-sync rows): a ONCE schedule 30 minutes late on a valve whose stored key is tab-padded (devices.deveui and valve_schedules.device_eui both '\\tKEY\\t'). Node-RED's grace skip marks the intent SKIPPED and logs the SKIP event, but store.updateSchedule binds the trimmed, upper-cased scope, so UPPER(device_eui)=? matches no row and the schedule stays PENDING with its sync_version. Go bound the raw stored key and marked the schedule SKIPPED. The lower-case and plain keys are controls (both sides mark them SKIPPED). B4 is a due ONCE schedule on a padded key: Node-RED opens the valve (normalizeDevice trims the key), finalizeOnceAccepted reads the expectation by command_id alone and records proof 'receipt' in its transport_json, and updateSchedule again matches no row. Go read the expectation by command_id and the raw padded key, found none, and left the proof out. B5 is a SKIPPED uncertain one-time open on a padded key whose open was observed: Node-RED's late correction records the proof, the IRRIGATE event and the actuator_log row, and its updateSchedule matches no row, so the schedule stays SKIPPED. Go updated the schedule without a device scope and marked it FIRED.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES (1,'Timer zone',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9cb1','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES (char(9)||'A8404100000000B1'||char(9),'Padded key','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('a8404100000000b2','Lower-case key','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000B3','Plain key','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b1',char(9)||'A8404100000000B1'||char(9),'ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-30 minutes'),7,'UTC',1,'PENDING');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b2','a8404100000000b2','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-30 minutes'),7,'UTC',1,'PENDING');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b3','A8404100000000B3','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-30 minutes'),7,'UTC',1,'PENDING');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES (char(9)||'A8404100000000B4'||char(9),'Padded key due','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b4',char(9)||'A8404100000000B4'||char(9),'ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minutes'),6,'UTC',1,'PENDING');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES (char(9)||'A8404100000000B5'||char(9),'Padded key late','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b5',char(9)||'A8404100000000B5'||char(9),'ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),8,'UTC',1,'SKIPPED');INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at) VALUES ('ceaa2200-0000-4000-8000-0000000000b5',char(9)||'A8404100000000B5'||char(9),'cd000000-0000-4000-8000-0000000000b5','SKIPPED',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'));INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,observed_open_at,created_at,transport_json) VALUES ('ee000000-0000-4000-8000-0000000000b5',char(9)||'A8404100000000B5'||char(9),1,'cd000000-0000-4000-8000-0000000000b5',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),480,strftime('%Y-%m-%dT%H:%M:%fZ','now','+8 minutes'),'unknown','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),json_object('once_settlement','uncertain','once_confirm_by',strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),'once_interval_minutes',10,'attempted_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),'phase','UNKNOWN'));"
+  },
+  {
+   "id": "once-tick",
+   "timer": "valve-once-tick"
+  },
+  {
+   "id": "once-tick-again",
+   "timer": "valve-once-tick"
+  }
+ ]
+}

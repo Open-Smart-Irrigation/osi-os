@@ -1,0 +1,18 @@
+{
+  "_comment": "Logical timer names used by scenarios, mapped per backend. node-red: the inject node id fired through the real inject node. other backends: POST /__test/timer/<name>.",
+  "daily-schedule-0600": { "node-red": "4b7b6d3b8d1f0d31", "cadence": "cron 00 06 * * *" },
+  "valve-once-tick": { "node-red": "valve-once-tick", "cadence": "60 s" },
+  "valve-clock-tick": { "node-red": "valve-clock-tick", "cadence": "60 s" },
+  "sync-outbox-flush": { "node-red": "sync-outbox-inject", "cadence": "30 s" },
+  "cloud-heartbeat": { "node-red": "310dfe7cfe34a448", "cadence": "60 s" },
+  "valve-observe-tick": { "node-red": "valve-observe-tick", "cadence": "60 s" },
+  "strega-reconciliation-tick": { "node-red": "strega-reconciliation-tick", "cadence": "60 s" },
+  "conditional-due-tick": { "node-red": "conditional-due-tick", "cadence": "60 s" },
+  "sync-history-batch": { "node-red": "sync-history-inject", "cadence": "30 s" },
+  "sync-history-manifest": { "node-red": "sync-history-manifest-inject", "cadence": "300 s" },
+  "sync-pending-commands": { "node-red": "sync-pending-inject", "cadence": "30 s" },
+  "command-ack-flush": { "node-red": "command-ack-flush-inject", "cadence": "30 s" },
+  "sync-token-refresh": { "node-red": "sync-refresh-inject", "cadence": "3600 s" },
+  "sync-bootstrap": { "node-red": "sync-bootstrap-inject", "cadence": "21600 s" },
+  "journal-v2-replication": { "node-red": "journal-v2-replication-tick", "cadence": "30 s" }
+}

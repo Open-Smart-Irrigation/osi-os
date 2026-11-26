@@ -1,0 +1,202 @@
+{
+ "name": "r5-auth-ct-login",
+ "description": "Login with Content-Type forms where type-is 1.6.18 (media-typer 0.3.0) and content-type 1.0.5 disagree: tab before \";\", latin1 quoted-pair, empty \"+\" suffix, NBSP that content-type trims. A string body makes the client send the header as UTF-8, so latin1 header bytes use rawBodyBase64.",
+ "steps": [
+  {
+   "id": "seed-user",
+   "why": "synthetic bcrypt account (cost 4)",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role) VALUES(2,'ct-review','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01','admin')"
+  },
+  {
+   "id": "login-control",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "login-tab-json",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json\t; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "login-tab-json-noparam",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json\t;a=b"
+    }
+   }
+  },
+  {
+   "id": "login-space-tab-json",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json \t; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "login-escaped-latin1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBodyBase64": "eyJ1c2VybmFtZSI6ImN0LXJldmlldyIsInBhc3N3b3JkIjoic3ludGhldGljLXBhc3MtMSJ9",
+    "headers": {
+     "content-type": "application/json; note=\"Caf\\é\""
+    }
+   }
+  },
+  {
+   "id": "login-tab-form",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=ct-review&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded\t; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "login-escaped-latin1-form",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=ct-review&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded; note=\"Caf\\é\""
+    }
+   }
+  },
+  {
+   "id": "login-json-empty-suffix",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json+"
+    }
+   }
+  },
+  {
+   "id": "login-form-empty-suffix",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=ct-review&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded+"
+    }
+   }
+  },
+  {
+   "id": "login-upper-space-json",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "Application/JSON ; Charset=UTF-8"
+    }
+   }
+  },
+  {
+   "id": "login-escaped-backslash",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json; a=\"\\\\\""
+    }
+   }
+  },
+  {
+   "id": "login-utf8-nbsp-before-semicolon",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json ; charset=utf-8"
+    }
+   },
+   "why": "string body: the client writes the header as UTF-8, bytes C2 A0"
+  },
+  {
+   "id": "login-nbsp-before-semicolon",
+   "why": "Buffer body: header byte 0xA0, which content-type trims",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBodyBase64": "eyJ1c2VybmFtZSI6ImN0LXJldmlldyIsInBhc3N3b3JkIjoic3ludGhldGljLXBhc3MtMSJ9",
+    "headers": {
+     "content-type": "application/json ; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "login-form-trailing-utf8-nbsp",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=ct-review&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded "
+    }
+   },
+   "why": "string body: header bytes C2 A0"
+  },
+  {
+   "id": "login-form-trailing-nbsp",
+   "why": "Buffer body: header byte 0xA0",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBodyBase64": "dXNlcm5hbWU9Y3QtcmV2aWV3JnBhc3N3b3JkPXN5bnRoZXRpYy1wYXNzLTE=",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded "
+    }
+   }
+  },
+  {
+   "id": "login-quoted-tab-param",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json; a=\"b\tc\""
+    }
+   }
+  },
+  {
+   "id": "login-suffix-with-dot",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json+b.c"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,68 @@
+{
+  "name": "r3-dispatch-blank-device-eui",
+  "_comment": "N1 (dispatch r3): with DEVICE_EUI whitespace only, String(env.get(DEVICE_EUI) || UNKNOWN).trim() is \"\": the manual command topics are devices//command_ack and devices//status, and the status names gatewayDeviceEui \"\". Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-blank-eui-node.sh; replay the backend under env DEVICE_EUI=\"   \" (three spaces).",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000361','Blank','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000362','BlankFault','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');"
+    },
+    {
+      "id": "open-blank-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000361",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "open-blank-eui-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000362",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      },
+      "radioFault": [
+        {
+          "rpc": "enqueue",
+          "eui": "A840410000000362",
+          "code": 14,
+          "details": "synthetic enqueue outage"
+        }
+      ]
+    }
+  ]
+}

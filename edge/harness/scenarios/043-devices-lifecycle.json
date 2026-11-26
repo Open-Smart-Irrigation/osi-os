@@ -1,0 +1,63 @@
+{
+  "name": "devices-lifecycle",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "seed-binding-and-tombstone",
+      "sql": "INSERT INTO devices(id,deveui,name,type_id,user_id,created_at,updated_at,sync_version,deleted_at) VALUES (91,'A840410000000091','Valve','STREGA_VALVE',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1,NULL),(92,'A840410000000092','Old sensor','KIWI_SENSOR',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1,'2026-11-19T09:00:00.000Z'); INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) VALUES ('A840410000000091','GEN1','{\"mode\":\"LIFECYCLE_CLEAR\",\"desired_revision\":\"review-revision\",\"required_push_ids\":[],\"predecessor_push_ids\":[],\"readiness\":{\"state\":\"PENDING\"},\"lifecycle_clear\":{\"v\":1,\"revision\":\"review-revision\",\"state\":\"PENDING\",\"reason\":\"device_unclaim\",\"prepared_at\":\"2026-11-18T09:00:00.000Z\",\"device\":{\"row_id\":91,\"device_eui\":\"A840410000000091\",\"type_id\":\"STREGA_VALVE\",\"user_id\":1,\"irrigation_zone_id\":null,\"deleted_at\":null},\"generation\":\"GEN1\",\"zone\":null,\"policy\":null,\"retired_schedules\":[],\"live_schedule_snapshot\":[]}}')"
+    },
+    {
+      "id": "strega-promote-and-supersede",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000091",
+          "name": "Review claim",
+          "type_id": "STREGA_VALVE",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "strega_generation": "GEN2"
+        }
+      }
+    },
+    {
+      "id": "reclaim-own-tombstone",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000092",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    }
+  ]
+}

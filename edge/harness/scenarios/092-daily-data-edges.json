@@ -1,0 +1,115 @@
+{
+  "name": "daily-data-edges",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-No data",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "No data",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "schedule-1",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "set-threshold-and-fractional-duration",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_AVG",
+          "threshold_kpa": 50,
+          "duration_minutes": 20
+        }
+      }
+    },
+    {
+      "id": "observations-for-row-weighted-mean",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000003','Soil','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1,swt_2,swt_3) VALUES ('A840410000000003',strftime('%Y-%m-%dT%H:%M:%fZ','now','-2 seconds'),100,NULL,NULL),('A840410000000003',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 second'),0,0,0),('A840410000000003',strftime('%Y-%m-%dT%H:%M:%fZ','now','-61 minutes'),300,300,300)"
+    },
+    {
+      "id": "row-mean-at-threshold",
+      "timer": "daily-schedule-0600"
+    },
+    {
+      "id": "import-parseable-utc-stamp",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE irrigation_schedules SET last_triggered_at=strftime('%Y/%m/%d','now') || ' 00:00:00 GMT' WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "same-day-imported-stamp",
+      "timer": "daily-schedule-0600"
+    },
+    {
+      "id": "reset-imported-stamp",
+      "why": "Begin the next scheduler test without a previous decision.",
+      "sql": "UPDATE irrigation_schedules SET last_triggered_at=NULL WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "seed-duration-or-invalid-threshold",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE irrigation_schedules SET duration_minutes=20.5 WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "fractional-legacy-swt-duration",
+      "timer": "daily-schedule-0600"
+    },
+    {
+      "id": "reset-fractional-stamp",
+      "why": "Begin the next scheduler test without a previous decision.",
+      "sql": "UPDATE irrigation_schedules SET last_triggered_at=NULL WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "import-text-threshold",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE irrigation_schedules SET threshold_kpa='unknown',duration_minutes=20 WHERE irrigation_zone_id=1"
+    },
+    {
+      "id": "non-numeric-threshold",
+      "timer": "daily-schedule-0600"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "r4-dispatch-nokey-decommission",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "devices discovered and claimed before the session, as in the release smoke",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+    },
+    {
+      "id": "seed-retired-gen1-with-acked-fixed-plan",
+      "sql": "UPDATE devices SET deleted_at=datetime('now','-2 hours') WHERE deveui='A840410000000001'; INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('a9100000-0000-4000-8000-000000000001','A840410000000001','WEEKDAY_PLAN',0,14,'00100001','nonempty-test-plan','ACKED',datetime('now','-1 day'));"
+    },
+    {
+      "id": "clock-tick-decommissions-gen1",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-does-not-repeat-decommission",
+      "timer": "valve-clock-tick"
+    }
+  ],
+  "_comment": "Dispatch round 4 client-construction sweep: a copy of 07I-decommission.json run with CHIRPSTACK_API_KEY empty on both sides. Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-nokey-node.sh and replay Go through a wrapper that runs `exec env CHIRPSTACK_API_KEY= <osi-edge> \"$@\"`. Covers the decommission sweep: queueSnapshot writes the rows, the lazy enqueue rejects (phase UNKNOWN, chirpstack_transport_unavailable)."
+}

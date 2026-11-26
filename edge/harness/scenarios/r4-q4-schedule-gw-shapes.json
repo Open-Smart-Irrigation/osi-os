@@ -1,0 +1,161 @@
+{
+ "name": "r4-q4-schedule-gw-shapes",
+ "description": "Fix Q4 (review A2 L1 and the stored-text sweep): the legacy schedule PUT (osi-irrigation-policy routes.js) answers the zone row as read, zone.zone_uuid || null and zone.gateway_device_eui || String(DEVICE_EUI || 'UNKNOWN').toUpperCase(): a BLOB is a truthy Buffer, answered as Buffer JSON. lifecycle.js zoneState binds the zone_uuid it read to find the zone's conditional policy: a BLOB zone_uuid matches only a BLOB policy key, never a TEXT one with the same characters (zone 6: no policy, so the write is a legacy write; zone 7: BLOB policy key, so the enabled write is refused as managed). Zone 8 has an empty-BLOB zone_uuid.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,'Zone 1',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c01',X'','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (2,'Zone 2',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c02',X'4142','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (3,'Zone 3',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c03',CAST('0016c001f1000001' AS BLOB),'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (4,'Zone 4',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c04','','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (5,'Zone 5',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c05','   ','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (6,'Zone 6',1,'UTC',CAST('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c06' AS BLOB),NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) VALUES ('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9d06','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c06','{}','UTC',1);INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (7,'Zone 7',1,'UTC',CAST('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c07' AS BLOB),NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) VALUES ('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9d07',CAST('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c07' AS BLOB),'{}','UTC',1);INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (8,'Zone 8',1,'UTC',X'',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');"
+  },
+  {
+   "id": "put-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/2/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-3",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/3/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-4",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/4/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-5",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/5/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-6",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/6/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-7",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/7/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "put-7-disabled",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/7/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": false
+    }
+   }
+  },
+  {
+   "id": "put-8",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/8/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 10,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  }
+ ]
+}

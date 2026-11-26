@@ -1,0 +1,78 @@
+{
+  "name": "rename-sql-fault",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "claim-plain-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000106",
+          "name": "BOM key",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "assign-device-to-owned-zone",
+      "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid) VALUES (1,'Rename zone',1,'UTC','d10a7c55-0000-4000-8000-0000000000b1'); UPDATE devices SET irrigation_zone_id=1 WHERE deveui='A840410000000106'"
+    },
+    {
+      "id": "reject-local-rename",
+      "sql": "CREATE TRIGGER review_reject_rename BEFORE UPDATE OF name ON devices WHEN NEW.deveui='A840410000000106' BEGIN SELECT RAISE(ABORT,'review rename refused'); END"
+    },
+    {
+      "id": "rename-fails-in-sql",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A840410000000106/name",
+        "auth": "token",
+        "body": {
+          "name": "New name"
+        }
+      }
+    },
+    {
+      "id": "drop-rename-trigger",
+      "sql": "DROP TRIGGER review_reject_rename"
+    },
+    {
+      "id": "rename-retry",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A840410000000106/name",
+        "auth": "token",
+        "body": {
+          "name": "New name"
+        }
+      }
+    }
+  ]
+}

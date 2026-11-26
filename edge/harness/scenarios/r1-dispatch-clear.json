@@ -1,0 +1,48 @@
+{
+  "name": "r1-dispatch-clear",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "Devices discovered and claimed before the session, plus a scheduled valve A840410000000006 with no clock stamp (clock sync due).",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000006','Scheduled','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000f6','A840410000000006','WEEKLY',127,'06:00',10,'UTC',1);"
+    },
+    {
+      "id": "seed-unattempted-lifecycle-clear",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'X840410000000008','Valve 8','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) SELECT d.deveui,'GEN2',json_object('mode','LIFECYCLE_CLEAR','generation','GEN2','desired_revision','a3200000-0000-4000-8000-000000000008','required_push_ids',json_array('a3100000-0000-4000-8000-000000000008'),'predecessor_push_ids',json_array(),'readiness',json_object('state','PENDING','revision','a3200000-0000-4000-8000-000000000008','reason','awaiting_clear_ack'),'prepared_at','2026-11-23T06:02:00.000Z','reason','device_unclaim','lifecycle_clear',json_object('v',1,'revision','a3200000-0000-4000-8000-000000000008','state','PENDING','reason','device_unclaim','prepared_at','2026-11-23T06:02:00.000Z','device',json_object('row_id',d.id,'device_eui',d.deveui,'type_id',d.type_id,'user_id',d.user_id,'irrigation_zone_id',d.irrigation_zone_id,'deleted_at',d.deleted_at),'generation','GEN2','zone',json_object('zone_uuid',z.zone_uuid,'sync_version',coalesce(z.sync_version,0),'deleted_at',z.deleted_at),'policy',NULL,'retired_schedules',json_array(),'live_schedule_snapshot',json_array())) FROM devices d JOIN irrigation_zones z ON d.irrigation_zone_id=z.id WHERE d.deveui='X840410000000008'; INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,plan_hash,transport_json) VALUES ('a3100000-0000-4000-8000-000000000008','X840410000000008','DAYMASK_PLAN',25,'80','da39a3ee5e6b4b0d3255bfef95601890afd80709','{\"lifecycle_clear_revision\":\"a3200000-0000-4000-8000-000000000008\"}');",
+      "why": "A lifecycle clear whose binding names the non-hex X840410000000008: store.parseControl throws conditional_control_malformed, which runHousekeeping does not catch, so the whole valve tick ends before the clock sync."
+    },
+    {
+      "id": "clock-tick",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-again",
+      "timer": "valve-clock-tick"
+    }
+  ]
+}

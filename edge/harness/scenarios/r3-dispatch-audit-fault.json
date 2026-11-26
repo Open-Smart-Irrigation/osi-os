@@ -1,0 +1,103 @@
+{
+  "name": "r3-dispatch-audit-fault",
+  "_comment": "B1 (dispatch r3): a manual STREGA command accepted by the radio whose actuator_log insert fails publishes only the first command_ack; status and the second ACK need the insert. Covers OPEN_FOR_DURATION, CLOSE and CLOSE_FOR_DURATION, with a control valve.",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000301','OpenLogFault','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000302','CloseLogFault','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000303','TimedCloseLogFault','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000304','Control','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');"
+    },
+    {
+      "id": "fault-log",
+      "sql": "CREATE TRIGGER r3_fault_log BEFORE INSERT ON actuator_log WHEN NEW.deveui IN ('A840410000000301','A840410000000302','A840410000000303') BEGIN SELECT RAISE(ABORT,'r3 actuator audit fault'); END;"
+    },
+    {
+      "id": "open-log-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000301",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "close-log-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000302",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "timed-close-log-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000303",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "open-control",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000304",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "drop-log",
+      "sql": "DROP TRIGGER r3_fault_log;"
+    },
+    {
+      "id": "open-after-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000301",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    }
+  ]
+}

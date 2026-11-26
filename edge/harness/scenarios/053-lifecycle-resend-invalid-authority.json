@@ -1,0 +1,92 @@
+{
+  "name": "lifecycle-resend-invalid-authority",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-No data",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "No data",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "schedule-1",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "seed-managed-policy",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) SELECT 'synthetic-review-policy',zone_uuid,'{}','UTC',1 FROM irrigation_zones WHERE id=1"
+    },
+    {
+      "id": "seed-managed-valve",
+      "why": "Attach an owned STREGA and a conditional weekly row to exercise pause with an existing valve program.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Managed valve','STREGA_VALVE',1,1,'CLOSED','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('synthetic-review-weekly','A840410000000002','WEEKLY',127,'09:00',30,'UTC','synthetic-review-policy')"
+    },
+    {
+      "id": "managed-pause",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "blank-lifecycle-prepared-at",
+      "sql": "UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.lifecycle_clear.prepared_at','') WHERE device_eui='A840410000000002'"
+    },
+    {
+      "id": "resend-malformed-lifecycle-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    }
+  ]
+}

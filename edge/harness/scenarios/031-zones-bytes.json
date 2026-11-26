@@ -1,0 +1,175 @@
+{
+  "name": "zones-bytes",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone"
+        }
+      }
+    },
+    {
+      "id": "link-for-bytes",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "config-all-escape",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "cropType": "a'b\"\\\b\r\n\t\f&<>  🌱",
+          "variety": "\ud800",
+          "soilType": [
+            42,
+            true,
+            null
+          ],
+          "irrigationMethod": {
+            "nested": 1
+          },
+          "areaM2": "0x20000000000001",
+          "irrigationEfficiencyPct": [
+            0.30000000000000004
+          ],
+          "schedulingMode": " SERVER_PREFERRED ",
+          "predictionCardEnabled": [
+            "TRUE"
+          ],
+          "weatherSource": " METEOSWISS ",
+          "notes": "\\u0000 ☃",
+          "timezone": "America/Los_Angeles",
+          "phenologicalStage": "budbreak",
+          "stageStartedOn": "2024-02-29",
+          "calibrationKey": "a'b"
+        }
+      }
+    },
+    {
+      "id": "config-null-fields",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "cropType": null,
+          "variety": null,
+          "soilType": null,
+          "irrigationMethod": null,
+          "areaM2": null,
+          "irrigationEfficiencyPct": "",
+          "schedulingMode": null,
+          "predictionCardEnabled": null,
+          "weatherSource": null,
+          "notes": null,
+          "phenologicalStage": null,
+          "calibrationKey": null,
+          "stageStartedOn": null
+        }
+      }
+    },
+    {
+      "id": "config-weather-absent",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": "after clearing provider"
+        }
+      }
+    },
+    {
+      "id": "config-nul-byte",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": "a\u0000b"
+        }
+      }
+    },
+    {
+      "id": "config-timezone-null",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "timezone": null
+        }
+      }
+    },
+    {
+      "id": "config-node20-offset-stage",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "timezone": "+14:00",
+          "phenologicalStage": "mid_season"
+        }
+      }
+    },
+    {
+      "id": "config-small-sci",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "1e-6"
+        }
+      }
+    },
+    {
+      "id": "reset-stage-date",
+      "sql": "UPDATE irrigation_zones SET stage_started_on='2024-02-29' WHERE id=1"
+    },
+    {
+      "id": "config-iana-spelling-stage",
+      "anchorTimeZone": "America/Argentina/Buenos_Aires",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "timezone": "america/argentina/buenos_aires",
+          "phenologicalStage": "development"
+        }
+      }
+    }
+  ]
+}

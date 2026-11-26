@@ -1,0 +1,53 @@
+{
+ "name": "r5-conn-snapshot-key",
+ "description": "Fix round connections (item 5): store.js listSnapshotPending selects the snapshot markers with key LIKE 'valve_snapshot_pending:%'. The gateway's sqlite3 matches a BLOB key as text; modernc is built with SQLITE_LIKE_DOESNT_MATCH_BLOBS. emitPendingSnapshots then slices the EUI off at the prefix length, upper-cases it, and claims the marker by the TEXT key 'valve_snapshot_pending:' + EUI. Each marker below is past the five-minute cap; the clock ticks send what Node-RED sends.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed-case-prefix",
+   "why": "Two debounced snapshots past the five-minute cap. 0840410000000021's marker key is 'VALVE_SNAPSHOT_PENDING:0840410000000021' (upper-case prefix, TEXT): it matches the LIKE, sorts first, and push.js slices the EUI off at the prefix length, then finds no 'valve_snapshot_pending:' marker for it, so nothing is sent. A840410000000023's marker is the ordinary key.",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c21','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('0840410000000021','Case prefix','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000023','Ordinary','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0100000-0000-4000-8000-410000000021','0840410000000021','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0100001-0000-4000-8000-410000000021','0840410000000021','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0100002-0000-4000-8000-410000000021','0840410000000021','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0300000-0000-4000-8000-410000000023','A840410000000023','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0300001-0000-4000-8000-410000000023','A840410000000023','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0300002-0000-4000-8000-410000000023','A840410000000023','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO app_settings (key,value,updated_at) VALUES ('VALVE_SNAPSHOT_PENDING:0840410000000021','{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0100000-0000-4000-8000-410000000021\",\"5c0100001-0000-4000-8000-410000000021\",\"5c0100002-0000-4000-8000-410000000021\"]}','2026-11-23T18:37:46.961Z');INSERT INTO app_settings (key,value,updated_at) VALUES ('valve_snapshot_pending:A840410000000023','{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0300000-0000-4000-8000-410000000023\",\"5c0300001-0000-4000-8000-410000000023\",\"5c0300002-0000-4000-8000-410000000023\"]}','2026-11-23T18:37:46.961Z');"
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "seed-blob-keys",
+   "why": "Debounced snapshots past the cap whose markers the gateway's LIKE matches but push.js cannot claim: A840410000000022 under a lower-case EUI (TEXT), A840410000000024 under a BLOB key only, a BLOB key whose text is not a valve EUI (sorted last). A840410000000026 has the ordinary TEXT marker and a BLOB twin with the same value: the TEXT marker is sent first, the twin then finds nothing.",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000022','Lower-case marker','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000024','BLOB marker','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000026','TEXT and BLOB markers','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0200000-0000-4000-8000-410000000022','A840410000000022','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0200001-0000-4000-8000-410000000022','A840410000000022','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0200002-0000-4000-8000-410000000022','A840410000000022','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0400000-0000-4000-8000-410000000024','A840410000000024','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0400001-0000-4000-8000-410000000024','A840410000000024','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0400002-0000-4000-8000-410000000024','A840410000000024','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0600000-0000-4000-8000-410000000026','A840410000000026','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0600001-0000-4000-8000-410000000026','A840410000000026','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('5c0600002-0000-4000-8000-410000000026','A840410000000026','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED','2026-11-23 18:37:46');INSERT INTO app_settings (key,value,updated_at) VALUES ('valve_snapshot_pending:a840410000000022','{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0200000-0000-4000-8000-410000000022\",\"5c0200001-0000-4000-8000-410000000022\",\"5c0200002-0000-4000-8000-410000000022\"]}','2026-11-23T18:37:46.961Z');INSERT INTO app_settings (key,value,updated_at) VALUES (CAST('valve_snapshot_pending:A840410000000024' AS BLOB),'{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0400000-0000-4000-8000-410000000024\",\"5c0400001-0000-4000-8000-410000000024\",\"5c0400002-0000-4000-8000-410000000024\"]}','2026-11-23T18:37:46.961Z');INSERT INTO app_settings (key,value,updated_at) VALUES ('valve_snapshot_pending:A840410000000026','{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0600000-0000-4000-8000-410000000026\",\"5c0600001-0000-4000-8000-410000000026\",\"5c0600002-0000-4000-8000-410000000026\"]}','2026-11-23T18:37:46.961Z');INSERT INTO app_settings (key,value,updated_at) VALUES (CAST('valve_snapshot_pending:A840410000000026' AS BLOB),'{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0600000-0000-4000-8000-410000000026\",\"5c0600001-0000-4000-8000-410000000026\",\"5c0600002-0000-4000-8000-410000000026\"]}','2026-11-23T18:37:46.961Z');INSERT INTO app_settings (key,value,updated_at) VALUES (CAST('valve_snapshot_pending:NOT-A-VALVE-EUI' AS BLOB),'{\"edited_at\":\"2026-11-23T18:37:46.885Z\",\"first_edited_at\":\"2026-11-23T18:37:46.885Z\",\"push_ids\":[\"5c0900000-0000-4000-8000-000000000000\"]}','2026-11-23T18:37:46.961Z');"
+  },
+  {
+   "id": "clock-tick-2",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "clock-tick-3",
+   "timer": "valve-clock-tick"
+  }
+ ]
+}

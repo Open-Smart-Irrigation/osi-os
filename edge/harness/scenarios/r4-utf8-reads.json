@@ -1,0 +1,80 @@
+{
+  "name": "r4-utf8-reads",
+  "description": "Review round 4: invalid UTF-8 stored text read back through device and settings projections.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "claim-device",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000302",
+          "name": "Utf8",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "seed-invalid-utf8-device-name",
+      "sql": "UPDATE devices SET name=CAST(X'4C61F09F9821E28221' AS TEXT) WHERE deveui='A840410000000302'"
+    },
+    {
+      "id": "list-invalid-utf8-device-name",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "rename-after-invalid-utf8",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A840410000000302/name",
+        "auth": "token",
+        "body": {
+          "name": "Utf8"
+        }
+      }
+    },
+    {
+      "id": "seed-invalid-utf8-gateway-timezone",
+      "sql": "INSERT INTO app_settings(key,value,updated_at) VALUES ('gateway_timezone', CAST(X'555443F09F98' AS TEXT), '2026-11-23T00:00:00.000Z') ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    },
+    {
+      "id": "get-settings-invalid-utf8",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "token"
+      }
+    }
+  ]
+}

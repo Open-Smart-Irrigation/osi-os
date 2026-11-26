@@ -1,0 +1,14 @@
+{
+  "name": "dc-valve-user-missing",
+  "_comment": "Dispatch-inventory probe for the manual valve route's user lookup (report row 4): a valid token whose user row no longer matches gets 401 before any radio call or write.",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "setup", "why": "An ordinary owned STREGA valve.",
+     "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000095','Valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');"},
+    {"id": "rename-user", "why": "The token names a username that no longer exists.", "sql": "UPDATE users SET username='renamed' WHERE id=1;"},
+    {"id": "open-user-missing", "http": {"method": "POST", "path": "/api/valve/A840410000000095", "auth": "token", "body": {"action": "OPEN_FOR_DURATION", "duration_minutes": 5}}},
+    {"id": "restore-user", "sql": "UPDATE users SET username='farmer' WHERE id=1;"},
+    {"id": "open-user-restored", "http": {"method": "POST", "path": "/api/valve/A840410000000095", "auth": "token", "body": {"action": "OPEN_FOR_DURATION", "duration_minutes": 5}}}
+  ]
+}

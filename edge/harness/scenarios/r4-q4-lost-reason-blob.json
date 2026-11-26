@@ -1,0 +1,141 @@
+{
+ "name": "r4-q4-lost-reason-blob",
+ "description": "Fix Q4 (stored-text sweep): store.js isLostRow is r.state === 'FAILED' && LOST_REASONS.includes(r.error), a strict test, so a BLOB error (a Buffer) is never a lost reason. ackPush skips a FAILED candidate that is not lost, and pushSummary and the scheduler status flag count only lost rows. D1's plan pushes fail with CAST('stale_unconfirmed' AS BLOB), D2's with the TEXT reason; a weekday-0 ACK then arrives for each, and the valve list and schedule read report the push states.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,'Zone 1',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c01',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D1','blob reason','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D2','text reason','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');"
+  },
+  {
+   "id": "create-d1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000D1/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "create-d2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000D2/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "fail-pushes",
+   "sql": "UPDATE valve_schedule_pushes SET state='FAILED', error=CAST('stale_unconfirmed' AS BLOB) WHERE device_eui='A8404100000000D1' AND purpose='WEEKDAY_PLAN';UPDATE valve_schedule_pushes SET state='FAILED', error='stale_unconfirmed' WHERE device_eui='A8404100000000D2' AND purpose='WEEKDAY_PLAN';UPDATE valve_schedule_pushes SET state='FAILED', error=CAST('not_resent_q02c' AS BLOB) WHERE device_eui='A8404100000000D1' AND purpose='SCHEDULER_STATUS';"
+  },
+  {
+   "id": "list-failed",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "get-d1-failed",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A8404100000000D1/schedules",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "get-d2-failed",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A8404100000000D2/schedules",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "ack-d1",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a8404100000000d1/event/up",
+    "payload": {
+     "time": "{{datetime:+0h}}",
+     "deduplicationId": "ack-d1",
+     "fCnt": 11,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a8404100000000d1",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Schl_Port": 14,
+      "Schl_status": "01"
+     }
+    }
+   }
+  },
+  {
+   "id": "ack-d2",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a8404100000000d2/event/up",
+    "payload": {
+     "time": "{{datetime:+0h}}",
+     "deduplicationId": "ack-d2",
+     "fCnt": 12,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a8404100000000d2",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Schl_Port": 14,
+      "Schl_status": "01"
+     }
+    }
+   }
+  },
+  {
+   "id": "list-after-ack",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  }
+ ]
+}

@@ -1,0 +1,96 @@
+{
+  "name": "daily-dendro-noncoercible-dates",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Test zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "configure-server-preferred",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "scheduling_mode": "server_preferred"
+        }
+      }
+    },
+    {
+      "id": "configure-dendro",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "DENDRO",
+          "threshold_kpa": 2,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "seed-shared-recommendation",
+      "why": "Restore a fresh shared DENDRO bundle with an object in its reasoning field.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO zone_shared_environment(zone_uuid,summary_json,last_received_at) SELECT zone_uuid,'{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":{\"toString\":0}}}}',strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM irrigation_zones WHERE id=1;"
+    },
+    {
+      "id": "seed-computed",
+      "sql": "UPDATE zone_shared_environment SET summary_json='{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"Synthetic probe\"}},\"display\":{\"sharedGeneratedAt\":{\"toString\":0}}}', last_received_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); UPDATE irrigation_schedules SET last_triggered_at=NULL;"
+    },
+    {
+      "id": "tick-with-computed",
+      "timer": "daily-schedule-0600"
+    },
+    {
+      "id": "seed-received",
+      "sql": "UPDATE zone_shared_environment SET summary_json='{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"Synthetic probe\"}},\"display\":{\"lastReceivedAt\":{\"toString\":0}}}', last_received_at=''; UPDATE irrigation_schedules SET last_triggered_at=NULL;"
+    },
+    {
+      "id": "tick-with-received",
+      "timer": "daily-schedule-0600"
+    },
+    {
+      "id": "seed-numeric-computed-control",
+      "sql": "UPDATE zone_shared_environment SET summary_json='{\"water\":{\"action\":{\"code\":\"emergency_irrigate\",\"source\":\"dendro\",\"reasoning\":\"Synthetic probe\"}},\"display\":{\"sharedGeneratedAt\":1893456000000}}', last_received_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); UPDATE irrigation_schedules SET last_triggered_at=NULL;"
+    },
+    {
+      "id": "tick-with-numeric-computed-control",
+      "timer": "daily-schedule-0600"
+    }
+  ]
+}

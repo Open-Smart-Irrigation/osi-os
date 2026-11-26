@@ -1,0 +1,380 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "JavaScript number semantics the flows depend on: Math.round (halves toward +inf), toFixed, String(number).",
+ "vectors": [
+  {
+   "input": {
+    "n": "3fe0000000000000"
+   },
+   "mathRound": {
+    "n": "3ff0000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "0.5",
+    "utf8Hex": "302e35",
+    "sha256": "d2cbad71ff333de67d07ec676e352ab7f38248eb69c942950157220607c55e84"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "0.50",
+    "utf8Hex": "302e3530",
+    "sha256": "f88afaea4207e3bdbf9381c1649835a1780019d246fe640dd86f1abe706462c0"
+   },
+   "string": "0.5",
+   "roundTenth": {
+    "n": "3fe0000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "3ff8000000000000"
+   },
+   "mathRound": {
+    "n": "4000000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "1.5",
+    "utf8Hex": "312e35",
+    "sha256": "9f29a130438b81170b92a42650f9a94291ecad60bd47af2a3886e75f7f728725"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "1.50",
+    "utf8Hex": "312e3530",
+    "sha256": "1a60b208ff491c3e2d21cdd5abb003e51e97b072efec59098863da45021de6a9"
+   },
+   "string": "1.5",
+   "roundTenth": {
+    "n": "3ff8000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "4004000000000000"
+   },
+   "mathRound": {
+    "n": "4008000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "2.5",
+    "utf8Hex": "322e35",
+    "sha256": "b8736b999909049671d0ea075a42b308a5fbe2df1854899123fe09eb0ee9de61"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "2.50",
+    "utf8Hex": "322e3530",
+    "sha256": "853a9a75b07e44c4a4117630d67a4c1eb7ced7b45c72bb6c13caf2ca2ab338ed"
+   },
+   "string": "2.5",
+   "roundTenth": {
+    "n": "4004000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "bfe0000000000000"
+   },
+   "mathRound": {
+    "n": "8000000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "-0.5",
+    "utf8Hex": "2d302e35",
+    "sha256": "1b07b0cffa0b3f596b5e048b0115168886cc5183dd518655b5515ee5dddac6d1"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "-0.50",
+    "utf8Hex": "2d302e3530",
+    "sha256": "82303d3ff365353aacdeb26e75a8d9ab7f769b2894690f93f69f22730610aaff"
+   },
+   "string": "-0.5",
+   "roundTenth": {
+    "n": "bfe0000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "bff8000000000000"
+   },
+   "mathRound": {
+    "n": "bff0000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "-1.5",
+    "utf8Hex": "2d312e35",
+    "sha256": "37c2b212b94e5372b33df924ea2a91182d90c237d0bf942c1768e794ebef2376"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "-1.50",
+    "utf8Hex": "2d312e3530",
+    "sha256": "31041bdd9d5a80b01cd6518420ae2ca82ad57eb4ff61faee20e5bf8453adad6f"
+   },
+   "string": "-1.5",
+   "roundTenth": {
+    "n": "bff8000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "c004000000000000"
+   },
+   "mathRound": {
+    "n": "c000000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "-2.5",
+    "utf8Hex": "2d322e35",
+    "sha256": "20fb508cd069b7fbaf72c798394a7995c9a3ded09ccf19a294fdb9415fd03317"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "-2.50",
+    "utf8Hex": "2d322e3530",
+    "sha256": "9c2f9d4e0a24203221153ea673328b0c8c15a581815938b827ebff0599fc9728"
+   },
+   "string": "-2.5",
+   "roundTenth": {
+    "n": "c004000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "3fdfffffffffffff"
+   },
+   "mathRound": {
+    "n": "0000000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "0.5",
+    "utf8Hex": "302e35",
+    "sha256": "d2cbad71ff333de67d07ec676e352ab7f38248eb69c942950157220607c55e84"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "0.50",
+    "utf8Hex": "302e3530",
+    "sha256": "f88afaea4207e3bdbf9381c1649835a1780019d246fe640dd86f1abe706462c0"
+   },
+   "string": "0.49999999999999994",
+   "roundTenth": {
+    "n": "3fe0000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "40591fffffffffff"
+   },
+   "mathRound": {
+    "n": "4059000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "100.5",
+    "utf8Hex": "3130302e35",
+    "sha256": "61ef14679b8b8d07f7777ff0636b131f3a29acdd0fc719535ed53599ce8cf5a0"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "100.50",
+    "utf8Hex": "3130302e3530",
+    "sha256": "deb3c9c1e1c40f75e3a55fc6accbbaecdcb28950579d220244007974ff70f107"
+   },
+   "string": "100.49999999999999",
+   "roundTenth": {
+    "n": "4059200000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "4070b80000000000"
+   },
+   "mathRound": {
+    "n": "4070c00000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "267.5",
+    "utf8Hex": "3236372e35",
+    "sha256": "2909042eedf9dfdcf71fe94c427024d2a15a09d36e7f8cf37fead8affb2c7999"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "267.50",
+    "utf8Hex": "3236372e3530",
+    "sha256": "64ef109bdcf8347171b9e5258594eecae8d90a045d4c4a5bfc285a728054dfa5"
+   },
+   "string": "267.5",
+   "roundTenth": {
+    "n": "4070b80000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "8000000000000000"
+   },
+   "mathRound": {
+    "n": "8000000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "0.0",
+    "utf8Hex": "302e30",
+    "sha256": "8aed642bf5118b9d3c859bd4be35ecac75b6e873cce34e7b6f554b06f75550d7"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "0.00",
+    "utf8Hex": "302e3030",
+    "sha256": "561b2814d3c09e62a92442c946307918f7f63f833c84876c08bd4c406767e53b"
+   },
+   "string": "0",
+   "roundTenth": {
+    "n": "8000000000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "432fffffffffffff"
+   },
+   "mathRound": {
+    "n": "4330000000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "4503599627370495.5",
+    "utf8Hex": "343530333539393632373337303439352e35",
+    "sha256": "edb1ed9702eb0dadda431795de438e650871bb5f83aa1b7d52ae825ec4f26c5d"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "4503599627370495.50",
+    "utf8Hex": "343530333539393632373337303439352e3530",
+    "sha256": "4ae48cade7da14eac9b91b9b56ad4079457080c99c293e9764dea40a4405a293"
+   },
+   "string": "4503599627370495.5",
+   "roundTenth": {
+    "n": "432ffffffffffffe"
+   }
+  },
+  {
+   "input": {
+    "n": "444b1ae4d6e2ef50"
+   },
+   "mathRound": {
+    "n": "444b1ae4d6e2ef50"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "1e+21",
+    "utf8Hex": "31652b3231",
+    "sha256": "241c4643fa70b1dcde1205b71be4e3bebb17e9f880c8e1a33d0ead6c27271d3c"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "1e+21",
+    "utf8Hex": "31652b3231",
+    "sha256": "241c4643fa70b1dcde1205b71be4e3bebb17e9f880c8e1a33d0ead6c27271d3c"
+   },
+   "string": "1e+21",
+   "roundTenth": {
+    "n": "444b1ae4d6e2ef50"
+   }
+  },
+  {
+   "input": {
+    "n": "4062df74bc6a7ef9"
+   },
+   "mathRound": {
+    "n": "4062e00000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "151.0",
+    "utf8Hex": "3135312e30",
+    "sha256": "ab3dad69c70ea5b5509492af216ff397afb495e6fd291274b7b055e6ad61f6b4"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "150.98",
+    "utf8Hex": "3135302e3938",
+    "sha256": "9b49930f063409b1857b40de2b5d9631858fcec5017f0b4901bbde12c1420b71"
+   },
+   "string": "150.98299999999998",
+   "roundTenth": {
+    "n": "4062e00000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "4089c40000000000"
+   },
+   "mathRound": {
+    "n": "4089c80000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "824.5",
+    "utf8Hex": "3832342e35",
+    "sha256": "133c1bb02fc0867d4913ef1b0196674d0de2268f138853d9e80a93139a941aed"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "824.50",
+    "utf8Hex": "3832342e3530",
+    "sha256": "a1dd91b3950c9859ca73d34d2fb789cac3d0e3629f646d89f9596efc2242a4ca"
+   },
+   "string": "824.5",
+   "roundTenth": {
+    "n": "4089c40000000000"
+   }
+  },
+  {
+   "input": {
+    "n": "4089cc0000000000"
+   },
+   "mathRound": {
+    "n": "4089d00000000000"
+   },
+   "toFixed1": {
+    "ok": true,
+    "text": "825.5",
+    "utf8Hex": "3832352e35",
+    "sha256": "1452b4b5f06a77ddd9344aaa33dd70328655b919d88dae9c7745232394ef45c6"
+   },
+   "toFixed2": {
+    "ok": true,
+    "text": "825.50",
+    "utf8Hex": "3832352e3530",
+    "sha256": "b54c919847db93697fb9cb288485fa943838de072145b484558f8f9312998be0"
+   },
+   "string": "825.5",
+   "roundTenth": {
+    "n": "4089cc0000000000"
+   }
+  }
+ ]
+}

@@ -1,0 +1,123 @@
+{
+ "name": "r4-q4-route-blob-tz-linked",
+ "description": "Fix Q4 (review A2 B2): on a linked gateway trg_sync_valve_schedules_outbox_ai builds json_object(..., 'timezone', NEW.timezone), which throws on a BLOB. A schedule created for a valve whose zone timezone is a BLOB is bound as that BLOB, so the INSERT fails and nothing is queued; a backend that binds the gateway text instead writes the schedule, an outbox row and a plan push. C1 X'', C3 BLOB 'Asia/Tokyo'; C2 empty TEXT is the control. The zones are seeded before the link, since the zone trigger refuses them too. C2's creates emit VALVE_RUNTIME_CHANGED: its recent_stale_state is a BLOB 'STALE_NO_OBSERVATION' (store.js recentStaleState's LIKE matches a BLOB as text and answers the Buffer), and before the east create its pushes fail with a BLOB 'stale_unconfirmed', which isLostRow does not count as lost. West gateway Etc/GMT+12, then east Pacific/Kiritimati.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT OR REPLACE INTO app_settings(key,value) VALUES ('gateway_timezone','Etc/GMT+12');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,'Zone 1',1,X'','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c01',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C1','linked blob tz','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (2,'Zone 2',1,'','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c02',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C2','linked empty tz','STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (3,'Zone 3',1,CAST('Asia/Tokyo' AS BLOB),'0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c03',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C3','linked tokyo blob','STREGA_VALVE',1,3,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at) VALUES ('ee000000-0000-4000-8000-0000000000c2','A8404100000000C2','{{datetime:-1h}}',60,'{{datetime:-1h}}','none',CAST('STALE_NO_OBSERVATION' AS BLOB),'{{datetime:-1h}}');"
+  },
+  {
+   "id": "link",
+   "why": "after the seed: the zone outbox trigger's json_object also refuses a BLOB timezone",
+   "sql": "INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES('cloud',1,'0016C001F1000001','2026-11-23T06:00:00.000Z');"
+  },
+  {
+   "id": "create-c1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000C1/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "create-c2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000C2/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "create-c3",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000C3/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "gateway-east",
+   "sql": "INSERT OR REPLACE INTO app_settings(key,value) VALUES ('gateway_timezone','Pacific/Kiritimati');UPDATE valve_schedule_pushes SET state='FAILED', error=CAST('stale_unconfirmed' AS BLOB) WHERE device_eui='A8404100000000C2';"
+  },
+  {
+   "id": "create-c1-east",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000C1/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "create-c2-east",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A8404100000000C2/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 64,
+     "start_time": "09:00",
+     "duration_minutes": 5
+    }
+   }
+  },
+  {
+   "id": "age-c2-push",
+   "why": "one QUEUED push older than 24 h: the tick's stale sweep fails it and emits C2's runtime",
+   "sql": "UPDATE valve_schedule_pushes SET state='QUEUED', error=NULL, queued_at='{{datetime:-48h}}' WHERE rowid=(SELECT MIN(rowid) FROM valve_schedule_pushes WHERE device_eui='A8404100000000C2' AND purpose='WEEKDAY_PLAN');"
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  }
+ ]
+}

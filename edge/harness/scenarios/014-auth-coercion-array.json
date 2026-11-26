@@ -1,0 +1,31 @@
+{
+ "name": "auth-coercion-array",
+ "description": "An array username at first registration is joined by String().",
+ "steps": [
+  {
+   "id": "register-array-username",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": [
+      "a",
+      "b"
+     ],
+     "password": "synthetic-pass-9"
+    }
+   }
+  },
+  {
+   "id": "login-joined-name",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "a,b",
+     "password": "synthetic-pass-9"
+    }
+   }
+  }
+ ]
+}

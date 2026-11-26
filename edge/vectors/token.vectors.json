@@ -1,0 +1,337 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "Session tokens: issuance by the shipped auth-process-result node, verification by osi-scope-helper.verifyBearer.",
+ "issue": [
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": 1,
+    "username": "farmer"
+   },
+   "claims": null,
+   "expect": "eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M"
+  },
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": 2,
+    "username": " spaced "
+   },
+   "claims": null,
+   "expect": "eyJ1c2VySWQiOjIsInVzZXJuYW1lIjoic3BhY2VkIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.F5m1Ye99JJWdGTDiETu4xoJpMJ8g7PjhyyUQ3GaXkio"
+  },
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": 3,
+    "username": "café 🌱"
+   },
+   "claims": null,
+   "expect": "eyJ1c2VySWQiOjMsInVzZXJuYW1lIjoiY2Fmw6kg8J-MsSIsImlhdCI6MTc5NTQ1MzQyMTUzNCwiZXhwIjoxNzk2MDU4MjIxNTM0fQ.uX8_KghXuBf5q9CWZRF5n8dnCoGaNVRONk3r4KAifP0"
+  },
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": 4,
+    "username": "</script>&\"q"
+   },
+   "claims": null,
+   "expect": "eyJ1c2VySWQiOjQsInVzZXJuYW1lIjoiPC9zY3JpcHQ-JlwicSIsImlhdCI6MTc5NTQ1MzQyMTUzNCwiZXhwIjoxNzk2MDU4MjIxNTM0fQ.sgAUu0ks9fLl77Z0lUZNq7J62CviNgjyNbxX2AB0YyI"
+  },
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": 1,
+    "username": "farmer"
+   },
+   "claims": {
+    "mustChangePassword": true
+   },
+   "expect": "eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzQsIm11c3RDaGFuZ2VQYXNzd29yZCI6dHJ1ZX0.559aTi-cmbmuP2gtCyi0cW-njaG7b5px2r-iSK0nj-k"
+  },
+  {
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "user": {
+    "id": "7",
+    "username": "string-id"
+   },
+   "claims": null,
+   "expect": "eyJ1c2VySWQiOjcsInVzZXJuYW1lIjoic3RyaW5nLWlkIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.DGvQsvDIRszdepd0D6PO-pM9Ohx7KBTst-dCiSYoxHs"
+  }
+ ],
+ "verify": [
+  {
+   "id": "valid",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453422534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "valid-trailing-space",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M  ",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453422534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "expired",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1796058221535,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Token expired"
+   }
+  },
+  {
+   "id": "at-expiry",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1796058221534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "no-bearer",
+   "authorization": "eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Unauthorized"
+   }
+  },
+  {
+   "id": "lowercase-bearer",
+   "authorization": "bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Unauthorized"
+   }
+  },
+  {
+   "id": "empty",
+   "authorization": "",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Unauthorized"
+   }
+  },
+  {
+   "id": "one-part",
+   "authorization": "Bearer abc",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "three-parts",
+   "authorization": "Bearer a.b.c",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "bad-sig",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJdAA",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "wrong-secret",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjowfQ.ONQSFNr5NCeDuefvVN8zxgfcShoWUYG_mPWYjbHgkxU",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "no-exp",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIn0.oSRJvfH3X2ZdrOrAp2nfP335yM0OiJ2w47ChcQGYUTw",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "exp-zero",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjowfQ.cduPHAqsB6FrjUaat9RgQXjcs1lKSU2LRxMCnsKKvbo",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "exp-string",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoiMSJ9.o36kJdBkmSwbL1AYXcoryR9GsfFPwXNC7Osrio-hPZs",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Token expired"
+   }
+  },
+  {
+   "id": "userid-string",
+   "authorization": "Bearer eyJ1c2VySWQiOiI1IiwidXNlcm5hbWUiOiJmYXJtZXIifQ.9AEZElLKEUo1yweVyhDU2M6km7NU8-j4-O5CGZt7jns",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 5,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "userid-missing",
+   "authorization": "Bearer eyJ1c2VybmFtZSI6ImZhcm1lciJ9.yLKakLbg5gaQ4b85FlZk76iDmt9QF_WJft81INxZZh0",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "userid-null",
+   "authorization": "Bearer eyJ1c2VySWQiOm51bGwsInVzZXJuYW1lIjoiZmFybWVyIn0.Kko16XfZLusD0P1mjIh9Q4MHQbz0nyXSTYfWQYtI3eY",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 0,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "username-blank",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiICAifQ.oiE6GSCUiG8CU-WQ9BE2EZ9-YuhHZzYQ0xEM4ClVllI",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "username-padded",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiICBmYXJtZXIgIn0.0Esz5I0af-et9p9Cb-fMurIHJNQfKZbjd6r0JHECcXE",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "payload-not-json",
+   "authorization": "Bearer bm90IGpzb24.5qxKBX2sPz66hIveW1wWwc42y73yGIk4n9jWPhjmaeg",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "payload-array",
+   "authorization": "Bearer WzFd.Ai4uny5Fjv1oN-kyFkrRykk0VARxrzA54xhRajL0mAA",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  },
+  {
+   "id": "padded-b64-payload",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIn0=.9atcC6t9kDHyAUPDj4IPtj_AHkgEQQ5iFStH648TJLg",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": true,
+    "userId": 1,
+    "username": "farmer"
+   }
+  },
+  {
+   "id": "sig-padded",
+   "authorization": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiaWF0IjoxNzk1NDUzNDIxNTM0LCJleHAiOjE3OTYwNTgyMjE1MzR9.PFGN0J72EpB0y2kTrrcGya2hQLakX6RSeh2XbpCJd1M=",
+   "secret": "synthetic-smoke-secret",
+   "nowMs": 1795453421534,
+   "expect": {
+    "ok": false,
+    "status": 401,
+    "message": "Invalid token"
+   }
+  }
+ ]
+}

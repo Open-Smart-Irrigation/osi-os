@@ -1,0 +1,256 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "Durable uplink identity keys (osi-uplink-dedup-guard/durable): eventKey and sdi12Key.",
+ "eventKey": [
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "deduplicationId",
+      "00000000-0000-4000-8000-000000000001"
+     ],
+     [
+      "fCnt",
+      {
+       "n": "3ff0000000000000"
+      }
+     ],
+     [
+      "time",
+      "2026-11-20T00:00:00.000Z"
+     ]
+    ]
+   },
+   "expect": "a8da1ef63b39e15711afab286e2ef2967da111b859c1b59da802e364fe34e00e"
+  },
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "deduplicationId",
+      "  spaced  "
+     ]
+    ]
+   },
+   "expect": "d23db690bf232ceba55eee21b45094731fb3573f9b79648aa26e4b2da78c67ad"
+  },
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "deduplicationId",
+      ""
+     ],
+     [
+      "fCnt",
+      {
+       "n": "401c000000000000"
+      }
+     ],
+     [
+      "fPort",
+      {
+       "n": "4024000000000000"
+      }
+     ],
+     [
+      "devAddr",
+      "01020304"
+     ],
+     [
+      "time",
+      "2026-11-20T00:00:00.123456789Z"
+     ]
+    ]
+   },
+   "expect": "2ff0272d8a7b664b9e90d0e9328d37aa6f1c358c2a904898881732af28e22962"
+  },
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "fCnt",
+      {
+       "n": "401c000000000000"
+      }
+     ],
+     [
+      "time",
+      "2026-11-20T00:00:00Z"
+     ]
+    ]
+   },
+   "expect": "5c9e1d515ac06724f46a04f0658b586f64cd0d2a3ae41ee07ffff29dce1341dc"
+  },
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "fCnt",
+      {
+       "n": "bff0000000000000"
+      }
+     ],
+     [
+      "time",
+      "2026-11-20T00:00:00Z"
+     ]
+    ]
+   },
+   "expect": null
+  },
+  {
+   "source": "kiwi",
+   "envelope": {
+    "o": [
+     [
+      "fCnt",
+      {
+       "n": "401c000000000000"
+      }
+     ],
+     [
+      "time",
+      "not a time"
+     ]
+    ]
+   },
+   "expect": null
+  },
+  {
+   "source": "strega",
+   "envelope": {
+    "o": [
+     [
+      "deduplicationId",
+      "café  "
+     ]
+    ]
+   },
+   "expect": "191638c82357aa06d80faf3c43f6ea7bc4afb81e5f6c11c1ef18bcb700a84921"
+  },
+  {
+   "source": "",
+   "envelope": {
+    "o": [
+     [
+      "deduplicationId",
+      "x"
+     ]
+    ]
+   },
+   "expect": null
+  }
+ ],
+ "sdi12Key": [
+  {
+   "info": {
+    "o": [
+     [
+      "frames",
+      [
+       {
+        "o": [
+         [
+          "event",
+          {
+           "o": [
+            [
+             "deduplicationId",
+             "b"
+            ]
+           ]
+          }
+         ]
+        ]
+       },
+       {
+        "o": [
+         [
+          "event",
+          {
+           "o": [
+            [
+             "deduplicationId",
+             "a"
+            ]
+           ]
+          }
+         ]
+        ]
+       },
+       {
+        "o": [
+         [
+          "event",
+          {
+           "o": [
+            [
+             "deduplicationId",
+             "b"
+            ]
+           ]
+          }
+         ]
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   "expect": "11f90056f30b048b44e260a10751283c2187d95d0efe838758030615e12a9b9d"
+  },
+  {
+   "info": {
+    "o": [
+     [
+      "frames",
+      []
+     ]
+    ]
+   },
+   "expect": null
+  },
+  {
+   "info": {
+    "o": [
+     [
+      "frames",
+      [
+       {
+        "o": [
+         [
+          "event",
+          {
+           "o": []
+          }
+         ]
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   "expect": null
+  }
+ ]
+}

@@ -1,0 +1,87 @@
+{
+ "name": "r4-q4-control-blob",
+ "description": "Fix Q4 (new finding N2, measurement only): store.js parseControl passes a non-string value through (typeof value === 'string' ? JSON.parse(value) : value), so a BLOB conditional_control_json is a Buffer control with no fields, while Go parses the BLOB's text. A1 and A3 hold CAST('{\"mode\":\"CONDITIONAL\"}' AS BLOB) (A1 with a RESERVED occurrence), A2 is the TEXT control with the same occurrence, A4 an empty BLOB. Each gets a manual timed open; a clock tick follows.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,'Zone 1',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c01',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A1','blob control busy','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A2','text control busy','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A3','blob control idle','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A4','blob empty control','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('a1100000-0000-4000-8000-0000000000a1','{{date:+0}}','06:00','A8404100000000A1','2026-11-23T06:00:00.000Z','a1200000-0000-4000-8000-0000000000a1','RESERVED');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('a1100000-0000-4000-8000-0000000000a2','{{date:+0}}','06:00','A8404100000000A2','2026-11-23T06:00:00.000Z','a1200000-0000-4000-8000-0000000000a2','RESERVED');INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A8404100000000A1',CAST('{\"mode\":\"CONDITIONAL\"}' AS BLOB)),('A8404100000000A2','{\"mode\":\"CONDITIONAL\"}'),('A8404100000000A3',CAST('{\"mode\":\"CONDITIONAL\"}' AS BLOB)),('A8404100000000A4',X'');"
+  },
+  {
+   "id": "open-a1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000A1",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "open-a2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000A2",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "open-a3",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000A3",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "open-a4",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000A4",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  }
+ ]
+}

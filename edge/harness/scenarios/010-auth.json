@@ -1,0 +1,23 @@
+{
+  "name": "auth",
+  "description": "Registration, sign-in rules and token checks on a fresh gateway (scoped access off unless recorded with --scoped).",
+  "steps": [
+    { "id": "register-empty", "http": { "method": "POST", "path": "/auth/register", "body": {} } },
+    { "id": "register-short", "http": { "method": "POST", "path": "/auth/register", "body": { "username": "farmer", "password": "12345" } } },
+    { "id": "register-ok", "http": { "method": "POST", "path": "/auth/register", "body": { "username": " farmer ", "password": "synthetic-pass-1" } } },
+    { "id": "register-again", "http": { "method": "POST", "path": "/auth/register", "body": { "username": "second", "password": "synthetic-pass-2" } } },
+    { "id": "login-missing", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "farmer" } } },
+    { "id": "login-wrong", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "farmer", "password": "wrong-pass" } } },
+    { "id": "login-unknown", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "nobody", "password": "synthetic-pass-1" } } },
+    { "id": "login-ok", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "farmer ", "password": "synthetic-pass-1" } }, "capture": { "token": "json.token" } },
+    { "id": "me", "http": { "method": "GET", "path": "/api/me", "auth": "token" } },
+    { "id": "me-no-token", "http": { "method": "GET", "path": "/api/me" } },
+    { "id": "me-bad-token", "http": { "method": "GET", "path": "/api/me", "auth": "Bearer abc.def" } },
+    { "id": "me-malformed", "http": { "method": "GET", "path": "/api/me", "auth": "Bearer onlyonepart" } },
+    { "id": "features-public", "http": { "method": "GET", "path": "/api/system/features" } },
+    { "id": "catalog-public", "http": { "method": "GET", "path": "/api/catalog" } },
+    { "id": "devices-empty", "http": { "method": "GET", "path": "/api/devices", "auth": "token" } },
+    { "id": "zones-empty", "http": { "method": "GET", "path": "/api/irrigation-zones", "auth": "token" } },
+    { "id": "devices-no-token", "http": { "method": "GET", "path": "/api/devices" } }
+  ]
+}

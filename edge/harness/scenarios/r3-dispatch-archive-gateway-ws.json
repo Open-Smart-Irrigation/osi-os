@@ -1,0 +1,107 @@
+{
+  "name": "r3-dispatch-archive-gateway-ws",
+  "_comment": "B2 (dispatch r3): the VALVE_ACTUATION_ARCHIVED and VALVE_RUNTIME_CHANGED rows of a cancelled manual open use the same String.prototype.trim gateway resolution.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000331','Tab','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',char(9));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000332','Padded','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',char(160)||'0016C001F1000009'||char(65279));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000333','TabLinked','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',char(9));"
+    },
+    {
+      "id": "link-no-gateway",
+      "why": "The valve_actuation dirty-key triggers are dropped: their row_key embeds the random expectation id inside text, which the comparator does not number. They are SQL, the same on both backends.",
+      "sql": "DROP TRIGGER IF EXISTS trg_sync_valve_actuation_dirty_ai; DROP TRIGGER IF EXISTS trg_sync_valve_actuation_dirty_au; INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES('cloud',1,NULL,'2026-11-23T06:00:00.000Z');"
+    },
+    {
+      "id": "open-tab",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000331",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "cancel-tab",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/valves/A840410000000331/cancel",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "open-padded",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000332",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "cancel-padded",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/valves/A840410000000332/cancel",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "link-gateway",
+      "sql": "UPDATE sync_link_state SET gateway_device_eui='0016C001F1000001' WHERE peer_node='cloud';"
+    },
+    {
+      "id": "open-tab-linked",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000333",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "cancel-tab-linked",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/valves/A840410000000333/cancel",
+        "auth": "token",
+        "body": {}
+      }
+    }
+  ]
+}

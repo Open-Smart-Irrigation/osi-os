@@ -1,0 +1,137 @@
+#!/bin/sh
+# osi-backend: choose the gateway backend. Exactly one runs at a time.
+#   osi-backend status
+#   osi-backend use edge|node-red
+# The choice lives in /etc/osi-backend (one word, written atomically). Both
+# backends use the same database, the same MQTT client ids and the same
+# port, so the old one is stopped and disabled, and seen gone, before the
+# new one is enabled and started. No database change happens here.
+# Before a switch to edge, `osi-edge tls-check` (cloud broker TLS
+# verification) must pass; otherwise nothing changes.
+set -eu
+ROOT="${OSI_BACKEND_ROOT:-}"
+CHOICE="$ROOT/etc/osi-backend"
+LOCK="$ROOT/var/lock/osi-backend.lock"
+INIT="$ROOT/etc/init.d"
+BOOT_LOCK="$ROOT/var/lock/osi-edge-boot.lock"
+FAILURE="$ROOT/var/run/osi-edge-boot.failed"
+FALLBACK="$ROOT/data/osi-backend/fallback.log"
+WAIT_SECONDS="${OSI_BACKEND_WAIT_SECONDS:-30}"
+
+log() { logger -t osi-backend "$*" 2>/dev/null || true; echo "osi-backend: $*" >&2; }
+current() { [ -f "$CHOICE" ] && head -n1 "$CHOICE" || echo node-red; }
+service_for() { case "$1" in edge) echo osi-edge ;; node-red) echo node-red ;; *) return 1 ;; esac; }
+# A backend counts as running while any of its processes exists.
+running() {
+    # Test seam: a directory of marker files stands in for processes.
+    if [ -n "${OSI_BACKEND_RUNNING_DIR:-}" ]; then [ -e "$OSI_BACKEND_RUNNING_DIR/$1" ]; return; fi
+    case "$1" in
+        edge) pgrep -x osi-edge >/dev/null 2>&1 ;;
+        node-red) pgrep -f '/usr/lib/node/node-red/red.js' >/dev/null 2>&1 ;;
+    esac
+}
+
+use() {
+    target="$1"
+    automatic="${2:-}"
+    other=node-red; [ "$target" = node-red ] && other=edge
+    service_for "$target" >/dev/null || { log "unknown backend '$target' (edge|node-red)"; exit 2; }
+    [ -n "$automatic" ] || [ -x "$INIT/$(service_for "$target")" ] || { log "$INIT/$(service_for "$target") is missing; nothing changed"; exit 1; }
+    mkdir -p "$(dirname "$LOCK")"
+    exec 9>"$LOCK"
+    waited=0
+    while ! flock -n 9; do
+        if [ -z "$automatic" ] || [ "$waited" -ge "$WAIT_SECONDS" ]; then
+            log "another osi-backend run holds $LOCK"
+            exit 75
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if [ -n "$automatic" ]; then
+        # An operator switch or another worker may have resolved this failure.
+        [ "$(current)" = edge ] && [ -s "$FAILURE" ] || return 0
+        if ! (mkdir -p "$(dirname "$FALLBACK")" && cat "$FAILURE" >> "$FALLBACK"); then
+            log "could not record fallback at $FALLBACK"
+        fi
+    fi
+    # 0. The edge verifies the cloud TLS endpoints before anything changes.
+    if [ "$target" = edge ]; then
+        if ! check="$("$INIT/osi-edge" tls_check 2>&1)"; then
+            reason="$(printf '%s\n' "$check" | grep -m1 'failed' || printf '%s\n' "$check" | tail -n1)"
+            log "edge refused: cloud broker TLS verification failed (${reason#osi-edge tls-check: }); still on $(current), nothing changed"
+            exit 1
+        fi
+    fi
+    log "switching $(current) -> $target"
+    # 1. Record the choice first: a reboot in the middle starts the target only.
+    tmp="$CHOICE.tmp.$$"
+    echo "$target" > "$tmp"
+    sync "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$CHOICE"
+    sync 2>/dev/null || true
+    if [ -z "$automatic" ]; then rm -f "$FAILURE"; fi
+    # 2. Stop and disable the other backend, then wait until it is gone.
+    "$INIT/$(service_for "$other")" stop || true
+    "$INIT/$(service_for "$other")" disable || true
+    waited=0
+    while running "$other"; do
+        if [ "$waited" -ge "$WAIT_SECONDS" ]; then
+            log "$other still running after ${WAIT_SECONDS}s; $target NOT started. /etc/osi-backend says $target; run again."
+            exit 1
+        fi
+        sleep 1; waited=$((waited + 1))
+    done
+    # The boot runner is a database writer before procd has an edge process.
+    if [ "$target" = node-red ]; then
+        exec 8>"$BOOT_LOCK"
+        while ! flock -n 8; do
+            if [ "$waited" -ge "$WAIT_SECONDS" ]; then
+                log "edge boot runner still holds the database. Node-RED startup blocked. Run the switch again."
+                exit 1
+            fi
+            sleep 1; waited=$((waited + 1))
+        done
+    fi
+    # 3. Enable and start the target.
+    "$INIT/$(service_for "$target")" enable
+    "$INIT/$(service_for "$target")" start 8>&-
+    if [ -n "$automatic" ]; then
+        waited=0
+        until running node-red; do
+            if [ "$waited" -ge "$WAIT_SECONDS" ]; then
+                log "Node-RED did not come up after ${WAIT_SECONDS}s; choice remains node-red"
+                exit 1
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+    elif [ "$target" = edge ] && [ ! -s "$FAILURE" ]; then
+        if [ -f "$FALLBACK" ]; then mv -f "$FALLBACK" "$FALLBACK.previous"; fi
+    fi
+    log "now $target"
+}
+
+case "${1:-status}" in
+    status)
+        echo "$(current)"
+        for b in edge node-red; do running "$b" && echo "running: $b"; done
+        for marker in "$FALLBACK" "$FALLBACK.previous"; do
+            if [ -f "$marker" ]; then
+                printf '%s\n' "fallback record ($marker)"
+                cat "$marker"
+            fi
+        done
+        ;;
+    use)
+        if [ "$#" -eq 2 ]; then
+            use "$2"
+        elif [ "$#" -eq 4 ] && [ "$2 $3 $4" = 'node-red --reason boot-runner' ]; then
+            use node-red boot-runner
+        else
+            log "usage: osi-backend use edge|node-red"
+            exit 2
+        fi
+        ;;
+    *) log "usage: osi-backend status | use edge|node-red"; exit 2 ;;
+esac

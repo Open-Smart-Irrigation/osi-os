@@ -1,0 +1,96 @@
+{
+  "name": "r2-dispatch-incident",
+  "_comment": "A malformed incident in a stored conditional control ends the Node-RED valve tick (parseControl runs parseIncident), so the due clock sync of another valve is not sent until the incident is valid.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "A FIXED control whose incident has an empty incident_id, and a WEEKLY valve due for its first clock sync.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000041','Incident valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000042','Scheduled valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A840410000000041','{\"mode\":\"FIXED\",\"incident\":{\"incident_id\":\"\",\"physical_run_reference\":\"run-41\",\"ended\":false,\"state\":\"OPEN\"}}'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-000000000042','A840410000000042','WEEKLY',127,'06:00',10,'UTC',1);"
+    },
+    {
+      "id": "tick-empty-id",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "schedules-empty-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/valves/A840410000000041/schedules",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "set-open-ended",
+      "sql": "DELETE FROM valve_schedule_pushes WHERE device_eui='A840410000000042'; UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui='A840410000000042'; UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.incident',json('{\"incident_id\":\"inc-41\",\"physical_run_reference\":\"run-41\",\"ended\":true,\"ended_at\":\"2026-11-23T06:10:00.000Z\",\"state\":\"OPEN\"}')) WHERE device_eui='A840410000000041';"
+    },
+    {
+      "id": "tick-open-ended",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "set-blank-retry",
+      "sql": "DELETE FROM valve_schedule_pushes WHERE device_eui='A840410000000042'; UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui='A840410000000042'; UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.incident',json('{\"incident_id\":\"inc-41\",\"physical_run_reference\":\"run-41\",\"ended\":false,\"state\":\"OPEN\",\"retry_revision\":\"   \"}')) WHERE device_eui='A840410000000041';"
+    },
+    {
+      "id": "tick-blank-retry",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "set-bad-ended-at",
+      "sql": "DELETE FROM valve_schedule_pushes WHERE device_eui='A840410000000042'; UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui='A840410000000042'; UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.incident',json('{\"incident_id\":\"inc-41\",\"physical_run_reference\":\"run-41\",\"ended\":true,\"ended_at\":\"garbage\",\"state\":\"ENDED\"}')) WHERE device_eui='A840410000000041';"
+    },
+    {
+      "id": "tick-bad-ended-at",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "set-array",
+      "sql": "DELETE FROM valve_schedule_pushes WHERE device_eui='A840410000000042'; UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui='A840410000000042'; UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.incident',json('[]')) WHERE device_eui='A840410000000041';"
+    },
+    {
+      "id": "tick-array",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "set-valid",
+      "sql": "DELETE FROM valve_schedule_pushes WHERE device_eui='A840410000000042'; UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui='A840410000000042'; UPDATE valve_settings SET conditional_control_json=json_set(conditional_control_json,'$.incident',json('{\"incident_id\":\"inc-41\",\"physical_run_reference\":\"run-41\",\"ended\":true,\"ended_at\":\"2026-11-23 06:10:00\",\"state\":\"ENDED\",\"reconciled_at\":null,\"retry_revision\":null}')) WHERE device_eui='A840410000000041';"
+    },
+    {
+      "id": "tick-valid",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "schedules-valid",
+      "http": {
+        "method": "GET",
+        "path": "/api/valves/A840410000000041/schedules",
+        "auth": "token"
+      }
+    }
+  ]
+}

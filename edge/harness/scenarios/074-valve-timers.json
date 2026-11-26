@@ -1,0 +1,68 @@
+{
+ "name": "valve-timers",
+ "description": "The ONCE tick sends a due open, the clock tick syncs a weekly valve, and a later tick settles existing attempts.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "setup-extra",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000007','Valve 7','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000008','Valve 8','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';"
+  },
+  {
+   "id": "seed-weekly",
+   "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('a1100000-0000-4000-8000-000000000006','A840410000000007','WEEKLY',127,'08:05',2,'UTC');"
+  },
+  {
+   "id": "seed-once-due",
+   "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,once_state) VALUES ('a1100000-0000-4000-8000-000000000007','A840410000000008','ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 seconds'),2,'UTC','PENDING');"
+  },
+  {
+   "id": "clock-already-set-for-once",
+   "sql": "INSERT INTO valve_settings(device_eui,last_clock_sync_queued_at) VALUES ('A840410000000008',strftime('%Y-%m-%dT%H:%M:%fZ','now'));"
+  },
+  {
+   "id": "tick-due-once",
+   "timer": "valve-once-tick"
+  },
+  {
+   "id": "clock-with-weekly",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "seed-once-recovery",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000009','Valve 9','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';\nINSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,once_state) VALUES\n  ('a1100000-0000-4000-8000-000000000008','A840410000000008','ONCE','2026-11-23T06:00:00.000Z',2,'UTC','PENDING'),\n  ('a1100000-0000-4000-8000-000000000009','A840410000000009','ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-5 seconds'),2,'UTC','PENDING');\nINSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at) VALUES\n  ('a1100000-0000-4000-8000-000000000008','A840410000000008','a1200000-0000-4000-8000-000000000008','ATTEMPTED','2026-11-23T06:00:00.000Z'),\n  ('a1100000-0000-4000-8000-000000000009','A840410000000009','a1200000-0000-4000-8000-000000000009','ATTEMPTED',strftime('%Y-%m-%dT%H:%M:%fZ','now','-4 seconds'));\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,trigger,transport_json)\nSELECT 'a1300000-0000-4000-8000-'||substr(i.command_id,25),i.device_eui,i.command_id,s.fire_at,120,strftime('%Y-%m-%dT%H:%M:%fZ',s.fire_at,'+120 seconds'),'unknown',i.attempted_at,'one_time',\n  CASE WHEN i.device_eui='A840410000000008' THEN json_set(json_remove((SELECT transport_json FROM valve_actuation_expectations WHERE device_eui=i.device_eui), '$.proof'), '$.queue_id','a1400000-0000-4000-8000-000000000008')\n  ELSE json_object('phase','ATTEMPTED','attempted_at',i.attempted_at) END\nFROM valve_once_dispatch_intents i JOIN valve_schedules s USING(schedule_uuid) WHERE i.command_id IN ('a1200000-0000-4000-8000-000000000008','a1200000-0000-4000-8000-000000000009');"
+  },
+  {
+   "id": "tick-with-previous-attempts",
+   "timer": "valve-once-tick"
+  }
+ ]
+}

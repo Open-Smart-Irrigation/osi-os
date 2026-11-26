@@ -1,0 +1,47 @@
+{
+  "name": "r1-dispatch-decommission",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "Retired GEN1 valves with an ACKED non-empty plan: non-hex X840410000000001 (rowid first), valid A840410000000005; a live valve A840410000000006 with a WEEKLY schedule and no clock stamp.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,deleted_at) VALUES ('X840410000000001','Retired non-hex','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED',datetime('now','-2 hours'));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,deleted_at) VALUES ('A840410000000005','Retired valid','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED',datetime('now','-2 hours'));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000006','Scheduled','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000f6','A840410000000006','WEEKLY',127,'06:00',10,'UTC',1);INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('a9100000-0000-4000-8000-000000000001','X840410000000001','WEEKDAY_PLAN',0,14,'00100001','nonempty-test-plan','ACKED',datetime('now','-1 day'));INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,queued_at) VALUES ('a9100000-0000-4000-8000-000000000005','A840410000000005','WEEKDAY_PLAN',0,14,'00100001','nonempty-test-plan','ACKED',datetime('now','-1 day'));"
+    },
+    {
+      "id": "clock-tick-decommission",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-again",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-third",
+      "timer": "valve-clock-tick"
+    }
+  ]
+}

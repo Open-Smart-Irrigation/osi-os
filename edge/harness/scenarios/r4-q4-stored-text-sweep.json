@@ -1,0 +1,183 @@
+{
+ "name": "r4-q4-stored-text-sweep",
+ "description": "Fix Q4 (stored-text sweep). Renames: osi-entity-name compares row.name === name strictly, so a BLOB name (a Buffer) is always renamed with a sync_version bump, and an invalid-UTF-8 TEXT name compares as its decoded string (zone 2 'Z\\uFFFD', device A2 'V\\uFFFD'); the zone rename echoes row.zone_uuid as read. The valve list echoes row.name and `row.x || null` as read (Buffer JSON for the BLOB name, zone name, zone uuid, skip date, clock ack and stale state). Zone create without a timezone splices String((row && row.value) || 'UTC'): an empty-BLOB gateway setting writes ''. System settings answer the stored gateway timezone as read and a module-only PUT with applyToAllZones writes it to the zones as it is (a BLOB stays a BLOB).",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,CAST('Zone A' AS BLOB),1,'UTC',CAST('0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c01' AS BLOB),NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),(2,CAST(X'5AC3' AS TEXT),1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c02',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),(3,'Zone C',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c03',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000A1',CAST('Valve A' AS BLOB),'STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A2',CAST(X'56C3' AS TEXT),'STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'),('A8404100000000A3','Valve C','STREGA_VALVE',1,3,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_settings(device_eui,skip_today_date,last_clock_sync_acked_at) VALUES ('A8404100000000A1',X'',CAST('2026-11-20T00:00:00.000Z' AS BLOB));INSERT INTO valve_actuation_expectations(expectation_id,device_eui,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at) VALUES ('ee000000-0000-4000-8000-0000000000a1','A8404100000000A1','{{datetime:-1h}}',60,'{{datetime:-1h}}','none',CAST('STALE_NO_OBSERVATION' AS BLOB),'{{datetime:-1h}}');"
+  },
+  {
+   "id": "list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "rename-zone-1-same",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/name",
+    "auth": "token",
+    "body": {
+     "name": "Zone A"
+    }
+   }
+  },
+  {
+   "id": "rename-zone-2-decoded",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/2/name",
+    "auth": "token",
+    "body": {
+     "name": "Z\ufffd"
+    }
+   }
+  },
+  {
+   "id": "rename-zone-3-same",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/3/name",
+    "auth": "token",
+    "body": {
+     "name": "Zone C"
+    }
+   }
+  },
+  {
+   "id": "rename-device-a1-same",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000000A1/name",
+    "auth": "token",
+    "body": {
+     "name": "Valve A"
+    }
+   }
+  },
+  {
+   "id": "rename-device-a2-decoded",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000000A2/name",
+    "auth": "token",
+    "body": {
+     "name": "V\ufffd"
+    }
+   }
+  },
+  {
+   "id": "rename-device-a3-same",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A8404100000000A3/name",
+    "auth": "token",
+    "body": {
+     "name": "Valve C"
+    }
+   }
+  },
+  {
+   "id": "gateway-empty-blob",
+   "sql": "INSERT OR REPLACE INTO app_settings(key,value) VALUES ('gateway_timezone',X'');"
+  },
+  {
+   "id": "zone-create-blob-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Zone D"
+    }
+   }
+  },
+  {
+   "id": "settings-get-empty-blob",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "gateway-text-blob",
+   "sql": "INSERT OR REPLACE INTO app_settings(key,value) VALUES ('gateway_timezone',CAST('Asia/Tokyo' AS BLOB));"
+  },
+  {
+   "id": "zone-create-text-blob-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Zone E"
+    }
+   }
+  },
+  {
+   "id": "settings-get-text-blob",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "settings-module-apply-all",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "body": {
+     "dataModuleEnabled": true,
+     "applyToAllZones": true
+    }
+   }
+  },
+  {
+   "id": "typeof",
+   "sql": "DROP TABLE IF EXISTS q4_typeof; CREATE TABLE q4_typeof AS SELECT 'zones' AS source, id, typeof(timezone) AS class, hex(timezone) AS bytes FROM irrigation_zones UNION ALL SELECT 'schedules', id, typeof(timezone), hex(timezone) FROM valve_schedules"
+  },
+  {
+   "id": "settings-put-timezone",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "body": {
+     "gatewayTimezone": "Europe/Zurich",
+     "applyToAllZones": true
+    }
+   }
+  }
+ ]
+}

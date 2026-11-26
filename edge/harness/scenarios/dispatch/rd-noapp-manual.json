@@ -1,0 +1,71 @@
+{
+  "name": "rd-noapp-manual",
+  "_comment": "Record and replay with CHIRPSTACK_APP_ACTUATORS empty on both sides: OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-noapp-node.sh for the oracle; run the Go backend under env -u CHIRPSTACK_APP_ACTUATORS. See edge/contracts/DISPATCH-INVENTORY.md.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "An ordinary owned STREGA valve; the probe runs with CHIRPSTACK_APP_ACTUATORS empty on both backends.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000081','Valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');"
+    },
+    {
+      "id": "open",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    },
+    {
+      "id": "close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "timed-close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    }
+  ]
+}

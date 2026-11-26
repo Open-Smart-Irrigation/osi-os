@@ -1,0 +1,69 @@
+{
+ "name": "daily-large-zone-id",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zone-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Z1",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "schedule-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 20,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "devices",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000003','Soil','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A840410000000003',strftime('%Y-%m-%dT%H:%M:%fZ','now','-2 seconds'),50)"
+  },
+  {
+   "id": "renumber-zone",
+   "why": "review: zone id 123456789012345696, whose JS spelling (123456789012345700) is a different integer",
+   "sql": "PRAGMA foreign_keys=OFF; UPDATE irrigation_zones SET id=123456789012345696 WHERE id=1; UPDATE irrigation_schedules SET irrigation_zone_id=123456789012345696; UPDATE devices SET irrigation_zone_id=123456789012345696 WHERE irrigation_zone_id=1"
+  },
+  {
+   "id": "tick",
+   "timer": "daily-schedule-0600"
+  }
+ ]
+}

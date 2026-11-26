@@ -1,0 +1,100 @@
+{
+ "name": "r5-auth-ct-shared",
+ "description": "The shared body parser on a non-auth write: tab before \";\" stays raw (422, no write); \"application/json+\" is parsed (write); NBSP before \";\" is a raw string.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "ct-review",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ct-review",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "login-trailing-semicolon",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"ct-review\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json;"
+    }
+   }
+  },
+  {
+   "id": "settings-put-tab-json",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "rawBody": "{\"gatewayTimezone\":\"Europe/Zurich\"}",
+    "headers": {
+     "content-type": "application/json\t; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "settings-put-json-empty-suffix",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "rawBody": "{\"gatewayTimezone\":\"Europe/Zurich\"}",
+    "headers": {
+     "content-type": "application/json+"
+    }
+   }
+  },
+  {
+   "id": "settings-put-utf8-nbsp-json",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "rawBody": "{\"gatewayTimezone\":\"Europe/Berlin\"}",
+    "headers": {
+     "content-type": "application/json ; charset=utf-8"
+    }
+   },
+   "why": "string body: header bytes C2 A0"
+  },
+  {
+   "id": "settings-put-nbsp-json",
+   "why": "Buffer body: header byte 0xA0; content-type trims it, type-is refuses, raw string body",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "auth": "token",
+    "rawBodyBase64": "eyJnYXRld2F5VGltZXpvbmUiOiJFdXJvcGUvQmVybGluIn0=",
+    "headers": {
+     "content-type": "application/json ; charset=utf-8"
+    }
+   }
+  },
+  {
+   "id": "settings-get-after",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "token"
+   }
+  }
+ ]
+}

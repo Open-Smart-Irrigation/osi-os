@@ -1,0 +1,17 @@
+{
+  "name": "dc-cloud-status",
+  "_comment": "Dispatch-inventory probe: which valve paths publish devices/{eui}/status to the cloud broker. A manual open, a one-time open and a 06:00 open, each on its own valve, with the cloud broker captured.",
+  "cloud": true,
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "create-daily-zone", "http": {"method": "POST", "path": "/api/irrigation-zones", "auth": "token", "body": {"name": "Daily zone", "timezone": "UTC"}}},
+    {"id": "schedule-daily-zone", "http": {"method": "PUT", "path": "/api/irrigation-zones/1/schedule", "auth": "token", "body": {"trigger_metric": "SWT_1", "threshold_kpa": 20, "duration_minutes": 20, "enabled": true}}},
+    {"id": "create-manual-zone", "http": {"method": "POST", "path": "/api/irrigation-zones", "auth": "token", "body": {"name": "Manual zone", "timezone": "UTC"}}},
+    {"id": "seed", "why": "Zone 1: a STREGA and a KIWI above threshold for the 06:00 tick. Zone 2 (no daily schedule): one STREGA for the manual open and one with a due ONCE schedule.",
+     "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A840410000000092','Daily valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000094','Daily probe','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000091','Manual valve','STREGA_VALVE',1,2,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000093','Once valve','STREGA_VALVE',1,2,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A840410000000094',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000f9','A840410000000093','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),7,'UTC',1,'PENDING');"},
+    {"id": "open-manual", "http": {"method": "POST", "path": "/api/valve/A840410000000091", "auth": "token", "body": {"action": "OPEN_FOR_DURATION", "duration_minutes": 5}}},
+    {"id": "once-tick", "timer": "valve-once-tick"},
+    {"id": "daily-tick", "timer": "daily-schedule-0600"}
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "r1-dispatch-noapp-manual-scoped",
+  "description": "Scoped manual valve commands with CHIRPSTACK_APP_ACTUATORS empty (record with --scoped through the noapp oracle wrapper, replay Go with env -u CHIRPSTACK_APP_ACTUATORS). live-authorize queues the REJECTED_PERMANENT ACK for a scope refusal first; live-transport then answers transport_unavailable before it looks at the dispatch error.",
+  "steps": [
+    {
+      "id": "seed-text",
+      "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(110,'va-text','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-text',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(110,'Zone va-text',110,'UTC','z-va-text','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000106E','Probe','KIWI_SENSOR',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000206E','Valve','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED')"
+    },
+    {
+      "id": "granted-open-noapp",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000206E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "seed-blob-empty",
+      "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(118,'va-blob-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',x'',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(118,'Zone va-blob-empty',118,'UTC','z-va-blob-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001076','Probe','KIWI_SENSOR',118,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',118);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002076','Valve','STREGA_VALVE',118,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',118,'CLOSED','MOTORIZED')"
+    },
+    {
+      "id": "actor-required-open-noapp",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000002076",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExOCwidXNlcm5hbWUiOiJ2YS1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.xiK7ypp1Uh3uLFGVwdKmxsavhF6O_6MvdMK7pT-zgqQ"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    }
+  ]
+}

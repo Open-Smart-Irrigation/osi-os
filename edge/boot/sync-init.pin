@@ -1,0 +1,10 @@
+# Pinned body of the frozen Node-RED boot node "Sync Init Schema + Triggers"
+# (id sync-init-fn), as edge/boot/run-sync-init.js executes it.
+#
+# Hash: SHA-256 over the UTF-8 bytes of the node's "func" value after JSON
+# decoding (the text Node-RED compiles), with nothing added or stripped.
+# Both image profiles (bcm2712 canonical, bcm2709 mirror) must carry the same
+# body. A different body fails `node edge/boot/gen-sync-init.js --check` and
+# the runner. Change this value only together with a reviewed change to the
+# node and a new parity run (edge/boot/INVENTORY.md, "Parity").
+sync-init-fn sha256 fc95ee3765f262acda8d06cfd2d20a8f35094bf65567e425ca631665fb41453e

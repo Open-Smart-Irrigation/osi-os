@@ -1,0 +1,340 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "History batch row hash (hashVersion 1), osi-history-sync-helper.",
+ "tableColumns": {},
+ "vectors": [
+  {
+   "table": "device_data",
+   "gatewayEui": "0016c001f1000001",
+   "input": {
+    "o": [
+     [
+      "id",
+      {
+       "n": "401c000000000000"
+      }
+     ],
+     [
+      "deveui",
+      "A840410000000001"
+     ],
+     [
+      "swt_1",
+      {
+       "n": "4037800000000000"
+      }
+     ],
+     [
+      "swt_2",
+      {
+       "n": "8000000000000000"
+      }
+     ],
+     [
+      "swt_3",
+      null
+     ],
+     [
+      "recorded_at",
+      "2026-11-23 17:03:41"
+     ],
+     [
+      "ambient_temperature",
+      {
+       "n": "4035400000000000"
+      }
+     ]
+    ]
+   },
+   "expect": {
+    "ok": true,
+    "historyKey": "DEVICE_DATA|0016C001F1000001|7",
+    "columns": [
+     [
+      "id",
+      "INTEGER",
+      "7"
+     ],
+     [
+      "deveui",
+      "TEXT",
+      "A840410000000001"
+     ],
+     [
+      "recorded_at",
+      "TIMESTAMP",
+      "2026-11-23T16:03:41.000Z"
+     ],
+     [
+      "swt_1",
+      "REAL",
+      "4037800000000000"
+     ],
+     [
+      "swt_2",
+      "REAL",
+      "0000000000000000"
+     ],
+     [
+      "dendro_valid",
+      "BOOLEAN",
+      null
+     ]
+    ],
+    "sha256": "ce9572589895351dfc90260a3991ae3948fb79f84e95de40ca00dbeaabf534b0"
+   }
+  },
+  {
+   "table": "device_data",
+   "gatewayEui": "0016c001f1000001",
+   "input": {
+    "o": [
+     [
+      "id",
+      "9007199254740993"
+     ],
+     [
+      "deveui",
+      "a840410000000001"
+     ],
+     [
+      "recorded_at",
+      "2026-11-23T17:03:41.123Z"
+     ],
+     [
+      "swt_1",
+      {
+       "n": "444b1ae4d6e2ef50"
+      }
+     ]
+    ]
+   },
+   "expect": {
+    "ok": true,
+    "historyKey": "DEVICE_DATA|0016C001F1000001|9007199254740993",
+    "columns": [
+     [
+      "id",
+      "INTEGER",
+      "9007199254740993"
+     ],
+     [
+      "deveui",
+      "TEXT",
+      "a840410000000001"
+     ],
+     [
+      "recorded_at",
+      "TIMESTAMP",
+      "2026-11-23T17:03:41.123Z"
+     ],
+     [
+      "swt_1",
+      "REAL",
+      "444b1ae4d6e2ef50"
+     ],
+     [
+      "swt_2",
+      "REAL",
+      null
+     ],
+     [
+      "dendro_valid",
+      "BOOLEAN",
+      null
+     ]
+    ],
+    "sha256": "1aec982ba63a0038637d02465d8eca6fcc4be3c465980bdddc87d81c1bddaf74"
+   }
+  },
+  {
+   "table": "radio_uplinks",
+   "gatewayEui": "0016c001f1000001",
+   "input": {
+    "o": [
+     [
+      "id",
+      {
+       "n": "3ff0000000000000"
+      }
+     ],
+     [
+      "installation_uuid",
+      "0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+     ],
+     [
+      "deveui",
+      "A840410000000001"
+     ],
+     [
+      "recorded_at",
+      "2026-11-23T17:03:41Z"
+     ],
+     [
+      "deduplication_id",
+      "x"
+     ],
+     [
+      "metadata_json",
+      "{\"b\":1,\"a\":[1e21,-0,\"\\u2028\"]}"
+     ]
+    ]
+   },
+   "expect": {
+    "ok": true,
+    "historyKey": "RADIO_UPLINK|0016C001F1000001|1",
+    "columns": [
+     [
+      "id",
+      "INTEGER",
+      "1"
+     ],
+     [
+      "installation_uuid",
+      "TEXT",
+      "0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+     ],
+     [
+      "deveui",
+      "TEXT",
+      "A840410000000001"
+     ],
+     [
+      "recorded_at",
+      "TIMESTAMP",
+      "2026-11-23T17:03:41.000Z"
+     ],
+     [
+      "deduplication_id",
+      "TEXT",
+      "x"
+     ],
+     [
+      "metadata_json",
+      "JSON",
+      "{\"a\":[1e+21,0,\" \"],\"b\":1}"
+     ]
+    ],
+    "sha256": "9421d73a9ad5961bf323740cc377b676d04fa6a2ab17e7b575f036d7810a3ef7"
+   }
+  },
+  {
+   "table": "radio_uplinks",
+   "gatewayEui": "0016c001f1000001",
+   "input": {
+    "o": [
+     [
+      "id",
+      {
+       "n": "4000000000000000"
+      }
+     ],
+     [
+      "installation_uuid",
+      null
+     ],
+     [
+      "deveui",
+      "A840410000000001"
+     ],
+     [
+      "recorded_at",
+      "not a time"
+     ],
+     [
+      "metadata_json",
+      null
+     ]
+    ]
+   },
+   "expect": {
+    "ok": false,
+    "error": "Error: invalid timestamp not a time"
+   }
+  },
+  {
+   "table": "irrigation_events",
+   "gatewayEui": "0016c001f1000001",
+   "input": {
+    "o": [
+     [
+      "id",
+      {
+       "n": "4008000000000000"
+      }
+     ],
+     [
+      "event_uuid",
+      "0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+     ]
+    ]
+   },
+   "expect": {
+    "ok": true,
+    "historyKey": "IRRIGATION_EVENT|0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11|3",
+    "columns": [
+     [
+      "event_uuid",
+      "TEXT",
+      "0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+     ],
+     [
+      "created_at",
+      "TIMESTAMP",
+      null
+     ],
+     [
+      "action",
+      "TEXT",
+      null
+     ],
+     [
+      "reason",
+      "TEXT",
+      null
+     ],
+     [
+      "aggregate_kpa",
+      "REAL",
+      null
+     ],
+     [
+      "threshold_kpa",
+      "REAL",
+      null
+     ],
+     [
+      "duration_minutes",
+      "INTEGER",
+      null
+     ],
+     [
+      "valve_deveui",
+      "TEXT",
+      null
+     ],
+     [
+      "payload_json",
+      "JSON",
+      null
+     ]
+    ],
+    "sha256": "18fb9d5d1579e4d73743ca907e4585b6b59b30e5f11b4ab77862abd3da89d3f3"
+   }
+  }
+ ]
+}

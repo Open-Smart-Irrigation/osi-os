@@ -1,0 +1,13 @@
+{
+  "name": "dc-noapp-daily",
+  "_comment": "Dispatch-inventory probe for report row 19: the 06:00 tick with CHIRPSTACK_APP_ACTUATORS empty on both sides. Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-noapp-node.sh; replay Go under env -u CHIRPSTACK_APP_ACTUATORS.",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "create-zone", "http": {"method": "POST", "path": "/api/irrigation-zones", "auth": "token", "body": {"name": "Daily zone", "timezone": "UTC"}}},
+    {"id": "schedule-zone", "http": {"method": "PUT", "path": "/api/irrigation-zones/1/schedule", "auth": "token", "body": {"trigger_metric": "SWT_1", "threshold_kpa": 20, "duration_minutes": 20, "enabled": true}}},
+    {"id": "seed", "why": "One STREGA and one KIWI above threshold in the scheduled zone.",
+     "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A840410000000096','Daily valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000097','Daily probe','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A840410000000097',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100);"},
+    {"id": "daily-tick", "timer": "daily-schedule-0600"}
+  ]
+}

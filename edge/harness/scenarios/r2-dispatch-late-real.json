@@ -1,0 +1,44 @@
+{
+  "name": "r2-dispatch-late-real",
+  "_comment": "The late one-time correction reads each candidate's stored duration as a number: a REAL corrects with the fraction, and does not stop the other candidates.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "Two SKIPPED one-time opens whose enqueue was uncertain and whose valve reported open inside the confirmation window: one with a REAL duration_minutes (10.5), one with 7. No effect snapshot, so the stored duration is used.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000061','Late valve 97','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-000000000661','A840410000000061','ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),10.5,'UTC',1,'SKIPPED');INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at) VALUES ('ceaa2200-0000-4000-8000-000000000661','A840410000000061','cd000000-0000-4000-8000-000000000661','SKIPPED',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'));INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,observed_open_at,created_at,transport_json) VALUES ('ee000000-0000-4000-8000-000000000661','A840410000000061',1,'cd000000-0000-4000-8000-000000000661',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),630,strftime('%Y-%m-%dT%H:%M:%fZ','now','+10 minutes'),'unknown','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),json_object('once_settlement','uncertain','once_confirm_by',strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),'once_interval_minutes',10,'attempted_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),'phase','UNKNOWN')); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000062','Late valve 98','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-000000000662','A840410000000062','ONCE',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),7,'UTC',1,'SKIPPED');INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at) VALUES ('ceaa2200-0000-4000-8000-000000000662','A840410000000062','cd000000-0000-4000-8000-000000000662','SKIPPED',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'));INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,observed_open_at,created_at,transport_json) VALUES ('ee000000-0000-4000-8000-000000000662','A840410000000062',1,'cd000000-0000-4000-8000-000000000662',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),420,strftime('%Y-%m-%dT%H:%M:%fZ','now','+7 minutes'),'unknown','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),json_object('once_settlement','uncertain','once_confirm_by',strftime('%Y-%m-%dT%H:%M:%fZ','now','+30 minutes'),'once_interval_minutes',10,'attempted_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes'),'phase','UNKNOWN'));"
+    },
+    {
+      "id": "once-tick",
+      "timer": "valve-once-tick"
+    },
+    {
+      "id": "once-tick-again",
+      "timer": "valve-once-tick"
+    }
+  ]
+}

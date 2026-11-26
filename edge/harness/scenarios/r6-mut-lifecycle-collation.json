@@ -1,0 +1,80 @@
+{
+ "name": "r6-mut-lifecycle-collation",
+ "description": "Mutation triage (inventory pass, zone-schedule/lifecycle-snapshot-order; nul-char nul-lead on valve_schedules.schedule_uuid in r5-conn-lifecycle-case): push.js lifecycleBindingTx sorts the retired and live schedule lists with String.prototype.localeCompare (ICU root collation): U+0000 is ignorable, punctuation sorts before digits and digits before letters, '10' before '9'. Go sorted with SQLite COLLATE NOCASE, so the managed pause stored conditional_control_json with the lists in another order.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "create-No data",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "No data",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "schedule-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 20,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "seed-managed-policy",
+   "why": "Review fixture data for the paired parity probe.",
+   "sql": "INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) SELECT 'synthetic-review-policy',zone_uuid,'{}','UTC',1 FROM irrigation_zones WHERE id=1"
+  },
+  {
+   "id": "seed-managed-valve",
+   "why": "An owned STREGA with conditional weekly rows of the managed policy whose schedule_uuid values collate apart under ICU and SQLite NOCASE: a leading NUL (ignorable for ICU), punctuation, digits against letters.",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Managed valve','STREGA_VALVE',1,1,'CLOSED','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES(char(0)||'synthetic-review-weekly','A840410000000002','WEEKLY',127,'09:00',30,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('abcdef00-0000-4000-8000-0000000000c1','A840410000000002','WEEKLY',2,'05:30',10,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('ABCDEF00-0000-4000-8000-0000000000C2','A840410000000002','WEEKLY',4,'06:00',11,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('abcdef00_0000','A840410000000002','WEEKLY',8,'06:30',12,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('[review]','A840410000000002','WEEKLY',16,'07:00',13,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('9-review','A840410000000002','WEEKLY',32,'07:30',14,'UTC','synthetic-review-policy');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES('10-review','A840410000000002','WEEKLY',64,'08:00',15,'UTC','synthetic-review-policy');"
+  },
+  {
+   "id": "managed-pause",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 20,
+     "enabled": false
+    }
+   }
+  }
+ ]
+}

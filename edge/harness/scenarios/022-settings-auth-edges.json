@@ -1,0 +1,291 @@
+{
+  "name": "settings-auth-edges",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone"
+        }
+      }
+    },
+    {
+      "id": "settings-local",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "Local",
+          "applyToAllZones": true
+        }
+      }
+    },
+    {
+      "id": "settings-alias-case",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "america/argentina/buenos_aires"
+        }
+      }
+    },
+    {
+      "id": "settings-new-tzdata",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "America/Coyhaique"
+        }
+      }
+    },
+    {
+      "id": "settings-bom",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "﻿Europe/Zurich﻿"
+        }
+      }
+    },
+    {
+      "id": "settings-offset",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "+14:00"
+        }
+      }
+    },
+    {
+      "id": "settings-get-no-expiry",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIn0.oSRJvfH3X2ZdrOrAp2nfP335yM0OiJ2w47ChcQGYUTw"
+      }
+    },
+    {
+      "id": "settings-put-no-expiry",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIn0.oSRJvfH3X2ZdrOrAp2nfP335yM0OiJ2w47ChcQGYUTw",
+        "body": {
+          "gatewayTimezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "settings-get-zero-exp",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjowfQ.cduPHAqsB6FrjUaat9RgQXjcs1lKSU2LRxMCnsKKvbo"
+      }
+    },
+    {
+      "id": "settings-put-zero-exp",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjowfQ.cduPHAqsB6FrjUaat9RgQXjcs1lKSU2LRxMCnsKKvbo",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-infinite-exp",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoxZTk5OX0.vmPxCQWudcfFFhrViKJO20YtmX0QZRG94wRpGyQDQa4"
+      }
+    },
+    {
+      "id": "settings-put-infinite-exp",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoxZTk5OX0.vmPxCQWudcfFFhrViKJO20YtmX0QZRG94wRpGyQDQa4",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-expired",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoxfQ.ywow-Ugew_qi3iEW8PEegwylhX2oNhQJ8XovBcF1W14"
+      }
+    },
+    {
+      "id": "settings-put-expired",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjoxfQ.ywow-Ugew_qi3iEW8PEegwylhX2oNhQJ8XovBcF1W14",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-zero-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjAsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.cVFBgWYn1_rgYYfX-um-XCs9kWFYNl4iBd6WULU73H0"
+      }
+    },
+    {
+      "id": "settings-put-zero-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjAsInVzZXJuYW1lIjoiZmFybWVyIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.cVFBgWYn1_rgYYfX-um-XCs9kWFYNl4iBd6WULU73H0",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-fractional-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEuNSwidXNlcm5hbWUiOiJmYXJtZXIiLCJleHAiOjQxMDI0NDQ4MDAwMDB9.ybXP42o0r2KOP3RUynHhBTuVmwP8DHplDddXHqC1tPU"
+      }
+    },
+    {
+      "id": "settings-put-fractional-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEuNSwidXNlcm5hbWUiOiJmYXJtZXIiLCJleHAiOjQxMDI0NDQ4MDAwMDB9.ybXP42o0r2KOP3RUynHhBTuVmwP8DHplDddXHqC1tPU",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-long-username",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoi8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsSIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.O4yIpxtR7JlC2pvjIdNXM8-6NLsEZD70Q0gSJEOC5lw"
+      }
+    },
+    {
+      "id": "settings-put-long-username",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoi8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsSIsImV4cCI6NDEwMjQ0NDgwMDAwMH0.O4yIpxtR7JlC2pvjIdNXM8-6NLsEZD70Q0gSJEOC5lw",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-boundary-username",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoi8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yxIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bIizw6JMCzHzbk7EAQ1Pr6WTLmEA1wfJk2OWX7IRnCo"
+      }
+    },
+    {
+      "id": "settings-put-boundary-username",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoi8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yx8J-MsfCfjLHwn4yxIiwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bIizw6JMCzHzbk7EAQ1Pr6WTLmEA1wfJk2OWX7IRnCo",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "settings-get-coerced-claims",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOiIxIiwidXNlcm5hbWUiOlsiZmFybWVyIl0sImV4cCI6IjQxMDI0NDQ4MDAwMDAifQ.WT-vm3aOTzEWSWI5ZsxsT2q34uuNmNKpR7oTQX8IjZs"
+      }
+    },
+    {
+      "id": "settings-put-coerced-claims",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOiIxIiwidXNlcm5hbWUiOlsiZmFybWVyIl0sImV4cCI6IjQxMDI0NDQ4MDAwMDAifQ.WT-vm3aOTzEWSWI5ZsxsT2q34uuNmNKpR7oTQX8IjZs",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "missing-settings-table",
+      "sql": "DROP TABLE app_settings"
+    },
+    {
+      "id": "settings-before-migration",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "settings-write-before-migration",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    }
+  ]
+}

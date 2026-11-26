@@ -1,0 +1,12 @@
+{
+  "name": "rd-daily-blob-valve",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "create-blob", "http": {"method": "POST", "path": "/api/irrigation-zones", "auth": "token", "body": {"name": "Blob valve", "timezone": "Europe/Zurich"}}},
+    {"id": "schedule-1", "http": {"method": "PUT", "path": "/api/irrigation-zones/1/schedule", "auth": "token", "body": {"trigger_metric": "SWT_1", "threshold_kpa": 20, "duration_minutes": 20, "enabled": true}}},
+    {"id": "seed", "why": "The zone's only STREGA row stores its deveui as a BLOB (hostile/never-written storage class); SWT is above threshold.",
+     "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES (CAST('A840410000000071' AS BLOB),'Blob valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000072','Probe','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A840410000000072',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100);"},
+    {"id": "daily-tick", "timer": "daily-schedule-0600"}
+  ]
+}

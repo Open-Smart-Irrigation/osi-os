@@ -1,0 +1,69 @@
+{
+  "name": "r3-dispatch-encoder-write-faults-scoped",
+  "_comment": "S1 (dispatch r3), scoped: a scoped actor open whose expectation insert or attempt claim fails inside the encoder. Record with --scoped.",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "seed",
+      "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(110,'va-text','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-text',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(110,'Zone va-text',110,'UTC','z-va-text','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000106E','Probe','KIWI_SENSOR',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000206E','Valve','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000306E','ClaimFault','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED')"
+    },
+    {
+      "id": "fault-exp",
+      "sql": "CREATE TRIGGER r3_fault_exp BEFORE INSERT ON valve_actuation_expectations WHEN NEW.device_eui='A84041000000206E' BEGIN SELECT RAISE(ABORT,'r3 expectation fault'); END;"
+    },
+    {
+      "id": "scoped-open-exp-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000206E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "drop-exp",
+      "sql": "DROP TRIGGER r3_fault_exp;"
+    },
+    {
+      "id": "fault-claim",
+      "sql": "CREATE TRIGGER r3_fault_claim BEFORE UPDATE OF transport_json ON valve_actuation_expectations WHEN NEW.device_eui='A84041000000306E' AND NEW.transport_json LIKE '%ATTEMPTED%' BEGIN SELECT RAISE(ABORT,'r3 claim fault'); END;"
+    },
+    {
+      "id": "scoped-open-claim-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000306E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "drop-claim",
+      "sql": "DROP TRIGGER r3_fault_claim;"
+    },
+    {
+      "id": "scoped-open-control",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000206E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    }
+  ]
+}

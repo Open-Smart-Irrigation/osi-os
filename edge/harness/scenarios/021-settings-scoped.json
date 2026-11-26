@@ -1,0 +1,20 @@
+{
+  "name": "settings-scoped",
+  "description": "Gateway system settings under OSI_SCOPED_ACCESS=1: the write-path role gate (researcher, disabled account, admin) and the read-path enabled-account gate (routes #4 and #5, scoped arm).",
+  "steps": [
+    { "id": "register", "http": { "method": "POST", "path": "/auth/register", "body": { "username": "farmer", "password": "synthetic-pass-1" } } },
+    { "id": "login", "http": { "method": "POST", "path": "/auth/login", "body": { "username": "farmer", "password": "synthetic-pass-1" } }, "capture": { "token": "json.token" } },
+    { "id": "settings-get-scoped-admin", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "demote-to-researcher", "sql": "UPDATE users SET role = 'researcher' WHERE id = 1" },
+    { "id": "settings-get-scoped-researcher", "why": "GET stays open to every enabled account in scoped mode.", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "settings-put-scoped-role", "why": "Scoped PUT requires admin; a researcher is refused before any validation.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich" } } },
+    { "id": "disable-account", "sql": "UPDATE users SET disabled_at = '2026-11-23T00:00:00.000Z' WHERE id = 1" },
+    { "id": "settings-get-scoped-disabled", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "settings-put-scoped-disabled", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich" } } },
+    { "id": "re-enable-as-admin", "sql": "UPDATE users SET role = 'admin', disabled_at = NULL WHERE id = 1" },
+    { "id": "settings-put-scoped-admin", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich", "applyToAllZones": true } } },
+    { "id": "settings-get-scoped-after-put", "http": { "method": "GET", "path": "/api/system/settings", "auth": "token" } },
+    { "id": "delete-user", "sql": "DELETE FROM users WHERE id = 1" },
+    { "id": "settings-put-scoped-unknown-user", "why": "The token still verifies, but the fresh role lookup finds no user.", "http": { "method": "PUT", "path": "/api/system/settings", "auth": "token", "body": { "gatewayTimezone": "Europe/Zurich" } } }
+  ]
+}
