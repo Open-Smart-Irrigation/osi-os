@@ -4,13 +4,13 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
-import {evaluate, markdown, planMismatches, requiredFailures, ROWS, summarize} from '../../scripts/check-perf.mjs';
+import {evaluate, FLOORS, markdown, planMismatches, requiredFailures, ROWS, summarize} from '../../scripts/check-perf.mjs';
 import type {PerfSnapshot} from '../../src/render-review';
 
 test('the closed-phone heap gate covers both the cold reading and the retained phone', () => {
   assert.deepEqual(planMismatches(readFileSync(new URL('../../docs/plan.md', import.meta.url), 'utf8')), []);
   const snapshot: PerfSnapshot = {
-    quality: 'standard', longTaskSupported: true, segments: [], frames: [], advances: [],
+    quality: 'standard', longTaskSupported: true, segments: [], frames: [], playCore: {ms: 0, ticks: 0}, advances: [],
     sleepJumps: [], replayLoads: [], longTasks: [], work: [],
   };
   for (const [heapClosedBytes, heapAfterBytes] of [[40e6, 70e6], [70e6, 40e6]]) {
@@ -28,7 +28,8 @@ test('the closed-phone heap gate covers both the cold reading and the retained p
 
 test('a long task counts by its start in play and reports overlapping work across the window end', () => {
   const snapshot: PerfSnapshot = {
-    quality: 'standard', longTaskSupported: true, frames: [], advances: [], sleepJumps: [], replayLoads: [],
+    quality: 'standard', longTaskSupported: true, frames: [], playCore: {ms: 0, ticks: 0},
+    advances: [], sleepJumps: [], replayLoads: [],
     segments: [
       {index: 0, window: 'play', start: 10, end: 200},
       {index: 1, window: 'phone', start: 210, end: 350},
@@ -62,6 +63,33 @@ test('a long task counts by its start in play and reports overlapping work acros
   assert.ok(output.includes('Ours 48.00 ms (simulation 17.00 ms, render 31.00 ms), remainder 12.00 ms.'));
   assert.ok(output.includes('render pass at 148.00 ms for 17.00 ms'));
   assert.ok(output.includes('core step at 90.00 ms for 25.00 ms (sim 10 to 20)'));
+});
+
+test('skipped callbacks cannot dilute the render gate or hide checkpoint CPU time', () => {
+  const snapshot: PerfSnapshot = {
+    quality: 'standard', longTaskSupported: true,
+    segments: [{index: 0, window: 'play', start: 0, end: 10_000}],
+    frames: Array.from({length: 620}, (_, i) => ({
+      window: 'play', segment: 0, start: i * 16, rendered: i < FLOORS.playFrames,
+      frameMs: i < 25 ? 30 : 10, renderMs: i < FLOORS.playFrames ? 2 : 0,
+      ticks: i < 400 ? 1 : 0, coreMs: i < 400 ? 3.8 : .4, viewMs: 0,
+    })),
+    playCore: {ms: 1_608, ticks: 400},
+    advances: Array.from({length: FLOORS.uplinks}, () => ({window: 'play', ms: 1, uplink: true})),
+    sleepJumps: [{ms: 50, fromHour: 21, toHour: 5 + 50 / 60}],
+    replayLoads: [{ms: 1_000, ticks: 101_920, logRows: 17}],
+    longTasks: [], work: [],
+  };
+  const measured = {heapClosedBytes: 1, heapAfterBytes: 1, heapOpenBytes: 1, phoneFirstOpenMs: 1};
+  const result = evaluate(summarize(snapshot, measured), 6);
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(requiredFailures(result, false).map(row => [row.id, row.value]), [
+    ['frameP95', 30], ['coreTickAvg', 4.02],
+  ]);
+  snapshot.frames[0].rendered = false;
+  assert.deepEqual(summarize(snapshot, measured).problems, [
+    `${FLOORS.playFrames - 1} rendered play frames, fewer than ${FLOORS.playFrames}`,
+  ]);
 });
 
 test('local timings bind and only an explicit hosted switch reports overruns', t => {

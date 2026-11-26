@@ -7,7 +7,7 @@ import {rollingTransplant} from './core/tutorial';
 import type {ReplayHeader, TileRef} from './core/types';
 import {inputController} from './input/controller';
 import {startLoop} from './loop';
-import {loadReplayFile} from './replay-file';
+import {createReplayFileLoader} from './replay-file';
 import {SleepJump} from './sleep-jump';
 import {createFarmRenderer} from './view/renderer';
 import {download, LogExport} from './ui/export';
@@ -88,7 +88,7 @@ export async function bootGame(root: HTMLElement, facilitator: boolean) {
   const restart = () => { close(); start(createRun(run.header)); };
   const exportLog = () => download('farm-log.jsonl', eventExport.jsonl(), 'application/x-ndjson');
   const exportSave = () => download('farm-replay.json', JSON.stringify(run.save()), 'application/json');
-  const load = (file: File) => loadReplayFile(file, {
+  const load = createReplayFileLoader({
     build: BUILD,
     session: () => session,
     load(save) {

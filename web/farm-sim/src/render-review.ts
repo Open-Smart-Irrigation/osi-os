@@ -161,13 +161,17 @@ export function makeReview(renderer: Pick<Renderer, 'render'>, header: ReplayHea
 
 /** Measurement windows the perf spec opens. Frames and ticks outside a window are not recorded. */
 export type PerfWindow = 'play' | 'phone' | 'fast-forward';
-type FrameWork = {coreMs: number; ticks: number; viewMs: number; sleepJump: boolean};
-export type PerfFrame = FrameWork & {segment: number; window: PerfWindow; start: number; frameMs: number; renderMs: number};
+type FrameWork = {coreMs: number; ticks: number; viewMs: number};
+export type PerfFrame = FrameWork & {
+  segment: number; window: PerfWindow; start: number; frameMs: number; renderMs: number; rendered: boolean;
+};
 export interface PerfSnapshot {
   quality: QualityTier | undefined;
   longTaskSupported: boolean;
   segments: {index: number; window: PerfWindow; start: number; end: number}[];
   frames: PerfFrame[];
+  /** Core work inside play windows, including checkpoint continuations between animation callbacks. */
+  playCore: {ms: number; ticks: number};
   /** One osi.advance call per tick; `uplink` is true when the soil probe's latest sample changed during the call. */
   advances: {window: PerfWindow; ms: number; uplink: boolean}[];
   /** Wall time from the first sleep slice through completion, including yields. */
@@ -191,21 +195,22 @@ export interface PerfProbe {
 }
 
 interface CoreProbe {
-  state: Pick<PerfSnapshot, 'advances' | 'sleepJumps' | 'replayLoads' | 'work'> & {
+  state: Pick<PerfSnapshot, 'playCore' | 'advances' | 'sleepJumps' | 'replayLoads' | 'work'> & {
     window: PerfWindow | undefined; bypass: boolean; run: FarmRun | undefined; frame: FrameWork;
   };
   bypassed<T>(work: () => T): T;
   takeFrame(): FrameWork;
 }
 
-const idleWork = (): FrameWork => ({coreMs: 0, ticks: 0, viewMs: 0, sleepJump: false});
+const idleWork = (): FrameWork => ({coreMs: 0, ticks: 0, viewMs: 0});
 let coreProbe: CoreProbe | undefined;
 
 /** Times core.step, osi.advance (FarmOsiAdapter.advance), view.sync (FarmRun.viewModel) and FarmRun.load. */
 export function wrapCore(): CoreProbe {
   if (coreProbe) return coreProbe;
   const state: CoreProbe['state'] = {
-    window: undefined, bypass: false, run: undefined, frame: idleWork(), advances: [], sleepJumps: [], replayLoads: [], work: [],
+    window: undefined, bypass: false, run: undefined, frame: idleWork(), playCore: {ms: 0, ticks: 0},
+    advances: [], sleepJumps: [], replayLoads: [], work: [],
   };
   const {step, resumeStep, viewModel, hash} = FarmRun.prototype;
   const {advance} = FarmOsiAdapter.prototype;
@@ -237,27 +242,36 @@ export function wrapCore(): CoreProbe {
       if (uplink && state.window === 'play') state.work.push({name: 'uplink advance', start, ms});
     }
   };
+  let timingStep = false;
+  function timeStep(run: FarmRun, name: 'core step' | 'checkpoint hash', runStep: () => boolean) {
+    const simFrom = run.now;
+    const ticksBefore = state.frame.ticks;
+    const start = performance.now();
+    timingStep = true;
+    try {
+      const done = runStep();
+      const ms = performance.now() - start;
+      if (state.window === 'play') {
+        state.work.push({name, start, ms, simFrom, simTo: run.now});
+        state.playCore.ms += ms;
+        state.playCore.ticks += state.frame.ticks - ticksBefore;
+      }
+      state.frame.coreMs += ms;
+      return done;
+    } finally {
+      timingStep = false;
+    }
+  }
   FarmRun.prototype.step = function (this: FarmRun, realMs: number, sliced = false) {
     if (state.bypass) return step.call(this, realMs, sliced);
     state.run = this;
-    const simFrom = this.now;
-    const start = performance.now();
-    const done = step.call(this, realMs, sliced);
-    const ms = performance.now() - start;
-    if (state.window === 'play') state.work.push({name: 'core step', start, ms, simFrom, simTo: this.now});
-    state.frame.coreMs += ms;
-    return done;
+    return timeStep(this, 'core step', () => step.call(this, realMs, sliced));
   };
   FarmRun.prototype.resumeStep = function (this: FarmRun) {
     const name = this.pendingWork;
-    if (state.bypass || !name) return resumeStep.call(this);
-    const start = performance.now();
-    const simFrom = this.now;
-    const done = resumeStep.call(this);
-    const ms = performance.now() - start;
-    if (state.window === 'play') state.work.push({name, start, ms, simFrom, simTo: this.now});
-    state.frame.coreMs += ms;
-    return done;
+    // A synchronous step may finish a pending checkpoint itself. Its span already includes that work.
+    if (state.bypass || timingStep || !name) return resumeStep.call(this);
+    return timeStep(this, name, () => resumeStep.call(this));
   };
 
   const advanceSleep = SleepJump.prototype.advance;
@@ -267,7 +281,6 @@ export function wrapCore(): CoreProbe {
     sleep ??= {start, from: this.run.now};
     const done = advanceSleep.call(this);
     const end = performance.now();
-    state.frame.sleepJump = true;
     if (state.window === 'play') state.work.push({name: 'sleep', start, ms: end - start});
     if (done) {
       if (this.run.now > sleep.from) {
@@ -347,6 +360,7 @@ export function installPerfProbe(renderer: Renderer) {
   let segment: PerfSnapshot['segments'][number] | undefined;
   let quality: QualityTier | undefined;
   let renderMs = 0;
+  let rendered = false;
   let fastForwardUntil: number | undefined;
 
   const rebake = TerrainChunk.prototype.rebake;
@@ -360,6 +374,7 @@ export function installPerfProbe(renderer: Renderer) {
   renderer.render = (...args: Parameters<Renderer['render']>) => {
     const start = performance.now();
     render(...args);
+    rendered = true;
     const ms = performance.now() - start;
     if (core.state.window === 'play') core.state.work.push({name: 'render pass', start, ms});
     renderMs += ms;
@@ -367,8 +382,9 @@ export function installPerfProbe(renderer: Renderer) {
   loopProbe.frame = (start, end, tier) => {
     const work = core.takeFrame();
     quality = tier;
-    if (segment) frames.push({...work, segment: segment.index, window: segment.window, start, frameMs: end - start, renderMs});
+    if (segment) frames.push({...work, segment: segment.index, window: segment.window, start, frameMs: end - start, renderMs, rendered});
     renderMs = 0;
+    rendered = false;
   };
 
   const activeRun = () => {
@@ -398,8 +414,8 @@ export function installPerfProbe(renderer: Renderer) {
     snapshot() {
       if (segment) throw new Error('Close the perf window before taking a snapshot');
       if (observer) recordTasks(observer.takeRecords());
-      const {advances, sleepJumps, replayLoads, work} = core.state;
-      return {quality, longTaskSupported, segments, frames, advances, sleepJumps, replayLoads, longTasks, work};
+      const {playCore, advances, sleepJumps, replayLoads, work} = core.state;
+      return {quality, longTaskSupported, segments, frames, playCore, advances, sleepJumps, replayLoads, longTasks, work};
     },
   };
 }

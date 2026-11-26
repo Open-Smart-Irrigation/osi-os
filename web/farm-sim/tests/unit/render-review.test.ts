@@ -112,4 +112,6 @@ test('the interactive probe counts each tick once and times checkpoint slices', 
   assert.equal(probe.state.work.filter(span => span.name === 'uplink advance').length, uplinks.length);
   assert.ok(checkpointSlices > 1);
   assert.equal(probe.state.work.filter(span => span.name === 'checkpoint hash').length, checkpointSlices);
+  const stepMs = probe.state.work.filter(span => span.name === 'core step').reduce((total, span) => total + span.ms, 0);
+  assert.deepEqual(probe.state.playCore, {ms: stepMs + checkpointSlices, ticks: 600});
 });

@@ -92,8 +92,6 @@ export function percentile95(samples) {
   return sorted[Math.ceil(sorted.length * .95) - 1];
 }
 
-const sum = values => values.reduce((total, value) => total + value, 0);
-
 /** Clip measured spans to the task. Simulation and rendering run sequentially, but both have nested spans. */
 function attributeTask(task, spans) {
   const end = task.start + task.ms;
@@ -120,9 +118,8 @@ function attributeTask(task, spans) {
  */
 export function summarize(snapshot, measured) {
   const problems = [];
-  const play = snapshot.frames.filter(frame => frame.window === 'play' && !frame.sleepJump);
-  const ticked = play.filter(frame => frame.ticks > 0);
-  const ticks = sum(ticked.map(frame => frame.ticks));
+  const play = snapshot.frames.filter(frame => frame.window === 'play' && frame.rendered);
+  const {ms: coreMs, ticks} = snapshot.playCore;
   const regular = snapshot.advances.filter(advance => advance.window !== 'phone');
   const uplinks = regular.filter(advance => advance.uplink).map(advance => advance.ms);
   const playSegments = snapshot.segments.filter(segment => segment.window === 'play');
@@ -134,8 +131,8 @@ export function summarize(snapshot, measured) {
   const [jump] = snapshot.sleepJumps;
   const [replay] = snapshot.replayLoads;
 
-  if (play.length < FLOORS.playFrames) problems.push(`${play.length} play frames, fewer than ${FLOORS.playFrames}`);
-  if (ticks < FLOORS.ticks) problems.push(`${ticks} ticks in play frames, fewer than ${FLOORS.ticks}`);
+  if (play.length < FLOORS.playFrames) problems.push(`${play.length} rendered play frames, fewer than ${FLOORS.playFrames}`);
+  if (ticks < FLOORS.ticks) problems.push(`${ticks} ticks in play windows, fewer than ${FLOORS.ticks}`);
   if (uplinks.length < FLOORS.uplinks) problems.push(`${uplinks.length} OSI steps crossing an uplink, fewer than ${FLOORS.uplinks}`);
   if (snapshot.sleepJumps.length !== 1) problems.push(`${snapshot.sleepJumps.length} sleep jumps, expected 1`);
   else if (!(jump.fromHour >= 21 && Math.abs(jump.toHour - (5 + 50 / 60)) < 1e-6)) {
@@ -151,7 +148,7 @@ export function summarize(snapshot, measured) {
     if (!(measured[key] > 0)) problems.push(`no ${key} measurement`);
   }
 
-  const phoneFrames = snapshot.frames.filter(frame => frame.window === 'phone');
+  const phoneFrames = snapshot.frames.filter(frame => frame.window === 'phone' && frame.rendered);
   const deltas = [];
   for (let i = 1; i < play.length; i++) {
     if (play[i].segment === play[i - 1].segment) deltas.push(play[i].start - play[i - 1].start);
@@ -160,7 +157,7 @@ export function summarize(snapshot, measured) {
     problems,
     metrics: {
       frameP95: percentile95(play.map(frame => frame.frameMs)),
-      coreTickAvg: ticks > 0 ? sum(ticked.map(frame => frame.coreMs)) / ticks : NaN,
+      coreTickAvg: ticks > 0 ? coreMs / ticks : NaN,
       uplinkStepP95: percentile95(uplinks),
       sleepJump: snapshot.sleepJumps.length === 1 ? jump.ms : NaN,
       replayLoad: snapshot.replayLoads.length === 1 ? replay.ms : NaN,

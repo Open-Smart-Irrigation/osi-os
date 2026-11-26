@@ -61,11 +61,12 @@ function measurement(page: Page) {
 
 function syntheticSnapshot(frameMs: number): PerfSnapshot {
   const frames = Array.from({length: 600}, (_, i): PerfFrame => ({
-    segment: 0, window: 'play', start: i * 16, frameMs, coreMs: 1, ticks: 1, viewMs: .5, renderMs: 2, sleepJump: false,
+    segment: 0, window: 'play', start: i * 16, frameMs, coreMs: 1, ticks: 1, viewMs: .5, renderMs: 2, rendered: true,
   }));
   const uplink = (): PerfSnapshot['advances'][number] => ({window: 'play', ms: 1, uplink: true});
   return {
     quality: 'standard', longTaskSupported: true, segments: [{index: 0, window: 'play', start: 0, end: 10_000}], frames,
+    playCore: {ms: frames.length, ticks: frames.length},
     advances: Array.from({length: 20}, uplink),
     sleepJumps: [{ms: 50, fromHour: 21, toHour: 5 + 50 / 60}],
     replayLoads: [{ms: 1_000, ticks: 101_920, logRows: 17}],
@@ -89,7 +90,8 @@ test('the section 12 evaluator gates the CI column and refuses missing samples',
   expect(atGate.pass).toBe(true);
   const over = evaluate(summarize(syntheticSnapshot(24.5), measured), 6);
   expect(over.rows.filter(row => row.pass === false).map(row => row.id)).toEqual(['frameP95']);
-  const empty = evaluate(summarize({...syntheticSnapshot(1), frames: [], advances: [], sleepJumps: [], replayLoads: []}, measured), 6);
+  const empty = evaluate(summarize({...syntheticSnapshot(1), frames: [], playCore: {ms: 0, ticks: 0},
+    advances: [], sleepJumps: [], replayLoads: []}, measured), 6);
   expect(empty.problems.length).toBeGreaterThan(0);
   expect(empty.pass).toBe(false);
 });
