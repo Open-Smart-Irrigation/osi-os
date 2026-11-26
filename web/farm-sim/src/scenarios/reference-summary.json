@@ -1,0 +1,29 @@
+{
+  "baseline": {
+    "liters": 5040,
+    "pumpStrokes": 269,
+    "carryTrips": 0,
+    "harvestedKg": 23.936,
+    "stressDays": 0,
+    "irrigationDays": 14,
+    "soilWaterEndMm": 164.91
+  },
+  "dry-spell": {
+    "liters": 5040,
+    "pumpStrokes": 224,
+    "carryTrips": 22,
+    "harvestedKg": 23.936,
+    "stressDays": 0,
+    "irrigationDays": 14,
+    "soilWaterEndMm": 159.4
+  },
+  "storm": {
+    "liters": 5040,
+    "pumpStrokes": 269,
+    "carryTrips": 0,
+    "harvestedKg": 23.936,
+    "stressDays": 0,
+    "irrigationDays": 14,
+    "soilWaterEndMm": 172.42
+  }
+}
