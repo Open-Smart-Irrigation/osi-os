@@ -1,0 +1,385 @@
+{
+  "baseline": {
+    "dayThreeHintKpa": -6.56,
+    "tiers": {
+      "0": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.36,
+        "pumpStrokes": 143,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 133.71
+        }
+      },
+      "1": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.36,
+        "pumpStrokes": 143,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 133.71
+        }
+      },
+      "2": {
+        "triggerDates": [],
+        "runLiters": [
+          408,
+          400,
+          440,
+          392,
+          424,
+          424,
+          424,
+          408,
+          424,
+          416
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.936,
+        "pumpStrokes": 227,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 152.56
+        }
+      },
+      "3": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.936,
+        "pumpStrokes": 269,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 164.91
+        }
+      },
+      "4": {
+        "triggerDates": [
+          "2027-01-12",
+          "2027-01-13",
+          "2027-01-14",
+          "2027-01-19",
+          "2027-01-22",
+          "2027-01-24"
+        ],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.36,
+        "pumpStrokes": 143,
+        "carryTrips": 0,
+        "stressDays": 2,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 129.68
+        }
+      }
+    }
+  },
+  "dry-spell": {
+    "dayThreeHintKpa": -6.45,
+    "tiers": {
+      "0": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 22.976,
+        "pumpStrokes": 150,
+        "carryTrips": 0,
+        "stressDays": 2,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 130.07
+        }
+      },
+      "1": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 22.976,
+        "pumpStrokes": 150,
+        "carryTrips": 0,
+        "stressDays": 2,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 130.07
+        }
+      },
+      "2": {
+        "triggerDates": [],
+        "runLiters": [
+          424,
+          448,
+          264,
+          80,
+          448,
+          440,
+          408,
+          424,
+          432,
+          400
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.488,
+        "pumpStrokes": 186,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 144.49
+        }
+      },
+      "3": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.936,
+        "pumpStrokes": 224,
+        "carryTrips": 22,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 159.4
+        }
+      },
+      "4": {
+        "triggerDates": [
+          "2027-01-12",
+          "2027-01-13",
+          "2027-01-14",
+          "2027-01-15",
+          "2027-01-20",
+          "2027-01-21",
+          "2027-01-23",
+          "2027-01-25"
+        ],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.296,
+        "pumpStrokes": 166,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 128.96
+        }
+      }
+    }
+  },
+  "storm": {
+    "dayThreeHintKpa": -6.82,
+    "tiers": {
+      "0": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 22.016,
+        "pumpStrokes": 143,
+        "carryTrips": 0,
+        "stressDays": 3,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 144.55
+        }
+      },
+      "1": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 22.016,
+        "pumpStrokes": 143,
+        "carryTrips": 0,
+        "stressDays": 3,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 144.55
+        }
+      },
+      "2": {
+        "triggerDates": [],
+        "runLiters": [
+          440,
+          392,
+          392,
+          408,
+          424,
+          384,
+          416,
+          424,
+          400,
+          440
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.808,
+        "pumpStrokes": 222,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 159.97
+        }
+      },
+      "3": {
+        "triggerDates": [],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.936,
+        "pumpStrokes": 269,
+        "carryTrips": 0,
+        "stressDays": 0,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 172.42
+        }
+      },
+      "4": {
+        "triggerDates": [
+          "2027-01-12",
+          "2027-01-13",
+          "2027-01-14",
+          "2027-01-15",
+          "2027-01-16",
+          "2027-01-19",
+          "2027-01-21"
+        ],
+        "runLiters": [
+          360,
+          360,
+          360,
+          360,
+          360,
+          360,
+          360
+        ],
+        "cutoffs": [],
+        "harvestedKg": 23.168,
+        "pumpStrokes": 161,
+        "carryTrips": 0,
+        "stressDays": 1,
+        "soilWaterMm": {
+          "start": 152.1,
+          "end": 141.14
+        }
+      }
+    }
+  }
+}

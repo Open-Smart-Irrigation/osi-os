@@ -122,6 +122,10 @@
     {
       "pattern": "web/history-zoom-prototypes/**",
       "reason": "pending owner decision D4: prototype app scope. Chart-library comparison app (uPlot, D3, Chart.js, ECharts) whose unit tests and Playwright browser specs run by hand (npm test, npm run test:browser); whether the app lands on main at all is open. Remove this entry when the app is wired into a workflow or dropped from the branch"
+    },
+    {
+      "pattern": "web/farm-sim/**",
+      "reason": "run by the path-filtered, non-required farm-sim.yml (osi-os lead decision 2026-11-23); its coverage step fails if a web/farm-sim test did not execute"
     }
   ]
 }

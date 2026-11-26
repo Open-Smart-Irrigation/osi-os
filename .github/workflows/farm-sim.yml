@@ -1,0 +1,53 @@
+name: Farm simulator
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'web/farm-sim/**'
+      - web/react-gui/demo/model.ts
+      - web/react-gui/demo/model/readings.ts
+      - web/react-gui/demo/model/environment.ts
+      - web/react-gui/demo/model/aggregation.ts
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/farm-sim/**'
+      - web/react-gui/demo/model.ts
+      - web/react-gui/demo/model/readings.ts
+      - web/react-gui/demo/model/environment.ts
+      - web/react-gui/demo/model/aggregation.ts
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  farm-sim:
+    runs-on: ubuntu-latest
+    # A ceiling for a hung step; the core steps (install, typecheck, bake, test, verify) take a few minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: web/react-gui
+      - run: npm ci
+        working-directory: web/farm-sim
+      - run: npm run typecheck
+        working-directory: web/farm-sim
+      - run: npm run bake
+        working-directory: web/farm-sim
+      - run: npm test
+        working-directory: web/farm-sim
+      - run: npm run verify
+        working-directory: web/farm-sim
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}

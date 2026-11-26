@@ -1,0 +1,24 @@
+{
+  "name": "osi-farm-sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "bake": "node --import tsx scripts/bake-atlas.ts",
+    "test": "node scripts/run-tests.mjs 'tests/unit/*.test.ts' 'tests/integration/*.test.ts'",
+    "verify": "node scripts/verify-core-purity.mjs && node scripts/verify-no-binary-art.mjs && node scripts/verify-isolation.mjs && node scripts/verify-package-hygiene.mjs && node scripts/verify-test-coverage.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "pixi.js": "8.23.0",
+    "preact": "11.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.19.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "5.4.21"
+  }
+}

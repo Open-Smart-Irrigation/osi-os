@@ -1,0 +1,92 @@
+{
+  "id": "baseline",
+  "seed": 9,
+  "start": 1799638200000,
+  "tiers": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "tutorial": true,
+  "initial": {
+    "bedA": {
+      "depletion": [
+        0,
+        0.35,
+        0.3,
+        0.45,
+        0.4
+      ],
+      "dayInStage": 5,
+      "fruit": {
+        "green": 6,
+        "ripening": 2,
+        "ripe": 1
+      }
+    },
+    "bedB": {
+      "depletion": [
+        0.2,
+        0.4,
+        0.3,
+        0.25,
+        0.2
+      ],
+      "empty": true
+    },
+    "tankLiters": 300,
+    "wellLiters": 480,
+    "wellYieldLiters": 480,
+    "energy": 100
+  },
+  "reference": {
+    "supply": {
+      "at": "06:30",
+      "pumpToLiters": 1000,
+      "carryToLiters": 400,
+      "carryMinEnergy": 20
+    },
+    "tiers": [
+      {
+        "tier": 0,
+        "kind": "even-day-tap",
+        "at": "07:00",
+        "minutes": 45
+      },
+      {
+        "tier": 1,
+        "kind": "even-day-tap",
+        "at": "07:00",
+        "minutes": 45
+      },
+      {
+        "tier": 2,
+        "kind": "verdict-tap",
+        "at": "07:00",
+        "verdict": "irrigate_today",
+        "maxMinutes": 90
+      },
+      {
+        "tier": 3,
+        "kind": "weekly-plan",
+        "at": "07:00",
+        "weekdays": 127,
+        "minutes": 45
+      },
+      {
+        "tier": 4,
+        "kind": "swt-trigger",
+        "sensor": "SWT_1",
+        "kPa": 25,
+        "minutes": 45
+      }
+    ],
+    "tutorialDrip": {
+      "day": 3,
+      "at": "07:00",
+      "minutes": 60
+    }
+  }
+}
