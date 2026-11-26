@@ -4472,6 +4472,27 @@ class BootTimingReadTests(unittest.TestCase):
             self.assertEqual([(run['pid'], run['started']) for run in boot_timing.boot_phases(out)['node_red']],
                              [('6749', BootTimingTests.stamp('16:46:50'))])
 
+    def test_each_boot_keeps_the_first_line_of_its_own_device_import(self):
+        # A first boot cut inside its device import, then the restart, which repeats the import.
+        # The read keeps the restart's first import line as well as its last, so the import is
+        # timed from its start and not from its last line to itself.
+        earlier = [self.line('16:50:00', self.RC + 'S99zzz-lorawan-devices.init: INFO earlier first'),
+                   self.line('16:50:10', self.RC + 'S99zzz-lorawan-devices.init: INFO earlier last')]
+        restart = [self.line('16:43:18', 'user.notice node-red.init: persistent syslog sink already set'),
+                   self.line('16:44:19', self.RC + 'S99zzz-lorawan-devices.init: INFO restart first'),
+                   self.line('16:46:00', self.RC + 'S99zzz-lorawan-devices.init: INFO restart second'),
+                   self.line('16:49:19', self.RC + 'S99zzz-lorawan-devices.init: INFO restart last'),
+                   self.line('16:49:30', self.NODE + '6749]: Welcome to Node-RED')]
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            self.write(current, [*earlier, *restart])
+            out = self.read(current, 1, str(os.stat(current).st_ino))
+            self.assertEqual([line for line in out.splitlines() if line[0].isdigit()], [
+                f'1 {earlier[0]}', f'2 {earlier[1]}', f'4 {restart[1]}', f'6 {restart[3]}', f'7 {restart[4]}'])
+            self.assertIn('osi-harness: boundary 3 of 7 lines read', out)
+            self.assertEqual(boot_timing.boot_phases(out)['device_import'], {
+                'start': BootTimingTests.stamp('16:44:19'), 'end': BootTimingTests.stamp('16:49:19'), 'seconds': 300})
+
     def test_a_log_rotated_past_the_checkpoint_reads_all_that_is_left_and_says_so(self):
         with tempfile.TemporaryDirectory() as directory:
             current = Path(directory)/'osi-system.log'

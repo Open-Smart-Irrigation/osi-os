@@ -71,9 +71,10 @@ NUMBERED = re.compile(r'^(\d+) (.*)$')
 # Guest awk. The shell's own header lines pass through and are not counted. The
 # device import writes thousands of lines through procd's runner, too many for
 # the console: every phase line comes through once with its number among the
-# lines read, and of each run of import lines the first and the last.
-# The last line says where the boot begins, by the full date and time, so that
-# midnight under a continuous clock is no boundary.
+# lines read, and of each boot's run of import lines the first and the last.
+# The boot begins where the clock last went backwards; the import compression
+# starts again there, since a boot cut inside its import has the next boot
+# repeat it.
 AWK = r"""function stamp(line,   f, n, m) {
     n = split(line, f, " ")
     if (n < 5 || f[1] !~ /^[A-Z][a-z][a-z]$/ || f[3] !~ /^[0-9]+$/ || f[4] !~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/ || f[5] !~ /^[0-9][0-9][0-9][0-9]$/) return ""
@@ -86,8 +87,13 @@ function key_of(text,   f, m) {
     m = index("JanFebMarAprMayJunJulAugSepOctNovDec", f[2])
     return f[5] * 10000000000 + ((m + 2) / 3) * 100000000 + f[3] * 1000000 + substr(f[4], 1, 2) * 3600 + substr(f[4], 4, 2) * 60 + substr(f[4], 7, 2)
 }
+function boundary() {
+    if (pending) { print ilpos " " illine; pending = 0 }
+    seen = 0
+    boot = n
+}
 /^osi-harness: / { print; next }
-{ n++; s = stamp($0); if (s != "") { if (first == "") first = s; last = s; k = key_of(s); if (k < prev) boot = n; prev = k } }
+{ n++; s = stamp($0); if (s != "") { if (first == "") first = s; last = s; k = key_of(s); if (k < prev) boundary(); prev = k } }
 /S99zzz-lorawan-devices\.init: / { if (!seen) { print n " " $0; seen = 1 } else { ilpos = n; illine = $0; pending = 1 }; next }
 /osi-bootstrap|S99osi-bootstrap|Welcome to Node-RED|Loading palette nodes|Settings file|Server now running/ { if (pending) { print ilpos " " illine; pending = 0 }; print n " " $0 }
 END {
