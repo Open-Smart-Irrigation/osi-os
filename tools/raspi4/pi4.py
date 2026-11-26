@@ -13,7 +13,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'raspi5'))
 import acceptance
 import boot_config
-from suite_vm import Guest
+from suite_vm import SLOW_BOOT_SECONDS, Guest
 from upgrade_suite import checked
 
 DTB = 'bcm2711-rpi-4-b.dtb'
@@ -88,6 +88,10 @@ class Pi4(Guest):
     usb_storage = 'usb-storage,bus=xhci.0,drive=update'
     boot_files = ('kernel.img', DTB, 'cmdline.txt', 'armstub.bin')
     console_args = 'console=ttyAMA0,115200 earlycon=pl011,mmio32,0xfe201000'
+    # A restart after a factory first-boot cut repeated first-boot work for longer
+    # than the Pi 5's 420 s API wait allows, on a quiet host (0.8.4 re-take, Pi 4
+    # run 2). This board gets the slow-boot budget #742 gave the 0.8.1 boot.
+    API_WAIT_SECONDS = SLOW_BOOT_SECONDS
 
     @staticmethod
     def load_boot(volume, work, dtmerge, *, quiet=False):

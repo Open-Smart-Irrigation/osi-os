@@ -15,6 +15,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import suite_vm
 from suite_vm import SLOW_BOOT_SECONDS
 from upgrade_suite import CANDIDATE_INSTALL, checked
 
@@ -711,7 +712,10 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         install_bootstrap_timer(upgraded)
         token = mark(upgraded)
         upgraded.upgrade_reboot('sync && reboot', launch_only=True)
-        upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
+        # run() also has a local function named timed (the osi-bootstrap
+        # collector): the wait timer is reached through its module.
+        with suite_vm.timed(upgraded, 'login prompt', SLOW_BOOT_SECONDS):
+            upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
         prompt = since_boot(upgraded)
         upgraded.shell()
         ready(upgraded)
@@ -732,7 +736,8 @@ def run(args, run_dir, scratch, release, make_guest, test, record, fixture_archi
         remove_stall(upgraded)
         token = mark(upgraded)
         upgraded.upgrade_reboot('sync && reboot', launch_only=True)
-        upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
+        with suite_vm.timed(upgraded, 'login prompt', SLOW_BOOT_SECONDS):
+            upgraded.expect(CONSOLE, SLOW_BOOT_SECONDS)
         prompt = since_boot(upgraded)
         upgraded.shell()
         ready(upgraded)
@@ -842,7 +847,8 @@ sed -n '/--- Tailscale boot init ---/,$p' "$f" """)
             raise RuntimeError(f'the line failed over LAN SSH: {command}: {error}')
         seen, later = recovery(vm, ssh, killed_at)
         if not (prompted or later):
-            vm.expect(CONSOLE, SLOW_BOOT_SECONDS)
+            with suite_vm.timed(vm, 'login prompt', SLOW_BOOT_SECONDS):
+                vm.expect(CONSOLE, SLOW_BOOT_SECONDS)
         vm.shell()
         ready(vm)
         daemon_runs(vm, 'tailscaled.real')

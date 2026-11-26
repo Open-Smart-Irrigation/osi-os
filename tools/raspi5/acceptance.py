@@ -15,7 +15,8 @@ from archives import verified_archive
 from minimal_flows import (
     CUT_RECEIPT, INIT, derive_probe_image, has_atomic_publish, prepare_probe_release, verify_disk,
 )
-from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path
+import suite_vm
+from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path, timed
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
 import tailscale_boot
@@ -188,7 +189,9 @@ exit 1""", ready_host_timeout(budget, poll)
 
 def ready(vm, *, budget=None, poll=READY_POLL_SECONDS):
     script, timeout = ready_script(budget, poll)
-    checked(vm, script, timeout)
+    # The budget noted is the one the host enforces on the wait.
+    with timed(vm, 'farm page', timeout):
+        checked(vm, script, timeout)
     if sql(vm,'PRAGMA integrity_check;') != 'ok':
         raise RuntimeError('integrity check failed')
 
@@ -426,7 +429,26 @@ def main(argv=None, *, board='pi5', guest_class=None, memory=(4, 8), verify_boar
 def run_cases(args, run, scratch, release, release_capability, customer_selected, *,
               board='pi5', guest_class=None, verify_board=None):
     make_guest = guest_class if guest_class is not None else Guest
+    guests = []
     results = {}
+
+    def open_guest(*options, **keywords):
+        # A guest of the harness's own class carries its boot waits to the
+        # results line of the case that runs them.
+        vm = make_guest(*options, **keywords)
+        # suite_vm.Guest, not the name above: a test may replace that with a stand-in class.
+        if isinstance(vm, suite_vm.Guest):
+            guests.append([vm, 0])
+        return vm
+
+    def unlisted_waits():
+        """Boot waits noted since the last results line; from now on they count as listed."""
+        lines = []
+        for entry in guests:
+            vm, listed = entry
+            lines += list(vm.waits[listed:])
+            entry[1] = len(vm.waits)
+        return lines
 
     def record(row):
         with (run/'results.log').open('a') as log:
@@ -439,6 +461,10 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
     expected = expected_cases(args, None, customer_selected, historical=historical)
 
     def summarize(*, aborted=False):
+        # Boot waits no case row took, as when the run stops before its first case.
+        waits = unlisted_waits()
+        if waits:
+            record('Boot waits no case row took: ' + ', '.join(waits))
         record('Case | Expected | Observed | Verdict | Reason | Required replacements')
         passed = required = 0
         failed = aborted or bool(results.keys() - expected.keys())
@@ -479,6 +505,9 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 detail = str(e)
             status='FAIL'
         row=f'{label:26} {status} {time.monotonic()-start:7.1f}s  {detail or ""}'
+        waits = unlisted_waits()
+        if waits:
+            row += ('; ' if detail else '') + 'boot waits: ' + ', '.join(waits)
         results[label] = status
         record(row)
 
@@ -522,7 +551,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         upgrade_media = build_media(probe_release, scratch/'minimal-media',
                                     revision=args.release_revision) if minimal else candidate_media()
         case = f'{old}-{scenario}' if scenario else old
-        guest = make_guest(scratch/case, image, args.qemu, args.ram, upgrade=upgrade_media,
+        guest = open_guest(scratch/case, image, args.qemu, args.ram, upgrade=upgrade_media,
                       receipts=run/case, direct_io=bool(scenario))
         try:
             if minimal:
@@ -546,7 +575,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
 
     def factory_minimal_cut(phase):
         case = scratch/f'minimal-factory-{phase}'
-        vm = make_guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
+        vm = open_guest(case, probe_image, args.qemu, args.ram, receipts=run/case.name, direct_io=True)
         try:
             receipt = vm.start(before_console=CUT_RECEIPT, flow_cut=phase)
             committed = verify_disk(vm, receipt, phase=phase, factory=True,
@@ -576,7 +605,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 record(str(error))
                 return summarize(aborted=True)
         if not focused:
-            vm = make_guest(scratch/'candidate', candidate, args.qemu, args.ram,
+            vm = open_guest(scratch/'candidate', candidate, args.qemu, args.ram,
                        receipts=run/'candidate', direct_io=True)
             try:
                 try:
@@ -624,7 +653,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
             for first_boot, label in zip((True, False), FLOWS_CASES[:2]):
                 def check_cut():
                     case = label.replace(' ', '-')
-                    vm = make_guest(scratch/case, candidate, args.qemu, args.ram,
+                    vm = open_guest(scratch/case, candidate, args.qemu, args.ram,
                                receipts=run/case, direct_io=True)
                     try:
                         if not first_boot:
@@ -646,7 +675,7 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
                 test(label, lambda: factory_minimal_cut(phase))
             test(MINIMAL_UPGRADE_CASE, lambda: verify_upgrade('0.8.1', cut_at=CUT_RECEIPT))
         if expected.get(tailscale_boot.CASES[0], False) is None:
-            tailscale_boot.run(args, run, scratch, release, make_guest, test, record,
+            tailscale_boot.run(args, run, scratch, release, open_guest, test, record,
                                fixture_archive, candidate_media, ready)
         if board == 'pi5' and (not focused or args.customer_fixture_only):
             from customer_fixture import QUALIFICATION_SCOPE, run as customer_upgrade
@@ -680,7 +709,8 @@ def stock_cases(vm, args, test, *, log=print, verify_board=None, inspect_disk=Fa
     def account():
         nonlocal password
         password=checked(vm,"head -c 24 /dev/urandom | hexdump -v -e '1/1 \"%02x\"'")
-        checked(vm,"""for i in $(seq 1 100); do [ \"$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)\" = 401 ] && exit 0; sleep 2; done; exit 1""")
+        with timed(vm, 'api', 90):
+            checked(vm,"""for i in $(seq 1 100); do [ \"$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/me)\" = 401 ] && exit 0; sleep 2; done; exit 1""")
         if sql(vm,'SELECT count(*) FROM users;')!='0':
             raise RuntimeError('factory accounts already present')
         observed=gui(vm,password,'setup')

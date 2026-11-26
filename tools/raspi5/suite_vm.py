@@ -1,4 +1,5 @@
 """Disposable Raspberry Pi guests with a serial shell and loopback browser access."""
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
@@ -56,6 +57,50 @@ def reap(process, cut=False):
 # ready() and up to 204 s to the marker.
 SLOW_BOOT_SECONDS = 900
 
+
+@contextmanager
+def timed(vm, name, budget):
+    """Time one bounded wait on a guest; its note says how long the wait took against its budget.
+
+    The note reads "<name> ready after 512.3 s (budget 900 s)", or "<name> not
+    ready after 900.0 s (budget 900 s)" when the wait raises, and the exception
+    goes on. Yields the monotonic time the wait began.
+    """
+    began = time.monotonic()
+    try:
+        yield began
+    except BaseException:
+        note_wait(vm, f'{name} not ready after {time.monotonic() - began:.1f} s (budget {budget} s)')
+        raise
+    note_wait(vm, f'{name} ready after {time.monotonic() - began:.1f} s (budget {budget} s)')
+
+
+def note_wait(vm, line):
+    """Put a boot-wait note on the results line of the case that runs the wait, and in harness-events.log.
+
+    A private guest keeps neither. The file is diagnostics: a note the results
+    line already carries must not fail a wait that passed, so a receipt that
+    cannot be written is said on the results line instead.
+    """
+    if vm.private:
+        return
+    vm.waits += (line,)
+    try:
+        vm.note(line)
+    except OSError as error:
+        vm.waits += (f'harness-events.log write failed: {error!r}',)
+
+
+def log_checkpoint(output):
+    """(lines, inode) of the guest's persistent syslog as the console's probe read them.
+
+    (0, '') is a guest without one. The image's BusyBox has no stat, so the
+    inode comes from ls -i and is missing when that fails.
+    """
+    count, _, rest = output.partition('\n')
+    return (int(count) if count.strip().isdigit() else 0), (rest.split() or [''])[0]
+
+
 # PID 1 runs only the shell and the setup needed by mount_root. OpenWrt
 # normally creates block nodes through procd, which must stay stopped here.
 INSPECTION_INIT = (
@@ -87,6 +132,32 @@ class Guest:
     load_boot = staticmethod(boot_config.load)
     boot_files = ('kernel_2712.img', 'bcm2712-rpi-5-b.dtb', 'cmdline.txt')
     console_args = 'console=ttyAMA10,115200 earlycon=pl011,mmio32,0x107d001000'
+    # Budget of the first 401 from /api/me after a start (upgrade_suite.wait_for_api).
+    # A factory first boot took 232–246 s from the console to it in QEMU. A
+    # restart after a factory first-boot cut repeats first-boot work (osi-bootstrap,
+    # a Node-RED restart and the ChirpStack device import), which the 32-bit Pi 4
+    # model ran past 420 s on a quiet host (0.8.4 re-take, Pi 4 run 2): its guest
+    # class takes SLOW_BOOT_SECONDS (raspi4/pi4.py).
+    API_WAIT_SECONDS = 420
+    # Boot waits noted on this guest by timed(), oldest first. The results line of
+    # the case that ran them lists each once (acceptance.run_cases).
+    waits = ()
+    # Read when a normal boot's console answers: how many lines the guest's
+    # persistent syslog (the sink node-red.init keeps on /data) held, and which
+    # file it is. logd rotates that file by renaming it, so the inode tells
+    # boot_timing whether the lines it reads are the file the console found.
+    # logd can rename the file between the two readings, so the inode is read on
+    # both sides of the count: when it changed, the count is not the new file's
+    # and the guest answers 0 for it, which has the read start at the first line.
+    LOG_CHECKPOINT = ('f=/data/log/osi-system.log\n'
+                      'if [ -f "$f" ]; then\n'
+                      '    id() { set -- $(ls -i "$1" 2>/dev/null); echo "$1"; }\n'
+                      '    a=$(id "$f"); n=$(wc -l < "$f"); b=$(id "$f")\n'
+                      '    if [ "$a" = "$b" ]; then echo "$n"; else echo 0; fi\n'
+                      '    echo "$b"\n'
+                      'fi')
+    log_from = 0
+    log_inode = ''
 
     def __init__(self, work, image, qemu, ram, upgrade=None, *, receipts=None, private=False,
                  direct_io=False):
@@ -119,29 +190,33 @@ class Guest:
     def start(self, *, before_console=None, inspection=False, flow_cut=None):
         self.launch(inspection=inspection, flow_cut=flow_cut)
         if inspection:
-            report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
-            if report.group(1) != b'READY':
-                raise RuntimeError('inspection shell could not mount the persistent overlay')
+            with timed(self, 'inspection console', 180):
+                report = self.expect(rb'\r?\nOSI_INSPECT_(READY|FAILED)\r?\n', 180)
+                if report.group(1) != b'READY':
+                    raise RuntimeError('inspection shell could not mount the persistent overlay')
             self.send(b'stty -echo\n')
             return
         return self.console(before_console)
 
     def console(self, before_console=None):
         if before_console is not None:
-            return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
-        self.expect(b'Please press Enter to activate this console',180)
+            with timed(self, 'console marker', SLOW_BOOT_SECONDS):
+                return self.expect(before_console, SLOW_BOOT_SECONDS).groups()
+        with timed(self, 'login prompt', 180):
+            self.expect(b'Please press Enter to activate this console',180)
         self.shell()
 
     # A usable shell once the login prompt has been read.
     def shell(self):
         self.send(b'\n')
-        self.expect(b':~#',40)
+        with timed(self, 'shell prompt', 40):
+            self.expect(b':~#',40)
         self.send(b'stty -echo; dmesg -n 1\n')
         self.console_ready()
 
     def console_ready(self):
         """Run once the console of a normal boot answers; a board may record its guest here."""
-        self.command('true')
+        self.log_from, self.log_inode = log_checkpoint(self.command(self.LOG_CHECKPOINT)[1])
 
     # Starts QEMU and the bridge for the next boot and returns at once. The
     # console must then be read without a pause: a pipe nobody reads fills,
