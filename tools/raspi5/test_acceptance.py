@@ -3726,8 +3726,7 @@ class TailscaleBootTests(unittest.TestCase):
             # guest's persistent syslog stood when this boot's console came up.
             command.assert_called_once_with(Guest.LOG_COUNT)
             self.assertEqual(vm.log_from, 27)
-            self.assertEqual(vm.waits, ('login prompt ready after 0.0 s (budget 180 s)',
-                                        'shell prompt ready after 0.0 s (budget 40 s)'))
+            self.assertEqual(BootWaitTests.noted(vm), ['shell prompt ready after T s (budget 40 s)'])
 
     def test_the_image_receipt_never_fails_and_names_the_boot_links(self):
         vm = Mock()

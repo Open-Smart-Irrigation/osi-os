@@ -15,6 +15,7 @@ from archives import verified_archive
 from minimal_flows import (
     CUT_RECEIPT, INIT, derive_probe_image, has_atomic_publish, prepare_probe_release, verify_disk,
 )
+import suite_vm
 from suite_vm import FLOWS_COMMITTED, SLOW_BOOT_SECONDS, Guest, external_path, timed
 from upgrade_suite import build_media, checked, run as upgrade, sql, wait_for_api
 from boot_safety import TRANSFER_TARGETS, verify_zero_recovery, verify_missing_pristine_hold
@@ -435,7 +436,8 @@ def run_cases(args, run, scratch, release, release_capability, customer_selected
         # A guest of the harness's own class carries its boot waits to the
         # results line of the case that runs them.
         vm = make_guest(*options, **keywords)
-        if isinstance(vm, Guest):
+        # suite_vm.Guest, not the name above: a test may replace that with a stand-in class.
+        if isinstance(vm, suite_vm.Guest):
             guests.append([vm, 0])
         return vm
 
