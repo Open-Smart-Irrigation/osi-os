@@ -5,11 +5,13 @@ import {bakeAtlas} from '../../scripts/bake-atlas';
 import {defaultHeader} from '../../src/core/scenario';
 import {createRun} from '../../src/core/replay';
 import {START_TILE} from '../../src/core/map';
+import {loopProbe} from '../../src/loop';
 import {advanceUntil, evening, house, queueWalk} from '../integration/run-replay-session';
-import {makeReview, wrapCore} from '../../src/render-review';
+import {installPerfProbe, makeReview, wrapCore} from '../../src/render-review';
 import {Actors} from '../../src/view/actors';
 import {FarmAtlas} from '../../src/view/atlas';
 import {lightingAt} from '../../src/view/lighting';
+import {TerrainChunk} from '../../src/view/terrain-layer';
 import type {ViewModel} from '../../src/view/view-model';
 
 function animationClock(t: TestContext, intervalMs: number) {
@@ -51,6 +53,7 @@ test('a fixed noon capture uses the same player texture before and after a bench
     assert.ok(player instanceof Sprite);
     rendered.push(idle.indexOf(player.texture));
     if (ms === 2_010) liveView = vm;
+    return true;
   }};
   const review = makeReview(renderer, defaultHeader('test'));
   const noon = review.frame('noon');
@@ -74,6 +77,7 @@ for (const {interval, sleep, rain} of [
     const review = makeReview({render(vm) {
       sawWake ||= vm.sky.day === 2 && vm.sky.hour >= 5 && vm.sky.hour < 7;
       sawRain ||= vm.sky.raining;
+      return true;
     }}, defaultHeader('test'));
     const result = await review.benchmark(60_000);
     assert.ok(result.frames > 0);
@@ -114,4 +118,39 @@ test('the interactive probe counts each tick once and times checkpoint slices', 
   assert.equal(probe.state.work.filter(span => span.name === 'checkpoint hash').length, checkpointSlices);
   const stepMs = probe.state.work.filter(span => span.name === 'core step').reduce((total, span) => total + span.ms, 0);
   assert.deepEqual(probe.state.playCore, {ms: stepMs + checkpointSlices, ticks: 600});
+});
+
+test('the standalone benchmark records no samples or completed render phases when draws are skipped', async t => {
+  animationClock(t, 50);
+  const review = makeReview({render: () => false}, defaultHeader('test'));
+  const result = await review.benchmark(60_000);
+  assert.ok(result.ticks >= 960);
+  assert.equal(result.frames, 0);
+  assert.deepEqual(result.phases, {sleep: false, rain: false});
+});
+
+test('the interactive probe flags only callbacks that drew the farm', t => {
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {configurable: true, value: {}});
+  const previousFrame = loopProbe.frame;
+  const rebake = TerrainChunk.prototype.rebake;
+  t.after(() => {
+    if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor);
+    else Reflect.deleteProperty(globalThis, 'window');
+    loopProbe.frame = previousFrame;
+    TerrainChunk.prototype.rebake = rebake;
+  });
+  let draws = false;
+  const renderer = {render: () => draws};
+  installPerfProbe(renderer);
+  const probe = window.farmPerf!;
+  probe.begin('play');
+  assert.equal(renderer.render(), false);
+  loopProbe.frame?.(0, 1, 'standard');
+  draws = true;
+  assert.equal(renderer.render(), true);
+  loopProbe.frame?.(16, 18, 'standard');
+  loopProbe.frame?.(32, 33, 'standard');
+  probe.end();
+  assert.deepEqual(probe.snapshot().frames.map(frame => frame.rendered), [false, true, false]);
 });

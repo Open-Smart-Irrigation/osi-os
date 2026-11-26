@@ -157,7 +157,7 @@ export async function createFarmRenderer(mount: HTMLElement, generatedBase: URL)
       return {image, width, height, frame: atlas.frame(id)};
     },
     render(vm: Readonly<ViewModel>, animationMs: number, quality: QualityTier = 'standard', playerElapsedMs?: number) {
-      if (renderer.context.isLost) return;
+      if (renderer.context.isLost) return false;
       // A portrait view is no taller than the map.
       if (dpr !== (window.devicePixelRatio || 1) || vm.map.height * TILE_SIZE !== mapHeight) {
         mapHeight = vm.map.height * TILE_SIZE;
@@ -219,6 +219,7 @@ export async function createFarmRenderer(mount: HTMLElement, generatedBase: URL)
 
       display.position.set(-shiftX, -shiftY);
       app.render();
+      return !renderer.context.isLost;
     },
     destroy() {
       sizeObserver.disconnect();

@@ -114,12 +114,12 @@ export function makeReview(renderer: Pick<Renderer, 'render'>, header: ReplayHea
                 const viewStart = performance.now();
                 const vm = world.viewModel(now);
                 const renderStart = performance.now();
-                renderer.render(vm, elapsed, quality.current);
+                const drew = renderer.render(vm, elapsed, quality.current);
                 const renderEnd = performance.now();
                 quality.observe(frame, renderEnd - stepStart);
                 lastSlot = frameSlot(elapsed, quality.current);
 
-                if (measuring) {
+                if (measuring && drew) {
                   phases.sleep ||= ticks >= SLEEP_TICK;
                   phases.rain ||= ticks >= RAIN_TICK && vm.sky.raining;
                   if (lastRender !== undefined) intervals.push(frame - lastRender);
@@ -346,7 +346,7 @@ export function replayLog(header: ReplayHeader): Save {
 }
 
 /** Adds renderer.render and the loop's frame span to the core probe and publishes window.farmPerf. */
-export function installPerfProbe(renderer: Renderer) {
+export function installPerfProbe(renderer: Pick<Renderer, 'render'>) {
   const core = wrapCore();
   const segments: PerfSnapshot['segments'] = [];
   const frames: PerfFrame[] = [];
@@ -373,11 +373,14 @@ export function installPerfProbe(renderer: Renderer) {
   const render = renderer.render;
   renderer.render = (...args: Parameters<Renderer['render']>) => {
     const start = performance.now();
-    render(...args);
-    rendered = true;
+    const drew = render(...args);
     const ms = performance.now() - start;
     if (core.state.window === 'play') core.state.work.push({name: 'render pass', start, ms});
-    renderMs += ms;
+    if (drew) {
+      rendered = true;
+      renderMs += ms;
+    }
+    return drew;
   };
   loopProbe.frame = (start, end, tier) => {
     const work = core.takeFrame();
