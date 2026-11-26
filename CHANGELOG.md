@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.5] — 2026-11-30
+
+0.8.5 is 0.8.4 with one boot fix. Field gateways can go from 0.8.0, 0.8.1,
+0.8.2, 0.8.3 or 0.8.4 straight to this release.
+
+### Upgrade notes
+- No database migration. The deploy replaces `/etc/init.d/tailscale` only while
+  it is still the tailscale 1.80.3-r1 package file, moves its boot link to
+  `S99tailscale` and does not restart Tailscale. The change takes effect at the
+  next boot.
+
 ### Fixed
 - A boot no longer waits on the Tailscale cleanup. The init file of tailscale
   1.80.3-r1 runs `tailscaled --cleanup` before the daemon with no time limit,
