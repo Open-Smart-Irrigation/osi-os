@@ -16,7 +16,6 @@ type Prop = {feature: Tile['feature']; id: string; foot: Point; pose: Pose};
 const DIRECTION = {north: 'up', south: 'down', east: 'right', west: 'left'} as const;
 const PLAYER_FPS = {idle: 2, walk: 8, carry: 8, hoe: 12, pour: 10, pump: 10, harvest: 10};
 const CASTERS: ReadonlySet<Tile['feature']> = new Set(['house', 'acacia', 'tank', 'well', 'shared-well', 'gateway']);
-const PIPE_JOINT = [[-8, -8], [9, -8], [9, 9], [-8, 9]] as const;
 // Plants stand a little north of their tile centre so the hose on the drip rows shows
 // just in front of the plant bases instead of running through the stems.
 const CROP_RISE = 3;
@@ -51,20 +50,6 @@ function tankFrame(water: ViewModel['water']) {
   if (fraction <= 0) return 'water.tank.0';
   if (fraction >= 1) return 'water.tank.3';
   return fraction < .5 ? 'water.tank.1' : 'water.tank.2';
-}
-
-function turnMask(mask: number) {
-  return ((mask << 1) | (mask >> 3)) & 15;
-}
-
-function pipeFrame(shapes: FarmAtlas['data']['autotiles']['dripShapes'], mask: number) {
-  for (const [shape, initial] of Object.entries(shapes)) {
-    let rotated: number = initial;
-    for (let turns = 0; turns < 4; turns++, rotated = turnMask(rotated)) {
-      if (mask === rotated) return {shape, turns};
-    }
-  }
-  throw new Error('Unsupported farm drip connection mask: ' + mask);
 }
 
 export class Actors {
@@ -330,14 +315,11 @@ export class Actors {
     const previous = this.pipeState;
     for (let i = 0; i < vm.dripLine.length; i++) {
       const segment = vm.dripLine[i];
-      const foot = tileFoot(segment.at);
       const old = previous?.[i];
       if (old?.at !== segment.at || old.connections !== segment.connections || old.wet !== segment.wet) {
-        const {shape, turns} = pipeFrame(this.atlas.data.autotiles.dripShapes, segment.connections);
         const pipe = this.pipeSprites[i] ??= this.pipes.addChild(new Sprite());
-        pipe.texture = this.atlas.texture(`water.drip.${shape}.${segment.wet ? 'wet' : 'dry'}`);
-        pipe.angle = turns * 90;
-        pipe.position.set(foot.x + PIPE_JOINT[turns][0], foot.y + PIPE_JOINT[turns][1]);
+        pipe.texture = this.atlas.texture(`water.drip.${segment.connections}.${segment.wet ? 'wet' : 'dry'}`);
+        pipe.position.set(segment.at.x * TILE_SIZE, segment.at.y * TILE_SIZE);
         pipe.visible = true;
       }
       if (!segment.wet) continue;

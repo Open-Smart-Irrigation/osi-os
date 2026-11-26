@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {dripShapes, waterSprites} from '../../art/sprites/world';
+import {dripMasks, waterSprites} from '../../art/sprites/world';
 import {LABOUR} from '../../src/core/labour';
 import {
   BED_A_TOP_LEFT, BED_B_TOP_LEFT, DRIP_TILES, FARM_HEIGHT, FARM_WIDTH, farmMap, START_TILE, TANK_TILE, tileIndex,
@@ -38,16 +38,11 @@ const featureTile = (map: readonly TileView[], feature: TileView['feature']) => 
 };
 
 test('the drip line is one pipe from the tank outlet, drawn only with shapes the atlas has', () => {
-  const shapes = new Set<number>();
-  for (const initial of Object.values(dripShapes)) {
-    let mask: number = initial;
-    for (let turn = 0; turn < 4; turn++, mask = ((mask << 1) | (mask >> 3)) & 15) shapes.add(mask);
-  }
   const byTile = new Map(DRIP_TILES.map(tile => [tileIndex(tile.at), tile]));
   assert.equal(byTile.size, DRIP_TILES.length);
   const open: (TileRef & {arm: number})[] = [];
   for (const tile of DRIP_TILES) {
-    assert.ok(shapes.has(tile.connections), 'no drip sprite for mask ' + tile.connections);
+    assert.ok(dripMasks.includes(tile.connections), 'no drip sprite for mask ' + tile.connections);
     for (const [dx, dy, arm, opposite] of ARMS) {
       if (!(tile.connections & arm)) continue;
       const next = byTile.get(tileIndex({x: tile.at.x + dx, y: tile.at.y + dy}));

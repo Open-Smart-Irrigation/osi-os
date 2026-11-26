@@ -81,6 +81,50 @@ test('camera follows the foot, keeps only a fractional remainder, and clamps at 
   assert.deepEqual(followCamera(mapOf(4, 4), {x: 3, y: 3}), {x: 0, y: 0, subX: 0, subY: 0});
 });
 
+test('live hose sprites join on both pixels of each horizontal and vertical seam', t => {
+  const {atlas: data} = bakeAtlas();
+  const page = new Texture({source: new TextureSource({width: data.width, height: data.height})});
+  const atlas = new FarmAtlas(data, page);
+  const actors = new Actors(atlas);
+  t.after(() => {
+    actors.sprites.destroy({children: true});
+    actors.shadows.destroy({children: true});
+    actors.pipes.destroy({children: true});
+    actors.destroy();
+    atlas.destroy();
+    page.destroy(true);
+  });
+  const frames = new Map(spriteFamilies.water.map(frame => [atlas.texture(frame.id), frame]));
+  const header = defaultHeader('test');
+  const initial = new World(header, TUTORIAL_SCENARIO).viewModel(header.start);
+  for (const wet of [false, true]) {
+    const vm = {...initial, dripLine: initial.dripLine.map(segment => ({...segment, wet}))};
+    actors.sync(vm, lightingAt(vm.sky), 0);
+    const pipes = actors.pipes.children.filter(sprite => sprite instanceof PixiSprite);
+    assert.equal(pipes.length, vm.dripLine.length);
+    const byTile = new Map(vm.dripLine.map(({at}, i) => [`${at.x},${at.y}`, pipes[i]]));
+    const ink = (sprite: PixiSprite, x: number, y: number) => {
+      const local = sprite.toLocal({x: x + .5, y: y + .5});
+      return frames.get(sprite.texture)?.rows[Math.floor(local.y)]?.[Math.floor(local.x)];
+    };
+    for (const {at: {x, y}, connections} of vm.dripLine) {
+      const pipe = byTile.get(`${x},${y}`)!;
+      for (const [arm, dx, dy] of [[2, 1, 0], [4, 0, 1]]) {
+        const next = byTile.get(`${x + dx},${y + dy}`);
+        if (!next || !(connections & arm)) continue;
+        const seamX = (x + dx) * TILE_SIZE + dy * 8;
+        const seamY = (y + dy) * TILE_SIZE + dx * 8;
+        for (const [offset, key] of [[0, 'R'], [1, 'k']] as const) {
+          const px = seamX + dy * offset;
+          const py = seamY + dx * offset;
+          assert.equal(ink(pipe, px - dx, py - dy), key, `pipe at (${x}, ${y}) near side`);
+          assert.equal(ink(next, px, py), key, `pipe at (${x + dx}, ${y + dy}) far side`);
+        }
+      }
+    }
+  }
+});
+
 test('viewport fits whole device pixels, including odd and undersized windows', () => {
   assert.deepEqual(fitViewport(1921, 1081), {scale: 4, width: 1920, height: 1080, left: 0, top: 0});
   assert.deepEqual(fitViewport(1197, 801), {scale: 2, width: 960, height: 540, left: 118, top: 130});

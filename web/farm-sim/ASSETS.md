@@ -22,7 +22,7 @@ The families are the keys of `spriteFamilies` in `scripts/bake-atlas.ts`; the fo
 | Family | Atlas ids | Source | How it is drawn |
 |---|---|---|---|
 | terrain | `terrain.laterite.*`, `terrain.tilled.*`, `terrain.grass.*`, `terrain.path.*`, `terrain.crack.*` | `art/generators/terrain.ts` | A laterite base in 8 seeded variants; dual-grid corner sets for grass, path and tilled soil, the tilled set in 5 wetness bands; 4 seeded crack overlays. |
-| water | `water.drip.*`, `water.tank.*`, `water.hand-pump`, `water.well.*` | `art/sprites/world.ts` | Drip line in four shapes, dry and wet; the tank at four levels; the hand-dug well and the shared well in four phases, all drawn with `Pixels`. The hand pump is literal rows. |
+| water | `water.drip.*`, `water.tank.*`, `water.hand-pump`, `water.well.*` | `art/sprites/world.ts` | Dry and wet drip lines oriented by connection mask, the tank at four levels, and the hand-dug and shared wells. These use `Pixels`. The hand pump is literal rows. |
 | structures | `structure.*`, `nature.acacia`, `nature.rock.*` | `art/sprites/world.ts` | The farmhouse with a lit frame, the three unplaced farmhouses below, the acacia, two rocks, the nursery tray, bed pegs and twine. |
 | structures | `nature.hedge.*`, `nature.tuft.*` | `art/generators/terrain.ts` | Sisal hedge tiles for the 47 blob neighbour cases, plus two extra clump layouts for each straight run (51 tiles); four grass tufts. |
 | crop | `crop.tomato.*` | `art/generators/crops.ts` | Five hand-drawn canopies, one per growth stage, and a hand-drawn rolled transplant. Five stress states come from palette remaps and three sway frames from posture shifts; the ripe fruit is a separate overlay. |
