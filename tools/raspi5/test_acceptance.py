@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import replace
+from datetime import date
 import hashlib
 import io
 import json
@@ -3724,7 +3725,7 @@ class TailscaleBootTests(unittest.TestCase):
             self.assertEqual(expect.call_args_list, [call(b':~#', 40)])
             # The same probe that proves the shell answers says where the
             # guest's persistent syslog stood when this boot's console came up.
-            command.assert_called_once_with(Guest.LOG_COUNT)
+            command.assert_called_once_with(Guest.LOG_CHECKPOINT)
             self.assertEqual(vm.log_from, 27)
             self.assertEqual(BootWaitTests.noted(vm), ['shell prompt ready after T s (budget 40 s)'])
 
@@ -3924,13 +3925,15 @@ class BootWaitTests(unittest.TestCase):
         log = BootTimingTests().first_boot()
         with tempfile.TemporaryDirectory() as directory:
             vm = self.guest(directory)
-            vm.log_from = 26
+            vm.log_from, vm.log_inode = 26, '777'
 
             def command(script, timeout):
                 if 'seq 1 210' in script:
                     return 0, 'Sun Apr 13 16:51:09 2025'
-                # Only this boot's syslog is read: the lines after the 26 the file held at the console.
-                self.assertIn('tail -n +27', script)
+                # The read looks back from the console's checkpoint, for this boot's first line,
+                # and goes by the file's inode to tell whether logd rotated it since.
+                self.assertIn('tail -n +1 ', script)
+                self.assertIn('I="777"', script)
                 return 0, log
 
             vm.command.side_effect = command
@@ -3967,7 +3970,7 @@ class BootWaitTests(unittest.TestCase):
     def test_boot_timing_that_cannot_be_read_is_said_on_the_results_line_and_fails_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             vm = self.guest(directory)
-            vm.log_from = 0
+            vm.log_from, vm.log_inode = 0, ''
             vm.command.side_effect = [(0, 'Sun Apr 13 16:51:09 2025'), TimeoutError('guest serial timed out')]
             with patch('time.monotonic', side_effect=[100.0, 1017.3, 1017.4]):
                 upgrade_suite.wait_for_api(vm)
@@ -4101,7 +4104,7 @@ class BootWaitTests(unittest.TestCase):
 
 
 class BootTimingTests(unittest.TestCase):
-    """boot_timing on a guest syslog: the phases of a first boot, and of a boot still inside them."""
+    """boot_timing on a guest syslog: the phases of one boot, and of one still inside them."""
 
     RC = 'daemon.notice procd: /etc/rc.d/'
     NODE = 'daemon.info node['
@@ -4109,9 +4112,14 @@ class BootTimingTests(unittest.TestCase):
     KEPT = os.environ.get('OSI_RASPI5_TEST_BOOT_SYSLOG')
 
     @staticmethod
-    def line(clock, text):
+    def line(clock, text, day=13):
+        return BootTimingTests.stamp(clock, day) + ' ' + text
+
+    @staticmethod
+    def stamp(clock, day=13):
+        # 13 April 2025 was a Sunday: the guest clock of these fixtures starts there.
         hour, minute, second = (int(part) for part in clock.split(':'))
-        return f'Sun Apr 13 {hour:02d}:{minute:02d}:{second:02d} 2025 ' + text
+        return f'{date(2025, 4, day):%a} Apr {day:2d} {hour:02d}:{minute:02d}:{second:02d} 2025'
 
     def first_boot(self):
         """A first boot that finishes: osi-bootstrap, a Node-RED start it restarts, the device import, the API up."""
@@ -4136,27 +4144,43 @@ class BootTimingTests(unittest.TestCase):
             self.line('16:48:41', self.NODE + '6749]: 13 Apr 16:48:41 - [info] Server now running at http://127.0.0.1:1880/'),
         ])
 
+    def earlier_boot(self):
+        """The end of an earlier boot of the same image: its guest clock ran on to 16:50 before the boot was cut."""
+        return [
+            self.line('16:50:00', 'user.notice node-red.init: persistent syslog sink already set (log_file=/data/log/osi-system.log)'),
+            self.line('16:50:10', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            self.line('16:50:30', 'user.notice osi-bootstrap: Node-RED restart requested after bootstrap'),
+            self.line('16:50:40', self.NODE + '11]: Welcome to Node-RED'),
+            self.line('16:50:41', self.NODE + '11]: 13 Apr 16:50:41 - [info] Server now running at http://127.0.0.1:1880/'),
+        ]
+
     FIRST_BOOT = {
-        'log': {'lines': 18, 'first': '16:41:56', 'last': '16:48:41'},
-        'first_boot_work': {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279},
-        'osi_bootstrap': {'start': '16:43:47', 'end': '16:44:17', 'seconds': 30},
-        'device_import': {'start': '16:45:52', 'end': '16:48:26', 'seconds': 154},
+        'log': {'lines': 18, 'first': 'Sun Apr 13 16:41:56 2025', 'last': 'Sun Apr 13 16:48:41 2025',
+                'boundary': None, 'read': None},
+        'first_boot_work': {'start': 'Sun Apr 13 16:43:47 2025', 'end': 'Sun Apr 13 16:48:26 2025', 'seconds': 279},
+        'osi_bootstrap': {'start': 'Sun Apr 13 16:43:47 2025', 'end': 'Sun Apr 13 16:44:17 2025', 'seconds': 30},
+        'device_import': {'start': 'Sun Apr 13 16:45:52 2025', 'end': 'Sun Apr 13 16:48:26 2025', 'seconds': 154},
         'node_red': [
-            {'pid': '4187', 'started': '16:44:48', 'node_load_start': '16:45:27', 'node_load_end': None,
-             'node_load_seconds': None, 'listening': None},
-            {'pid': '6749', 'started': '16:46:50', 'node_load_start': '16:47:08', 'node_load_end': '16:48:40',
-             'node_load_seconds': 92, 'listening': '16:48:41'},
+            {'pid': '4187', 'started': 'Sun Apr 13 16:44:48 2025', 'node_load_start': 'Sun Apr 13 16:45:27 2025',
+             'node_load_end': None, 'node_load_seconds': None, 'listening': None},
+            {'pid': '6749', 'started': 'Sun Apr 13 16:46:50 2025', 'node_load_start': 'Sun Apr 13 16:47:08 2025',
+             'node_load_end': 'Sun Apr 13 16:48:40 2025', 'node_load_seconds': 92,
+             'listening': 'Sun Apr 13 16:48:41 2025'},
         ],
         'api_answer': None,
     }
 
+    def without(self, *needles):
+        return '\n'.join(line for line in self.first_boot().splitlines()
+                         if not any(needle in line for needle in needles))
+
     def test_a_finished_first_boot_is_timed_from_its_syslog(self):
         self.assertEqual(boot_timing.boot_phases(self.first_boot()), self.FIRST_BOOT)
         # The guest clock at the first 401 comes from the API wait, which alone observes it.
-        phases = dict(self.FIRST_BOOT, api_answer='16:51:09')
+        phases = dict(self.FIRST_BOOT, api_answer='Sun Apr 13 16:51:09 2025')
         self.assertEqual(boot_timing.boot_phases(self.first_boot(), 'Sun Apr 13 16:51:09 2025'), phases)
         self.assertEqual(boot_timing.format_phases(phases).splitlines(), [
-            'guest syslog: 18 lines, 16:41:56 to 16:48:41',
+            'guest syslog: 18 lines, Sun Apr 13 16:41:56 2025 to Sun Apr 13 16:48:41 2025',
             'first-boot work: 16:43:47 to 16:48:26 (279 s)',
             '  osi-bootstrap: 16:43:47 to 16:44:17 (30 s)',
             '  device import: 16:45:52 to 16:48:26 (154 s)',
@@ -4168,14 +4192,29 @@ class BootTimingTests(unittest.TestCase):
             'first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 154 s, '
             'Node-RED 4187 node load not finished, Node-RED 6749 node load 92 s, first /api/me answer 16:51:09'))
 
+    def test_a_log_of_several_boots_is_read_from_the_last_boot_boundary(self):
+        # The emulator's clock restarts at each boot, so the first line of a boot is earlier than the
+        # last line of a boot that lived past it. That is where the last boot in a log begins.
+        log = '\n'.join([*self.earlier_boot(), *self.first_boot().splitlines()])
+        phases = boot_timing.boot_phases(log)
+        self.assertEqual(phases['log'], {'lines': 23, 'first': 'Sun Apr 13 16:50:00 2025',
+                                         'last': 'Sun Apr 13 16:48:41 2025', 'boundary': 6, 'read': None})
+        # The earlier boot's osi-bootstrap and Node-RED start are not this boot's.
+        self.assertEqual({key: value for key, value in phases.items() if key != 'log'},
+                         {key: value for key, value in self.FIRST_BOOT.items() if key != 'log'})
+        self.assertEqual(boot_timing.format_phases(phases).splitlines()[0],
+                         'guest syslog: 23 lines, Sun Apr 13 16:50:00 2025 to Sun Apr 13 16:48:41 2025; '
+                         'the boot begins at line 6')
+
     def test_a_log_that_ends_inside_the_first_boot_work_says_so(self):
         lines = self.first_boot().splitlines()
         cut = next(n for n, line in enumerate(lines) if '6749]: 13 Apr 16:47:08' in line)
         log = '\n'.join([*lines[:cut + 1], self.line('16:48:26', self.RC + 'S99zzz-lorawan-devices.init: INFO last')])
         phases = boot_timing.boot_phases(log)
-        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279})
-        self.assertEqual(phases['node_red'][1], {'pid': '6749', 'started': '16:46:50', 'node_load_start': '16:47:08',
-                                                  'node_load_end': None, 'node_load_seconds': None, 'listening': None})
+        self.assertEqual(phases['first_boot_work'], self.FIRST_BOOT['first_boot_work'])
+        self.assertEqual(phases['node_red'][1], {'pid': '6749', 'started': self.stamp('16:46:50'),
+                                                  'node_load_start': self.stamp('16:47:08'), 'node_load_end': None,
+                                                  'node_load_seconds': None, 'listening': None})
         text = boot_timing.format_phases(phases)
         self.assertIn('Node-RED 6749: started 16:46:50, node load from 16:47:08, not finished in this log', text)
         self.assertIn('first /api/me answer: none in this evidence', text)
@@ -4184,47 +4223,108 @@ class BootTimingTests(unittest.TestCase):
             'Node-RED 4187 node load not finished, Node-RED 6749 node load not finished, no first /api/me answer'))
 
     def test_a_bootstrap_that_never_ends_is_not_finished(self):
-        lines = self.first_boot().splitlines()
-        open_ = [line for line in lines if ' osi-bootstrap: ' in line and 'requested after bootstrap' not in line
-                 and 'completed successfully' not in line]
-        phases = boot_timing.boot_phases('\n'.join(open_))
-        self.assertEqual(phases['osi_bootstrap'], {'start': '16:43:47', 'end': None, 'seconds': None})
-        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': None, 'seconds': None})
-        self.assertEqual(phases['node_red'], [])
-        self.assertIn('first-boot work: 16:43:47, not finished in this log', boot_timing.format_phases(phases))
+        phases = boot_timing.boot_phases(self.without('requested after bootstrap', 'completed successfully'))
+        self.assertEqual(phases['osi_bootstrap'], {'start': self.stamp('16:43:47'), 'end': None, 'seconds': None})
+        self.assertEqual(phases['first_boot_work'], {'start': self.stamp('16:43:47'),
+                                                     'end': self.stamp('16:48:26'), 'seconds': 279})
+        self.assertIn('  osi-bootstrap: 16:43:47, not finished in this log', boot_timing.format_phases(phases))
         self.assertEqual(boot_timing.summarize(phases), (
-            'first-boot work 16:43:47, not finished, osi-bootstrap not finished, Node-RED did not start in the log, '
-            'no first /api/me answer'))
+            'first-boot work 16:43:47 to 16:48:26, osi-bootstrap not finished, device import 154 s, '
+            'Node-RED 4187 node load not finished, Node-RED 6749 node load 92 s, no first /api/me answer'))
+
+    def test_a_node_load_without_a_seen_start_stays_visible(self):
+        # The read can begin after Node-RED started. Its palette load is still this boot's evidence.
+        phases = boot_timing.boot_phases(self.without('6749]: Welcome', '6749]: ===='))
+        self.assertEqual(phases['node_red'][1], {'pid': '6749', 'started': None,
+                                                  'node_load_start': self.stamp('16:47:08'),
+                                                  'node_load_end': self.stamp('16:48:40'), 'node_load_seconds': 92,
+                                                  'listening': self.stamp('16:48:41')})
+        self.assertIn('Node-RED 6749: start not in this log, node load 16:47:08 to 16:48:40 (92 s), '
+                      'API listening 16:48:41', boot_timing.format_phases(phases))
+        self.assertIn('Node-RED 6749 start not in the log, node load 92 s', boot_timing.summarize(phases))
+
+    def test_a_node_load_end_without_its_start_stays_visible(self):
+        phases = boot_timing.boot_phases(self.without('6749]: Welcome', '6749]: ====', '6749]: 13 Apr 16:47:08'))
+        run = phases['node_red'][1]
+        self.assertEqual((run['started'], run['node_load_start']), (None, None))
+        self.assertEqual(run['node_load_end'], self.stamp('16:48:40'))
+        self.assertIn('Node-RED 6749: start not in this log, node load ended 16:48:40, its start not in this log, '
+                      'API listening 16:48:41', boot_timing.format_phases(phases))
+        self.assertIn('Node-RED 6749 start not in the log, node load ended 16:48:40', boot_timing.summarize(phases))
+
+    def test_a_bootstrap_end_without_a_seen_start_stays_visible(self):
+        phases = boot_timing.boot_phases(self.without('waiting for ChirpStack gRPC'))
+        self.assertEqual(phases['osi_bootstrap'], {'start': None, 'end': self.stamp('16:44:17'), 'seconds': None})
+        self.assertEqual(phases['first_boot_work']['start'], self.stamp('16:45:52'))
+        self.assertIn('  osi-bootstrap: ended 16:44:17, start not in this log', boot_timing.format_phases(phases))
+        self.assertIn('osi-bootstrap ended 16:44:17, start not in the log', boot_timing.summarize(phases))
+
+    def test_a_backwards_clock_step_leaves_the_span_unknown(self):
+        # A same-date step back inside a run is neither a day-long stall nor a missing phase.
+        log = '\n'.join([self.line('00:01:01', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+                         self.line('00:01:00', 'user.notice osi-bootstrap: bootstrap failed, will retry next boot')])
+        phases = boot_timing.boot_phases(log)
+        self.assertEqual(phases['osi_bootstrap'], {'start': self.stamp('00:01:01'), 'end': self.stamp('00:01:00'),
+                                                    'seconds': 'unknown (clock step)'})
+        self.assertEqual(phases['first_boot_work']['seconds'], 'unknown (clock step)')
+        self.assertEqual(phases['log']['boundary'], 2)
+        self.assertIn('  osi-bootstrap: 00:01:01 to 00:01:00 (unknown: clock step)', boot_timing.format_phases(phases))
+        self.assertIn('osi-bootstrap unknown (clock step)', boot_timing.summarize(phases))
+        # A step back between a palette load and its end: the load is not timed either.
+        log = '\n'.join([self.line('00:01:05', self.NODE + '99]: Welcome to Node-RED'),
+                         self.line('00:01:10', self.NODE + '99]: 13 Apr 00:01:10 - [info] Loading palette nodes'),
+                         self.line('00:01:09', self.NODE + '99]: 13 Apr 00:01:09 - [info] Settings file  : /srv/node-red/settings.js')])
+        run = boot_timing.boot_phases(log)['node_red'][-1]
+        self.assertEqual((run['node_load_start'], run['node_load_seconds']), (None, None))
+        self.assertEqual(run['node_load_end'], self.stamp('00:01:09'))
+
+    def test_midnight_under_a_continuous_clock_is_no_boot_boundary(self):
+        log = '\n'.join([
+            self.line('23:59:50', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            self.line('00:00:20', 'user.notice osi-bootstrap: bootstrap failed, will retry next boot', day=14),
+            self.line('00:00:22', self.NODE + '99]: Welcome to Node-RED', day=14),
+            self.line('00:00:24', self.NODE + '99]: 14 Apr 00:00:24 - [info] Loading palette nodes', day=14),
+            self.line('00:00:59', self.NODE + '99]: 14 Apr 00:00:59 - [info] Settings file  : /srv/node-red/settings.js', day=14),
+        ])
+        phases = boot_timing.boot_phases(log)
+        self.assertIsNone(phases['log']['boundary'])
+        self.assertEqual(phases['osi_bootstrap']['seconds'], 30)
+        self.assertEqual(phases['node_red'][0]['node_load_seconds'], 35)
+        self.assertEqual(phases['first_boot_work'], {'start': self.stamp('23:59:50'), 'end': self.stamp('00:00:20', 14),
+                                                     'seconds': 30})
+        # The same times on the earlier date come first: the date orders the lines.
+        self.assertEqual(phases['log'], {'lines': 5, 'first': self.stamp('23:59:50'), 'last': self.stamp('00:00:59', 14),
+                                         'boundary': None, 'read': None})
 
     def test_an_ordinary_boot_has_no_first_boot_work(self):
-        lines = [line for line in self.first_boot().splitlines()
-                 if 'osi-bootstrap' not in line and 'lorawan-devices' not in line and '4187' not in line]
-        phases = boot_timing.boot_phases('\n'.join(lines), 'Sun Apr 13 16:49:02 2025')
+        log = self.without('osi-bootstrap', 'lorawan-devices', '4187')
+        phases = boot_timing.boot_phases(log, 'Sun Apr 13 16:49:02 2025')
         self.assertIsNone(phases['first_boot_work'])
         self.assertIsNone(phases['osi_bootstrap'])
         self.assertIsNone(phases['device_import'])
         self.assertEqual([run['pid'] for run in phases['node_red']], ['6749'])
         self.assertEqual(boot_timing.format_phases(phases).splitlines(), [
-            'guest syslog: 6 lines, 16:41:56 to 16:48:41',
+            'guest syslog: 6 lines, Sun Apr 13 16:41:56 2025 to Sun Apr 13 16:48:41 2025',
             'first-boot work: none in this log',
             'Node-RED 6749: started 16:46:50, node load 16:47:08 to 16:48:40 (92 s), API listening 16:48:41',
             'first /api/me answer: 16:49:02 (guest clock, read by the API wait)',
         ])
         # An answer the wait did not read in the syslog clock format is not placed on the timeline.
-        self.assertIsNone(boot_timing.boot_phases('\n'.join(lines), 'Thu Nov 26 00:01:02 CET 2026')['api_answer'])
+        self.assertIsNone(boot_timing.boot_phases(log, 'Thu Nov 26 00:01:02 CET 2026')['api_answer'])
 
-    def test_times_are_read_across_the_hour_and_past_midnight(self):
-        log = '\n'.join([
-            self.line('23:59:50', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
-            self.line('00:00:20', 'user.notice osi-bootstrap: bootstrap failed, will retry next boot'),
-            self.line('00:00:22', self.NODE + '99]: Welcome to Node-RED'),
-            self.line('00:00:24', self.NODE + '99]: 14 Apr 00:00:24 - [info] Loading palette nodes'),
-            self.line('00:00:59', self.NODE + '99]: 14 Apr 00:00:59 - [info] Settings file  : /srv/node-red/settings.js'),
-        ])
-        phases = boot_timing.boot_phases(log)
-        self.assertEqual(phases['osi_bootstrap']['seconds'], 30)
-        self.assertEqual(phases['node_red'][0]['node_load_seconds'], 35)
-        self.assertEqual(phases['first_boot_work'], {'start': '23:59:50', 'end': '00:00:20', 'seconds': 30})
+    def test_the_harness_read_is_timed_like_the_log_it_came_from(self):
+        text = self.first_boot()
+        lines = text.splitlines()
+        read = ('osi-harness: syslog: the file the console found\n'
+                + ''.join(f'{n} {line}\n' for n, line in enumerate(lines, 1))
+                + 'osi-harness: boundary 0 of 18 lines read, Sun Apr 13 16:41:56 2025 to Sun Apr 13 16:48:41 2025\n')
+        log = dict(self.FIRST_BOOT['log'], read='the file the console found')
+        self.assertEqual(boot_timing.boot_phases(read), dict(self.FIRST_BOOT, log=log))
+        self.assertNotIn('syslog', boot_timing.summarize(boot_timing.boot_phases(read)))
+        # A rotation is said on the results line; a read that saw no boot boundary is not, since the reader cut there.
+        rotated = read.replace('syslog: the file the console found', 'syslog: rotated once since the console')
+        self.assertTrue(boot_timing.summarize(boot_timing.boot_phases(rotated)).endswith(
+            '; syslog rotated once since the console'))
 
     def test_the_helper_reads_a_kept_log_by_hand(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4242,21 +4342,35 @@ class BootTimingTests(unittest.TestCase):
             done = subprocess.run(['python3', str(boot_timing.__file__), str(log), '--json'],
                                   capture_output=True, text=True)
             self.assertEqual(json.loads(done.stdout), self.FIRST_BOOT)
+            # Several boots in one kept file: the last one.
+            log.write_text('\n'.join([*self.earlier_boot(), *self.first_boot().splitlines()]))
+            done = subprocess.run(['python3', str(boot_timing.__file__), str(log)], capture_output=True, text=True)
+            self.assertIn('; the boot begins at line 6', done.stdout.splitlines()[0])
+            self.assertNotIn('Node-RED 11:', done.stdout)
 
     @unittest.skipUnless(KEPT, 'set OSI_RASPI5_TEST_BOOT_SYSLOG to the kept syslog of the 0.8.4 Pi 4 re-take')
     def test_the_kept_syslog_of_the_pi4_retake_names_where_the_restart_boot_stood(self):
         # The 0.8.4 re-take, Pi 4 run 2: the restart after a factory first-boot cut
         # ran past the 420 s API wait. Its disk holds the boot up to the device import.
-        phases = boot_timing.boot_phases(Path(self.KEPT).read_text(errors='replace'))
-        self.assertEqual(phases['log'], {'lines': 4113, 'first': '16:42:19', 'last': '16:48:26'})
-        self.assertEqual(phases['osi_bootstrap'], {'start': '16:43:47', 'end': '16:44:17', 'seconds': 30})
+        text = Path(self.KEPT).read_text(errors='replace')
+        phases = boot_timing.boot_phases(text)
+        lines = text.splitlines()
+        # Twenty-three lines of the cut first boot, then the restart: its clock had not come as far.
+        self.assertLess(boot_timing.line_time(lines[23]), boot_timing.line_time(lines[22]))
+        self.assertEqual(phases['log'], {'lines': 4113, 'first': 'Sun Apr 13 16:42:19 2025',
+                                         'last': 'Sun Apr 13 16:48:26 2025', 'boundary': 24, 'read': None})
+        self.assertEqual(phases['osi_bootstrap'], {'start': self.stamp('16:43:47'), 'end': self.stamp('16:44:17'),
+                                                    'seconds': 30})
         # The device import began two seconds after the bootstrap asked for the Node-RED
         # restart and was still writing when the log ends.
-        self.assertEqual(phases['device_import'], {'start': '16:44:19', 'end': '16:48:26', 'seconds': 247})
-        self.assertEqual(phases['first_boot_work'], {'start': '16:43:47', 'end': '16:48:26', 'seconds': 279})
+        self.assertEqual(phases['device_import'], {'start': self.stamp('16:44:19'), 'end': self.stamp('16:48:26'),
+                                                   'seconds': 247})
+        self.assertEqual(phases['first_boot_work'], {'start': self.stamp('16:43:47'), 'end': self.stamp('16:48:26'),
+                                                      'seconds': 279})
         self.assertEqual([(run['pid'], run['started'], run['node_load_start'], run['node_load_end'])
                           for run in phases['node_red']],
-                         [('4187', '16:44:48', '16:45:27', None), ('6749', '16:46:50', '16:47:08', None)])
+                         [('4187', self.stamp('16:44:48'), self.stamp('16:45:27'), None),
+                          ('6749', self.stamp('16:46:50'), self.stamp('16:47:08'), None)])
         self.assertIsNone(phases['api_answer'])
         self.assertEqual(boot_timing.summarize(phases), (
             'first-boot work 16:43:47 to 16:48:26, osi-bootstrap 30 s, device import 247 s, '
@@ -4264,55 +4378,173 @@ class BootTimingTests(unittest.TestCase):
 
 
 class BootTimingReadTests(unittest.TestCase):
-    """The guest read behind the automatic boot timing: this boot's phase lines, small enough for the console."""
+    """The guest read behind the automatic boot timing: this boot's phase lines, numbered, small enough for the console."""
 
-    RC = 'daemon.notice procd: /etc/rc.d/S99zzz-lorawan-devices.init: '
-    PREVIOUS = [BootTimingTests.line('16:10:00', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
-                BootTimingTests.line('16:10:01', 'daemon.info node[11]: Welcome to Node-RED'),
-                BootTimingTests.line('16:10:02', 'user.notice node-red.init: persistent syslog sink enabled')]
-    BOOT = [BootTimingTests.line('16:43:18', 'user.notice node-red.init: persistent syslog sink already set'),
-            BootTimingTests.line('16:43:47', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
-            BootTimingTests.line('16:45:52', RC + 'INFO first'),
-            BootTimingTests.line('16:46:00', RC + 'INFO second'),
-            BootTimingTests.line('16:46:10', RC + 'INFO third'),
-            BootTimingTests.line('16:46:50', 'daemon.info node[6749]: Welcome to Node-RED'),
-            BootTimingTests.line('16:48:26', RC + 'INFO last'),
-            BootTimingTests.line('16:47:08', 'daemon.info node[6749]: 13 Apr 16:47:08 - [info] Loading palette nodes')]
-    # Each phase line once, and of each run of import lines the first and the last.
-    PHASE_LINES = [BOOT[1], BOOT[2], BOOT[4], BOOT[5], BOOT[6], BOOT[7]]
+    line = staticmethod(BootTimingTests.line)
+    RC, NODE = BootTimingTests.RC, BootTimingTests.NODE
+    # The end of an earlier boot, whose guest clock had run on to 16:50 when it was cut.
+    PREVIOUS = [line('16:50:00', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+                line('16:50:01', NODE + '11]: Welcome to Node-RED'),
+                line('16:50:02', 'user.notice node-red.init: persistent syslog sink enabled')]
+    BOOT = [line('16:43:18', 'user.notice node-red.init: persistent syslog sink already set'),
+            line('16:43:47', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+            line('16:45:52', RC + 'S99zzz-lorawan-devices.init: INFO first'),
+            line('16:46:00', RC + 'S99zzz-lorawan-devices.init: INFO second'),
+            line('16:46:10', RC + 'S99zzz-lorawan-devices.init: INFO third'),
+            line('16:46:50', NODE + '6749]: Welcome to Node-RED'),
+            line('16:48:26', RC + 'S99zzz-lorawan-devices.init: INFO last'),
+            line('16:48:30', NODE + '6749]: 13 Apr 16:48:30 - [info] Loading palette nodes')]
+    UNRELATED = [BootTimingTests.line(f'16:49:{second:02d}', 'daemon.info netifd: Interface "lan" is now up')
+                 for second in range(10)]
+    START = 'osi-harness: syslog: the file the console found'
+    # Each phase line once with its number among the lines read, and of each run of import lines the first and the last.
+    PHASE_LINES = [(1, PREVIOUS[0]), (2, PREVIOUS[1]), (5, BOOT[1]), (6, BOOT[2]), (8, BOOT[4]), (9, BOOT[5]),
+                   (10, BOOT[6]), (11, BOOT[7])]
+    BOUNDARY = 'osi-harness: boundary 4 of 11 lines read, Sun Apr 13 16:50:00 2025 to Sun Apr 13 16:48:30 2025'
 
-    def read(self, current, rotated, first, *, ring=''):
-        script = boot_timing.read_script(first).replace(boot_timing.SYSLOG, quote(str(current)))
+    @staticmethod
+    def checkpoint(path, lines):
+        """What the console's probe reads: the lines and the inode of the persistent syslog."""
+        return lines + 1, str(os.stat(path).st_ino)
+
+    def read(self, current, first_line, inode, *, ring=''):
+        """Run the guest read on the host with the syslog under `current`."""
+        script = boot_timing.read_script(first_line, inode).replace(boot_timing.SYSLOG, quote(str(current)))
         done = subprocess.run(['sh', '-c', ring + script], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
-        return done.stdout.splitlines()
+        return done.stdout
 
-    def test_the_read_starts_after_the_lines_the_console_found_and_keeps_the_import_ends(self):
+    def write(self, path, lines):
+        path.write_text(''.join(line + '\n' for line in lines))
+
+    def test_the_read_reaches_back_before_the_console_checkpoint_and_names_the_boot_boundary(self):
+        # The console answered after this boot's first line. Lines of this boot before the checkpoint are read.
         with tempfile.TemporaryDirectory() as directory:
             current = Path(directory)/'osi-system.log'
-            current.write_text('\n'.join([*self.PREVIOUS, *self.BOOT]) + '\n')
-            self.assertEqual(self.read(current, None, len(self.PREVIOUS) + 1), self.PHASE_LINES)
+            self.write(current, [*self.PREVIOUS, *self.BOOT])
+            out = self.read(current, *self.checkpoint(current, 4))
+            self.assertEqual(out.splitlines(), [self.START, *(f'{n} {line}' for n, line in self.PHASE_LINES),
+                                                self.BOUNDARY])
+            phases = boot_timing.boot_phases(out)
+            self.assertEqual(phases['log'], {'lines': 11, 'first': 'Sun Apr 13 16:50:00 2025',
+                                             'last': 'Sun Apr 13 16:48:30 2025', 'boundary': 4,
+                                             'read': 'the file the console found'})
+            # The earlier boot's osi-bootstrap and Node-RED start ended before the boundary.
+            self.assertEqual(phases['osi_bootstrap']['start'], BootTimingTests.stamp('16:43:47'))
+            self.assertEqual([(run['pid'], run['started']) for run in phases['node_red']],
+                             [('6749', BootTimingTests.stamp('16:46:50'))])
 
     def test_a_log_rotated_since_the_console_answers_reads_on_from_the_rotated_file(self):
         with tempfile.TemporaryDirectory() as directory:
             current = Path(directory)/'osi-system.log'
             rotated = Path(directory)/'osi-system.log.old'
             # The console found 5 lines; the import then filled the file and logd started a new one.
-            rotated.write_text('\n'.join([*self.PREVIOUS, *self.BOOT[:6]]) + '\n')
-            current.write_text('\n'.join(self.BOOT[6:]) + '\n')
-            self.assertEqual(self.read(current, rotated, 5), self.PHASE_LINES)
+            self.write(current, [*self.PREVIOUS, *self.BOOT[:6]])
+            first_line, inode = self.checkpoint(current, 5)
+            current.rename(rotated)
+            self.write(current, self.BOOT[6:])
+            out = self.read(current, first_line, inode)
+            # The lookback still reaches the earlier boot in the rotated file, so the boundary is found there too.
+            self.assertEqual(out.splitlines(), ['osi-harness: syslog: rotated once since the console',
+                                                *(f'{n} {line}' for n, line in self.PHASE_LINES), self.BOUNDARY])
+            phases = boot_timing.boot_phases(out)
+            self.assertEqual(phases['log']['read'], 'rotated once since the console')
+            self.assertEqual([run['pid'] for run in phases['node_red']], ['6749'])
+
+    def test_a_busy_new_log_past_the_checkpoint_does_not_hide_the_rotation(self):
+        # The reviewer's case: the checkpoint after five lines, a Node-RED start as the sixth line of
+        # the file that then rotated, and ten unrelated lines in the new file, past the checkpoint.
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            rotated = Path(directory)/'osi-system.log.old'
+            self.write(current, [*self.PREVIOUS, *self.BOOT[:2]])
+            first_line, inode = self.checkpoint(current, 5)
+            self.write(current, [*self.PREVIOUS, *self.BOOT[:2], self.BOOT[5]])
+            current.rename(rotated)
+            self.write(current, self.UNRELATED)
+            self.assertGreater(len(current.read_text().splitlines()), first_line)
+            out = self.read(current, first_line, inode)
+            self.assertEqual(out.splitlines(), [
+                'osi-harness: syslog: rotated once since the console',
+                *(f'{n} {line}' for n, line in ((1, self.PREVIOUS[0]), (2, self.PREVIOUS[1]), (5, self.BOOT[1]),
+                                                (6, self.BOOT[5]))),
+                'osi-harness: boundary 4 of 16 lines read, Sun Apr 13 16:50:00 2025 to Sun Apr 13 16:49:09 2025'])
+            self.assertEqual([(run['pid'], run['started']) for run in boot_timing.boot_phases(out)['node_red']],
+                             [('6749', BootTimingTests.stamp('16:46:50'))])
+
+    def test_a_log_rotated_past_the_checkpoint_reads_all_that_is_left_and_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            rotated = Path(directory)/'osi-system.log.old'
+            self.write(rotated, [*self.PREVIOUS, *self.BOOT[:4]])
+            self.write(current, self.BOOT[4:])
+            out = self.read(current, 3, '1')
+            self.assertEqual(out.splitlines()[:1], ['osi-harness: syslog: rotated past the file the console found'])
+            self.assertEqual([line for line in out.splitlines()[1:] if not line.startswith('osi-harness:')],
+                             [f'{n} {line}' for n, line in self.PHASE_LINES])
+            self.assertEqual(boot_timing.boot_phases(out)['log']['read'], 'rotated past the file the console found')
+
+    def test_a_syslog_that_did_not_exist_when_the_console_answered_is_read_whole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            rotated = Path(directory)/'osi-system.log.old'
+            self.write(rotated, self.PREVIOUS)
+            self.write(current, self.BOOT)
+            out = self.read(current, 1, '')
+            self.assertEqual(out.splitlines(), ['osi-harness: no persistent syslog when the console answered',
+                                                *(f'{n} {line}' for n, line in self.PHASE_LINES), self.BOUNDARY])
 
     def test_a_guest_without_a_persistent_syslog_is_read_from_the_ring(self):
         with tempfile.TemporaryDirectory() as directory:
             ring = 'logread() {\n' + ''.join(f'  echo {quote(line)}\n' for line in (self.BOOT[1], self.BOOT[7])) + '}\n'
-            self.assertEqual(self.read(Path(directory)/'osi-system.log', None, 1, ring=ring), [self.BOOT[1], self.BOOT[7]])
+            out = self.read(Path(directory)/'osi-system.log', 1, '', ring=ring)
+            self.assertEqual(out.splitlines(), [
+                'osi-harness: no persistent syslog when the console answered',
+                f'1 {self.BOOT[1]}', f'2 {self.BOOT[7]}',
+                'osi-harness: boundary 0 of 2 lines read, Sun Apr 13 16:43:47 2025 to Sun Apr 13 16:48:30 2025'])
 
-    def test_the_console_probe_reads_the_persistent_log_line_count(self):
-        self.assertEqual(suite_vm.line_count('27'), 27)
-        # No persistent syslog on the guest: the read starts at the first line.
-        self.assertEqual(suite_vm.line_count(''), 0)
-        self.assertEqual(suite_vm.line_count('wc: read error'), 0)
-        self.assertIn('-f /data/log/osi-system.log', Guest.LOG_COUNT)
+    def test_the_read_reaches_back_a_bounded_number_of_lines(self):
+        self.assertEqual(boot_timing.LOOKBACK, 2000)
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            # 2600 lines, all written before the console answered: the read reaches back 2000 lines, to
+            # line 602. Of two Node-RED starts at lines 601 and 602, the first lies outside.
+            lines = [self.line(f'{16 + second // 3600:02d}:{second // 60 % 60:02d}:{second % 60:02d}',
+                               'daemon.info netifd: Interface "lan" is now up') for second in range(2600)]
+            lines[600] = self.line('16:10:00', self.NODE + '11]: Welcome to Node-RED')
+            lines[601] = self.line('16:10:01', self.NODE + '12]: Welcome to Node-RED')
+            self.write(current, lines)
+            out = self.read(current, 2601, str(os.stat(current).st_ino))
+            self.assertIn(f'1 {lines[601]}', out.splitlines())
+            self.assertNotIn('11]: Welcome', out)
+            self.assertEqual(out.splitlines()[-1],
+                             'osi-harness: boundary 0 of 1999 lines read, Sun Apr 13 16:10:01 2025 to Sun Apr 13 16:43:19 2025')
+            self.assertEqual(boot_timing.boot_phases(out)['log'], {
+                'lines': 1999, 'first': 'Sun Apr 13 16:10:01 2025', 'last': 'Sun Apr 13 16:43:19 2025',
+                'boundary': None, 'read': 'the file the console found'})
+
+    def test_midnight_under_a_continuous_clock_is_no_boot_boundary_in_the_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory)/'osi-system.log'
+            self.write(current, [self.line('23:59:50', 'user.notice osi-bootstrap: waiting for ChirpStack gRPC...'),
+                                 self.line('00:00:20', 'user.notice osi-bootstrap: bootstrap failed, will retry next boot', day=14)])
+            out = self.read(current, 1, str(os.stat(current).st_ino))
+            self.assertEqual(out.splitlines()[-1],
+                             f'osi-harness: boundary 0 of 2 lines read, {BootTimingTests.stamp("23:59:50")} to '
+                             f'{BootTimingTests.stamp("00:00:20", 14)}')
+            self.assertEqual(boot_timing.boot_phases(out)['osi_bootstrap']['seconds'], 30)
+
+    def test_the_console_probe_reads_the_persistent_log_checkpoint(self):
+        probe = lambda output: suite_vm.log_checkpoint(f'{output}\n   5678 /data/log/osi-system.log')
+        self.assertEqual(probe('27'), (27, '5678'))
+        # No persistent syslog on the guest: the read starts at the first line of any file that appears.
+        self.assertEqual(suite_vm.log_checkpoint(''), (0, ''))
+        self.assertEqual(suite_vm.log_checkpoint('wc: read error'), (0, ''))
+        # No inode readable (the ls failed): the lines still count, and no file will match.
+        self.assertEqual(suite_vm.log_checkpoint('27'), (27, ''))
+        # The image's BusyBox has ls but no stat: the inode comes from ls -i.
+        self.assertIn('wc -l < /data/log/osi-system.log; ls -i /data/log/osi-system.log', Guest.LOG_CHECKPOINT)
+        self.assertNotIn('stat ', Guest.LOG_CHECKPOINT)
 
 
 if __name__ == '__main__':

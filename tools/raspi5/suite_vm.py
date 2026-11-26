@@ -91,9 +91,14 @@ def note_wait(vm, line):
         vm.waits += (f'harness-events.log write failed: {error!r}',)
 
 
-def line_count(output):
-    """What the console's line-count probe read, or 0 for a guest without a persistent syslog."""
-    return int(output) if output.strip().isdigit() else 0
+def log_checkpoint(output):
+    """(lines, inode) of the guest's persistent syslog as the console's probe read them.
+
+    (0, '') is a guest without one. The image's BusyBox has no stat, so the
+    inode comes from ls -i and is missing when that fails.
+    """
+    count, _, rest = output.partition('\n')
+    return (int(count) if count.strip().isdigit() else 0), (rest.split() or [''])[0]
 
 
 # PID 1 runs only the shell and the setup needed by mount_root. OpenWrt
@@ -137,11 +142,14 @@ class Guest:
     # Boot waits noted on this guest by timed(), oldest first. The results line of
     # the case that ran them lists each once (acceptance.run_cases).
     waits = ()
-    # Read when a normal boot's console answers: the lines the guest's persistent
-    # syslog (the sink node-red.init keeps on /data) held at that moment. The
-    # lines after them are that boot's; boot_timing reads them.
-    LOG_COUNT = 'test -f /data/log/osi-system.log && wc -l < /data/log/osi-system.log'
+    # Read when a normal boot's console answers: how many lines the guest's
+    # persistent syslog (the sink node-red.init keeps on /data) held, and which
+    # file it is. logd rotates that file by renaming it, so the inode tells
+    # boot_timing whether the lines it reads are the file the console found.
+    LOG_CHECKPOINT = ('if [ -f /data/log/osi-system.log ]; then wc -l < /data/log/osi-system.log; '
+                      'ls -i /data/log/osi-system.log; fi')
     log_from = 0
+    log_inode = ''
 
     def __init__(self, work, image, qemu, ram, upgrade=None, *, receipts=None, private=False,
                  direct_io=False):
@@ -200,7 +208,7 @@ class Guest:
 
     def console_ready(self):
         """Run once the console of a normal boot answers; a board may record its guest here."""
-        self.log_from = line_count(self.command(self.LOG_COUNT)[1])
+        self.log_from, self.log_inode = log_checkpoint(self.command(self.LOG_CHECKPOINT)[1])
 
     # Starts QEMU and the bridge for the next boot and returns at once. The
     # console must then be read without a pause: a pipe nobody reads fills,

@@ -297,7 +297,7 @@ class Pi4Tests(unittest.TestCase):
             vm.receipts, vm.boots, vm.private = Path(directory), 7, False
             with patch.object(Guest, 'command', side_effect=[(0, ''), answer]) as command:
                 vm.console_ready()
-            self.assertEqual(command.call_args_list[0].args[0], Guest.LOG_COUNT)
+            self.assertEqual(command.call_args_list[0].args[0], Guest.LOG_CHECKPOINT)
             script = command.call_args_list[1].args[0]
             for needle in ('/sys/class/net/$interface/address', 'using random Ethernet MAC', 'osi-server.cloud.device_eui'):
                 self.assertIn(needle, script)

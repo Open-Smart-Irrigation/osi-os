@@ -96,9 +96,12 @@ directory's `harness-events.log` and at the end of the case's results line:
 420 s; the Pi 4 runner gives it 900 s (`tools/raspi4/pi4.py`). An API wait
 longer than 600 s also keeps `boot-timing-N.syslog` and `boot-timing-N.txt` in
 the case directory: the boot's phase lines from the guest's persistent syslog,
-and their timing. `python3 tools/raspi5/boot_timing.py SYSLOG` gives the same
-timing for a kept syslog. `--api-answer` takes the guest clock the API wait
-printed at the first 401.
+and their timing. The read goes by that file's inode, so a log logd rotated
+since the console answered is still read. The boot begins in the log where the
+guest clock last went backwards; a phase whose start lies before that says so.
+`python3 tools/raspi5/boot_timing.py SYSLOG` gives the same timing for a kept
+syslog. `--api-answer` takes the guest clock the API wait printed at the first
+401.
 
 The customer-line 0.7.0 fixture is **PROVISIONAL** and off by default. Release
 evidence requires a successful owner-only qualification receipt for the exact
