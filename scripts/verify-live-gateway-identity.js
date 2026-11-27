@@ -1112,9 +1112,10 @@ if (silentCatchBaseline) {
   // catches visible as warnings, ratcheting the maintained profiles 77 -> 74.
   // NEW-15: DENDRO SIM SETUP opens the farm file through osi-db-helper and its
   // close() catch gains a visible node.warn: 74 -> 73.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 73 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 73,
-    'silent-catch baseline records 73 for both maintained profiles',
-    'silent-catch baseline must be 73 for both maintained profiles');
+  // The 0.8.5 Build Heartbeat change makes seven empty catches visible: 73 -> 66.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 66 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 66,
+    'silent-catch baseline records 66 for both maintained profiles',
+    'silent-catch baseline must be 66 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

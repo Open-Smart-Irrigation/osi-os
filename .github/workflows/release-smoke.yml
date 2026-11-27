@@ -2,9 +2,9 @@ name: Release Runtime Smoke
 
 on:
   pull_request:
-    branches: [main, master, 'release/0.8.4']
+    branches: [main, master, 'release/0.8.4', 'release/0.8.5']
   push:
-    branches: [main, master, 'release/0.8.4']
+    branches: [main, master, 'release/0.8.4', 'release/0.8.5']
     tags: ['v*']
   workflow_dispatch:
 

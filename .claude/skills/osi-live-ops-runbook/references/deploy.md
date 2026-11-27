@@ -357,7 +357,30 @@ Reading straight through the script, in order:
     whole pair, so the `/gui` probe exercises the new GUI bundle together with
     the new flows. It still proves only that Node-RED served the route, not that
     the SPA works in a browser.
-12. Prints the final summary: `=== Deploy complete. ===`, the payload path
+12. Replaces the tailscale boot init. This runs last, after the identity
+    supervisor and only when the payload passed its health check. The init file
+    of tailscale 1.80.3-r1 runs `tailscaled --cleanup` before the daemon, with
+    no time limit, at `START=80`; a cleanup that does not return keeps every
+    later boot service from starting, ChirpStack and Node-RED included. The OSI
+    copy (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale`,
+    pinned by `TAILSCALE_INIT_SHA256`) cuts that cleanup short after 15 s,
+    keeps a cleanup that outlives its kill off procd's lock for the service
+    (fd 1000), and starts the service at `START=99`. procd runs the `S99`
+    links in name order, so tailscale starts after ChirpStack, Node-RED and
+    osi-bootstrap; on a provisioned gateway osi-bootstrap returns after its
+    stamp test, so remote access waits for it only briefly. `deploy.sh`
+    installs the copy only while the gateway's `/etc/init.d/tailscale` still
+    is the package file (`TAILSCALE_PACKAGE_INIT_SHA256`) or already the OSI
+    copy. A single boot link is renamed to `S99tailscale` in one step;
+    several links get `S99tailscale` first and then lose the others. A
+    service that is disabled at boot stays disabled. Tailscale is not restarted,
+    because that would drop an operator's session; the change applies at the
+    next boot. The step never fails the deploy. A refused or failed install
+    leaves the old init untouched and prints one `WARN` of the form
+    `WARN: tailscale boot protection NOT installed: <reason>; <state>`, and
+    the closing banner repeats it. When the file is in place but a boot link
+    could not be moved, the line says that instead.
+13. Prints the final summary: `=== Deploy complete. ===`, the payload path
     annotated "(flipped + local health self-checked)", a rollback note
     (automatic for payload failure; committed DB migration restore is the 1.B1
     operator path, not automatic), and the ChirpStack reprovisioning reminder.

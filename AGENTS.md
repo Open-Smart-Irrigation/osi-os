@@ -62,6 +62,18 @@ and tags free of customer-specific history.
   (`COMMAND_LEDGER_*_SHA256`). A change to any of them updates its pin in the
   same commit; `node --test scripts/deploy-command-ledger-dependency.test.js`
   fails otherwise, and a deploy with a stale pin aborts before activation.
+- **Tailscale boot init:** `deploy.sh` replaces `/etc/init.d/tailscale` with the
+  OSI copy (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/tailscale`,
+  mirrored in `bcm2709`), pinned by `TAILSCALE_INIT_SHA256`, only while the
+  gateway's file still is the tailscale 1.80.3-r1 package file
+  (`TAILSCALE_PACKAGE_INIT_SHA256`) or already the OSI copy. Anything else is
+  left alone with one line that says the boot protection was not installed
+  and why. The copy cuts `tailscaled --cleanup` short after
+  15 s and starts the service at `S99tailscale`. The deploy moves the `rc.d`
+  link and never restarts tailscale; it applies at the next boot. The image
+  builds ship the same file through the profile `files/` overlay. A change to
+  the init updates its pin in the same commit;
+  `node --test scripts/test-tailscale-init.js scripts/test-deploy-tailscale-init.js`.
 - Before risky repair: timestamped backup under `/data/db/backups/osi-os-<timestamp>/` taken with `sqlite3 /data/db/farming.db ".backup '<dir>/farming.db'"` (online and WAL-consistent; never copy the DB and its `-wal`/`-shm` separately while Node-RED runs), plus `cp -aL` of `/srv/node-red/flows.json`, `settings.js`, `flows_cred.json` and `/usr/lib/node-red/gui/`. Procedure: `osi-live-ops-runbook`.
 - Schema changes go via migrations or idempotent SQL; never replace `farming.db`.
 - **After an integration merge, reconcile artifacts against both parents even when Git reports a clean merge.** Resolve the local attributes path with `git rev-parse --git-path info/attributes` and inspect that file; use `git check-attr merge -- <paths>` for effective attributes and inspect configured drivers. Compare every bundled DB in `scripts/seed-db-paths.js` (`SEED_DB_RELATIVE_PATHS`) individually with both parents, including data-only `chameleon_calibrations` differences. Reconcile ordered SQL and `CHECKSUMS.json` against approved source history, then run `node scripts/verify-migrations.js`; never hash suspect SQL. Compare the approved migration head with the head stamped in the result's seed images. Run `node scripts/verify-seed-db-ledger.js` after every merge, whether or not you rebuild. A result seed ahead of or otherwise inconsistent with the approved migration head is a ledger failure: stop for a separate approved-schema disposition; it does not authorize a rebuild by itself. Rebuild with `node scripts/build-seed-db.js` only when the approved head is newer; after rebuilding, run the migration, seed, schema and profile-parity gates in `osi-schema-change-control`, then rerun the seed-ledger check. On release lines that ship the Chameleon calibration snapshot, reapply it after a rebuild with `node scripts/apply-chameleon-calibration-seed.js`; the builder does not write `CHECKSUMS.json`. For a completed merge, run `node scripts/verify-merge-allowance-preservation.js --left-ref HEAD^1 --right-ref HEAD^2` only with a clean index and worktree. During an in-progress merge, use `--left-ref HEAD --right-ref MERGE_HEAD`. Every unmatched entry from either parent needs its own SHA-bound disposition with a measured justification, including an unchanged value superseded by the other parent's raise, remeasurement, or rewording. The comparison is conservative: it does not infer intent from a merge base or automatically waive unchanged entries. Rerun with `--dispositions <receipt.json>`.
