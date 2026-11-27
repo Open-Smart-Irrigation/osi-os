@@ -1,0 +1,84 @@
+{
+ "name": "valve-write-faults",
+ "description": "Inject independent acceptance-journal and actuator-audit write faults and observe the original queue receipt settle.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "setup-extra",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000003','Valve 3','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000006','Valve 6','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';"
+  },
+  {
+   "id": "acceptance-log-fault",
+   "sql": "CREATE TRIGGER review_valve_fault_log BEFORE INSERT ON actuator_log WHEN NEW.deveui='A840410000000006' BEGIN SELECT RAISE(ABORT,'review actuator audit fault'); END;"
+  },
+  {
+   "id": "open-with-log-fault",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000006",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "restore-actuator-log",
+   "sql": "DROP TRIGGER review_valve_fault_log;"
+  },
+  {
+   "id": "fail-accepted-write",
+   "sql": "CREATE TRIGGER review_valve_fault_accept BEFORE UPDATE OF transport_json ON valve_actuation_expectations WHEN NEW.device_eui='A840410000000003' AND json_extract(NEW.transport_json,'$.phase')='ACCEPTED' BEGIN SELECT RAISE(ABORT,'review acceptance journal fault'); END;"
+  },
+  {
+   "id": "open-with-receipt-write-fault",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000003",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "restore-acceptance-write",
+   "sql": "DROP TRIGGER review_valve_fault_accept;"
+  },
+  {
+   "id": "accepted-bookkeeping-retry",
+   "waitMs": 2200
+  }
+ ]
+}

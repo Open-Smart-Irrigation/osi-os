@@ -1,0 +1,83 @@
+{
+  "name": "r1-dispatch-noapp-manual",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "An ordinary owned STREGA valve and a non-16-hex one. Record and replay with CHIRPSTACK_APP_ACTUATORS empty on both backends: the oracle through runs/review-dispatch/oracle-noapp-wrapper (OSI_ORACLE_NODE preload noapp-preload.cjs), Go through env -u CHIRPSTACK_APP_ACTUATORS. The scenario schema cannot express the blanked variable; a plain re-record yields 202s.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000081','Valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('NOTAHEXEUI000082','Non-hex valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');"
+    },
+    {
+      "id": "open",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    },
+    {
+      "id": "close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "timed-close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000081",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    },
+    {
+      "id": "open-nonhex",
+      "why": "live-transport refuses on the missing Actuators app before executeValveAttempt's 16-hex check",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/NOTAHEXEUI000082",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    }
+  ]
+}

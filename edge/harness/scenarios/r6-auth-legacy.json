@@ -1,0 +1,4450 @@
+{
+ "name": "r6-auth-legacy",
+ "description": "Legacy (unscoped) arm of the disabled_at and user_uuid probes. disabled_at stored as NULL, empty TEXT, TEXT, BLOB, empty BLOB, integer and real (TEXT affinity stores numbers as text). Each authenticated route that reads disabled_at; node-sqlite3 returns a Buffer for a BLOB (truthy, even empty). users.user_uuid as BLOB, empty BLOB, empty TEXT, integer and real (stored as text), and TEXT/BLOB twins with the same bytes. Node binds a Buffer back as a BLOB, so scope reads find the BLOB row and BLOB grants only; a Buffer is truthy. Record without --scoped.",
+ "steps": [
+  {
+   "id": "dis-seed-null",
+   "why": "account with disabled_at NULL",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(20,'dis-null','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-null',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(20,'Zone dis-null',20,'UTC','z-dis-null','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001014','Probe','KIWI_SENSOR',20,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',20);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002014','Valve','STREGA_VALVE',20,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',20,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-null-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001014/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-null-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001014/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-null-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001014",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-null-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001014/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-null-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/20/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-null-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001014/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "name": "Renamed 20"
+    }
+   }
+  },
+  {
+   "id": "dis-null-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "deveui": "A840410000003014",
+     "name": "Claim 20",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-null-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    }
+   }
+  },
+  {
+   "id": "dis-null-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/20/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "name": "Zone renamed 20"
+    }
+   }
+  },
+  {
+   "id": "dis-null-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-null",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-text-empty",
+   "why": "account with disabled_at ''",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(21,'dis-text-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-text-empty','');\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(21,'Zone dis-text-empty',21,'UTC','z-dis-text-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001015','Probe','KIWI_SENSOR',21,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',21);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002015','Valve','STREGA_VALVE',21,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',21,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-text-empty-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001015/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-empty-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001015/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-empty-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001015",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001015/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/21/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-empty-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001015/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "name": "Renamed 21"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "deveui": "A840410000003015",
+     "name": "Claim 21",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/21/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "name": "Zone renamed 21"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-text-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-text",
+   "why": "account with disabled_at '2026-01-02'",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(22,'dis-text','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-text','2026-01-02');\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(22,'Zone dis-text',22,'UTC','z-dis-text','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001016','Probe','KIWI_SENSOR',22,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',22);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002016','Valve','STREGA_VALVE',22,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',22,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-text-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001016/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001016/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001016",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-text-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001016/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-text-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/22/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-text-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001016/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "name": "Renamed 22"
+    }
+   }
+  },
+  {
+   "id": "dis-text-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "deveui": "A840410000003016",
+     "name": "Claim 22",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-text-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    }
+   }
+  },
+  {
+   "id": "dis-text-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/22/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "name": "Zone renamed 22"
+    }
+   }
+  },
+  {
+   "id": "dis-text-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-text",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-blob",
+   "why": "account with disabled_at CAST('2026-01-02' AS BLOB)",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(23,'dis-blob','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-blob',CAST('2026-01-02' AS BLOB));\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(23,'Zone dis-blob',23,'UTC','z-dis-blob','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001017','Probe','KIWI_SENSOR',23,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',23);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002017','Valve','STREGA_VALVE',23,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',23,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-blob-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001017/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001017/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001017",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-blob-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001017/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-blob-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/23/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001017/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "name": "Renamed 23"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "deveui": "A840410000003017",
+     "name": "Claim 23",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/23/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "name": "Zone renamed 23"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-blob",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-blob-empty",
+   "why": "account with disabled_at x''",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(24,'dis-blob-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-blob-empty',x'');\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(24,'Zone dis-blob-empty',24,'UTC','z-dis-blob-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001018','Probe','KIWI_SENSOR',24,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',24);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002018','Valve','STREGA_VALVE',24,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',24,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-blob-empty-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001018/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-empty-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001018/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-empty-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001018",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001018/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/24/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-blob-empty-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001018/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "name": "Renamed 24"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "deveui": "A840410000003018",
+     "name": "Claim 24",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/24/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "name": "Zone renamed 24"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-blob-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-int0",
+   "why": "account with disabled_at 0",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(25,'dis-int0','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-int0',0);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(25,'Zone dis-int0',25,'UTC','z-dis-int0','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001019','Probe','KIWI_SENSOR',25,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',25);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002019','Valve','STREGA_VALVE',25,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',25,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-int0-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001019/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int0-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001019/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int0-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001019",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-int0-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001019/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-int0-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/25/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int0-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001019/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "name": "Renamed 25"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "deveui": "A840410000003019",
+     "name": "Claim 25",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/25/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "name": "Zone renamed 25"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-int0",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-real0",
+   "why": "account with disabled_at 0.0",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(26,'dis-real0','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-real0',0.0);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(26,'Zone dis-real0',26,'UTC','z-dis-real0','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000101A','Probe','KIWI_SENSOR',26,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',26);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000201A','Valve','STREGA_VALVE',26,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',26,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-real0-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101A/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real0-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000101A/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real0-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101A",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-real0-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000101A/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-real0-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/26/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real0-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000101A/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "name": "Renamed 26"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "deveui": "A84041000000301A",
+     "name": "Claim 26",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/26/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "name": "Zone renamed 26"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-real0",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-int1",
+   "why": "account with disabled_at 1",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(27,'dis-int1','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-int1',1);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(27,'Zone dis-int1',27,'UTC','z-dis-int1','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000101B','Probe','KIWI_SENSOR',27,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',27);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000201B','Valve','STREGA_VALVE',27,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',27,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-int1-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101B/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int1-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000101B/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int1-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101B",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-int1-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000101B/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-int1-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/27/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-int1-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000101B/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "name": "Renamed 27"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "deveui": "A84041000000301B",
+     "name": "Claim 27",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/27/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "name": "Zone renamed 27"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-int1",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-seed-real1",
+   "why": "account with disabled_at 1.5",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(28,'dis-real1','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-dis-real1',1.5);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(28,'Zone dis-real1',28,'UTC','z-dis-real1','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000101C','Probe','KIWI_SENSOR',28,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',28);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000201C','Valve','STREGA_VALVE',28,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',28,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "dis-real1-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101C/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real1-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000101C/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real1-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000101C",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "dis-real1-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000101C/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "dis-real1-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/28/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "dis-real1-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000101C/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "name": "Renamed 28"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "deveui": "A84041000000301C",
+     "name": "Claim 28",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/28/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "name": "Zone renamed 28"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "dis-real1",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "dis-typeof-disabled",
+   "sql": "SELECT 1"
+  },
+  {
+   "id": "uuid-seed-zone-owner",
+   "why": "owner of zones granted to the probe accounts",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid) VALUES(90,'zone-owner','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-zone-owner');\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(90,'Granted A',90,'UTC','z-granted-a','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),(91,'Granted B',90,'UTC','z-granted-b','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000009001','Granted A','KIWI_SENSOR',90,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',90),('A840410000009002','Granted B','KIWI_SENSOR',90,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',91)"
+  },
+  {
+   "id": "uuid-seed-blob",
+   "why": "user_uuid CAST('u-blob' AS BLOB)",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(40,'uuid-blob','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-blob' AS BLOB),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(40,'Zone uuid-blob',40,'UTC','z-uuid-blob','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001028','Probe','KIWI_SENSOR',40,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',40);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002028','Valve','STREGA_VALVE',40,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',40,'CLOSED','MOTORIZED');\nINSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES('as-blob-text','u-blob','z-granted-a','2026-01-01T00:00:00.000Z'),('as-blob-blob',CAST('u-blob' AS BLOB),'z-granted-b','2026-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "uuid-blob-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001028/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001028/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001028",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001028/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/40/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001028/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Renamed 40"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "deveui": "A840410000003028",
+     "name": "Claim 40",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/40/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Zone renamed 40"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-blob",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Granted blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Granted blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Granted rename blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "deveui": "A840410000009100",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-blob-empty",
+   "why": "user_uuid x''",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(42,'uuid-blob-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',x'',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(42,'Zone uuid-blob-empty',42,'UTC','z-uuid-blob-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000102A','Probe','KIWI_SENSOR',42,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',42);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000202A','Valve','STREGA_VALVE',42,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',42,'CLOSED','MOTORIZED');\nINSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES('as-empty-blob',x'','z-granted-a','2026-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "uuid-blob-empty-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102A/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-empty-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000102A/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-empty-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102A",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000102A/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/42/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-empty-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000102A/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Renamed 42"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "deveui": "A84041000000302A",
+     "name": "Claim 42",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/42/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Zone renamed 42"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-blob-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Granted blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Granted blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Granted rename blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "deveui": "A840410000009101",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-text-empty",
+   "why": "user_uuid 'pending'",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(44,'uuid-text-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','pending',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(44,'Zone uuid-text-empty',44,'UTC','z-uuid-text-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000102C','Probe','KIWI_SENSOR',44,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',44);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000202C','Valve','STREGA_VALVE',44,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',44,'CLOSED','MOTORIZED');\nUPDATE users SET user_uuid='' WHERE username='uuid-text-empty'"
+  },
+  {
+   "id": "uuid-text-empty-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102C/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-text-empty-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000102C/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-text-empty-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102C",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000102C/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/44/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-text-empty-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000102C/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Renamed 44"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "deveui": "A84041000000302C",
+     "name": "Claim 44",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/44/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Zone renamed 44"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-text-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Granted text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Granted text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Granted rename text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "deveui": "A840410000009102",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-int",
+   "why": "user_uuid 7",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(46,'uuid-int','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',7,NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(46,'Zone uuid-int',46,'UTC','z-uuid-int','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000102E','Probe','KIWI_SENSOR',46,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',46);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000202E','Valve','STREGA_VALVE',46,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',46,'CLOSED','MOTORIZED');\nINSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES('as-int','7','z-granted-a','2026-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "uuid-int-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102E/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-int-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A84041000000102E/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-int-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000102E",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-int-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A84041000000102E/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-int-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/46/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-int-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A84041000000102E/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Renamed 46"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "deveui": "A84041000000302E",
+     "name": "Claim 46",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/46/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Zone renamed 46"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-int",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-int-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Granted int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-int-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Granted int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Granted rename int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "deveui": "A840410000009103",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-real",
+   "why": "user_uuid 7.5",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(48,'uuid-real','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',7.5,NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(48,'Zone uuid-real',48,'UTC','z-uuid-real','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001030','Probe','KIWI_SENSOR',48,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',48);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002030','Valve','STREGA_VALVE',48,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',48,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "uuid-real-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001030/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-real-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001030/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-real-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001030",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-real-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001030/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-real-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/48/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-real-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001030/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Renamed 48"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "deveui": "A840410000003030",
+     "name": "Claim 48",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/48/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Zone renamed 48"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-real",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-real-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Granted real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-real-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Granted real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Granted rename real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "deveui": "A840410000009104",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-twin-viewer",
+   "why": "user_uuid CAST('u-twin' AS BLOB) with a twin row holding the same bytes in the other storage class",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(50,'uuid-twin-viewer','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','viewer',CAST('u-twin' AS BLOB),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(50,'Zone uuid-twin-viewer',50,'UTC','z-uuid-twin-viewer','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001032','Probe','KIWI_SENSOR',50,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',50);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002032','Valve','STREGA_VALVE',50,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',50,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(51,'twin-of-twin-viewer','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-twin',NULL)"
+  },
+  {
+   "id": "uuid-twin-viewer-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001032/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001032/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001032",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001032/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/50/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001032/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Renamed 50"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "deveui": "A840410000003032",
+     "name": "Claim 50",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/50/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Zone renamed 50"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-twin-viewer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Granted twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Granted twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Granted rename twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "deveui": "A840410000009105",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-twin-disabled",
+   "why": "user_uuid CAST('u-twin2' AS BLOB) with a twin row holding the same bytes in the other storage class",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(52,'uuid-twin-disabled','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-twin2' AS BLOB),'2026-01-02');\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(52,'Zone uuid-twin-disabled',52,'UTC','z-uuid-twin-disabled','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001034','Probe','KIWI_SENSOR',52,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',52);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002034','Valve','STREGA_VALVE',52,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',52,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(53,'twin-of-twin-disabled','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-twin2',NULL)"
+  },
+  {
+   "id": "uuid-twin-disabled-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001034/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001034/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001034",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001034/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/52/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001034/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Renamed 52"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "deveui": "A840410000003034",
+     "name": "Claim 52",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/52/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Zone renamed 52"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-twin-disabled",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Granted twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Granted twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Granted rename twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "deveui": "A840410000009106",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-seed-twin-text-disabled",
+   "why": "user_uuid 'u-twin3' with a twin row holding the same bytes in the other storage class",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(54,'uuid-twin-text-disabled','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-twin3',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(54,'Zone uuid-twin-text-disabled',54,'UTC','z-uuid-twin-text-disabled','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001036','Probe','KIWI_SENSOR',54,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',54);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002036','Valve','STREGA_VALVE',54,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',54,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(55,'twin-of-twin-text-disabled','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-twin3' AS BLOB),'2026-01-02')"
+  },
+  {
+   "id": "uuid-twin-text-disabled-me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001036/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-valve-cancel-v1",
+   "http": {
+    "method": "POST",
+    "path": "/api/v1/valves/A840410000001036/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-valve-command",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000001036",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "action": "open",
+     "duration": 5
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000001036/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-settings-get",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-settings-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/system/settings",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "gatewayTimezone": 7
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-daily-schedule",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/54/schedule",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000001036/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Renamed 54"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "deveui": "A840410000003036",
+     "name": "Claim 54",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zones-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/54/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Zone renamed 54"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uuid-twin-text-disabled",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-cancel-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009001/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-schedules-1",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009001/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-rename-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009001/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Granted twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-cancel-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000009002/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-schedules-2",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000009002/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-rename-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000009002/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Granted twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/name",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Granted rename twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-granted-claim-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "deveui": "A840410000009107",
+     "name": "Zone claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "irrigation_zone_id": 90
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "name": "Created blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/40/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "notes": "Own blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    },
+    "body": {
+     "notes": "Granted blob"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQwLCJ1c2VybmFtZSI6InV1aWQtYmxvYiIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-z22YeemLjJ7pZh_KCc5zPJbskIYzJwv2WLvhVhGQgY"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "name": "Created blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/42/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "notes": "Own blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    },
+    "body": {
+     "notes": "Granted blob-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-blob-empty-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQyLCJ1c2VybmFtZSI6InV1aWQtYmxvYi1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.bI0rYcJQT_GKtskxIO-YJww6LHSojmePZ7UoG3QsqWU"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "name": "Created text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/44/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "notes": "Own text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    },
+    "body": {
+     "notes": "Granted text-empty"
+    }
+   }
+  },
+  {
+   "id": "uuid-text-empty-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ0LCJ1c2VybmFtZSI6InV1aWQtdGV4dC1lbXB0eSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.K8ybQwpXUwnWFkBaFEVFgPoymYV3pXSze-TPAp1ZeTc"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "name": "Created int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/46/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "notes": "Own int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    },
+    "body": {
+     "notes": "Granted int"
+    }
+   }
+  },
+  {
+   "id": "uuid-int-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ2LCJ1c2VybmFtZSI6InV1aWQtaW50IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.CuYaaTmXl3JxFq1QVWFrJqX3aIbSeVx5PwBMTFl9PHg"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "name": "Created real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/48/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "notes": "Own real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    },
+    "body": {
+     "notes": "Granted real"
+    }
+   }
+  },
+  {
+   "id": "uuid-real-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjQ4LCJ1c2VybmFtZSI6InV1aWQtcmVhbCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.xDk_DFlFriGgPYSIq-U5PUs-DsyoHqXVAnvhTOgqK8o"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "name": "Created twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/50/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "notes": "Own twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    },
+    "body": {
+     "notes": "Granted twin-viewer"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-viewer-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUwLCJ1c2VybmFtZSI6InV1aWQtdHdpbi12aWV3ZXIiLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.CZwLhRff5l9BC6J4WdNV2Jx1zegeLiIKcvqswCFuLr8"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "name": "Created twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/52/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "notes": "Own twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    },
+    "body": {
+     "notes": "Granted twin-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-disabled-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjUyLCJ1c2VybmFtZSI6InV1aWQtdHdpbi1kaXNhYmxlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.QsSBhB9CkMYRNoy1QIN-uBqeEGg1mJhWvinU91kqNmY"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "name": "Created twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-me-after-create",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zone-config-own",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/54/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "notes": "Own twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zone-config-granted",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/90/config",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    },
+    "body": {
+     "notes": "Granted twin-text-disabled"
+    }
+   }
+  },
+  {
+   "id": "uuid-twin-text-disabled-zones-after-config",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjU0LCJ1c2VybmFtZSI6InV1aWQtdHdpbi10ZXh0LWRpc2FibGVkIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.I1fw8n9kqdIcfJfHb6nDk4K8ua7FscMyYYsLZReqEL4"
+    }
+   }
+  },
+  {
+   "id": "dis-null-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIwLCJ1c2VybmFtZSI6ImRpcy1udWxsIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wYBxNcbEyReyjyDwhWVBAb_JhrmAU5OjRwksypAu8eY"
+    },
+    "body": {
+     "deveui": "A840410000004014",
+     "name": "Strega 20",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-text-empty-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIxLCJ1c2VybmFtZSI6ImRpcy10ZXh0LWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.vj4_LwyJaoVGUbJJbiwYHzS8t3-PznoT8WSUijKrOd4"
+    },
+    "body": {
+     "deveui": "A840410000004015",
+     "name": "Strega 21",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-text-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIyLCJ1c2VybmFtZSI6ImRpcy10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.nC469OzwysigI_LLNQUFTtF49V_akZqOLGcxLW3j6Bo"
+    },
+    "body": {
+     "deveui": "A840410000004016",
+     "name": "Strega 22",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjIzLCJ1c2VybmFtZSI6ImRpcy1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.Z7kaNeaZVt73rLv6Qxi-KRgk4c5tZHX1rgkCZKSqKEk"
+    },
+    "body": {
+     "deveui": "A840410000004017",
+     "name": "Strega 23",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-blob-empty-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0LCJ1c2VybmFtZSI6ImRpcy1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.id0NsK85txMloOboshTAht7rzYDWa-J0JND-PBPadCI"
+    },
+    "body": {
+     "deveui": "A840410000004018",
+     "name": "Strega 24",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-int0-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI1LCJ1c2VybmFtZSI6ImRpcy1pbnQwIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.N4YLxvTWLV0FwQMCM52uCRCpbv0OAWOqAlzh0TwMF6Q"
+    },
+    "body": {
+     "deveui": "A840410000004019",
+     "name": "Strega 25",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-real0-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI2LCJ1c2VybmFtZSI6ImRpcy1yZWFsMCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.FoobNufO6lQCMnvjOhZZxz66sP6eagfcmFPKnexCDu8"
+    },
+    "body": {
+     "deveui": "A84041000000401A",
+     "name": "Strega 26",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-int1-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI3LCJ1c2VybmFtZSI6ImRpcy1pbnQxIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.5_VMqE1YAvSp7xEFqxgxnE1w_ycjHiE6d_EsC3jSre8"
+    },
+    "body": {
+     "deveui": "A84041000000401B",
+     "name": "Strega 27",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  },
+  {
+   "id": "dis-real1-strega-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI4LCJ1c2VybmFtZSI6ImRpcy1yZWFsMSIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.I0kBMtHljjtVTowvGVxddzkxFvywjYObbXHznR92ugU"
+    },
+    "body": {
+     "deveui": "A84041000000401C",
+     "name": "Strega 28",
+     "type_id": "STREGA_VALVE",
+     "strega_generation": "GEN1",
+     "appkey": "00112233445566778899AABBCCDDEE02"
+    }
+   }
+  }
+ ]
+}

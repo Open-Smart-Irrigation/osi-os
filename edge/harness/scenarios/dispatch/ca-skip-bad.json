@@ -1,0 +1,43 @@
+{
+ "name": "ca-skip-bad",
+ "description": "confirm-A split of ca-skip-reset-keys",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES (1,'Skip zone',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c21','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES (CAST(X'4138343034313030303030303030C3FF' AS TEXT),'v0','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C3','v1','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_settings(device_eui,scheduler_status,skip_today_date) VALUES (CAST(X'4138343034313030303030303030C3FF' AS TEXT),'SKIP_TODAY','2020-01-01'),('A8404100000000C3','SKIP_TODAY','2020-01-01');"
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "clock-tick-2",
+   "timer": "valve-clock-tick"
+  }
+ ]
+}

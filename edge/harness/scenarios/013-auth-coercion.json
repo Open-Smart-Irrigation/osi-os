@@ -1,0 +1,44 @@
+{
+ "name": "auth-coercion",
+ "description": "JS String() coercion of non-string usernames at first registration (review sign-in r2): an own valueOf key registers '[object Object]'; arrays join.",
+ "steps": [
+  {
+   "id": "register-object-username-valueof",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": {
+      "valueOf": "x"
+     },
+     "password": "synthetic-pass-9"
+    }
+   }
+  },
+  {
+   "id": "login-object-name",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "[object Object]",
+     "password": "synthetic-pass-9"
+    }
+   }
+  },
+  {
+   "id": "register-array-username-closed",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": [
+      "a",
+      "b"
+     ],
+     "password": "synthetic-pass-9"
+    }
+   }
+  }
+ ]
+}

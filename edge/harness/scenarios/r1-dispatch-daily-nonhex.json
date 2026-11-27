@@ -1,0 +1,91 @@
+{
+  "name": "r1-dispatch-daily-nonhex",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-nonhex",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Nonhex",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "schedule-1",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "create-lower",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Lowercase",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "schedule-2",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/2/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "seed",
+      "why": "Zone 1: a STREGA whose deveui is not 16 hex. Zone 2: a lowercase hex deveui. Both zones have SWT above threshold.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('NOTAHEXEUI000002','Nonhex valve','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('a840410000000099','Lower valve','STREGA_VALVE',1,2,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000021','Probe 1','KIWI_SENSOR',1,1,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000022','Probe 2','KIWI_SENSOR',1,2,NULL,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A840410000000021',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100),('A840410000000022',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100);"
+    },
+    {
+      "id": "daily-tick",
+      "timer": "daily-schedule-0600"
+    }
+  ]
+}

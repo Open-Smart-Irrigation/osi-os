@@ -1,0 +1,167 @@
+{
+ "name": "r3-q3-auth-rows",
+ "description": "Fix round Q3 (S1): probes for dispatch-inventory rows no earlier scenario covered. A signed null-payload token on the device claim (verifyBearer reads payload.userId outside its try: 500 TypeError before any ChirpStack call); a zone create whose timezone, or the stored gateway timezone it falls back to, holds a NUL (post-zone-auth splices it: the INSERT fails); and valve schedule POSTs on valves whose stored owner is TEXT or BLOB, compared as Number(owner). Record legacy and --scoped.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "null-device-claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "deveui": "A840410000006001",
+     "name": "Null claim",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "null-device-claim-strega",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "Bearer bnVsbA.Sjgd8dhZe5qhjvqc8L474bTQV2UORpfNCDxX1PLUqbw",
+    "body": {
+     "deveui": "A840410000006002",
+     "name": "Null claim s",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "zone-create-nul-timezone",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Nul timezone",
+     "timezone": "UTC\u0000x"
+    }
+   }
+  },
+  {
+   "id": "zone-create-quote-nul-timezone",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Quote nul timezone",
+     "timezone": "Europe/Zur'ich\u0000"
+    }
+   }
+  },
+  {
+   "id": "gateway-timezone-nul",
+   "sql": "INSERT INTO app_settings(key,value) VALUES('gateway_timezone','Europe/Zurich' || char(0) || 'x') ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+   "why": "The zone create falls back to the stored gateway timezone when the body has none."
+  },
+  {
+   "id": "zone-create-nul-gateway-timezone",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Nul gateway timezone"
+    }
+   }
+  },
+  {
+   "id": "zone-create-ok",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Valid timezone",
+     "timezone": "UTC"
+    }
+   }
+  },
+  {
+   "id": "owner-seed",
+   "sql": "PRAGMA foreign_keys=OFF;INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(240,'r7-owner','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-r7-own',NULL);INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(240,'Zone r7-owner',240,'UTC','z-r7-own','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000C001','Valve text-hex','STREGA_VALVE','0xF0','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',240,'CLOSED','MOTORIZED'),('A84041000000C002','Valve text-abc','STREGA_VALVE','abc','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',240,'CLOSED','MOTORIZED'),('A84041000000C003','Valve blob-num','STREGA_VALVE',CAST('240' AS BLOB),'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',240,'CLOSED','MOTORIZED');",
+   "why": "Valves whose devices.user_id is TEXT '0xF0' (Number() 240), TEXT 'abc' (NaN) and BLOB '240', owned through Number() by user 240."
+  },
+  {
+   "id": "schedule-owner-text-hex",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A84041000000C001/schedules",
+    "body": {
+     "kind": "WEEKLY",
+     "label": "Morning",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    },
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0MCwidXNlcm5hbWUiOiJyNy1vd25lciIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-5dcSt4lTX8SPJayzN2CNziGi542J8Of3zdQDyeF9UQ"
+    }
+   }
+  },
+  {
+   "id": "schedule-owner-text-abc",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A84041000000C002/schedules",
+    "body": {
+     "kind": "WEEKLY",
+     "label": "Morning",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    },
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0MCwidXNlcm5hbWUiOiJyNy1vd25lciIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-5dcSt4lTX8SPJayzN2CNziGi542J8Of3zdQDyeF9UQ"
+    }
+   }
+  },
+  {
+   "id": "schedule-owner-blob-num",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A84041000000C003/schedules",
+    "body": {
+     "kind": "WEEKLY",
+     "label": "Morning",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    },
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjI0MCwidXNlcm5hbWUiOiJyNy1vd25lciIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.-5dcSt4lTX8SPJayzN2CNziGi542J8Of3zdQDyeF9UQ"
+    }
+   }
+  }
+ ]
+}

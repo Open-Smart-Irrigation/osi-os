@@ -1,0 +1,114 @@
+{
+  "name": "r2-dispatch-manual-cloud-scoped",
+  "_comment": "Cloud broker traffic of a scoped actor's STREGA open and close, and of opens that are not accepted (held valve, enqueue faults, non-16-hex key). Record with --scoped.",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "seed",
+      "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(110,'va-text','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-text',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(110,'Zone va-text',110,'UTC','z-va-text','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000106E','Probe','KIWI_SENSOR',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000206E','Valve','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED')"
+    },
+    {
+      "id": "scoped-open",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000206E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "scoped-close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000206E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "seed-failures",
+      "why": "Three more valves of the scoped actor: one held by a RESERVED conditional occurrence, one whose enqueue fails, one with a non-16-hex key.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000306E','Held','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED'),('A84041000000406E','Fault','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED'),('NOTAHEXEUI00006E','Nonhex','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED'); INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('bb545400-0000-4000-8000-00000000306e','{{date:+0}}','06:00','A84041000000306E',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'),'bb545400-0000-4000-8000-00000000306e','RESERVED');"
+    },
+    {
+      "id": "scoped-open-held",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000306E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "scoped-open-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000406E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      },
+      "radioFault": [
+        {
+          "rpc": "enqueue",
+          "eui": "A84041000000406E",
+          "code": 14,
+          "details": "synthetic enqueue outage"
+        }
+      ]
+    },
+    {
+      "id": "scoped-close-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A84041000000406E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "CLOSE"
+        }
+      },
+      "radioFault": [
+        {
+          "rpc": "enqueue",
+          "eui": "A84041000000406E",
+          "code": 3,
+          "details": "synthetic enqueue refusal"
+        }
+      ]
+    },
+    {
+      "id": "scoped-open-nonhex",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/NOTAHEXEUI00006E",
+        "headers": {
+          "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+        },
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    }
+  ]
+}

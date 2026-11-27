@@ -1,0 +1,85 @@
+{
+ "name": "r5-conn-once-uplinks",
+ "description": "Fix round connections (item 6, unordered-result audit): store.js recentUplinkTimes selects the last ten uplinks with recorded_at >= since-date AND recorded_at < next-day AND julianday(recorded_at) BETWEEN ... ORDER BY julianday(recorded_at) DESC LIMIT 10. Go had only the julianday bound, so rows Node-RED's text bounds drop took LIMIT slots and changed the median uplink interval (once_interval_minutes) stored with the confirmation window.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "create-Plan zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Plan zone",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "seed-valves",
+   "why": "Start with owned, foreign and unclaimed device records. Radio provisioning only creates or claims a device for the caller and cannot reproduce all these starting states.",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000002','Valve east','STREGA_VALVE',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','CLOSED','CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000003','Kiwi probe','KIWI_SENSOR',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z',NULL,NULL); INSERT INTO devices(deveui,name,type_id,current_state,created_at,updated_at) VALUES ('A840410000000004','Unclaimed','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000005','Foreign','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000006','Second generation','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');"
+  },
+  {
+   "id": "assign-valves",
+   "why": "Attach the fixture devices to the HTTP-created zone and configure a second hardware generation without calling ChirpStack provisioning.",
+   "sql": "UPDATE devices SET irrigation_zone_id=1 WHERE deveui IN ('A840410000000002','A840410000000003','A840410000000004','A840410000000005','A840410000000006');\n    INSERT INTO users(id,username,password_hash,user_uuid,role,created_at) VALUES(2,'other','synthetic-unused','synthetic-other','researcher','2020-01-01T00:00:00.000Z');\n    UPDATE devices SET user_id=2 WHERE deveui='A840410000000005';\n    INSERT INTO valve_settings(device_eui,strega_generation,scheduler_status) VALUES('A840410000000006','GEN2','DEACTIVATED');"
+  },
+  {
+   "id": "schedule-post-once",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000002/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "ONCE",
+     "label": "One-time flush",
+     "fire_at": "{{datetime:+24h}}",
+     "duration_minutes": 15
+    }
+   }
+  },
+  {
+   "id": "seed-once-attempt",
+   "why": "An uncertain one-time enqueue attempted at 2026-11-20T12:00:00.000Z, with no saved confirmation window: the schedule list computes and stores it from the valve's uplinks of the 48 hours before the attempt.",
+   "sql": "INSERT INTO valve_once_dispatch_intents(schedule_uuid,device_eui,command_id,state,attempted_at)\n        SELECT schedule_uuid,device_eui,'synthetic-once-command','UNKNOWN','2026-11-20T12:00:00.000Z' FROM valve_schedules WHERE label='One-time flush';\n        INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json)\n        VALUES('synthetic-once-expectation','A840410000000002',1,'synthetic-once-command','2026-11-20T12:00:00.000Z',900,strftime('%Y-%m-%dT%H:%M:%fZ','now','+15 minutes'),'unknown','2026-11-20T12:00:00.000Z','{\"phase\":\"UNKNOWN\"}');"
+  },
+  {
+   "id": "seed-uplinks",
+   "why": "Ten ISO uplinks before the attempt (10 to 50 minutes before it every 10 minutes, then every 50 minutes to 300 minutes before it) and four recorded_at values written as Julian day numbers in text, 11 to 14 minutes before the attempt. julianday() reads those inside the 48-hour window; store.js recentUplinkTimes also bounds recorded_at by text (>= the since date, < the next day), which drops them before LIMIT 10.",
+   "sql": "INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T11:50:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T11:40:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T11:30:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T11:20:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T11:10:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T10:20:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T09:30:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T08:40:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T07:50:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2026-11-20T07:00:00.000Z');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2461364.99236111');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2461364.99166667');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2461364.99097222');INSERT INTO device_data(deveui,recorded_at) VALUES ('A840410000000002','2461364.99027778');"
+  },
+  {
+   "id": "read-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000000002/schedules",
+    "auth": "token"
+   }
+  }
+ ]
+}

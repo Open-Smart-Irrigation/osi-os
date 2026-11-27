@@ -1,0 +1,2075 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "bcryptjs hashing with fixed salts, cross-comparison, and the default salt prefix new hashes use.",
+ "defaultSaltPrefix": "$2b$10$",
+ "hash": [
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2"
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2a$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC"
+   }
+  },
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuISwvAr4j6jEatR/Z7SkhZXM2CkmHZlS"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuujr5dF95nlffmIUNubpV71FPx1zncrEm"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuxD0vCwu/f2ahNVJLL35ZYA2xuiRyPH6"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuEMUlbp/1okYPDpaoBro4xrB5pQHfcrG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuRGS8l6b/PQAvtQTW0P/v5KlBNsV6TR."
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuusC1rYG4xVCO5hPDUZYp0CS0z3Jdx1Xi"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuuQyCT7t6nGGqsQo9eYOh194k8kjH4di."
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2a$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2a$10$abcdefghijklmnopqrstuu0s9AH8LRkZ9vYzTkEXqK1yisZgeoOaq"
+   }
+  },
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2"
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2b$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC"
+   }
+  },
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuISwvAr4j6jEatR/Z7SkhZXM2CkmHZlS"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuujr5dF95nlffmIUNubpV71FPx1zncrEm"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuxD0vCwu/f2ahNVJLL35ZYA2xuiRyPH6"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuEMUlbp/1okYPDpaoBro4xrB5pQHfcrG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuRGS8l6b/PQAvtQTW0P/v5KlBNsV6TR."
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuusC1rYG4xVCO5hPDUZYp0CS0z3Jdx1Xi"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuuQyCT7t6nGGqsQo9eYOh194k8kjH4di."
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2b$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2b$10$abcdefghijklmnopqrstuu0s9AH8LRkZ9vYzTkEXqK1yisZgeoOaq"
+   }
+  },
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2"
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2y$04$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC"
+   }
+  },
+  {
+   "password": "synthetic-pass-1",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuISwvAr4j6jEatR/Z7SkhZXM2CkmHZlS"
+   }
+  },
+  {
+   "password": "",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuujr5dF95nlffmIUNubpV71FPx1zncrEm"
+   }
+  },
+  {
+   "password": "123456",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuxD0vCwu/f2ahNVJLL35ZYA2xuiRyPH6"
+   }
+  },
+  {
+   "password": "café 🌱 日本",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuEMUlbp/1okYPDpaoBro4xrB5pQHfcrG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuhBb/0dYbuuS1CS8hp30IXhlFBW2VAWG"
+   }
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuRGS8l6b/PQAvtQTW0P/v5KlBNsV6TR."
+   }
+  },
+  {
+   "password": "p\u0000nul",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuusC1rYG4xVCO5hPDUZYp0CS0z3Jdx1Xi"
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuuQyCT7t6nGGqsQo9eYOh194k8kjH4di."
+   }
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "salt": "$2y$10$abcdefghijklmnopqrstuu",
+   "expect": {
+    "ok": true,
+    "hash": "$2y$10$abcdefghijklmnopqrstuu0s9AH8LRkZ9vYzTkEXqK1yisZgeoOaq"
+   }
+  }
+ ],
+ "compare": [
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": true
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": true
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": true
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": true
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2a$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": true
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": true
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": true
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": true
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2b$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": true
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuPzCoBCjmeSBU3g6CW/tRuMs2q2uruyq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": true
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubyCG3zY1GIXMyxfivm.ClDiInHzxjiq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": true
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuFwMibPVIyV1/Vdxb3PVZCmM4bYxIada",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuu1tJYEHK9J7qlFvsL9wsBvXdVaVrwlaq",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": true
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuubzadhGtS2zEF.gu0yd0opP6cVzb.e0i",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": true
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBQHqZaO/dlDRZ.TvJ67we2MtFVZUvA2",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuufJMU63/66PejGdIHSDnBBUGMcgqugsS",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": true
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuBZJtdLkzfECa2sy66DfaHVSIBiusQhG",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "123456",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "café 🌱 日本",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxé",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "p\u0000nul",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": false
+  },
+  {
+   "password": "synthetic-pass-1::0016C001F1000001",
+   "hash": "$2y$04$abcdefghijklmnopqrstuuOex0w//5/OYqMYcr59b8E4My6eZrqoC",
+   "expect": true
+  }
+ ],
+ "verifierSubject": [
+  {
+   "password": "pw",
+   "version": 1,
+   "installationUuid": null,
+   "gatewayDeviceEui": "0016c001f1000001",
+   "expect": {
+    "ok": true,
+    "subject": "pw::0016C001F1000001"
+   }
+  },
+  {
+   "password": "pw",
+   "version": 1,
+   "installationUuid": null,
+   "gatewayDeviceEui": "00:16:C0:01:F1:00",
+   "expect": {
+    "ok": true,
+    "subject": "pw::0016C0FFFE01F100"
+   }
+  },
+  {
+   "password": "pw",
+   "version": 2,
+   "installationUuid": "0B8F6A3E-6C1A-4F61-9A43-2F1D8B3E9C11",
+   "gatewayDeviceEui": null,
+   "expect": {
+    "ok": true,
+    "subject": "pw::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+   }
+  },
+  {
+   "password": "pw",
+   "version": 2,
+   "installationUuid": null,
+   "gatewayDeviceEui": "0016C001F1000001",
+   "expect": {
+    "ok": false,
+    "error": "installation identity is required for verifier v2"
+   }
+  },
+  {
+   "password": "pw",
+   "version": 1,
+   "installationUuid": null,
+   "gatewayDeviceEui": "0101010101010101",
+   "expect": {
+    "ok": false,
+    "error": "gateway identity is required for verifier v1"
+   }
+  },
+  {
+   "password": "",
+   "version": 1,
+   "installationUuid": null,
+   "gatewayDeviceEui": "0016C001F1000001",
+   "expect": {
+    "ok": true,
+    "subject": "::0016C001F1000001"
+   }
+  },
+  {
+   "password": "pw",
+   "version": "2",
+   "installationUuid": " 0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11 ",
+   "gatewayDeviceEui": null,
+   "expect": {
+    "ok": true,
+    "subject": "pw::0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11"
+   }
+  }
+ ]
+}

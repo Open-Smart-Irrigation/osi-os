@@ -1,0 +1,60 @@
+{
+ "name": "r5-conn-conflict-order",
+ "description": "Fix round connections (item 6): dispatch.js findConflict reads the device's expectations ORDER BY rowid DESC and walks them with their occurrences before the active occurrences that have none; the first owner that holds answers valve_busy, the first malformed transport_json refuses the command. Go walked the occurrences in the order of its join (by command_id), so it met a different owner first; and it answered a malformed owner with UNKNOWN and a REJECTED_PERMANENT ledger row (its detail was the JSON parser's 'invalid character' text).",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "why": "Two RESERVED conditional occurrences per valve, each with its expectation. C1: the expectation inserted first (and the lower command_id) has malformed transport_json, the later one holds (no effect snapshot, no expiry): Node-RED meets the later one first and answers 409 valve_busy. C2: the reverse: Node-RED meets the malformed owner first; parsePersistedJson's errorWithCode('transport_state_malformed') becomes the 503's error, and the FAILED ack (detail 'persisted safety JSON is malformed') is retryable, so nothing reaches applied_commands.",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,gateway_device_eui,created_at,updated_at) VALUES (1,'Zone 1',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c31',NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C1','malformed older owner','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C2','malformed newer owner','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('c0000000-0000-4000-8000-000000000001','{{date:+0}}','06:00','A8404100000000C1','2026-11-23T06:00:00.000Z','c1-command-a','RESERVED');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('c0000000-0000-4000-8000-000000000002','{{date:+0}}','06:00','A8404100000000C1','2026-11-23T06:00:00.000Z','c1-command-b','RESERVED');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) VALUES ('c1-expectation-old','A8404100000000C1',1,'c1-command-a','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z','{malformed');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) VALUES ('c1-expectation-new','A8404100000000C1',1,'c1-command-b','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z','{}');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('c0000000-0000-4000-8000-000000000003','{{date:+0}}','06:00','A8404100000000C2','2026-11-23T06:00:00.000Z','c2-command-a','RESERVED');INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('c0000000-0000-4000-8000-000000000004','{{date:+0}}','06:00','A8404100000000C2','2026-11-23T06:00:00.000Z','c2-command-b','RESERVED');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) VALUES ('c2-expectation-old','A8404100000000C2',1,'c2-command-a','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z','{}');INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) VALUES ('c2-expectation-new','A8404100000000C2',1,'c2-command-b','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','unknown','2026-11-23T06:00:00.000Z','{malformed');"
+  },
+  {
+   "id": "open-c1",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000C1",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "open-c2",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A8404100000000C2",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  }
+ ]
+}

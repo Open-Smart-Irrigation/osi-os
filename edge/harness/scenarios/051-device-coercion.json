@@ -1,0 +1,118 @@
+{
+  "name": "device-coercion",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "claim-object-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": {
+            "toString": null
+          },
+          "name": "Claim review",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-object-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000191",
+          "name": "Claim review",
+          "type_id": "KIWI_SENSOR",
+          "appkey": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "claim-object-generation",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000191",
+          "name": "Claim review",
+          "type_id": "STREGA_VALVE",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "strega_generation": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "claim-number-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000191",
+          "name": "Claim review",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "zone_id": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "claim-control",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000191",
+          "name": "Claim review",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "list-devices",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

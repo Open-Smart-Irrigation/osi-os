@@ -1,0 +1,44 @@
+{
+  "name": "r2-dispatch-clock-supersede",
+  "_comment": "queuePushes supersedes every QUEUED CLOCK_SYNC row of the valve before it inserts the new one, also for a key the dispatcher then refuses.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "Scheduled GEN1 valves due for a clock sync (last one 8 days ago). A840410000000081 and NOTAHEXEUI000083 keep an older QUEUED CLOCK_SYNC row below a later settled one; A840410000000082 has only the settled row.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000081','Stale queued clock','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000082','Control','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('NOTAHEXEUI000083','Nonhex stale queued clock','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO valve_settings(device_eui,strega_generation,last_clock_sync_queued_at) VALUES ('A840410000000081','GEN1',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days')),('A840410000000082','GEN1',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days')),('NOTAHEXEUI000083','GEN1',strftime('%Y-%m-%dT%H:%M:%fZ','now','-8 days')); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-000000000881','A840410000000081','WEEKLY',127,'06:00',10,'UTC',1),('ceaa2200-0000-4000-8000-000000000882','A840410000000082','WEEKLY',127,'06:00',10,'UTC',1),('ceaa2200-0000-4000-8000-000000000883','NOTAHEXEUI000083','WEEKLY',127,'06:00',10,'UTC',1); INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,state,queued_at) VALUES ('ab000000-0000-4000-8000-000000000811','A840410000000081','CLOCK_SYNC',12,'0006000000000102010101020205','QUEUED',datetime('now','-2 hours')),('ab000000-0000-4000-8000-000000000812','A840410000000081','CLOCK_SYNC',12,'0006000000000102010101020205','ACKED',datetime('now','-1 hours')),('ab000000-0000-4000-8000-000000000821','A840410000000082','CLOCK_SYNC',12,'0006000000000102010101020205','ACKED',datetime('now','-1 hours')),('ab000000-0000-4000-8000-000000000831','NOTAHEXEUI000083','CLOCK_SYNC',12,'0006000000000102010101020205','QUEUED',datetime('now','-2 hours')),('ab000000-0000-4000-8000-000000000832','NOTAHEXEUI000083','CLOCK_SYNC',12,'0006000000000102010101020205','FAILED',datetime('now','-1 hours'));"
+    },
+    {
+      "id": "clock-tick",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-again",
+      "timer": "valve-clock-tick"
+    }
+  ]
+}

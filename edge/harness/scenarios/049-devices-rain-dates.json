@@ -1,0 +1,58 @@
+{
+  "name": "rain-date",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "seed-rain-date",
+      "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone) VALUES (1,'Zurich',1,'Europe/Zurich'),(2,'Asuncion',1,'America/Asuncion'); INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES ('A840410000000101','Minute precision','AQUASCOPE_LORAIN',1,1,'2026-07-20T00:00:00.000Z','2026-07-20T00:00:00.000Z'),('A840410000000102','Paraguay tzdata','AQUASCOPE_LORAIN',1,2,'2026-07-21T00:00:00.000Z','2026-07-21T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,rain_mm_today) VALUES ('A840410000000101','2026-07-20 23:30',2.5),('A840410000000102','2026-07-20T03:25:00.000Z',3.5)"
+    },
+    {
+      "id": "list-rain-dates",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "advance-to-minute-with-Z",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-21T23:30Z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "use-utc-for-paraguay-control",
+      "sql": "UPDATE irrigation_zones SET timezone='UTC' WHERE id=2"
+    },
+    {
+      "id": "list-minute-explicit-zone",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

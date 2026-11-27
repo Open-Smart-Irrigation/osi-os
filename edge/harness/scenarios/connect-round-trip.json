@@ -1,0 +1,28 @@
+{
+  "name": "connect-round-trip",
+  "cloud": true,
+  "cloudConnect": {
+    "eui": "",
+    "password": "",
+    "previous": {
+      "eui": "0016C001F1000003",
+      "password": "synthetic-node-red-new"
+    },
+    "edgeStore": {
+      "clientid": "device_0016C001F1000002",
+      "user": "0016C001F1000002",
+      "password": "synthetic-go",
+      "nodeRed": {
+        "clientid": "device_0016C001F1000001",
+        "user": "0016C001F1000001",
+        "password": "synthetic-node-red-old"
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "connect",
+      "waitMs": 1
+    }
+  ]
+}

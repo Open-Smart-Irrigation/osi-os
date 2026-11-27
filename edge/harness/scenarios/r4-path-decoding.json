@@ -1,0 +1,128 @@
+{
+  "name": "r4-path-decoding",
+  "description": "Review round 4: path parameter percent-decoding (Express decodes once, after routing).",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "claim-device",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000302",
+          "name": "Original device",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "rename-zone-double-encoded-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/%2531/name",
+        "auth": "token",
+        "body": {
+          "name": "Double encoded"
+        }
+      }
+    },
+    {
+      "id": "config-double-encoded-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/%2531/config",
+        "auth": "token",
+        "body": {
+          "notes": "double encoded"
+        }
+      }
+    },
+    {
+      "id": "rename-device-double-encoded-eui",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/A84041000000030%2532/name",
+        "auth": "token",
+        "body": {
+          "name": "Double encoded device"
+        }
+      }
+    },
+    {
+      "id": "rename-device-literal-percent",
+      "http": {
+        "method": "PUT",
+        "path": "/api/devices/%25ZZ/name",
+        "auth": "token",
+        "body": {
+          "name": "Percent"
+        }
+      }
+    },
+    {
+      "id": "rename-zone-single-encoded-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/%31/name",
+        "auth": "token",
+        "body": {
+          "name": "Single encoded"
+        }
+      }
+    },
+    {
+      "id": "list-zones",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "list-devices",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

@@ -1,0 +1,206 @@
+{
+  "name": "valve-plan-edges",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-Plan zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Plan zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "seed-valves",
+      "why": "Start with owned, foreign and unclaimed device records. Radio provisioning only creates or claims a device for the caller and cannot reproduce all these starting states.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000002','Valve east','STREGA_VALVE',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','CLOSED','CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000003','Kiwi probe','KIWI_SENSOR',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z',NULL,NULL); INSERT INTO devices(deveui,name,type_id,current_state,created_at,updated_at) VALUES ('A840410000000004','Unclaimed','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000005','Foreign','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000006','Second generation','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');"
+    },
+    {
+      "id": "assign-valves",
+      "why": "Attach the fixture devices to the HTTP-created zone and configure a second hardware generation without calling ChirpStack provisioning.",
+      "sql": "UPDATE devices SET irrigation_zone_id=1 WHERE deveui IN ('A840410000000002','A840410000000003','A840410000000004','A840410000000005','A840410000000006');\n    INSERT INTO users(id,username,password_hash,user_uuid,role,created_at) VALUES(2,'other','synthetic-unused','synthetic-other','researcher','2020-01-01T00:00:00.000Z');\n    UPDATE devices SET user_id=2 WHERE deveui='A840410000000005';\n    INSERT INTO valve_settings(device_eui,strega_generation,scheduler_status) VALUES('A840410000000006','GEN2','DEACTIVATED');"
+    },
+    {
+      "id": "fresh-fixture-clocks",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE valve_settings SET last_clock_sync_queued_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); INSERT INTO valve_settings(device_eui,last_clock_sync_queued_at) SELECT deveui,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM devices WHERE type_id='STREGA_VALVE' AND deveui NOT IN (SELECT device_eui FROM valve_settings)"
+    },
+    {
+      "id": "gen1-all-days",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "23:50",
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-exclusive-boundary",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "00:10",
+          "duration_minutes": 10,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-cross-midnight-overlap",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "00:05",
+          "duration_minutes": 10,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen2-all-days",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "19:15",
+          "duration_minutes": 15,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen2-collapsed-two-windows",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "19:45",
+          "duration_minutes": 16,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000004/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "11:00",
+          "duration_minutes": 10,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "inside-debounce",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "age-snapshots",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE app_settings SET value=json_set(value,'$.edited_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 seconds')) WHERE key LIKE 'valve_snapshot_pending:%'"
+    },
+    {
+      "id": "send-snapshots",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "gen2-new-edit",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "21:00",
+          "duration_minutes": 10,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "seed-blocking-observation",
+      "why": "The observation worker settled this fixture earlier. Keep the expectation pending observation to test the queue flush fence.",
+      "sql": "INSERT INTO valve_actuation_expectations(expectation_id,device_eui,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at) VALUES('synthetic-review-open','A840410000000006','synthetic-review-open',strftime('%Y-%m-%dT%H:%M:%fZ','now'),1200,strftime('%Y-%m-%dT%H:%M:%fZ','now','+20 minutes'),'unavailable','PENDING_OBSERVATION',strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    },
+    {
+      "id": "snapshot-empty-transport-object",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE valve_schedule_pushes SET transport_json='{}' WHERE state='QUEUED' AND device_eui='A840410000000006' AND purpose='DAYMASK_PLAN'; UPDATE app_settings SET value=json_set(value,'$.edited_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 seconds')) WHERE key='valve_snapshot_pending:A840410000000006'"
+    },
+    {
+      "id": "blocking-observation-inside-cap",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "cap-reached-with-blocking-observation",
+      "why": "Keep the current edit old enough to send and move the first edit past the five minute cap.",
+      "sql": "UPDATE app_settings SET value=json_set(value,'$.first_edited_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-301 seconds')) WHERE key='valve_snapshot_pending:A840410000000006'"
+    },
+    {
+      "id": "send-snapshot-with-empty-transport-object",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "get-after-empty-object",
+      "http": {
+        "method": "GET",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token"
+      }
+    }
+  ]
+}

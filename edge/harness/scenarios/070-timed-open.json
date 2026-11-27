@@ -1,0 +1,237 @@
+{
+ "name": "timed-open",
+ "description": "A timed open through the gRPC stand-in: INTENT/ATTEMPTED/enqueue/outcome rows and the frame bytes, refusals, valve reports, a second open, cancel, and the valve ticks.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "valves",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-no-token",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    },
+    "auth": "none"
+   }
+  },
+  {
+   "id": "open-bare-refused",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN"
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-zero-refused",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 0
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-256-refused",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 256
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-string-minutes",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": "2"
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-sensor-refused",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-unknown-device",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000000F",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "open-lowercase-eui",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/a840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "settle-after-open",
+   "waitMs": 300
+  },
+  {
+   "id": "report-open",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "deduplicationId": "00000000-0000-4000-8000-000000000701",
+     "time": "2026-11-23T06:01:00.000Z",
+     "fCnt": 101,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1",
+      "Battery": 90,
+      "Temperature": 21,
+      "Hygrometry": 40
+     }
+    }
+   }
+  },
+  {
+   "id": "report-closed",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "deduplicationId": "00000000-0000-4000-8000-000000000702",
+     "time": "2026-11-23T06:02:00.000Z",
+     "fCnt": 102,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "0",
+      "Battery": 90,
+      "Temperature": 21,
+      "Hygrometry": 40
+     }
+    }
+   }
+  },
+  {
+   "id": "open-again",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 3
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "tick-once",
+   "timer": "valve-once-tick"
+  },
+  {
+   "id": "tick-clock",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001/cancel",
+    "body": {},
+    "auth": "token"
+   }
+  },
+  {
+   "id": "close",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "body": {
+     "action": "CLOSE"
+    },
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valves-after",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  }
+ ]
+}

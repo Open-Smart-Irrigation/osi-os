@@ -1,0 +1,11 @@
+{
+  "name": "rd-clock-invalid-last",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "setup", "why": "Scheduled GEN1 valves whose last clock sync stamp is unparseable text (hostile/never-written), plus a control valve stamped one hour ago.",
+     "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000051','Garbage stamp','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'),('A840410000000052','Recent stamp','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'),('A840410000000053','Word stamp','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO valve_settings(device_eui,strega_generation,last_clock_sync_queued_at) VALUES ('A840410000000051','GEN1','garbage'),('A840410000000052','GEN1',strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')),('A840410000000053','GEN2','last tuesday'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000d1','A840410000000051','WEEKLY',127,'06:00',10,'UTC',1),('ceaa2200-0000-4000-8000-0000000000d2','A840410000000052','WEEKLY',127,'06:00',10,'UTC',1),('ceaa2200-0000-4000-8000-0000000000d3','A840410000000053','WEEKLY',127,'06:00',10,'UTC',1);"},
+    {"id": "clock-tick", "timer": "valve-clock-tick"},
+    {"id": "clock-tick-again", "timer": "valve-clock-tick"}
+  ]
+}

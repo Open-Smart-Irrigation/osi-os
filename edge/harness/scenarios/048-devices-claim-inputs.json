@@ -1,0 +1,118 @@
+{
+  "name": "claim-inputs",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "claim-bom-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000103",
+          "name": "BOM key",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "﻿00112233445566778899AABBCCDDEEFF﻿"
+        }
+      }
+    },
+    {
+      "id": "claim-bom-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "﻿A840410000000104﻿",
+          "name": "BOM EUI",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-array-type",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000105",
+          "name": "Array type",
+          "type_id": [
+            "KIWI_SENSOR"
+          ],
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "claim-plain-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000106",
+          "name": "BOM key",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "reclaim-get-device-fails",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000106",
+          "name": "BOM key",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      },
+      "radioFault": [
+        {
+          "rpc": "get",
+          "eui": "A840410000000106",
+          "code": 7,
+          "details": "review existing Get denied"
+        }
+      ]
+    },
+    {
+      "id": "list-after-claims",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

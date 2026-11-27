@@ -1,0 +1,61 @@
+{
+  "name": "gen2-clear-negative-ack",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "devices discovered and claimed before the session, as in the release smoke",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+    },
+    {
+      "id": "seed-conditional-clear",
+      "sql": "INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) VALUES ('A840410000000001','GEN2','{\"mode\":\"CONDITIONAL\",\"generation\":\"GEN2\",\"desired_revision\":\"b9200000-0000-4000-8000-000000000001\",\"required_push_ids\":[\"b9100000-0000-4000-8000-000000000001\"],\"predecessor_push_ids\":[],\"readiness\":{\"state\":\"PENDING\",\"revision\":\"b9200000-0000-4000-8000-000000000001\",\"reason\":\"awaiting_clear_ack\"},\"prepared_at\":\"2026-11-23T06:02:00.000Z\",\"reason\":\"conversion\"}'); INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,queued_at,transport_json) VALUES ('b9100000-0000-4000-8000-000000000001','A840410000000001','DAYMASK_PLAN',25,'80','2026-11-23T06:02:00.000Z','{\"phase\":\"ACCEPTED\",\"attempted_at\":\"2026-11-23T06:02:00.000Z\",\"accepted_at\":\"2026-11-23T06:02:00.000Z\",\"queue_id\":\"b9300000-0000-4000-8000-000000000001\"}');"
+    },
+    {
+      "id": "negative-gen2-clear-ack",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+        "payload": {
+          "deduplicationId": "negative-gen2-clear-ack",
+          "time": "2026-11-23T06:03:00.000Z",
+          "fCnt": 301,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve Gen2",
+            "deviceProfileId": "11111111-1111-4111-8111-11111111111A",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Ack_Port": 25,
+            "Ack_Value": 0
+          }
+        }
+      }
+    }
+  ]
+}

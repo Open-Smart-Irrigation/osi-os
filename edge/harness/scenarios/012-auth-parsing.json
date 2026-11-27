@@ -1,0 +1,256 @@
+{
+ "name": "auth-parsing",
+ "description": "Body-parser behaviour on the sign-in routes (review r1 findings): urlencoded extended forms, charsets, gzip JSON, malformed credential shapes.",
+ "steps": [
+  {
+   "id": "register-object-username-tostring",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": {
+      "toString": "label"
+     },
+     "password": "synthetic-pass-9"
+    }
+   }
+  },
+  {
+   "id": "register-password-object",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": {
+      "length": 4
+     }
+    }
+   }
+  },
+  {
+   "id": "register-password-object-long",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": {
+      "length": 8
+     }
+    }
+   }
+  },
+  {
+   "id": "register-ok",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "form-array-username",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username[]=farmer&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   }
+  },
+  {
+   "id": "form-bad-percent-extra-field",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=farmer&password=synthetic-pass-1&ui=%",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   }
+  },
+  {
+   "id": "form-latin1-charset",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=farmer&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded; charset=iso-8859-1"
+    }
+   }
+  },
+  {
+   "id": "form-nested-object",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username[a]=farmer&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   }
+  },
+  {
+   "id": "form-duplicate-password",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username=farmer&password=x&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   }
+  },
+  {
+   "id": "json-gzip",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBodyGzipJson": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    },
+    "headers": {
+     "content-type": "application/json",
+     "content-encoding": "gzip"
+    }
+   }
+  },
+  {
+   "id": "json-utf16-charset",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"farmer\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/json; charset=utf-16"
+    }
+   }
+  },
+  {
+   "id": "json-text-plain",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"farmer\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "text/plain"
+    }
+   }
+  },
+  {
+   "id": "json-vnd-type",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"farmer\",\"password\":\"synthetic-pass-1\"}",
+    "headers": {
+     "content-type": "application/vnd.api+json"
+    }
+   }
+  },
+  {
+   "id": "json-number-username",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": 123,
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "json-top-level-string",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "\"farmer\"",
+    "headers": {
+     "content-type": "application/json"
+    }
+   }
+  },
+  {
+   "id": "json-many-fields",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "{\"username\":\"farmer\",\"password\":\"synthetic-pass-1\",\"a1\":1,\"a2\":2,\"a3\":3,\"a4\":4,\"a5\":5,\"a6\":6,\"a7\":7,\"a8\":8,\"a1\":9}",
+    "headers": {
+     "content-type": "application/json"
+    }
+   }
+  },
+  {
+   "id": "head-me-no-token",
+   "http": {
+    "method": "HEAD",
+    "path": "/api/me"
+   }
+  },
+  {
+   "id": "trailing-slash-login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login/",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "uppercase-path-login",
+   "http": {
+    "method": "POST",
+    "path": "/AUTH/LOGIN",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login-object-username-tostring",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": {
+      "toString": "x"
+     },
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login-form-object-username-tostring",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBody": "username[toString]=x&password=synthetic-pass-1",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    }
+   }
+  },
+  {
+   "id": "login-latin1-quoted-param",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "rawBodyBase64": "eyJ1c2VybmFtZSI6ImZhcm1lciIsInBhc3N3b3JkIjoic3ludGhldGljLXBhc3MtMSJ9",
+    "headers": {
+     "content-type": "application/json; note=\"Caf\u00e9\""
+    }
+   }
+  }
+ ]
+}

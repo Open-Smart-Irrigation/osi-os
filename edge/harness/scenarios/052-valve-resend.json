@@ -1,0 +1,446 @@
+{
+  "name": "valve-resend",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-Plan zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Plan zone",
+          "timezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "seed-valves",
+      "why": "Start with owned, foreign and unclaimed device records. Radio provisioning only creates or claims a device for the caller and cannot reproduce all these starting states.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000002','Valve east','STREGA_VALVE',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','CLOSED','CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000003','Kiwi probe','KIWI_SENSOR',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z',NULL,NULL); INSERT INTO devices(deveui,name,type_id,current_state,created_at,updated_at) VALUES ('A840410000000004','Unclaimed','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000005','Foreign','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000006','Second generation','STREGA_VALVE','CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');"
+    },
+    {
+      "id": "assign-valves",
+      "why": "Attach the fixture devices to the HTTP-created zone and configure a second hardware generation without calling ChirpStack provisioning.",
+      "sql": "UPDATE devices SET irrigation_zone_id=1 WHERE deveui IN ('A840410000000002','A840410000000003','A840410000000004','A840410000000005','A840410000000006');\n    INSERT INTO users(id,username,password_hash,user_uuid,role,created_at) VALUES(2,'other','synthetic-unused','synthetic-other','researcher','2020-01-01T00:00:00.000Z');\n    UPDATE devices SET user_id=2 WHERE deveui='A840410000000005';\n    INSERT INTO valve_settings(device_eui,strega_generation,scheduler_status) VALUES('A840410000000006','GEN2','DEACTIVATED');"
+    },
+    {
+      "id": "fresh-fixture-clocks",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE valve_settings SET last_clock_sync_queued_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); INSERT INTO valve_settings(device_eui,last_clock_sync_queued_at) SELECT deveui,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM devices WHERE type_id='STREGA_VALVE' AND deveui NOT IN (SELECT device_eui FROM valve_settings)"
+    },
+    {
+      "id": "resend-no-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-invalid-eui",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/bad/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-missing-valve",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A8404100000000FF/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-non-valve",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000003/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-viewer-role",
+      "why": "Mirror a role change while the bearer token is still valid.",
+      "sql": "UPDATE users SET role='viewer' WHERE id=1"
+    },
+    {
+      "id": "resend-viewer",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-restore-owner",
+      "why": "Restore the original actor before the plan cases.",
+      "sql": "UPDATE users SET role='admin' WHERE id=1"
+    },
+    {
+      "id": "disable-resend-actor",
+      "why": "Mirror the cloud account disabling the current bearer.",
+      "sql": "UPDATE users SET disabled_at='2020-01-01T00:00:00.000Z' WHERE id=1"
+    },
+    {
+      "id": "resend-disabled-actor",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "restore-resend-actor",
+      "why": "Restore the account for later plan tests.",
+      "sql": "UPDATE users SET disabled_at=NULL WHERE id=1"
+    },
+    {
+      "id": "remove-resend-zone-assignment",
+      "why": "Remove the valve from the actor’s zone while it remains unclaimed.",
+      "sql": "UPDATE devices SET irrigation_zone_id=NULL WHERE deveui='A840410000000006'"
+    },
+    {
+      "id": "resend-no-zone-grant",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "restore-resend-zone-assignment",
+      "why": "Restore the valve’s zone before programming it.",
+      "sql": "UPDATE devices SET irrigation_zone_id=1 WHERE deveui='A840410000000006'"
+    },
+    {
+      "id": "seed-other-valve-owner",
+      "why": "Assign a valve to another local user who shares the same zone.",
+      "sql": "UPDATE devices SET user_id=2 WHERE deveui='A840410000000006'"
+    },
+    {
+      "id": "resend-other-owners-valve",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "restore-valve-owner",
+      "why": "Restore the valve to the scenario actor.",
+      "sql": "UPDATE devices SET user_id=1 WHERE deveui='A840410000000006'"
+    },
+    {
+      "id": "gen1-all-days",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "23:50",
+          "duration_minutes": 20,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-exclusive-boundary",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "00:10",
+          "duration_minutes": 10,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-cross-midnight-overlap",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000002/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 1,
+          "start_time": "00:05",
+          "duration_minutes": 10,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen2-all-days",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "19:15",
+          "duration_minutes": 15,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen2-collapsed-two-windows",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "19:45",
+          "duration_minutes": 16,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "gen1-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000004/schedules",
+        "auth": "token",
+        "body": {
+          "kind": "WEEKLY",
+          "weekdays_mask": 127,
+          "start_time": "11:00",
+          "duration_minutes": 10,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "inside-debounce",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "age-snapshots",
+      "why": "Review fixture data for the paired parity probe.",
+      "sql": "UPDATE app_settings SET value=json_set(value,'$.edited_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 seconds')) WHERE key LIKE 'valve_snapshot_pending:%'"
+    },
+    {
+      "id": "send-snapshots",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "resend-route",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "age-resent-snapshot",
+      "why": "Advance the fixed snapshot past debounce without sleeping.",
+      "sql": "UPDATE app_settings SET value=json_set(value,'$.edited_at',strftime('%Y-%m-%dT%H:%M:%fZ','now','-31 seconds')) WHERE key LIKE 'valve_snapshot_pending:%'"
+    },
+    {
+      "id": "emit-resent-snapshot",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "seed-plan-conflict",
+      "why": "Import an overlapping weekly row to exercise validation before any resend flush.",
+      "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,label,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('synthetic-resend-overlap','A840410000000006','WEEKLY','Imported overlap',127,'19:20',30,'UTC')"
+    },
+    {
+      "id": "resend-plan-conflict",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000006/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "remove-plan-conflict",
+      "why": "Remove the synthetic overlap before the next case.",
+      "sql": "DELETE FROM valve_schedules WHERE schedule_uuid='synthetic-resend-overlap'"
+    },
+    {
+      "id": "seed-valve-without-plan",
+      "why": "Add an owned STREGA with no weekly rows or plan push history.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000008','No plan','STREGA_VALVE',1,1,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+    },
+    {
+      "id": "resend-status-only",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "seed-resend-conditional",
+      "why": "Bind a conditional weekly schedule to a valve with no fixed plan.",
+      "sql": "INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone) SELECT 'synthetic-resend-policy',zone_uuid,'{}','UTC' FROM irrigation_zones WHERE id=1; INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,condition_policy_uuid) VALUES ('synthetic-resend-conditional','A840410000000008','WEEKLY',1,'07:00',10,'UTC','synthetic-resend-policy')"
+    },
+    {
+      "id": "resend-conditional-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "seed-resend-mixed-mode",
+      "why": "Add a fixed weekly schedule beside the conditional schedule.",
+      "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('synthetic-resend-fixed','A840410000000008','WEEKLY',2,'07:00',10,'UTC')"
+    },
+    {
+      "id": "resend-mixed-mode",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "seed-resend-deleted-policy",
+      "why": "Retire the policy while the valve schedule still references it.",
+      "sql": "DELETE FROM valve_schedules WHERE schedule_uuid='synthetic-resend-fixed'; UPDATE irrigation_policies SET deleted_at='2020-01-01T00:00:00.000Z' WHERE policy_uuid='synthetic-resend-policy'"
+    },
+    {
+      "id": "resend-invalid-policy",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "restore-resend-policy",
+      "why": "Restore the conditional binding, then prepare a lifecycle clear through the legacy route.",
+      "sql": "UPDATE irrigation_policies SET deleted_at=NULL WHERE policy_uuid='synthetic-resend-policy'"
+    },
+    {
+      "id": "seed-managed-occurrences",
+      "why": "Pause skips unattempted occurrences and preserves in-flight history.",
+      "sql": "INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,policy_uuid,zone_uuid,device_eui,due_at,state)\n    SELECT 'synthetic-resend-conditional','2020-01-01','07:00',policy_uuid,zone_uuid,'A840410000000008','2020-01-01T07:00:00.000Z','PENDING' FROM irrigation_policies WHERE policy_uuid='synthetic-resend-policy'\n    UNION ALL SELECT 'synthetic-resend-conditional','2020-01-02','07:00',policy_uuid,zone_uuid,'A840410000000008','2020-01-02T07:00:00.000Z','CLAIMED' FROM irrigation_policies WHERE policy_uuid='synthetic-resend-policy'\n    UNION ALL SELECT 'synthetic-resend-conditional','2020-01-03','07:00',policy_uuid,zone_uuid,'A840410000000008','2020-01-03T07:00:00.000Z','SENT' FROM irrigation_policies WHERE policy_uuid='synthetic-resend-policy'"
+    },
+    {
+      "id": "prepare-resend-lifecycle-clear",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "resend-pending-lifecycle-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "resend-attempted-lifecycle-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "prepare-resend-failed-lifecycle-clear",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/schedule",
+        "auth": "token",
+        "body": {
+          "trigger_metric": "SWT_1",
+          "threshold_kpa": 20,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "seed-lifecycle-preacceptance-rejection",
+      "why": "Supply the durable result of one rejected enqueue on the new clear revision.",
+      "sql": "UPDATE valve_schedule_pushes SET transport_json=json_set(transport_json,'$.phase','enqueue_rejected') WHERE push_id=(SELECT json_extract(conditional_control_json,'$.required_push_ids[0]') FROM valve_settings WHERE device_eui='A840410000000008')"
+    },
+    {
+      "id": "resend-definitive-rejection",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    },
+    {
+      "id": "change-resend-lifecycle-binding",
+      "why": "Change the zone version so the stored clear is obsolete.",
+      "sql": "UPDATE irrigation_zones SET sync_version=sync_version+1 WHERE id=1"
+    },
+    {
+      "id": "resend-obsolete-lifecycle-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/valves/A840410000000008/plan/resend",
+        "auth": "token",
+        "body": {}
+      }
+    }
+  ]
+}

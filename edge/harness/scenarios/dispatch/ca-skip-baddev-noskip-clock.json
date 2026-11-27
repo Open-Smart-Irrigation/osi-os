@@ -1,0 +1,47 @@
+{
+ "name": "ca-skip-baddev-noskip-clock",
+ "description": "confirm-A control for B2",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES (1,'Skip zone',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c21','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES (CAST(X'4138343034313030303030303030C3FF' AS TEXT),'bad','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_settings(device_eui,scheduler_status) VALUES (CAST(X'4138343034313030303030303030C3FF' AS TEXT),'ACTIVE');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C3','ctrl','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_settings(device_eui,scheduler_status,skip_today_date) VALUES ('A8404100000000C3','SKIP_TODAY','2020-01-01');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C4','clock valve','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000c4','A8404100000000C4','WEEKLY',127,'06:00',10,'UTC',1);INSERT INTO valve_settings(device_eui,strega_generation,last_clock_sync_queued_at) VALUES ('A8404100000000C4','GEN1','2020-01-01T00:00:00.000Z');"
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "clock-tick-2",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "readback",
+   "sql": "SELECT 1"
+  }
+ ]
+}

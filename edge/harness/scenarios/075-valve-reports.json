@@ -1,0 +1,150 @@
+{
+ "name": "valve-reports",
+ "description": "Gen2 state and a millivolt reading, conditional close, an untrusted arrival-time open, a Gen1 clock ACK, and rounding below one half.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "setup-extra",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000004','Valve 4','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000005','Valve 5','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';"
+  },
+  {
+   "id": "seed-conditional",
+   "sql": "INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('a1100000-0000-4000-8000-000000000005','{{date:+0}}','06:00','A840410000000005','2026-11-23T06:00:00.000Z','a1200000-0000-4000-8000-000000000005','RESERVED'); INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A840410000000005','{\"mode\":\"CONDITIONAL\"}');"
+  },
+  {
+   "id": "conditional-closed-report",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000005/event/up",
+    "payload": {
+     "time": "2026-11-23T06:01:00.000Z",
+     "deduplicationId": "probe-810",
+     "fCnt": 810,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000005",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "0",
+      "Battery": 91
+     }
+    }
+   }
+  },
+  {
+   "id": "gen2-status",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000004/event/up",
+    "payload": {
+     "time": "2026-11-23T06:01:00.000Z",
+     "deduplicationId": "probe-811",
+     "fCnt": 811,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000004",
+      "deviceProfileName": "OSI STREGA Valve Gen2",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Battery": 3200,
+      "Actuator": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "battery-below-half",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "deduplicationId": "probe-js-round",
+     "time": "2026-11-23T06:01:00.000Z",
+     "fCnt": 101,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Battery": 0.49999999999999994
+     }
+    }
+   }
+  },
+  {
+   "id": "open-without-time",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "deduplicationId": "probe-no-time",
+     "fCnt": 101,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "seed-clock-push",
+   "sql": "INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,state,queued_at,transport_json) VALUES ('b1100000-0000-4000-8000-000000000001','A840410000000004','CLOCK_SYNC',12,'00','QUEUED','2026-11-23T06:00:30.000Z','{\"phase\":\"ACCEPTED\",\"queue_id\":\"b1100000-0000-4000-8000-000000000002\",\"attempted_at\":\"2026-11-23T06:00:30.000Z\",\"accepted_at\":\"2026-11-23T06:00:30.000Z\"}');"
+  },
+  {
+   "id": "gen1-clock-ack",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000004/event/up",
+    "payload": {
+     "time": "2026-11-23T06:01:00.000Z",
+     "deduplicationId": "probe-clock-ack",
+     "fCnt": 812,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000004",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "RTC_Port": "12",
+      "RTC_status": "00"
+     }
+    }
+   }
+  }
+ ]
+}

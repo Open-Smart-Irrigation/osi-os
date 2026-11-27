@@ -1,0 +1,44 @@
+{
+  "name": "r4-dispatch-nokey-clock-plans",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "seed-valves",
+      "why": "POST /api/devices fails closed with 503 on the oracle (the release-smoke runtime env carries no CHIRPSTACK_PROFILE_* mapping), so no HTTP route on this backend can create the valve (and the non-valve control device) the #14/#15 cases need; seeded the way the release smoke sets devices up.",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000002','Valve east','STREGA_VALVE',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','CLOSED','CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state,target_state) VALUES ('A840410000000003','Kiwi probe','KIWI_SENSOR',1,'2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z','2026-11-23T00:00:00.000Z',NULL,NULL)"
+    },
+    {
+      "id": "seed-debounced-weekly-plan",
+      "sql": "INSERT INTO valve_schedules (id,schedule_uuid,device_eui,kind,label,weekdays_mask,start_time,fire_at,duration_minutes,timezone,enabled,once_state,once_fired_at,sync_version,deleted_at,created_at,updated_at,condition_policy_uuid,effective_from) VALUES (1,'7730be7c-742e-49ba-9001-b223998f31d9','A840410000000002','WEEKLY','Morning block',127,'06:00',NULL,30,'Europe/Zurich',1,NULL,NULL,0,NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('ff6d6f39-f773-4ecb-af0e-52b3cdb9723b','A840410000000002','SCHEDULER_STATUS',NULL,21,'30',NULL,'QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('9924fff8-eb15-48c0-aeab-ea9de64eaf1d','A840410000000002','WEEKDAY_PLAN',0,14,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('5e9cd517-eea0-4bdc-a6a4-e704a65ae0f2','A840410000000002','WEEKDAY_PLAN',1,15,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('14048a55-723a-44de-b530-5a2aed11879b','A840410000000002','WEEKDAY_PLAN',2,16,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('b956734c-be7b-4d52-b0db-f23e95eb9053','A840410000000002','WEEKDAY_PLAN',3,17,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('0794f645-8855-4b9d-9ced-66a076f84759','A840410000000002','WEEKDAY_PLAN',4,18,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('818e5155-61f3-4a94-bf27-616503c68691','A840410000000002','WEEKDAY_PLAN',5,19,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO valve_schedule_pushes (push_id,device_eui,purpose,weekday,fport,payload_hex,plan_hash,state,ack_status,queued_at,acked_at,error,transport_json) VALUES ('98d446fb-3fd7-4130-ad3f-5c56a7958c57','A840410000000002','WEEKDAY_PLAN',6,20,'FF8600FF0630FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF','da3d541fc6599c3095efda5597c8d48839f605f8','QUEUED',NULL,strftime('%Y-%m-%d %H:%M:%S','{{datetime:-1h}}'),NULL,NULL,NULL);\nINSERT INTO app_settings (key,value,updated_at) VALUES ('valve_snapshot_pending:A840410000000002','{\"edited_at\":\"{{datetime:-1h}}\",\"first_edited_at\":\"{{datetime:-1h}}\",\"push_ids\":[\"ff6d6f39-f773-4ecb-af0e-52b3cdb9723b\",\"9924fff8-eb15-48c0-aeab-ea9de64eaf1d\",\"5e9cd517-eea0-4bdc-a6a4-e704a65ae0f2\",\"14048a55-723a-44de-b530-5a2aed11879b\",\"b956734c-be7b-4d52-b0db-f23e95eb9053\",\"0794f645-8855-4b9d-9ced-66a076f84759\",\"818e5155-61f3-4a94-bf27-616503c68691\",\"98d446fb-3fd7-4130-ad3f-5c56a7958c57\"]}','{{datetime:-1h}}');"
+    },
+    {
+      "id": "clock-with-pending-fixed-plan",
+      "timer": "valve-clock-tick"
+    }
+  ],
+  "_comment": "Dispatch round 4 client-construction sweep: a copy of 07B-valve-clock-plans.json run with CHIRPSTACK_API_KEY empty on both sides. Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-nokey-node.sh and replay Go through a wrapper that runs `exec env CHIRPSTACK_API_KEY= <osi-edge> \"$@\"`. Covers plan snapshots and clock syncs on the valve tick: a pending snapshot stays pending (ensure() gate) and the tick goes on to the clock syncs."
+}

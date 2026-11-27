@@ -1,0 +1,426 @@
+{
+ "name": "r6-auth-login-columns",
+ "description": "username and server_username decoded from TEXT/BLOB (node-sqlite3 decodes UTF-8 with replacement; String(Buffer) does the same), and server_offline_verifier_version (INTEGER affinity) read as Number(v || 1). Record without --scoped.",
+ "steps": [
+  {
+   "id": "seed-installation",
+   "sql": "INSERT INTO installation_identity(singleton_id,installation_uuid,created_at,updated_at) VALUES(1,'0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "seed-uname-blob",
+   "sql": "INSERT INTO users(id,username,server_username,password_hash,created_at,role) VALUES(100,CAST('uname-blob' AS BLOB),'uname-blob','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-uname-blob",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uname-blob",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_uname_blob": "json.token"
+   }
+  },
+  {
+   "id": "me-uname-blob",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_uname_blob"
+   }
+  },
+  {
+   "id": "seed-uname-blob-invalid",
+   "sql": "INSERT INTO users(id,username,server_username,password_hash,created_at,role) VALUES(101,x'ff','�','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-uname-blob-invalid",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "�",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_uname_blob_invalid": "json.token"
+   }
+  },
+  {
+   "id": "me-uname-blob-invalid",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_uname_blob_invalid"
+   }
+  },
+  {
+   "id": "seed-uname-text-invalid",
+   "sql": "INSERT INTO users(id,username,server_username,password_hash,created_at,role) VALUES(102,CAST(x'fe' AS TEXT),'��','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-uname-text-invalid",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "��",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_uname_text_invalid": "json.token"
+   }
+  },
+  {
+   "id": "me-uname-text-invalid",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_uname_text_invalid"
+   }
+  },
+  {
+   "id": "seed-uname-blob-empty",
+   "sql": "INSERT INTO users(id,username,server_username,password_hash,created_at,role) VALUES(103,x'','uname-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-uname-blob-empty",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "uname-empty",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_uname_blob_empty": "json.token"
+   }
+  },
+  {
+   "id": "me-uname-blob-empty",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_uname_blob_empty"
+   }
+  },
+  {
+   "id": "seed-server-uname-text-invalid",
+   "sql": "INSERT INTO users(id,username,auth_mode,server_username,server_password_hash,password_hash,created_at,role) VALUES(104,'local-sui','server',CAST(x'fd' AS TEXT),'$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','x','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-server-uname-text-invalid",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "�",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_server_uname_text_invalid": "json.token"
+   }
+  },
+  {
+   "id": "me-server-uname-text-invalid",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_server_uname_text_invalid"
+   }
+  },
+  {
+   "id": "seed-ver-null",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(105,'local-ver-null','x','server','ver-null','$2b$04$nullsaltsaltsaltsaltseKSL/bzq7fksy1giViYyqXt51s2F2k/a',NULL,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-null",
+   "why": "JS Number(NULL || 1) = 1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-null",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-int0",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(106,'local-ver-int0','x','server','ver-int0','$2b$04$int0saltsaltsaltsaltseitokeJxyS2E8Jkq9VNF4.kVA1NQs3fu',0,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-int0",
+   "why": "JS Number(0 || 1) = 1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-int0",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-int1",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(107,'local-ver-int1','x','server','ver-int1','$2b$04$int1saltsaltsaltsaltseZIhXIXYgtNDlU0AyS1u9T3QhHC19NB.',1,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-int1",
+   "why": "JS Number(1 || 1) = 1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-int1",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-int2",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(108,'local-ver-int2','x','server','ver-int2','$2b$04$int2saltsaltsaltsaltseVCar6NUzt31jLsDul.hB/K/u0IMM04e',2,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-int2",
+   "why": "JS Number(2 || 1) = 2",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-int2",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-real2_5",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(109,'local-ver-real2_5','x','server','ver-real2_5','$2b$04$real25saltsaltsaltsaleQEVxqk07qyqOzX0ccJY0SU6t.37ytGC',2.5,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-real2_5",
+   "why": "JS Number(2.5 || 1) = 2.5",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-real2_5",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-real1_5",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(110,'local-ver-real1_5','x','server','ver-real1_5','$2b$04$real15saltsaltsaltsaleuF/LPvFuBRi.3gHWh.fLmuZ6oET/Do.',1.5,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-real1_5",
+   "why": "JS Number(1.5 || 1) = 1.5",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-real1_5",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-inf",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(111,'local-ver-inf','x','server','ver-inf','$2b$04$infsaltsaltsaltsaltsaepxCh.lsYhHziIsQruFu9zC4dDX/ped.',9e999,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-inf",
+   "why": "JS Number(9e999 || 1) = Infinity",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-inf",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-neginf",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(112,'local-ver-neginf','x','server','ver-neginf','$2b$04$neginfsaltsaltsaltsalelURFyfnMXOSELfPmSyCp4.MZZwTFr/m',-9e999,'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-neginf",
+   "why": "JS Number(-9e999 || 1) = -Infinity",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-neginf",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-text-abc",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(113,'local-ver-text-abc','x','server','ver-text-abc','$2b$04$textabcsaltsaltsaltsaeTWX1STnnKI.KbZaxeSqVsG0AwmZ4VUy','abc','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-text-abc",
+   "why": "JS Number('abc' || 1) = NaN",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-text-abc",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-text-2",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(114,'local-ver-text-2','x','server','ver-text-2','$2b$04$text2saltsaltsaltsalteapzYGoK6vsNkjrN64P26LEJwR./wICG','2','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-text-2",
+   "why": "JS Number('2' || 1) = 2",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-text-2",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-text-2x",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(115,'local-ver-text-2x','x','server','ver-text-2x','$2b$04$text2xsaltsaltsaltsaleN7Mwl4LlO721ET9U8qFpT28zby6I4c.',' 2 ','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-text-2x",
+   "why": "JS Number(' 2 ' || 1) = 2",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-text-2x",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-text-empty",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(116,'local-ver-text-empty','x','server','ver-text-empty','$2b$04$textemptysaltsaltsalteiNDAUhE1jGacDhSS8PElJnjC.H7O2yK','','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-text-empty",
+   "why": "JS Number('' || 1) = 1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-text-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-blob-2",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(117,'local-ver-blob-2','x','server','ver-blob-2','$2b$04$blob2saltsaltsaltsalteEdnBSrFSPMQuZ0EVWkTrlP4pmUrZmya',CAST('2' AS BLOB),'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-blob-2",
+   "why": "JS Number(CAST('2' AS BLOB) || 1) = 2",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-blob-2",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-blob-1",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(118,'local-ver-blob-1','x','server','ver-blob-1','$2b$04$blob1saltsaltsaltsaltei3WeEnvjIBZ44G263xz0ZfW2Vwdh3By',CAST('1' AS BLOB),'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-blob-1",
+   "why": "JS Number(CAST('1' AS BLOB) || 1) = 1",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-blob-1",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-blob-empty",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(119,'local-ver-blob-empty','x','server','ver-blob-empty','$2b$04$blobemptysaltsaltsalte3h2hfWe7WPXwTXsf2zkdVggZl5zefEe',x'','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-blob-empty",
+   "why": "JS Number(x'' || 1) = 0",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-blob-empty",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-ver-blob-hex",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_offline_verifier,server_offline_verifier_version,created_at,role) VALUES(120,'local-ver-blob-hex','x','server','ver-blob-hex','$2b$04$blobhexsaltsaltsaltsaea0baHqsvFF76Eu.0NLaMI4vxDEZDznG',CAST('0x2' AS BLOB),'2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-ver-blob-hex",
+   "why": "JS Number(CAST('0x2' AS BLOB) || 1) = 2",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "ver-blob-hex",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "typeof-after",
+   "sql": "SELECT 1"
+  },
+  {
+   "id": "seed-second-linked-fffd",
+   "sql": "INSERT INTO users(id,username,server_username,password_hash,created_at,role) VALUES(121,'other-fffd','�','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin')"
+  },
+  {
+   "id": "login-uname-blob-invalid-again",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "�",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "t_uname_blob_invalid_again": "json.token"
+   }
+  },
+  {
+   "id": "me-uname-blob-invalid-again",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "t_uname_blob_invalid_again"
+   }
+  }
+ ]
+}

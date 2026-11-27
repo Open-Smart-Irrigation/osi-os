@@ -1,0 +1,48 @@
+{
+ "name": "ca-skip-reset-keys",
+ "description": "confirm-A probe: the clock tick reads valve_settings.device_eui and rebinds it (store.upsertSettings: String(eui).toUpperCase(), INSERT OR IGNORE, UPDATE). Go rebinds the read value raw in an UPDATE. Stored lowercase and invalid-UTF-8 keys.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES (1,'Skip zone',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c21','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('a8404100000000c1','Lower skip','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES (CAST(X'4138343034313030303030303030C3FF' AS TEXT),'Invalid utf8 skip','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000C3','Control skip','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO valve_settings(device_eui,scheduler_status,skip_today_date) VALUES ('a8404100000000c1','SKIP_TODAY','2020-01-01'),(CAST(X'4138343034313030303030303030C3FF' AS TEXT),'SKIP_TODAY','2020-01-01'),('A8404100000000C3','SKIP_TODAY','2020-01-01');",
+   "why": "Three STREGA valves with an expired SKIP_TODAY: lowercase stored key, a key whose stored TEXT ends in invalid UTF-8 (C3 FF), and an uppercase control."
+  },
+  {
+   "id": "clock-tick-1",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "clock-tick-2",
+   "timer": "valve-clock-tick"
+  },
+  {
+   "id": "settings-rows",
+   "sql": "SELECT 1"
+  }
+ ]
+}

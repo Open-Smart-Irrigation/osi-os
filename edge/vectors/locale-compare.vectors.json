@@ -1,0 +1,65 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate.js",
+  "sources": {
+   "osi-watermark-binding/canonicalization.js": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+   "osi-journal-replication/canonicalization.js": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+   "osi-history-sync-helper/index.js": "a97b28432aa0c56f4fcf7f41b5b6d799bd1e487fa21436137740027a637fa85f",
+   "osi-scope-helper/index.js": "2b18361730f169feb86ae19a1b8004e323db7a55e33c75dac1a3b52c07dc5b28",
+   "osi-installation-helper/index.js": "cbed2b7d07ccbc633e9d54e65f6a4360eb76e7be88e7a42418c371c8014d4cec",
+   "osi-history-helper/index.js": "47185b7381a1f061b949c23638a4ca97d0d9a2746601fe531f7a3554dde4afee",
+   "osi-uplink-dedup-guard/durable.js": "914e0f62b05ad49649147591d5ee5d6a74f5a1972f65b0bc95317d8513f0c251",
+   "flows.json#auth-process-result": "9c1f4d4e19b4aadefa1d50dbb9451281ab7bc807a2a5c972b8ce6e50ff269a6c",
+   "bcryptjs": "3.0.3"
+  },
+  "node": "22.23.1"
+ },
+ "about": "String.prototype.localeCompare order on the generating host. ICU differs by Node build; re-check on the device image.",
+ "input": [
+  "zone 10",
+  "Zone 2",
+  "zone 2",
+  "été",
+  "ete",
+  "Ete",
+  "a",
+  "B",
+  "_x",
+  "日本",
+  "",
+  "zürich",
+  "Zurich"
+ ],
+ "sortedDefault": [
+  "",
+  "_x",
+  "a",
+  "B",
+  "ete",
+  "Ete",
+  "été",
+  "zone 10",
+  "zone 2",
+  "Zone 2",
+  "Zurich",
+  "zürich",
+  "日本"
+ ],
+ "sortedUtf16": [
+  "",
+  "B",
+  "Ete",
+  "Zone 2",
+  "Zurich",
+  "_x",
+  "a",
+  "ete",
+  "zone 10",
+  "zone 2",
+  "zürich",
+  "été",
+  "日本"
+ ],
+ "icu": "78.2",
+ "unicode": "17.0"
+}

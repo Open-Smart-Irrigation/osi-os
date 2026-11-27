@@ -1,0 +1,57 @@
+{
+  "name": "settings-auth-coercion",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "get-noncoercible-username",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo"
+      }
+    },
+    {
+      "id": "put-noncoercible-username",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "Bearer eyJ1c2VySWQiOjEsInVzZXJuYW1lIjp7InRvU3RyaW5nIjpudWxsfSwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.Pabe1noeNIsV6TQJYN2GZymqlT30WrA3WAFLzVH4ZJo",
+        "body": {
+          "gatewayTimezone": "Europe/Zurich"
+        }
+      }
+    },
+    {
+      "id": "get-after-noncoercible-username",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "token"
+      }
+    }
+  ]
+}

@@ -1,0 +1,178 @@
+{
+  "name": "zone-coercion",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "set-zone-gateway",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "europe/zurich"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "\ufeffEurope/Zurich\ufeff"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "set-initial-prediction",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "predictionCardEnabled": true,
+          "notes": "Original"
+        }
+      }
+    },
+    {
+      "id": "invalid-prediction-value",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "predictionCardEnabled": {
+            "toString": null
+          },
+          "notes": "Unexpected prediction update"
+        }
+      }
+    },
+    {
+      "id": "invalid-numeric-area",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "invalid-scheduling-mode",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "schedulingMode": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "invalid-weather-source",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "weatherSource": [
+            {
+              "toString": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "invalid-start-date",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "stageStartedOn": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "largest-finite-area",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 1.7976931348623157e+308
+        }
+      }
+    },
+    {
+      "id": "area-overflow-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "1.7976931348623159e308"
+        }
+      }
+    },
+    {
+      "id": "date-only",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "stageStartedOn": "2026-07-19"
+        }
+      }
+    },
+    {
+      "id": "list-persisted-zone",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "name": "devices-disabled",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "all-zero-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000071",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "id": "local-insert-failure",
+      "sql": "CREATE TRIGGER review_fail_claim BEFORE INSERT ON devices WHEN NEW.deveui='A840410000000072' BEGIN SELECT RAISE(ABORT,'review local insert failure'); END"
+    },
+    {
+      "id": "new-device-db-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000072",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "clear-local-insert-failure",
+      "sql": "DROP TRIGGER review_fail_claim"
+    },
+    {
+      "id": "new-device-retry",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000072",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "disable-actor",
+      "sql": "UPDATE users SET disabled_at='2026-11-19T09:00:00.000Z' WHERE id=1"
+    },
+    {
+      "id": "legacy-disabled-device-claim",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000077",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    }
+  ]
+}

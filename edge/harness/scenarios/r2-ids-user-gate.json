@@ -1,0 +1,257 @@
+{
+ "name": "r2-ids-user-gate",
+ "description": "fix-ids-r2 N1: users.id 123456789012345696. The legacy gates spell the token id, which names 123456789012345700: Node-RED answers 401 \"User not found\". Record legacy and --scoped.",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "renumber-user",
+   "sql": "PRAGMA foreign_keys=OFF; UPDATE users SET id=123456789012345696 WHERE id=1"
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zones",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "zone-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Z1",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "devices",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "claim",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000011",
+     "name": "Dev 11",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "zone-direct",
+   "sql": "PRAGMA foreign_keys=OFF; INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,sync_version,created_at,updated_at) VALUES (5,'Z5',123456789012345696,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c55',1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000002','Valve','STREGA_VALVE',123456789012345696,5,'CLOSED','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "zone-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/5/name",
+    "auth": "token",
+    "body": {
+     "name": "Z5b"
+    }
+   }
+  },
+  {
+   "id": "device-rename",
+   "http": {
+    "method": "PUT",
+    "path": "/api/devices/A840410000000002/name",
+    "auth": "token",
+    "body": {
+     "name": "V2"
+    }
+   }
+  },
+  {
+   "id": "valves",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valve-schedules",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves/A840410000000002/schedules",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valve-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "settle",
+   "waitMs": 300
+  },
+  {
+   "id": "schedule-put",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/5/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 30,
+     "duration_minutes": 15,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "zone-config",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/5/config",
+    "auth": "token",
+    "body": {
+     "cropType": "apple"
+    }
+   }
+  },
+  {
+   "id": "me",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "settings",
+   "http": {
+    "method": "GET",
+    "path": "/api/system/settings",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "valve-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000002/cancel",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "valve-schedule-post",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000002/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "label": "Morning",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "plan-resend",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000002/plan/resend",
+    "auth": "token",
+    "body": {}
+   }
+  },
+  {
+   "id": "strega-unclaimed",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,current_state,sync_version,created_at,updated_at) VALUES ('A840410000000042','Old valve','STREGA_VALVE',NULL,'CLOSED',2,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "claim-strega-new",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000041",
+     "name": "Valve 41",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-strega-existing",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000042",
+     "name": "Valve 42",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "devices-after",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  },
+  {
+   "id": "zones-after",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  }
+ ]
+}

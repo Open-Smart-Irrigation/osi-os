@@ -1,0 +1,202 @@
+{
+  "name": "cloud-mqtt",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "claim-sensor",
+      "why": "a claimed KIWI with no ChirpStack registration; the release smoke sets devices up the same way",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,current_state) VALUES ('A840410000000001','kiwi-1','KIWI_SENSOR',1,'2026-11-20T00:00:00.000Z','2026-11-20T00:00:00.000Z','2026-11-20T00:00:00.000Z',NULL)"
+    },
+    {
+      "id": "connected-uplink",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+        "payload": {
+          "deduplicationId": "00000000-0000-4000-8000-000000000001",
+          "time": "2026-11-20T00:00:00.000Z",
+          "fCnt": 1,
+          "fPort": 10,
+          "deviceInfo": {
+            "applicationId": "synthetic-sensors-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000001"
+          },
+          "object": {
+            "input5_frequency": 2811,
+            "input6_frequency": 667,
+            "light_intensity": 4259,
+            "ambient_temperature": -9.8,
+            "relative_humidity": 70,
+            "watermark1_frequency": 2811
+          }
+        }
+      }
+    },
+    {
+      "id": "block-account-recovery",
+      "cloudRecovery": "block"
+    },
+    {
+      "id": "gated-uplink",
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+        "payload": {
+          "deduplicationId": "00000000-0000-4000-8000-000000000002",
+          "time": "2026-11-20T00:15:00.000Z",
+          "fCnt": 2,
+          "fPort": 10,
+          "deviceInfo": {
+            "applicationId": "synthetic-sensors-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000001"
+          },
+          "object": {
+            "input5_frequency": 3424,
+            "input6_frequency": 4228,
+            "light_intensity": 3211,
+            "ambient_temperature": -8.3,
+            "relative_humidity": 27.5
+          }
+        }
+      }
+    },
+    {
+      "id": "unblock-account-recovery",
+      "cloudRecovery": "unblock"
+    },
+    {
+      "id": "qos1-in-flight",
+      "cloudHoldPuback": true,
+      "uplink": {
+        "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+        "payload": {
+          "deduplicationId": "00000000-0000-4000-8000-000000000003",
+          "time": "2026-11-20T00:30:00.000Z",
+          "fCnt": 3,
+          "fPort": 10,
+          "deviceInfo": {
+            "applicationId": "synthetic-sensors-app",
+            "deviceProfileName": "KIWI",
+            "devEui": "a840410000000001"
+          },
+          "object": {
+            "input5_frequency": 6180,
+            "input6_frequency": 2734,
+            "light_intensity": 1392,
+            "ambient_temperature": 17.5,
+            "relative_humidity": 83
+          }
+        }
+      }
+    },
+    {
+      "id": "restart-and-uplinks",
+      "cloudBroker": "restart",
+      "outageUplinks": [
+        {
+          "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+          "payload": {
+            "deduplicationId": "00000000-0000-4000-8000-000000000004",
+            "time": "2026-11-20T00:45:00.000Z",
+            "fCnt": 4,
+            "fPort": 10,
+            "deviceInfo": {
+              "applicationId": "synthetic-sensors-app",
+              "deviceProfileName": "KIWI",
+              "devEui": "a840410000000001"
+            },
+            "object": {}
+          }
+        },
+        {
+          "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+          "payload": {
+            "deduplicationId": "00000000-0000-4000-8000-000000000005",
+            "time": "2026-11-20T01:00:00.000Z",
+            "fCnt": 5,
+            "fPort": 10,
+            "deviceInfo": {
+              "applicationId": "synthetic-sensors-app",
+              "deviceProfileName": "KIWI",
+              "devEui": "a840410000000001"
+            },
+            "object": {
+              "input5_frequency": 3235,
+              "input6_frequency": 5116,
+              "light_intensity": 166,
+              "ambient_temperature": 4.5,
+              "relative_humidity": 46
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconnected-uplinks",
+      "uplinks": [
+        {
+          "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+          "payload": {
+            "deduplicationId": "00000000-0000-4000-8000-000000000006",
+            "time": "2026-11-20T01:15:00.000Z",
+            "fCnt": 6,
+            "fPort": 99,
+            "deviceInfo": {
+              "applicationId": "synthetic-sensors-app",
+              "deviceProfileName": "KIWI",
+              "devEui": "a840410000000001"
+            },
+            "object": {}
+          }
+        },
+        {
+          "topic": "application/synthetic-sensors-app/device/a840410000000001/event/up",
+          "payload": {
+            "deduplicationId": "00000000-0000-4000-8000-000000000007",
+            "time": "2026-11-20T01:30:00.000Z",
+            "fCnt": 7,
+            "fPort": 10,
+            "deviceInfo": {
+              "applicationId": "synthetic-sensors-app",
+              "deviceProfileName": "KIWI",
+              "devEui": "a840410000000001"
+            },
+            "object": {
+              "input5_frequency": 1794,
+              "input6_frequency": 3697,
+              "light_intensity": 2278,
+              "ambient_temperature": 32.4,
+              "relative_humidity": 24,
+              "swt_wm2": 137.5
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

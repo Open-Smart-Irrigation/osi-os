@@ -1,0 +1,14 @@
+{
+  "name": "connect-empty-eui-fresh",
+  "cloud": true,
+  "cloudConnect": {
+    "eui": "",
+    "password": "synthetic-current"
+  },
+  "steps": [
+    {
+      "id": "connect",
+      "waitMs": 1
+    }
+  ]
+}

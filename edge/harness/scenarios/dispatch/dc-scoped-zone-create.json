@@ -1,0 +1,70 @@
+{
+  "name": "dc-scoped-zone-create",
+  "description": "Dispatch-inventory probe for the scoped role checks on zone create and zone rename: a viewer gets 403 and no row. Record with --scoped.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-as-admin",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Admin zone",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "make-viewer",
+      "sql": "UPDATE users SET role='viewer' WHERE username='farmer';"
+    },
+    {
+      "id": "create-as-viewer",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Viewer zone",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "rename-as-viewer",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/name",
+        "auth": "token",
+        "body": {
+          "name": "Viewer rename"
+        }
+      }
+    }
+  ]
+}

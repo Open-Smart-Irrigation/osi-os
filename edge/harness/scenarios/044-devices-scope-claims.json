@@ -1,0 +1,89 @@
+{
+  "name": "devices-scope-claims",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone"
+        }
+      }
+    },
+    {
+      "id": "seed-owner-and-assigned",
+      "sql": "INSERT INTO users(id,username,password_hash,role,created_at,user_uuid) VALUES(999,'other','unused','researcher',CURRENT_TIMESTAMP,'bbed0200-0000-4000-8000-000000000099'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,irrigation_zone_id,sync_version) VALUES ('A840410000000088','Assigned sensor','KIWI_SENSOR',1,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1,1),('A840410000000089','Other owner','KIWI_SENSOR',999,'2026-11-18T09:00:00.000Z','2026-11-18T09:00:00.000Z',1,1)"
+    },
+    {
+      "id": "assigned-reclaim-no-zone-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000088",
+          "name": "Review changed label",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "assigned-reclaim-null-zone-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000088",
+          "name": "Review changed label",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "zone_id": null
+        }
+      }
+    },
+    {
+      "id": "other-owner-in-allowed-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000089",
+          "name": "Review changed label",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF",
+          "zone_id": 1
+        }
+      }
+    }
+  ]
+}

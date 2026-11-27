@@ -1,0 +1,63 @@
+{
+  "name": "linked-observed-close",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "devices discovered and claimed before the session, as in the release smoke",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+    },
+    {
+      "id": "link-gateway-for-cancel",
+      "sql": "INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES ('cloud',1,'0016C001F1000001','2026-11-23T06:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "seed-linked-running-command",
+      "sql": "UPDATE devices SET current_state='OPEN', target_state='OPEN' WHERE deveui='A840410000000001';\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,trigger,reconciliation_state,observed_open_at,transport_json) VALUES\n('a9600000-0000-4000-8000-000000000001','A840410000000001',1,'a9700000-0000-4000-8000-000000000001','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:03:00.000Z','unknown','2026-11-23T06:00:00.000Z','commanded','OBSERVED_RUNNING','2026-11-23T06:01:00.000Z','{\"phase\":\"ACCEPTED\",\"observation\":{\"source\":\"explicit_report\",\"report_only\":false,\"observed_at\":\"2026-11-23T06:01:00.000Z\"}}');\nINSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A840410000000001','{\"observation\":{\"state\":\"OPEN\",\"last_reported_at\":\"2026-11-23T06:01:00.000Z\",\"event_identity\":\"earlier-open\",\"physical_run_id\":\"a9600000-0000-4000-8000-000000000001\",\"uncertain\":false}}');"
+    },
+    {
+      "id": "reported-close-completes-a-linked-open",
+      "uplink": {
+        "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+        "payload": {
+          "time": "2026-11-23T06:03:00.000Z",
+          "deduplicationId": "reported-close-completes-a-linked-open",
+          "fCnt": 13,
+          "fPort": 4,
+          "deviceInfo": {
+            "devEui": "a840410000000001",
+            "deviceProfileName": "OSI STREGA Valve",
+            "applicationId": "synthetic-actuators-app"
+          },
+          "object": {
+            "Valve": "0"
+          }
+        }
+      }
+    }
+  ]
+}

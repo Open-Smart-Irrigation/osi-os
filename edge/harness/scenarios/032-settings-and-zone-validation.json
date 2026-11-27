@@ -1,0 +1,228 @@
+{
+  "name": "settings-and-zone",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "set-zone-gateway",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "europe/zurich"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "﻿Europe/Zurich﻿"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "config-decimal-0",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 100.013,
+          "irrigationEfficiencyPct": 95.01
+        }
+      }
+    },
+    {
+      "id": "config-decimal-1",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 1.2345678901234567,
+          "irrigationEfficiencyPct": 0.10001234567890123
+        }
+      }
+    },
+    {
+      "id": "config-decimal-2",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 100.01,
+          "irrigationEfficiencyPct": 99.91
+        }
+      }
+    },
+    {
+      "id": "config-decimal-3",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 10000000001.000002,
+          "irrigationEfficiencyPct": 99.99999999999999
+        }
+      }
+    },
+    {
+      "id": "config-decimal-4",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 2099.99,
+          "irrigationEfficiencyPct": 0.125
+        }
+      }
+    },
+    {
+      "id": "config-decimal-5",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 100.29999999999998,
+          "irrigationEfficiencyPct": 87.675
+        }
+      }
+    },
+    {
+      "id": "config-decimal-6",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 1037.1100000000001,
+          "irrigationEfficiencyPct": 13.1
+        }
+      }
+    },
+    {
+      "id": "config-decimal-7",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 0.000012345678901234566,
+          "irrigationEfficiencyPct": 66.6
+        }
+      }
+    },
+    {
+      "id": "config-decimal-8",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 79999.99,
+          "irrigationEfficiencyPct": 31.319
+        }
+      }
+    },
+    {
+      "id": "config-decimal-9",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": 1847.71,
+          "irrigationEfficiencyPct": 80.09
+        }
+      }
+    },
+    {
+      "id": "settings-timezone-single-element-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": [
+            "Europe/Zurich"
+          ]
+        }
+      }
+    },
+    {
+      "id": "settings-invalid-object-timezone",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "zone-config-invalid-note-coercion",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": {
+            "toString": null
+          }
+        }
+      }
+    },
+    {
+      "id": "config-minimum-normal-range",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "areaM2": "1e-6",
+          "irrigationEfficiencyPct": "5e-308"
+        }
+      }
+    }
+  ]
+}

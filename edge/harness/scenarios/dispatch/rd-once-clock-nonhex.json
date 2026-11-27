@@ -1,0 +1,11 @@
+{
+  "name": "rd-once-clock-nonhex",
+  "steps": [
+    {"id": "register", "http": {"method": "POST", "path": "/auth/register", "body": {"username": "farmer", "password": "synthetic-pass-1"}}},
+    {"id": "login", "http": {"method": "POST", "path": "/auth/login", "body": {"username": "farmer", "password": "synthetic-pass-1"}}, "capture": {"token": "json.token"}},
+    {"id": "setup", "why": "Isolated non-16-hex STREGA rows: one with a due ONCE schedule, one with a WEEKLY schedule and no clock stamp (clock sync due on both sides).",
+     "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('NOTAHEXEUI000006','Nonhex once','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'),('NOTAHEXEUI000007','Nonhex weekly','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,fire_at,duration_minutes,timezone,enabled,once_state) VALUES ('ceaa2200-0000-4000-8000-0000000000b1','NOTAHEXEUI000006','ONCE',strftime('%Y-%m-%dT%H:%M:00.000Z','now','-1 minute'),7,'UTC',1,'PENDING'); INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled) VALUES ('ceaa2200-0000-4000-8000-0000000000b2','NOTAHEXEUI000007','WEEKLY',127,'06:00',10,'UTC',1);"},
+    {"id": "once-tick", "timer": "valve-once-tick"},
+    {"id": "clock-tick", "timer": "valve-clock-tick"}
+  ]
+}

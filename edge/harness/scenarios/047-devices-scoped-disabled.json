@@ -1,0 +1,148 @@
+{
+  "name": "devices-scoped-disabled",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone"
+        }
+      }
+    },
+    {
+      "id": "zones-list-warm",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "empty-disabled-at",
+      "sql": "UPDATE users SET disabled_at='' WHERE id=1"
+    },
+    {
+      "id": "zones-list-empty-disabled-at",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "devices-list-empty-disabled-at",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "config-empty-disabled-at",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": "changed"
+        }
+      }
+    },
+    {
+      "id": "settings-empty-disabled-at",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "UTC"
+        }
+      }
+    },
+    {
+      "id": "device-claim-empty-disabled-at",
+      "http": {
+        "method": "POST",
+        "path": "/api/devices",
+        "auth": "token",
+        "body": {
+          "deveui": "A840410000000081",
+          "name": "Review claim",
+          "type_id": "KIWI_SENSOR",
+          "appkey": "00112233445566778899AABBCCDDEEFF"
+        }
+      }
+    },
+    {
+      "id": "disabled-at",
+      "sql": "UPDATE users SET disabled_at='2026-11-19T09:00:00.000Z' WHERE id=1"
+    },
+    {
+      "id": "zones-list-after-disable",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "devices-list-after-disable",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "config-after-disable",
+      "http": {
+        "method": "PUT",
+        "path": "/api/irrigation-zones/1/config",
+        "auth": "token",
+        "body": {
+          "notes": "should not change"
+        }
+      }
+    },
+    {
+      "id": "scope-cache-expiry",
+      "waitMs": 31000
+    },
+    {
+      "id": "devices-list-after-cache-expiry",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

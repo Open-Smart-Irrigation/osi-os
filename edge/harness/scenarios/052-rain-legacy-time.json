@@ -1,0 +1,166 @@
+{
+  "name": "rain-legacy-time",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "seed-rain-date",
+      "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone) VALUES (1,'Zurich',1,'UTC'),(2,'Asuncion',1,'America/Asuncion'); INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES ('A840410000000101','Minute precision','AQUASCOPE_LORAIN',1,1,'2026-07-20T00:00:00.000Z','2026-07-20T00:00:00.000Z'),('A840410000000102','Paraguay tzdata','AQUASCOPE_LORAIN',1,2,'2026-07-21T00:00:00.000Z','2026-07-21T00:00:00.000Z'); INSERT INTO device_data(deveui,recorded_at,rain_mm_today) VALUES ('A840410000000101','2026-07-20 23:30',2.5),('A840410000000102','2026-07-20T03:25:00.000Z',3.5)"
+    },
+    {
+      "id": "seed-0",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20 23:30:00 UTC' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-0",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-1",
+      "sql": "UPDATE device_data SET recorded_at='Mon, 20 Jul 2026 23:30:00 PST' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-1",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-2",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20T23:30:00.123456789+00:00' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-2",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-3",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20 23:30:00 +0100' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-3",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-4",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20 23:30:00 +02:00' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-4",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-5",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20T24:00:00Z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-5",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-6",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20T23:30:00,123Z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-6",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-7",
+      "sql": "UPDATE device_data SET recorded_at='2026/07/20 23:30:00' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-7",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-8",
+      "sql": "UPDATE device_data SET recorded_at='2026-07-20t23:30:00z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-8",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-9",
+      "sql": "UPDATE device_data SET recorded_at='1900-01-01T00:00:00Z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-9",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "seed-10",
+      "sql": "UPDATE device_data SET recorded_at='0001-01-01T00:00:00Z' WHERE deveui='A840410000000101'"
+    },
+    {
+      "id": "list-10",
+      "http": {
+        "method": "GET",
+        "path": "/api/devices",
+        "auth": "token"
+      }
+    }
+  ]
+}

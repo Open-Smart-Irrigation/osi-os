@@ -1,0 +1,77 @@
+{
+ "name": "r6-mut-claim-nul-gateway",
+ "description": "Mutation triage (inventory pass, device-claim rows; nul-char on devices.gateway_device_eui): claiming an existing unclaimed device whose stored gateway_device_eui ends in U+0000. post-devices-insert splices String(existing.gateway_device_eui || gatewayDeviceEui).trim().toUpperCase() into the UPDATE as a quoted literal; trim() keeps the NUL, so cs-register-device-fn's run(sql) fails after provisioning, the claim rolls back and the provisioned ChirpStack device is deleted. Go ran the same text through its driver, which read past the NUL, and claimed the device. D2 (a clean stored EUI) is the control; D3 is the STREGA path (applyStregaClaim).",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "existing",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES ('A8404100000000D1','D1','KIWI_SENSOR',NULL,'0016C001F1000001'||char(0),1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A8404100000000D2','D2','KIWI_SENSOR',NULL,'0016C001F1000001',1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A8404100000000D3','D3','STREGA_VALVE',NULL,'0016C001F1000001'||char(0),1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z');"
+  },
+  {
+   "id": "claim-d1",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A8404100000000D1",
+     "name": "Dev D1",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-d2",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A8404100000000D2",
+     "name": "Dev D2",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  },
+  {
+   "id": "claim-d3",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A8404100000000D3",
+     "name": "Valve D3",
+     "type_id": "STREGA_VALVE",
+     "appkey": "00112233445566778899AABBCCDDEEFF"
+    }
+   }
+  }
+ ]
+}

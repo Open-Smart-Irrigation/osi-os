@@ -1,0 +1,48 @@
+{
+  "name": "r1-dispatch-clear-nonhex-key",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "Zone A with two GEN2 valves: X840410000000008 (non-hex key) and A840410000000009 (valid control).",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('X840410000000008','Non-hex key','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000009','Valid','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');"
+    },
+    {
+      "id": "seed-unattempted-lifecycle-clears",
+      "why": "An unattempted lifecycle clear on each valve. The non-hex valve's binding names a 16-hex EUI, so parseControl accepts it; push.js sendPreparedLifecycleClear's withValveWriter refuses the key and emitPendingClears goes on to the next candidate.",
+      "sql": "INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) SELECT 'X840410000000008','GEN2',json_object('mode','LIFECYCLE_CLEAR','generation','GEN2','desired_revision','a3200000-0000-4000-8000-000000000008','required_push_ids',json_array('a3100000-0000-4000-8000-000000000008'),'predecessor_push_ids',json_array(),'readiness',json_object('state','PENDING','revision','a3200000-0000-4000-8000-000000000008','reason','awaiting_clear_ack'),'prepared_at','2026-11-23T06:02:00.000Z','reason','device_unclaim','lifecycle_clear',json_object('v',1,'revision','a3200000-0000-4000-8000-000000000008','state','PENDING','reason','device_unclaim','prepared_at','2026-11-23T06:02:00.000Z','device',json_object('row_id',d.id,'device_eui','A840410000000008','type_id',d.type_id,'user_id',d.user_id,'irrigation_zone_id',d.irrigation_zone_id,'deleted_at',d.deleted_at),'generation','GEN2','zone',json_object('zone_uuid',z.zone_uuid,'sync_version',coalesce(z.sync_version,0),'deleted_at',z.deleted_at),'policy',NULL,'retired_schedules',json_array(),'live_schedule_snapshot',json_array())) FROM devices d JOIN irrigation_zones z ON d.irrigation_zone_id=z.id WHERE d.deveui='X840410000000008'; INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,plan_hash,transport_json) VALUES ('a3100000-0000-4000-8000-000000000008','X840410000000008','DAYMASK_PLAN',25,'80','da39a3ee5e6b4b0d3255bfef95601890afd80709','{\"lifecycle_clear_revision\":\"a3200000-0000-4000-8000-000000000008\"}');INSERT INTO valve_settings(device_eui,strega_generation,conditional_control_json) SELECT 'A840410000000009','GEN2',json_object('mode','LIFECYCLE_CLEAR','generation','GEN2','desired_revision','a3200000-0000-4000-8000-000000000009','required_push_ids',json_array('a3100000-0000-4000-8000-000000000009'),'predecessor_push_ids',json_array(),'readiness',json_object('state','PENDING','revision','a3200000-0000-4000-8000-000000000009','reason','awaiting_clear_ack'),'prepared_at','2026-11-23T06:02:00.000Z','reason','device_unclaim','lifecycle_clear',json_object('v',1,'revision','a3200000-0000-4000-8000-000000000009','state','PENDING','reason','device_unclaim','prepared_at','2026-11-23T06:02:00.000Z','device',json_object('row_id',d.id,'device_eui','A840410000000009','type_id',d.type_id,'user_id',d.user_id,'irrigation_zone_id',d.irrigation_zone_id,'deleted_at',d.deleted_at),'generation','GEN2','zone',json_object('zone_uuid',z.zone_uuid,'sync_version',coalesce(z.sync_version,0),'deleted_at',z.deleted_at),'policy',NULL,'retired_schedules',json_array(),'live_schedule_snapshot',json_array())) FROM devices d JOIN irrigation_zones z ON d.irrigation_zone_id=z.id WHERE d.deveui='A840410000000009'; INSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,fport,payload_hex,plan_hash,transport_json) VALUES ('a3100000-0000-4000-8000-000000000009','A840410000000009','DAYMASK_PLAN',25,'80','da39a3ee5e6b4b0d3255bfef95601890afd80709','{\"lifecycle_clear_revision\":\"a3200000-0000-4000-8000-000000000009\"}');"
+    },
+    {
+      "id": "clock-tick",
+      "timer": "valve-clock-tick"
+    },
+    {
+      "id": "clock-tick-again",
+      "timer": "valve-clock-tick"
+    }
+  ]
+}

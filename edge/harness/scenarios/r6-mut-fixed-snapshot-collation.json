@@ -1,0 +1,63 @@
+{
+ "name": "r6-mut-fixed-snapshot-collation",
+ "description": "Mutation triage (same class as zone-schedule/lifecycle-collation): push.js fixedScheduleSnapshot sorts the fixed transition's source_schedule_snapshot with String(a.schedule_uuid).localeCompare(...). Go sorted by bytes, so the first Gen2 clock acknowledgement stored the snapshot in another order when schedule ids differ only in case or in '_' against '-'. 07I-gen2-fixed-transition with four weekly schedules.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "seed-fixed-weekly-schedules",
+   "why": "Weekly schedules whose schedule_uuid order differs between ICU's localeCompare and byte order: a pair equal but for case (ICU puts lower case first) and a pair that differs in '_' against '-' (ICU sorts '_' first).",
+   "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('A1100000-0000-4000-8000-000000000006','A840410000000001','WEEKLY',1,'08:05',2,'UTC');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('a1100000-0000-4000-8000-000000000006','A840410000000001','WEEKLY',2,'08:10',2,'UTC');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('b1100000-0000-4000-8000-00000000000-','A840410000000001','WEEKLY',4,'08:15',2,'UTC');INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('b1100000-0000-4000-8000-00000000000_','A840410000000001','WEEKLY',8,'08:20',2,'UTC');"
+  },
+  {
+   "id": "first-gen2-clock-ack-with-weekly-plan",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "deduplicationId": "first-gen2-clock-ack-with-weekly-plan",
+     "time": "2026-11-23T06:03:00.000Z",
+     "fCnt": 301,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve Gen2",
+      "deviceProfileId": "11111111-1111-4111-8111-11111111111A",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Ack_Port": 13,
+      "Ack_Value": 1
+     }
+    }
+   }
+  }
+ ]
+}

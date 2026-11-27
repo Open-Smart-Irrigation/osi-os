@@ -1,0 +1,169 @@
+{
+ "name": "r5-auth-blob-hash",
+ "description": "Credential, mode and disabled columns stored as BLOB (never written; TEXT columns keep BLOBs). node-sqlite3 returns a Buffer: typeof refusals give 401, bcryptjs throws give 500, a Buffer is truthy.",
+ "steps": [
+  {
+   "id": "seed-blob-plain",
+   "why": "BLOB plaintext legacy value",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role) VALUES(2,'blob-plain',CAST('synthetic-pass-1' AS BLOB),'2026-01-01','admin')"
+  },
+  {
+   "id": "login-blob-plain",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "blob-plain",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "p": "json.token"
+   }
+  },
+  {
+   "id": "me-blob-plain",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "p"
+   }
+  },
+  {
+   "id": "seed-blob-bcrypt",
+   "why": "BLOB bcrypt value",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role) VALUES(3,'blob-bcrypt',CAST('$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG' AS BLOB),'2026-01-01','admin')"
+  },
+  {
+   "id": "login-blob-bcrypt",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "blob-bcrypt",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-blob-linked",
+   "why": "linked account with BLOB server_password_hash, no verifier",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_password_hash,created_at,role) VALUES(4,'blob-linked-local','x','server','blob-linked',CAST('$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG' AS BLOB),'2026-01-01','admin')"
+  },
+  {
+   "id": "login-blob-linked",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "blob-linked",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-blob-mode",
+   "why": "auth_mode stored as BLOB \"server\": Node compares with === and takes the local path",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_password_hash,created_at,role) VALUES(5,'blob-mode','x',CAST('server' AS BLOB),'blob-mode-cloud','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01','admin')"
+  },
+  {
+   "id": "login-blob-mode",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "blob-mode",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-blob-verifier",
+   "why": "BLOB server_offline_verifier is ignored (typeof check); TEXT server_password_hash decides",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_password_hash,server_offline_verifier,created_at,role) VALUES(6,'blob-verifier-local','x','server','blob-verifier','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG',CAST('$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG' AS BLOB),'2026-01-01','admin')"
+  },
+  {
+   "id": "login-blob-verifier",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "blob-verifier",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-empty-blob-linked",
+   "why": "empty BLOB server_password_hash is a truthy Buffer: bcryptjs compareSync throws",
+   "sql": "INSERT INTO users(id,username,password_hash,auth_mode,server_username,server_password_hash,created_at,role) VALUES(7,'empty-linked-local','x','server','empty-linked',x'','2026-01-01','admin')"
+  },
+  {
+   "id": "login-empty-blob-linked",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "empty-linked",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "seed-text-user",
+   "why": "TEXT control account for the disabled_at probes",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role) VALUES(8,'text-user','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01','admin')"
+  },
+  {
+   "id": "login-text-user",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "text-user",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "d": "json.token"
+   }
+  },
+  {
+   "id": "me-text-user",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "d"
+   }
+  },
+  {
+   "id": "disable-empty-blob",
+   "why": "empty BLOB disabled_at is a truthy Buffer in api-me-fn",
+   "sql": "UPDATE users SET disabled_at=x'' WHERE id=8"
+  },
+  {
+   "id": "me-empty-blob-disabled",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "d"
+   }
+  },
+  {
+   "id": "disable-blob",
+   "sql": "UPDATE users SET disabled_at=CAST('2026-01-02' AS BLOB) WHERE id=8"
+  },
+  {
+   "id": "me-blob-disabled",
+   "http": {
+    "method": "GET",
+    "path": "/api/me",
+    "auth": "d"
+   }
+  },
+  {
+   "id": "users-after",
+   "sql": "SELECT 1"
+  }
+ ]
+}

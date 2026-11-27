@@ -1,0 +1,179 @@
+{
+ "name": "valve-observation",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "initial-closed",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "time": "2026-11-23T06:05:00.000Z",
+     "deduplicationId": "initial-closed",
+     "fCnt": 1,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "0"
+     }
+    }
+   }
+  },
+  {
+   "id": "equal-time-conflicting-open",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "time": "2026-11-23T06:05:00.000Z",
+     "deduplicationId": "equal-time-conflicting-open",
+     "fCnt": 2,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "out-of-order-open",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "time": "2026-11-23T06:04:00.000Z",
+     "deduplicationId": "out-of-order-open",
+     "fCnt": 3,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "single-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000001",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "seed-invalid-snapshot",
+   "sql": "UPDATE valve_actuation_expectations SET transport_json=json_set(transport_json,'$.effect_snapshot.version',99) WHERE command_id IS NOT NULL;"
+  },
+  {
+   "id": "open-with-invalid-owner-snapshot",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "time": "2026-11-23T06:06:00.000Z",
+     "deduplicationId": "open-with-invalid-owner-snapshot",
+     "fCnt": 4,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "seed-valid-conditional-relation",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000005','Valve 5','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) SELECT 'bb500000-0000-4000-8000-000000000005','A840410000000005',1,'bb500000-0000-4000-8000-000000000005','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:33:00.000Z','unknown','2026-11-23T06:00:00.000Z',json_remove(json_set(transport_json,'$.effect_snapshot.version', 1, '$.effect_snapshot.device_eui', 'A840410000000005', '$.effect_snapshot.anchor_at', '2026-11-23T06:00:00.000Z', '$.effect_snapshot.latest_physical_start_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.calculated_queue_expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.queue_expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.future_effect_end', '2026-11-23T06:33:00.000Z', '$.effect_snapshot.exclusion_end_at', '2026-11-23T06:33:00.000Z', '$.effect_snapshot.reservation_end_at', '2026-11-23T06:33:00.000Z','$.effect_snapshot.qualification_context.device_eui','A840410000000005','$.attempt_trusted_at','2026-11-23T06:00:00.000Z'),'$.attempt_receipt') FROM valve_actuation_expectations WHERE device_eui='A840410000000001' AND command_id IS NOT NULL;\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state,expires_at,reservation_end_at,decision_evidence_json) SELECT 'bb500000-0000-4000-8000-000000000005','{{date:+0}}','06:00','A840410000000005','2026-11-23T06:00:00.000Z','bb500000-0000-4000-8000-000000000005','SENT','2026-11-23T06:31:00.000Z','2026-11-23T06:33:00.000Z',json_object('effect_bounds',json_object('queue_expires_at','2026-11-23T06:31:00.000Z','latest_physical_start_at','2026-11-23T06:31:00.000Z','future_effect_end','2026-11-23T06:33:00.000Z','exclusion_end_at','2026-11-23T06:33:00.000Z'),'effect_snapshot',json_extract(transport_json,'$.effect_snapshot')) FROM valve_actuation_expectations WHERE command_id='bb500000-0000-4000-8000-000000000005';"
+  },
+  {
+   "id": "open-with-valid-conditional-relation",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000005/event/up",
+    "payload": {
+     "time": "2026-11-23T06:07:00.000Z",
+     "deduplicationId": "open-with-valid-conditional-relation",
+     "fCnt": 5,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000005",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  },
+  {
+   "id": "seed-changed-conditional-relation",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) VALUES ('A840410000000006','Valve 6','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) SELECT 'bb500000-0000-4000-8000-000000000006','A840410000000006',1,'bb500000-0000-4000-8000-000000000006','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:33:00.000Z','unknown','2026-11-23T06:00:00.000Z',json_remove(json_set(transport_json,'$.effect_snapshot.version', 1, '$.effect_snapshot.device_eui', 'A840410000000006', '$.effect_snapshot.anchor_at', '2026-11-23T06:00:00.000Z', '$.effect_snapshot.latest_physical_start_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.calculated_queue_expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.queue_expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.expires_at', '2026-11-23T06:31:00.000Z', '$.effect_snapshot.future_effect_end', '2026-11-23T06:33:00.000Z', '$.effect_snapshot.exclusion_end_at', '2026-11-23T06:33:00.000Z', '$.effect_snapshot.reservation_end_at', '2026-11-23T06:33:00.000Z','$.effect_snapshot.qualification_context.device_eui','A840410000000006','$.attempt_trusted_at','2026-11-23T06:00:00.000Z'),'$.attempt_receipt') FROM valve_actuation_expectations WHERE device_eui='A840410000000001' AND command_id IS NOT NULL;\nINSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state,expires_at,reservation_end_at,decision_evidence_json) SELECT 'bb500000-0000-4000-8000-000000000006','{{date:+0}}','06:00','A840410000000006','2026-11-23T06:00:00.000Z','bb500000-0000-4000-8000-000000000006','SENT','2026-11-23T06:31:00.000Z','2026-11-23T06:33:00.000Z',json_object('effect_bounds',json_object('queue_expires_at','2026-11-23T06:32:00.000Z','latest_physical_start_at','2026-11-23T06:31:00.000Z','future_effect_end','2026-11-23T06:33:00.000Z','exclusion_end_at','2026-11-23T06:33:00.000Z'),'effect_snapshot',json_extract(transport_json,'$.effect_snapshot')) FROM valve_actuation_expectations WHERE command_id='bb500000-0000-4000-8000-000000000006';"
+  },
+  {
+   "id": "open-with-changed-conditional-relation",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000006/event/up",
+    "payload": {
+     "time": "2026-11-23T06:07:00.000Z",
+     "deduplicationId": "open-with-changed-conditional-relation",
+     "fCnt": 5,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000006",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "1"
+     }
+    }
+   }
+  }
+ ]
+}

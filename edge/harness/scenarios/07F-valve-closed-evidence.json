@@ -1,0 +1,59 @@
+{
+ "name": "valve-closed-evidence",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "seed-committed-close-owner",
+   "sql": "INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at,transport_json) VALUES ('bff4c1e4-62a2-4ff3-8064-2b80b1a09271','A840410000000001',1,'23a9d3e4-98a0-45ad-b6c6-978dcad36089','2026-11-23T17:20:04.185Z',0,'2026-11-23T17:20:04.185Z','unknown','2026-11-23T17:20:04.185Z','{\"effect_snapshot\":{\"version\":1,\"fPort\":1,\"data\":\"MA==\",\"bytes_hex\":\"30\",\"confirmed\":false,\"encrypted\":false,\"provenance\":{\"source\":\"local_encoder\"},\"encoded_duration_seconds\":null,\"effect_class\":\"CLOSE_ONLY\",\"snapshot_version\":1,\"anchor_at\":\"2026-11-23T17:20:04.185Z\",\"device_eui\":\"A840410000000001\",\"interval_minutes\":10,\"interval_source\":\"documented_default\",\"allowance_minutes\":31,\"latest_physical_start_at\":\"2026-11-23T17:51:04.185Z\",\"calculated_queue_expires_at\":\"2026-11-23T17:51:04.185Z\",\"explicit_expiry_at\":null,\"queue_expires_at\":\"2026-11-23T17:51:04.185Z\",\"future_effect_end\":\"2026-11-23T17:51:04.185Z\",\"exclusion_end_at\":\"2026-11-23T17:51:04.185Z\",\"minimum_gap_minutes\":0,\"qualification\":{\"qualified\":false,\"identity\":null,\"margin_seconds\":null,\"reason\":\"qualification_unavailable\"},\"qualification_context\":{\"device_eui\":\"A840410000000001\",\"identity\":null},\"reservation_end_at\":\"2026-11-23T17:51:04.185Z\",\"expires_at\":\"2026-11-23T17:51:04.185Z\"},\"phase\":\"ACCEPTED\",\"intent_at\":\"2026-11-23T17:20:04.188Z\",\"attempted_at\":\"2026-11-23T17:20:04.188Z\",\"enqueue_timeout_ms\":20000,\"attempt_trusted_at\":\"2026-11-23T17:20:04.188Z\",\"queue_id\":\"707fca1a-1eb4-4315-81ca-7beacbab8aee\",\"accepted_at\":\"2026-11-23T17:20:04.193Z\"}');"
+  },
+  {
+   "id": "trusted-closed-after-close",
+   "uplink": {
+    "topic": "application/synthetic-actuators-app/device/a840410000000001/event/up",
+    "payload": {
+     "time": "2026-11-23T17:21:04.188Z",
+     "deduplicationId": "r2-close-evidence",
+     "fCnt": 13,
+     "fPort": 4,
+     "deviceInfo": {
+      "devEui": "a840410000000001",
+      "deviceProfileName": "OSI STREGA Valve",
+      "applicationId": "synthetic-actuators-app"
+     },
+     "object": {
+      "Valve": "0"
+     }
+    }
+   }
+  }
+ ]
+}

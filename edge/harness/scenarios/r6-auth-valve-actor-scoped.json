@@ -1,0 +1,336 @@
+{
+ "name": "r6-auth-valve-actor-scoped",
+ "description": "STREGA valve commands for accounts whose user_uuid is BLOB, empty BLOB, a BLOB with a TEXT twin, or TEXT with padding. The boundary check binds the Buffer; the dispatch re-check uses String(actor).trim(). Record with --scoped.",
+ "steps": [
+  {
+   "id": "seed-text",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(110,'va-text','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-text',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(110,'Zone va-text',110,'UTC','z-va-text','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A84041000000106E','Probe','KIWI_SENSOR',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A84041000000206E','Valve','STREGA_VALVE',110,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',110,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "text-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000206E",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "text-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+    }
+   }
+  },
+  {
+   "id": "text-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A84041000000206E/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "text-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A84041000000206E/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMCwidXNlcm5hbWUiOiJ2YS10ZXh0IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.DBP6bGXOKIvnf5nWC6CuQxumLLTljL5qZvK1YUOoxCM"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  },
+  {
+   "id": "seed-blob",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(112,'va-blob','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-va-blob' AS BLOB),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(112,'Zone va-blob',112,'UTC','z-va-blob','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001070','Probe','KIWI_SENSOR',112,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',112);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002070','Valve','STREGA_VALVE',112,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',112,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "blob-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002070",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMiwidXNlcm5hbWUiOiJ2YS1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wRioEKp_K_I0Co9QTWI36wT_XXF5pVCBVMX5CcCWUDU"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "blob-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMiwidXNlcm5hbWUiOiJ2YS1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wRioEKp_K_I0Co9QTWI36wT_XXF5pVCBVMX5CcCWUDU"
+    }
+   }
+  },
+  {
+   "id": "blob-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002070/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMiwidXNlcm5hbWUiOiJ2YS1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wRioEKp_K_I0Co9QTWI36wT_XXF5pVCBVMX5CcCWUDU"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "blob-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000002070/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExMiwidXNlcm5hbWUiOiJ2YS1ibG9iIiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.wRioEKp_K_I0Co9QTWI36wT_XXF5pVCBVMX5CcCWUDU"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  },
+  {
+   "id": "seed-blob-twin",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(114,'va-blob-twin','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-va-twin' AS BLOB),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(114,'Zone va-blob-twin',114,'UTC','z-va-blob-twin','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001072','Probe','KIWI_SENSOR',114,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',114);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002072','Valve','STREGA_VALVE',114,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',114,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid) VALUES(115,'va-twin-of-blob-twin','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-twin')"
+  },
+  {
+   "id": "blob-twin-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002072",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNCwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4iLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.3kvmod1lw316iHW8TFvCeLAUi7ij48JGgEiUJa9YGF8"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "blob-twin-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNCwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4iLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.3kvmod1lw316iHW8TFvCeLAUi7ij48JGgEiUJa9YGF8"
+    }
+   }
+  },
+  {
+   "id": "blob-twin-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002072/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNCwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4iLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.3kvmod1lw316iHW8TFvCeLAUi7ij48JGgEiUJa9YGF8"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "blob-twin-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000002072/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNCwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4iLCJpYXQiOjE3MDAwMDAwMDAwMDAsImV4cCI6NDEwMjQ0NDgwMDAwMH0.3kvmod1lw316iHW8TFvCeLAUi7ij48JGgEiUJa9YGF8"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  },
+  {
+   "id": "seed-blob-twin-granted",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(116,'va-blob-twin-granted','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',CAST('u-va-twin2' AS BLOB),NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(116,'Zone va-blob-twin-granted',116,'UTC','z-va-blob-twin-granted','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001074','Probe','KIWI_SENSOR',116,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',116);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002074','Valve','STREGA_VALVE',116,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',116,'CLOSED','MOTORIZED');\nINSERT INTO users(id,username,password_hash,created_at,role,user_uuid) VALUES(117,'va-twin-of-blob-twin-granted','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin','u-va-twin2');\nINSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at) VALUES('as-va-blob-twin-granted','u-va-twin2','z-va-blob-twin-granted','2026-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "blob-twin-granted-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002074",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNiwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4tZ3JhbnRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.yCm6v1nuQlnlQ_TxQni_D2LPjpLjUpYf5e4nfXsV0S0"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "blob-twin-granted-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNiwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4tZ3JhbnRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.yCm6v1nuQlnlQ_TxQni_D2LPjpLjUpYf5e4nfXsV0S0"
+    }
+   }
+  },
+  {
+   "id": "blob-twin-granted-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002074/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNiwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4tZ3JhbnRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.yCm6v1nuQlnlQ_TxQni_D2LPjpLjUpYf5e4nfXsV0S0"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "blob-twin-granted-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000002074/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExNiwidXNlcm5hbWUiOiJ2YS1ibG9iLXR3aW4tZ3JhbnRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.yCm6v1nuQlnlQ_TxQni_D2LPjpLjUpYf5e4nfXsV0S0"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  },
+  {
+   "id": "seed-blob-empty",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(118,'va-blob-empty','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',x'',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(118,'Zone va-blob-empty',118,'UTC','z-va-blob-empty','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001076','Probe','KIWI_SENSOR',118,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',118);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002076','Valve','STREGA_VALVE',118,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',118,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "blob-empty-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002076",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExOCwidXNlcm5hbWUiOiJ2YS1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.xiK7ypp1Uh3uLFGVwdKmxsavhF6O_6MvdMK7pT-zgqQ"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "blob-empty-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExOCwidXNlcm5hbWUiOiJ2YS1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.xiK7ypp1Uh3uLFGVwdKmxsavhF6O_6MvdMK7pT-zgqQ"
+    }
+   }
+  },
+  {
+   "id": "blob-empty-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002076/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExOCwidXNlcm5hbWUiOiJ2YS1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.xiK7ypp1Uh3uLFGVwdKmxsavhF6O_6MvdMK7pT-zgqQ"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "blob-empty-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000002076/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjExOCwidXNlcm5hbWUiOiJ2YS1ibG9iLWVtcHR5IiwiaWF0IjoxNzAwMDAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDAwMDB9.xiK7ypp1Uh3uLFGVwdKmxsavhF6O_6MvdMK7pT-zgqQ"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  },
+  {
+   "id": "seed-text-padded",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(120,'va-text-padded','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',' u-va-pad ',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(120,'Zone va-text-padded',120,'UTC','z-va-text-padded','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001078','Probe','KIWI_SENSOR',120,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',120);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002078','Valve','STREGA_VALVE',120,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',120,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "text-padded-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002078",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "text-padded-valves-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    }
+   }
+  },
+  {
+   "id": "text-padded-cancel",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002078/cancel",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    },
+    "body": {}
+   }
+  },
+  {
+   "id": "text-padded-schedule-create",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000002078/schedules",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    },
+    "body": {
+     "schedule_type": "interval",
+     "start_time": "06:00",
+     "duration_minutes": 5,
+     "interval_days": 1
+    }
+   }
+  }
+ ]
+}

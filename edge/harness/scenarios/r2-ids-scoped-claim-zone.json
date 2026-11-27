@@ -1,0 +1,138 @@
+{
+ "name": "r2-ids-scoped-claim-zone",
+ "description": "fix-ids-r2 N2: scoped claim with zone_id 123456789012345696 (number and string), new and existing device; the statement spells the JS number. Record --scoped.",
+ "steps": [
+  {
+   "id": "register-farmer",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "zone-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Z1",
+     "timezone": "Europe/Zurich"
+    }
+   }
+  },
+  {
+   "id": "renumber-zone",
+   "sql": "PRAGMA foreign_keys=OFF; UPDATE irrigation_zones SET id=123456789012345696 WHERE id=1"
+  },
+  {
+   "id": "zone-spelled",
+   "sql": "INSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,sync_version,created_at,updated_at) VALUES (123456789012345700,'Z700',1,'UTC','1b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c56',1,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "existing-device",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,sync_version,created_at,updated_at) VALUES ('A840410000000014','Old','KIWI_SENSOR',NULL,NULL,4,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z'),('A840410000000016','Old16','KIWI_SENSOR',NULL,123456789012345700,4,'2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')"
+  },
+  {
+   "id": "claim-new-into-big-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000013",
+     "name": "Dev 13",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "zone_id": 123456789012345700
+    }
+   }
+  },
+  {
+   "id": "claim-new-into-big-zone-string",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000015",
+     "name": "Dev 15",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "zone_id": "123456789012345696"
+    }
+   }
+  },
+  {
+   "id": "claim-existing-into-big-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000014",
+     "name": "Dev 14",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "zone_id": 123456789012345700
+    }
+   }
+  },
+  {
+   "id": "claim-existing-assigned-spelled",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000016",
+     "name": "Dev 16",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "zone_id": "123456789012345700"
+    }
+   }
+  },
+  {
+   "id": "claim-new-exponent-zone",
+   "http": {
+    "method": "POST",
+    "path": "/api/devices",
+    "auth": "token",
+    "body": {
+     "deveui": "A840410000000017",
+     "name": "Dev 17",
+     "type_id": "KIWI_SENSOR",
+     "appkey": "00112233445566778899AABBCCDDEEFF",
+     "zone_id": 1e+21
+    }
+   }
+  },
+  {
+   "id": "devices-list",
+   "http": {
+    "method": "GET",
+    "path": "/api/devices",
+    "auth": "token"
+   }
+  }
+ ]
+}

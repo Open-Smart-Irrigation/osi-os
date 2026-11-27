@@ -1,0 +1,116 @@
+{
+  "name": "r2-dispatch-manual-cloud",
+  "_comment": "Cloud broker traffic of accepted manual STREGA commands (open, CLOSE, CLOSE_FOR_DURATION, an open of a valve last reported open) and of an open while the account-recovery journal blocks cloud MQTT.",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "STREGA valves for each accepted manual action; A840410000000024 last reported OPEN.",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000021','Open valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000022','Close valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000023','Timed close valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); UPDATE devices SET current_state='OPEN', updated_at='2026-11-23T05:00:00.000Z' WHERE deveui='A840410000000022'; INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000024','Reported open valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'OPEN'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000025','Recovery valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED'); INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000026','After recovery valve','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED');"
+    },
+    {
+      "id": "open",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000021",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 5
+        }
+      }
+    },
+    {
+      "id": "close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000022",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "timed-close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000023",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE_FOR_DURATION",
+          "duration_minutes": 4
+        }
+      }
+    },
+    {
+      "id": "open-reported-open",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000024",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "recovery-block",
+      "cloudRecovery": "block"
+    },
+    {
+      "id": "open-during-recovery",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000025",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "recovery-unblock",
+      "cloudRecovery": "unblock"
+    },
+    {
+      "id": "open-after-recovery",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000026",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 6
+        }
+      }
+    }
+  ]
+}

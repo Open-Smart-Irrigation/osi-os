@@ -1,0 +1,152 @@
+{
+ "name": "ca-daily-nul-valve",
+ "description": "confirm-A probe: decision.js splices the stored valve deveui into the irrigation_events INSERT text (quote-doubled only). A NUL ends the statement, so Node-RED writes no event for that zone. Record legacy and --scoped.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "create-zone-1",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Nul irrigate",
+     "timezone": "UTC"
+    }
+   }
+  },
+  {
+   "id": "schedule-zone-1",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/1/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 20,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "create-zone-2",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Nul skip",
+     "timezone": "UTC"
+    }
+   }
+  },
+  {
+   "id": "schedule-zone-2",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/2/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 200,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "create-zone-3",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Quote nul skip",
+     "timezone": "UTC"
+    }
+   }
+  },
+  {
+   "id": "schedule-zone-3",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/3/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 200,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "create-zone-4",
+   "http": {
+    "method": "POST",
+    "path": "/api/irrigation-zones",
+    "auth": "token",
+    "body": {
+     "name": "Control skip",
+     "timezone": "UTC"
+    }
+   }
+  },
+  {
+   "id": "schedule-zone-4",
+   "http": {
+    "method": "PUT",
+    "path": "/api/irrigation-zones/4/schedule",
+    "auth": "token",
+    "body": {
+     "trigger_metric": "SWT_1",
+     "threshold_kpa": 200,
+     "duration_minutes": 20,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": "seed",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A84041000000' || char(0) || '00B1','Nul valve irrigate','STREGA_VALVE',1,1,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D1','Sensor 1','KIWI_SENSOR',1,1,NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A84041000000' || char(0) || '00B2','Nul valve skip','STREGA_VALVE',1,2,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D2','Sensor 2','KIWI_SENSOR',1,2,NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A840''41' || char(0) || 'B3','Quote nul valve','STREGA_VALVE',1,3,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D3','Sensor 3','KIWI_SENSOR',1,3,NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000B4','Control valve','STREGA_VALVE',1,4,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at,claimed_at) VALUES ('A8404100000000D4','Sensor 4','KIWI_SENSOR',1,4,NULL,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES ('A8404100000000D1',strftime('%Y-%m-%dT%H:%M:%fZ','now'),100),('A8404100000000D2',strftime('%Y-%m-%dT%H:%M:%fZ','now'),50),('A8404100000000D3',strftime('%Y-%m-%dT%H:%M:%fZ','now'),50),('A8404100000000D4',strftime('%Y-%m-%dT%H:%M:%fZ','now'),50);",
+   "why": "STREGA valves whose stored deveui holds U+0000 (zones 1-3) and a valid control valve (zone 4); one KIWI sensor per zone. Zone 1 is above threshold (IRRIGATE), zones 2-4 below (SKIP)."
+  },
+  {
+   "id": "daily-tick",
+   "timer": "daily-schedule-0600"
+  },
+  {
+   "id": "events",
+   "http": {
+    "method": "GET",
+    "path": "/api/irrigation-zones",
+    "auth": "token"
+   }
+  }
+ ]
+}

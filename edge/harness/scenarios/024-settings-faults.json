@@ -1,0 +1,118 @@
+{
+  "name": "settings-faults",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "set-zone-gateway",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "europe/zurich"
+        }
+      }
+    },
+    {
+      "id": "create-zone",
+      "http": {
+        "method": "POST",
+        "path": "/api/irrigation-zones",
+        "auth": "token",
+        "body": {
+          "name": "Review zone",
+          "timezone": "\ufeffEurope/Zurich\ufeff"
+        }
+      }
+    },
+    {
+      "id": "link",
+      "sql": "INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-11-23T00:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1,gateway_device_eui=excluded.gateway_device_eui"
+    },
+    {
+      "id": "reject-module-write",
+      "sql": "CREATE TRIGGER review_setting_abort BEFORE INSERT ON app_settings WHEN new.key='network_module_enabled' BEGIN SELECT RAISE(ABORT,'review settings refused'); END"
+    },
+    {
+      "id": "settings-fault",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "America/Asuncion",
+          "networkModuleEnabled": true,
+          "applyToAllZones": true
+        }
+      }
+    },
+    {
+      "id": "settings-after-fault",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "drop-module-fault",
+      "sql": "DROP TRIGGER review_setting_abort"
+    },
+    {
+      "id": "reject-zone-write",
+      "sql": "CREATE TRIGGER review_timezone_abort BEFORE UPDATE OF timezone ON irrigation_zones BEGIN SELECT RAISE(ABORT,'review timezone refused'); END"
+    },
+    {
+      "id": "settings-zone-fault",
+      "http": {
+        "method": "PUT",
+        "path": "/api/system/settings",
+        "auth": "token",
+        "body": {
+          "gatewayTimezone": "Pacific/Auckland",
+          "applyToAllZones": true
+        }
+      }
+    },
+    {
+      "id": "settings-after-zone-fault",
+      "http": {
+        "method": "GET",
+        "path": "/api/system/settings",
+        "auth": "token"
+      }
+    },
+    {
+      "id": "zones-after-zone-fault",
+      "http": {
+        "method": "GET",
+        "path": "/api/irrigation-zones",
+        "auth": "token"
+      }
+    }
+  ]
+}

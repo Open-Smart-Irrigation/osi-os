@@ -1,0 +1,43 @@
+{
+ "name": "r3-q3-dispatch-ack-fault",
+ "description": "Fix round Q3 (S1, auth r5): a scoped timed open whose dispatch re-check refuses the padded actor (scope_actor_required, a REJECTED_PERMANENT ACK), then the same open with a trigger that makes that ACK insert fail: queueCommandAck's throw reaches manual-ingress's outer catch, which answers 503 with the SQLite code. Record --scoped.",
+ "steps": [
+  {
+   "id": "seed-text-padded",
+   "sql": "INSERT INTO users(id,username,password_hash,created_at,role,user_uuid,disabled_at) VALUES(120,'va-text-padded','$2b$04$8genrpi8vDbNy.S5Cj1Xyer3MvIfd19sjNT0yb7/AW9QlmujB9hnG','2026-01-01T00:00:00.000Z','admin',' u-va-pad ',NULL);\nINSERT INTO irrigation_zones(id,name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES(120,'Zone va-text-padded',120,'UTC','z-va-text-padded','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id) VALUES('A840410000001078','Probe','KIWI_SENSOR',120,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',120);\nINSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES('A840410000002078','Valve','STREGA_VALVE',120,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',120,'CLOSED','MOTORIZED')"
+  },
+  {
+   "id": "padded-open-refused",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002078",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "ack-fault-trigger",
+   "sql": "CREATE TRIGGER q3_ack_fault BEFORE INSERT ON applied_commands WHEN NEW.result='REJECTED_PERMANENT' BEGIN SELECT RAISE(ABORT,'q3 rejection ack fault'); END;",
+   "why": "Makes the REJECTED_PERMANENT ACK insert of the dispatch-scope refusal fail."
+  },
+  {
+   "id": "padded-open-ack-fault",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000002078",
+    "headers": {
+     "authorization": "Bearer eyJ1c2VySWQiOjEyMCwidXNlcm5hbWUiOiJ2YS10ZXh0LXBhZGRlZCIsImlhdCI6MTcwMDAwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwMDAwfQ.m4r1bfodA__yMT0hLE5tkyoAkU_Psyn5zl-zDv3ak8w"
+    },
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  }
+ ]
+}

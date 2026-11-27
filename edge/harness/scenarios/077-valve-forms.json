@@ -1,0 +1,92 @@
+{
+ "name": "valve-forms",
+ "description": "Form-encoded timed open, timed close, the maximum duration and weekly schedule display.",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "why": "devices discovered and claimed before the session, as in the release smoke",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+  },
+  {
+   "id": "setup-extra",
+   "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000003','Valve 3','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';\nINSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000007','Valve 7','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';"
+  },
+  {
+   "id": "form-open",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000003",
+    "auth": "token",
+    "headers": {
+     "content-type": "application/x-www-form-urlencoded"
+    },
+    "rawBody": "action=OPEN_FOR_DURATION&duration_minutes=2"
+   }
+  },
+  {
+   "id": "timed-close",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000003",
+    "auth": "token",
+    "body": {
+     "action": "CLOSE_FOR_DURATION",
+     "duration_minutes": 2
+    }
+   }
+  },
+  {
+   "id": "max-duration",
+   "http": {
+    "method": "POST",
+    "path": "/api/valve/A840410000000003",
+    "auth": "token",
+    "body": {
+     "action": "OPEN_FOR_DURATION",
+     "duration_minutes": 255
+    }
+   }
+  },
+  {
+   "id": "seed-weekly",
+   "sql": "INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone) VALUES ('a1100000-0000-4000-8000-000000000006','A840410000000007','WEEKLY',127,'08:05',2,'UTC');"
+  },
+  {
+   "id": "seed-plan-summary",
+   "sql": "INSERT INTO valve_settings(device_eui,scheduler_status,skip_today_date) VALUES ('A840410000000007','SKIP_TODAY','2020-01-01');\nINSERT INTO valve_schedule_pushes(push_id,device_eui,purpose,weekday,fport,payload_hex,state) VALUES ('b1100000-0000-4000-8000-000000000003','A840410000000007','WEEKDAY_PLAN',0,14,'00','QUEUED');"
+  },
+  {
+   "id": "list-weekly",
+   "http": {
+    "method": "GET",
+    "path": "/api/valves",
+    "auth": "token"
+   }
+  }
+ ]
+}

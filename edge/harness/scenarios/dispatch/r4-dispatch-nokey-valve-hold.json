@@ -1,0 +1,73 @@
+{
+  "name": "r4-dispatch-nokey-valve-hold",
+  "description": "A reserved occurrence and a sent occurrence with a stale close both retain the valve hold.",
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "why": "devices discovered and claimed before the session, as in the release smoke",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000001','Valve 1','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),'CLOSED','MOTORIZED');\n       INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state) VALUES ('A840410000000002','Sensor 1','KIWI_SENSOR',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',(SELECT id FROM irrigation_zones WHERE zone_uuid='0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11'),NULL);"
+    },
+    {
+      "id": "setup-extra",
+      "sql": "INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,current_state,created_at,updated_at) SELECT 'A840410000000005','Valve 5','STREGA_VALVE',1,id,'CLOSED','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z' FROM irrigation_zones WHERE name='Zone A';"
+    },
+    {
+      "id": "seed-conditional",
+      "sql": "INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('a1100000-0000-4000-8000-000000000005','{{date:+0}}','06:00','A840410000000005','2026-11-23T06:00:00.000Z','a1200000-0000-4000-8000-000000000005','RESERVED'); INSERT INTO valve_settings(device_eui,conditional_control_json) VALUES ('A840410000000005','{\"mode\":\"CONDITIONAL\"}');"
+    },
+    {
+      "id": "conditional-busy",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000005",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    },
+    {
+      "id": "seed-stale-close",
+      "sql": "INSERT INTO irrigation_occurrences(schedule_uuid,local_date,local_time,device_eui,due_at,command_id,state) VALUES ('b1200000-0000-4000-8000-000000000001','{{date:+0}}','06:00','A840410000000001','2026-11-23T06:00:00.000Z','b1300000-0000-4000-8000-000000000001','SENT');\nINSERT INTO valve_actuation_expectations(expectation_id,device_eui,command_id,commanded_at,commanded_duration_seconds,expected_close_at,observed_close_at,transport_json,volume_source,created_at) VALUES ('b1300000-0000-4000-8000-000000000001','A840410000000001','b1300000-0000-4000-8000-000000000001','2026-11-23T06:00:00.000Z',120,'2026-11-23T06:02:00.000Z','2026-11-23T05:59:00.000Z','{\"effect_snapshot\":{\"version\":1,\"effect_class\":\"SELF_CLOSING_OPEN\"}}','unknown','2026-11-23T06:00:00.000Z');"
+    },
+    {
+      "id": "busy-after-stale-close",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000001",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 2
+        }
+      }
+    }
+  ],
+  "_comment": "Dispatch round 4 client-construction sweep: a copy of 071-valve-hold.json run with CHIRPSTACK_API_KEY empty on both sides. Record with OSI_ORACLE_NODE=edge/harness/scenarios/dispatch/oracle-nokey-node.sh and replay Go through a wrapper that runs `exec env CHIRPSTACK_API_KEY= <osi-edge> \"$@\"`. Covers manual opens: the encoder builds the ChirpStack client before executeValveAttempt, so the constructor throw (phase UNKNOWN, 503) comes before the conditional hold. Original note: A reserved occurrence and a sent occurrence with a stale close both retain the valve hold."
+}

@@ -1,0 +1,79 @@
+{
+  "name": "cb2-noapp-calibration-fault",
+  "_comment": "confirm-B2 probe: with CHIRPSTACK_APP_ACTUATORS empty, a manual timed open whose calibration read fails (write-strega-expectation 503 SQLITE_ERROR, then the encoder's first check answers transport_unavailable). Run with the no-app oracle wrapper and Go under env -u CHIRPSTACK_APP_ACTUATORS. Cloud captured.",
+  "cloud": true,
+  "steps": [
+    {
+      "id": "register",
+      "http": {
+        "method": "POST",
+        "path": "/auth/register",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      }
+    },
+    {
+      "id": "login",
+      "http": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "username": "farmer",
+          "password": "synthetic-pass-1"
+        }
+      },
+      "capture": {
+        "token": "json.token"
+      }
+    },
+    {
+      "id": "setup",
+      "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model) VALUES ('A840410000000321','NoappCal','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED'),('A840410000000322','NoappCtl','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED');"
+    },
+    {
+      "id": "fault-calibration",
+      "sql": "DROP TABLE IF EXISTS zone_irrigation_calibration; CREATE TABLE cb2_calibration_source(zone_id INTEGER, measured_flow_rate_lpm REAL, measurement_method TEXT); CREATE VIEW zone_irrigation_calibration AS SELECT * FROM cb2_calibration_source; DROP TABLE cb2_calibration_source;"
+    },
+    {
+      "id": "open-noapp-calibration-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000321",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    },
+    {
+      "id": "close-noapp-calibration-fault",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000321",
+        "auth": "token",
+        "body": {
+          "action": "CLOSE"
+        }
+      }
+    },
+    {
+      "id": "restore-calibration",
+      "sql": "DROP VIEW zone_irrigation_calibration;"
+    },
+    {
+      "id": "open-noapp-control",
+      "http": {
+        "method": "POST",
+        "path": "/api/valve/A840410000000322",
+        "auth": "token",
+        "body": {
+          "action": "OPEN_FOR_DURATION",
+          "duration_minutes": 3
+        }
+      }
+    }
+  ]
+}

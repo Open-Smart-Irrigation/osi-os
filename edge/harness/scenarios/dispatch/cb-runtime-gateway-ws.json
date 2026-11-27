@@ -1,0 +1,127 @@
+{
+ "name": "cb-runtime-gateway-ws",
+ "_comment": "confirm-B probe: VALVE_RUNTIME_CHANGED outbox gate when devices.gateway_device_eui is whitespace other than spaces (JS String.trim vs SQLite trim).",
+ "steps": [
+  {
+   "id": "register",
+   "http": {
+    "method": "POST",
+    "path": "/auth/register",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   }
+  },
+  {
+   "id": "login",
+   "http": {
+    "method": "POST",
+    "path": "/auth/login",
+    "body": {
+     "username": "farmer",
+     "password": "synthetic-pass-1"
+    }
+   },
+   "capture": {
+    "token": "json.token"
+   }
+  },
+  {
+   "id": "setup",
+   "sql": "INSERT INTO irrigation_zones(name,user_id,timezone,zone_uuid,created_at,updated_at) VALUES ('Zone A',1,'UTC','0b8f6a3e-6c1a-4f61-9a43-2f1d8b3e9c11','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000061','Tab','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',char(9));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000062','Nbsp','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',char(160));INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000063','Spaces','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED','   ');INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,claimed_at,irrigation_zone_id,current_state,strega_model,gateway_device_eui) VALUES ('A840410000000064','Plain','STREGA_VALVE',1,'2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z','2026-11-23T06:00:00.000Z',1,'CLOSED','MOTORIZED',NULL);"
+  },
+  {
+   "id": "link-no-gateway",
+   "sql": "INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES('cloud',1,NULL,'2026-11-23T06:00:00.000Z');"
+  },
+  {
+   "id": "schedule-tab-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000061/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "schedule-nbsp-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000062/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "schedule-spaces-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000063/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "schedule-null-gateway",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000064/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 127,
+     "start_time": "06:00",
+     "duration_minutes": 30
+    }
+   }
+  },
+  {
+   "id": "link-gateway",
+   "sql": "UPDATE sync_link_state SET gateway_device_eui='0016C001F1000001' WHERE peer_node='cloud';"
+  },
+  {
+   "id": "schedule-tab-gateway-linked",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000061/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 62,
+     "start_time": "07:00",
+     "duration_minutes": 20
+    }
+   }
+  },
+  {
+   "id": "schedule-plain-linked",
+   "http": {
+    "method": "POST",
+    "path": "/api/valves/A840410000000064/schedules",
+    "auth": "token",
+    "body": {
+     "kind": "WEEKLY",
+     "weekdays_mask": 62,
+     "start_time": "07:00",
+     "duration_minutes": 20
+    }
+   }
+  }
+ ]
+}

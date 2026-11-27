@@ -1,0 +1,1851 @@
+{
+ "meta": {
+  "generator": "edge/vectors/generate-sqlite.js",
+  "sqlite": "3.44.2",
+  "node": "20.18.3"
+ },
+ "about": "Value rendering of the device SQLite engine. A backend that writes through triggers or SQL must produce identical text.",
+ "vectors": [
+  {
+   "sql": "SELECT json_object('v', 1e-309) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0e-309}"
+  },
+  {
+   "sql": "SELECT json_array(1e-309) AS r",
+   "type": "string",
+   "text": "[1.0e-309]"
+  },
+  {
+   "sql": "SELECT CAST(1e-309 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0e-309"
+  },
+  {
+   "sql": "SELECT printf('%s', 1e-309) AS r",
+   "type": "string",
+   "text": "1.0e-309"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1e-309) AS r",
+   "type": "string",
+   "text": "1e-309"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1e-309) AS r",
+   "type": "string",
+   "text": "1.0000000000000019e-309"
+  },
+  {
+   "sql": "SELECT quote(1e-309) AS r",
+   "type": "string",
+   "text": "1.0e-309"
+  },
+  {
+   "sql": "SELECT json(1e-309) AS r",
+   "type": "string",
+   "text": "1.0e-309"
+  },
+  {
+   "sql": "SELECT (1e-309) || '' AS r",
+   "type": "string",
+   "text": "1.0e-309"
+  },
+  {
+   "sql": "SELECT typeof(1e-309) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 2e-309) AS r",
+   "type": "string",
+   "text": "{\"v\":2.0e-309}"
+  },
+  {
+   "sql": "SELECT json_array(2e-309) AS r",
+   "type": "string",
+   "text": "[2.0e-309]"
+  },
+  {
+   "sql": "SELECT CAST(2e-309 AS TEXT) AS r",
+   "type": "string",
+   "text": "2.0e-309"
+  },
+  {
+   "sql": "SELECT printf('%s', 2e-309) AS r",
+   "type": "string",
+   "text": "2.0e-309"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 2e-309) AS r",
+   "type": "string",
+   "text": "2e-309"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 2e-309) AS r",
+   "type": "string",
+   "text": "1.9999999999999988e-309"
+  },
+  {
+   "sql": "SELECT quote(2e-309) AS r",
+   "type": "string",
+   "text": "2.0e-309"
+  },
+  {
+   "sql": "SELECT json(2e-309) AS r",
+   "type": "string",
+   "text": "2.0e-309"
+  },
+  {
+   "sql": "SELECT (2e-309) || '' AS r",
+   "type": "string",
+   "text": "2.0e-309"
+  },
+  {
+   "sql": "SELECT typeof(2e-309) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "{\"v\":2.2250738585072e-308}"
+  },
+  {
+   "sql": "SELECT json_array(2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "[2.2250738585072e-308]"
+  },
+  {
+   "sql": "SELECT CAST(2.2250738585072009e-308 AS TEXT) AS r",
+   "type": "string",
+   "text": "2.2250738585072e-308"
+  },
+  {
+   "sql": "SELECT printf('%s', 2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "2.2250738585072e-308"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "2.2250738585072e-308"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "2.2250738585072009e-308"
+  },
+  {
+   "sql": "SELECT quote(2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "2.22507385850720088e-308"
+  },
+  {
+   "sql": "SELECT json(2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "2.2250738585072e-308"
+  },
+  {
+   "sql": "SELECT (2.2250738585072009e-308) || '' AS r",
+   "type": "string",
+   "text": "2.2250738585072e-308"
+  },
+  {
+   "sql": "SELECT typeof(2.2250738585072009e-308) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', -1e-310) AS r",
+   "type": "string",
+   "text": "{\"v\":-9.99999999999997e-311}"
+  },
+  {
+   "sql": "SELECT json_array(-1e-310) AS r",
+   "type": "string",
+   "text": "[-9.99999999999997e-311]"
+  },
+  {
+   "sql": "SELECT CAST(-1e-310 AS TEXT) AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT printf('%s', -1e-310) AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT printf('%.15g', -1e-310) AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', -1e-310) AS r",
+   "type": "string",
+   "text": "-9.9999999999999694e-311"
+  },
+  {
+   "sql": "SELECT quote(-1e-310) AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT json(-1e-310) AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT (-1e-310) || '' AS r",
+   "type": "string",
+   "text": "-9.99999999999997e-311"
+  },
+  {
+   "sql": "SELECT typeof(-1e-310) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 0.0) AS r",
+   "type": "string",
+   "text": "{\"v\":0.0}"
+  },
+  {
+   "sql": "SELECT json_array(0.0) AS r",
+   "type": "string",
+   "text": "[0.0]"
+  },
+  {
+   "sql": "SELECT CAST(0.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT printf('%s', 0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 0.0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT quote(0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT json(0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT (0.0) || '' AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT typeof(0.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', -0.0) AS r",
+   "type": "string",
+   "text": "{\"v\":0.0}"
+  },
+  {
+   "sql": "SELECT json_array(-0.0) AS r",
+   "type": "string",
+   "text": "[0.0]"
+  },
+  {
+   "sql": "SELECT CAST(-0.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT printf('%s', -0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT printf('%.15g', -0.0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', -0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT quote(-0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT json(-0.0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT (-0.0) || '' AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT typeof(-0.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1.0) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0}"
+  },
+  {
+   "sql": "SELECT json_array(1.0) AS r",
+   "type": "string",
+   "text": "[1.0]"
+  },
+  {
+   "sql": "SELECT CAST(1.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT printf('%s', 1.0) AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1.0) AS r",
+   "type": "string",
+   "text": "1"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1.0) AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT quote(1.0) AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT json(1.0) AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT (1.0) || '' AS r",
+   "type": "string",
+   "text": "1.0"
+  },
+  {
+   "sql": "SELECT typeof(1.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 0.1) AS r",
+   "type": "string",
+   "text": "{\"v\":0.1}"
+  },
+  {
+   "sql": "SELECT json_array(0.1) AS r",
+   "type": "string",
+   "text": "[0.1]"
+  },
+  {
+   "sql": "SELECT CAST(0.1 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT printf('%s', 0.1) AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 0.1) AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 0.1) AS r",
+   "type": "string",
+   "text": "0.10000000000000001"
+  },
+  {
+   "sql": "SELECT quote(0.1) AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT json(0.1) AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT (0.1) || '' AS r",
+   "type": "string",
+   "text": "0.1"
+  },
+  {
+   "sql": "SELECT typeof(0.1) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 0.2+0.1) AS r",
+   "type": "string",
+   "text": "{\"v\":0.3}"
+  },
+  {
+   "sql": "SELECT json_array(0.2+0.1) AS r",
+   "type": "string",
+   "text": "[0.3]"
+  },
+  {
+   "sql": "SELECT CAST(0.2+0.1 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%s', 0.2+0.1) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 0.2+0.1) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 0.2+0.1) AS r",
+   "type": "string",
+   "text": "0.30000000000000004"
+  },
+  {
+   "sql": "SELECT quote(0.2+0.1) AS r",
+   "type": "string",
+   "text": "3.00000000000000044e-01"
+  },
+  {
+   "sql": "SELECT json(0.2+0.1) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT (0.2+0.1) || '' AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT typeof(0.2+0.1) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1.23456789012345678) AS r",
+   "type": "string",
+   "text": "{\"v\":1.23456789012346}"
+  },
+  {
+   "sql": "SELECT json_array(1.23456789012345678) AS r",
+   "type": "string",
+   "text": "[1.23456789012346]"
+  },
+  {
+   "sql": "SELECT CAST(1.23456789012345678 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.23456789012346"
+  },
+  {
+   "sql": "SELECT printf('%s', 1.23456789012345678) AS r",
+   "type": "string",
+   "text": "1.23456789012346"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1.23456789012345678) AS r",
+   "type": "string",
+   "text": "1.23456789012346"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1.23456789012345678) AS r",
+   "type": "string",
+   "text": "1.2345678901234567"
+  },
+  {
+   "sql": "SELECT quote(1.23456789012345678) AS r",
+   "type": "string",
+   "text": "1.23456789012345669e+00"
+  },
+  {
+   "sql": "SELECT json(1.23456789012345678) AS r",
+   "type": "string",
+   "text": "1.23456789012346"
+  },
+  {
+   "sql": "SELECT (1.23456789012345678) || '' AS r",
+   "type": "string",
+   "text": "1.23456789012346"
+  },
+  {
+   "sql": "SELECT typeof(1.23456789012345678) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 123456789.123456789) AS r",
+   "type": "string",
+   "text": "{\"v\":123456789.123457}"
+  },
+  {
+   "sql": "SELECT json_array(123456789.123456789) AS r",
+   "type": "string",
+   "text": "[123456789.123457]"
+  },
+  {
+   "sql": "SELECT CAST(123456789.123456789 AS TEXT) AS r",
+   "type": "string",
+   "text": "123456789.123457"
+  },
+  {
+   "sql": "SELECT printf('%s', 123456789.123456789) AS r",
+   "type": "string",
+   "text": "123456789.123457"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 123456789.123456789) AS r",
+   "type": "string",
+   "text": "123456789.123457"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 123456789.123456789) AS r",
+   "type": "string",
+   "text": "123456789.12345679"
+  },
+  {
+   "sql": "SELECT quote(123456789.123456789) AS r",
+   "type": "string",
+   "text": "1.23456789123456791e+08"
+  },
+  {
+   "sql": "SELECT json(123456789.123456789) AS r",
+   "type": "string",
+   "text": "123456789.123457"
+  },
+  {
+   "sql": "SELECT (123456789.123456789) || '' AS r",
+   "type": "string",
+   "text": "123456789.123457"
+  },
+  {
+   "sql": "SELECT typeof(123456789.123456789) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1e15) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0e+15}"
+  },
+  {
+   "sql": "SELECT json_array(1e15) AS r",
+   "type": "string",
+   "text": "[1.0e+15]"
+  },
+  {
+   "sql": "SELECT CAST(1e15 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0e+15"
+  },
+  {
+   "sql": "SELECT printf('%s', 1e15) AS r",
+   "type": "string",
+   "text": "1.0e+15"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1e15) AS r",
+   "type": "string",
+   "text": "1e+15"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1e15) AS r",
+   "type": "string",
+   "text": "1000000000000000.0"
+  },
+  {
+   "sql": "SELECT quote(1e15) AS r",
+   "type": "string",
+   "text": "1.0e+15"
+  },
+  {
+   "sql": "SELECT json(1e15) AS r",
+   "type": "string",
+   "text": "1.0e+15"
+  },
+  {
+   "sql": "SELECT (1e15) || '' AS r",
+   "type": "string",
+   "text": "1.0e+15"
+  },
+  {
+   "sql": "SELECT typeof(1e15) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1e16) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0e+16}"
+  },
+  {
+   "sql": "SELECT json_array(1e16) AS r",
+   "type": "string",
+   "text": "[1.0e+16]"
+  },
+  {
+   "sql": "SELECT CAST(1e16 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0e+16"
+  },
+  {
+   "sql": "SELECT printf('%s', 1e16) AS r",
+   "type": "string",
+   "text": "1.0e+16"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1e16) AS r",
+   "type": "string",
+   "text": "1e+16"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1e16) AS r",
+   "type": "string",
+   "text": "10000000000000000.0"
+  },
+  {
+   "sql": "SELECT quote(1e16) AS r",
+   "type": "string",
+   "text": "1.0e+16"
+  },
+  {
+   "sql": "SELECT json(1e16) AS r",
+   "type": "string",
+   "text": "1.0e+16"
+  },
+  {
+   "sql": "SELECT (1e16) || '' AS r",
+   "type": "string",
+   "text": "1.0e+16"
+  },
+  {
+   "sql": "SELECT typeof(1e16) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1e21) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0e+21}"
+  },
+  {
+   "sql": "SELECT json_array(1e21) AS r",
+   "type": "string",
+   "text": "[1.0e+21]"
+  },
+  {
+   "sql": "SELECT CAST(1e21 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT printf('%s', 1e21) AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1e21) AS r",
+   "type": "string",
+   "text": "1e+21"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1e21) AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT quote(1e21) AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT json(1e21) AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT (1e21) || '' AS r",
+   "type": "string",
+   "text": "1.0e+21"
+  },
+  {
+   "sql": "SELECT typeof(1e21) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1e-7) AS r",
+   "type": "string",
+   "text": "{\"v\":1.0e-07}"
+  },
+  {
+   "sql": "SELECT json_array(1e-7) AS r",
+   "type": "string",
+   "text": "[1.0e-07]"
+  },
+  {
+   "sql": "SELECT CAST(1e-7 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.0e-07"
+  },
+  {
+   "sql": "SELECT printf('%s', 1e-7) AS r",
+   "type": "string",
+   "text": "1.0e-07"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1e-7) AS r",
+   "type": "string",
+   "text": "1e-07"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1e-7) AS r",
+   "type": "string",
+   "text": "9.9999999999999995e-08"
+  },
+  {
+   "sql": "SELECT quote(1e-7) AS r",
+   "type": "string",
+   "text": "1.0e-07"
+  },
+  {
+   "sql": "SELECT json(1e-7) AS r",
+   "type": "string",
+   "text": "1.0e-07"
+  },
+  {
+   "sql": "SELECT (1e-7) || '' AS r",
+   "type": "string",
+   "text": "1.0e-07"
+  },
+  {
+   "sql": "SELECT typeof(1e-7) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', -1.5e-10) AS r",
+   "type": "string",
+   "text": "{\"v\":-1.5e-10}"
+  },
+  {
+   "sql": "SELECT json_array(-1.5e-10) AS r",
+   "type": "string",
+   "text": "[-1.5e-10]"
+  },
+  {
+   "sql": "SELECT CAST(-1.5e-10 AS TEXT) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT printf('%s', -1.5e-10) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT printf('%.15g', -1.5e-10) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', -1.5e-10) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT quote(-1.5e-10) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT json(-1.5e-10) AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT (-1.5e-10) || '' AS r",
+   "type": "string",
+   "text": "-1.5e-10"
+  },
+  {
+   "sql": "SELECT typeof(-1.5e-10) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 3.14159265358979) AS r",
+   "type": "string",
+   "text": "{\"v\":3.14159265358979}"
+  },
+  {
+   "sql": "SELECT json_array(3.14159265358979) AS r",
+   "type": "string",
+   "text": "[3.14159265358979]"
+  },
+  {
+   "sql": "SELECT CAST(3.14159265358979 AS TEXT) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT printf('%s', 3.14159265358979) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 3.14159265358979) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 3.14159265358979) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT quote(3.14159265358979) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT json(3.14159265358979) AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT (3.14159265358979) || '' AS r",
+   "type": "string",
+   "text": "3.14159265358979"
+  },
+  {
+   "sql": "SELECT typeof(3.14159265358979) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 2.5) AS r",
+   "type": "string",
+   "text": "{\"v\":2.5}"
+  },
+  {
+   "sql": "SELECT json_array(2.5) AS r",
+   "type": "string",
+   "text": "[2.5]"
+  },
+  {
+   "sql": "SELECT CAST(2.5 AS TEXT) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT printf('%s', 2.5) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 2.5) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 2.5) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT quote(2.5) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT json(2.5) AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT (2.5) || '' AS r",
+   "type": "string",
+   "text": "2.5"
+  },
+  {
+   "sql": "SELECT typeof(2.5) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 100.0) AS r",
+   "type": "string",
+   "text": "{\"v\":100.0}"
+  },
+  {
+   "sql": "SELECT json_array(100.0) AS r",
+   "type": "string",
+   "text": "[100.0]"
+  },
+  {
+   "sql": "SELECT CAST(100.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT printf('%s', 100.0) AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 100.0) AS r",
+   "type": "string",
+   "text": "100"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 100.0) AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT quote(100.0) AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT json(100.0) AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT (100.0) || '' AS r",
+   "type": "string",
+   "text": "100.0"
+  },
+  {
+   "sql": "SELECT typeof(100.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 9007199254740993.0) AS r",
+   "type": "string",
+   "text": "{\"v\":9.00719925474099e+15}"
+  },
+  {
+   "sql": "SELECT json_array(9007199254740993.0) AS r",
+   "type": "string",
+   "text": "[9.00719925474099e+15]"
+  },
+  {
+   "sql": "SELECT CAST(9007199254740993.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT printf('%s', 9007199254740993.0) AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 9007199254740993.0) AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 9007199254740993.0) AS r",
+   "type": "string",
+   "text": "9007199254740992.0"
+  },
+  {
+   "sql": "SELECT quote(9007199254740993.0) AS r",
+   "type": "string",
+   "text": "9.007199254740992e+15"
+  },
+  {
+   "sql": "SELECT json(9007199254740993.0) AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT (9007199254740993.0) || '' AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT typeof(9007199254740993.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "{\"v\":1.79769313486232e+308}"
+  },
+  {
+   "sql": "SELECT json_array(1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "[1.79769313486232e+308]"
+  },
+  {
+   "sql": "SELECT CAST(1.7976931348623157e308 AS TEXT) AS r",
+   "type": "string",
+   "text": "1.79769313486232e+308"
+  },
+  {
+   "sql": "SELECT printf('%s', 1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "1.79769313486232e+308"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "1.79769313486232e+308"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "1.7976931348623157e+308"
+  },
+  {
+   "sql": "SELECT quote(1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "1.797693134862315708e+308"
+  },
+  {
+   "sql": "SELECT json(1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "1.79769313486232e+308"
+  },
+  {
+   "sql": "SELECT (1.7976931348623157e308) || '' AS r",
+   "type": "string",
+   "text": "1.79769313486232e+308"
+  },
+  {
+   "sql": "SELECT typeof(1.7976931348623157e308) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 4.9e-324) AS r",
+   "type": "string",
+   "text": "{\"v\":4.94065645841247e-324}"
+  },
+  {
+   "sql": "SELECT json_array(4.9e-324) AS r",
+   "type": "string",
+   "text": "[4.94065645841247e-324]"
+  },
+  {
+   "sql": "SELECT CAST(4.9e-324 AS TEXT) AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT printf('%s', 4.9e-324) AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 4.9e-324) AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 4.9e-324) AS r",
+   "type": "string",
+   "text": "4.9406564584124654e-324"
+  },
+  {
+   "sql": "SELECT quote(4.9e-324) AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT json(4.9e-324) AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT (4.9e-324) || '' AS r",
+   "type": "string",
+   "text": "4.94065645841247e-324"
+  },
+  {
+   "sql": "SELECT typeof(4.9e-324) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 15.098299999999998) AS r",
+   "type": "string",
+   "text": "{\"v\":15.0983}"
+  },
+  {
+   "sql": "SELECT json_array(15.098299999999998) AS r",
+   "type": "string",
+   "text": "[15.0983]"
+  },
+  {
+   "sql": "SELECT CAST(15.098299999999998 AS TEXT) AS r",
+   "type": "string",
+   "text": "15.0983"
+  },
+  {
+   "sql": "SELECT printf('%s', 15.098299999999998) AS r",
+   "type": "string",
+   "text": "15.0983"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 15.098299999999998) AS r",
+   "type": "string",
+   "text": "15.0983"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 15.098299999999998) AS r",
+   "type": "string",
+   "text": "15.098299999999998"
+  },
+  {
+   "sql": "SELECT quote(15.098299999999998) AS r",
+   "type": "string",
+   "text": "1.50982999999999982e+01"
+  },
+  {
+   "sql": "SELECT json(15.098299999999998) AS r",
+   "type": "string",
+   "text": "15.0983"
+  },
+  {
+   "sql": "SELECT (15.098299999999998) || '' AS r",
+   "type": "string",
+   "text": "15.0983"
+  },
+  {
+   "sql": "SELECT typeof(15.098299999999998) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 67.1208) AS r",
+   "type": "string",
+   "text": "{\"v\":67.1208}"
+  },
+  {
+   "sql": "SELECT json_array(67.1208) AS r",
+   "type": "string",
+   "text": "[67.1208]"
+  },
+  {
+   "sql": "SELECT CAST(67.1208 AS TEXT) AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT printf('%s', 67.1208) AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 67.1208) AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 67.1208) AS r",
+   "type": "string",
+   "text": "67.120800000000003"
+  },
+  {
+   "sql": "SELECT quote(67.1208) AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT json(67.1208) AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT (67.1208) || '' AS r",
+   "type": "string",
+   "text": "67.1208"
+  },
+  {
+   "sql": "SELECT typeof(67.1208) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 0.30000000000000004) AS r",
+   "type": "string",
+   "text": "{\"v\":0.3}"
+  },
+  {
+   "sql": "SELECT json_array(0.30000000000000004) AS r",
+   "type": "string",
+   "text": "[0.3]"
+  },
+  {
+   "sql": "SELECT CAST(0.30000000000000004 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%s', 0.30000000000000004) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 0.30000000000000004) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 0.30000000000000004) AS r",
+   "type": "string",
+   "text": "0.30000000000000004"
+  },
+  {
+   "sql": "SELECT quote(0.30000000000000004) AS r",
+   "type": "string",
+   "text": "3.00000000000000044e-01"
+  },
+  {
+   "sql": "SELECT json(0.30000000000000004) AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT (0.30000000000000004) || '' AS r",
+   "type": "string",
+   "text": "0.3"
+  },
+  {
+   "sql": "SELECT typeof(0.30000000000000004) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 1.0/3.0) AS r",
+   "type": "string",
+   "text": "{\"v\":0.333333333333333}"
+  },
+  {
+   "sql": "SELECT json_array(1.0/3.0) AS r",
+   "type": "string",
+   "text": "[0.333333333333333]"
+  },
+  {
+   "sql": "SELECT CAST(1.0/3.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.333333333333333"
+  },
+  {
+   "sql": "SELECT printf('%s', 1.0/3.0) AS r",
+   "type": "string",
+   "text": "0.333333333333333"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 1.0/3.0) AS r",
+   "type": "string",
+   "text": "0.333333333333333"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 1.0/3.0) AS r",
+   "type": "string",
+   "text": "0.33333333333333331"
+  },
+  {
+   "sql": "SELECT quote(1.0/3.0) AS r",
+   "type": "string",
+   "text": "3.33333333333333314e-01"
+  },
+  {
+   "sql": "SELECT json(1.0/3.0) AS r",
+   "type": "string",
+   "text": "0.333333333333333"
+  },
+  {
+   "sql": "SELECT (1.0/3.0) || '' AS r",
+   "type": "string",
+   "text": "0.333333333333333"
+  },
+  {
+   "sql": "SELECT typeof(1.0/3.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 2.0/3.0) AS r",
+   "type": "string",
+   "text": "{\"v\":0.666666666666667}"
+  },
+  {
+   "sql": "SELECT json_array(2.0/3.0) AS r",
+   "type": "string",
+   "text": "[0.666666666666667]"
+  },
+  {
+   "sql": "SELECT CAST(2.0/3.0 AS TEXT) AS r",
+   "type": "string",
+   "text": "0.666666666666667"
+  },
+  {
+   "sql": "SELECT printf('%s', 2.0/3.0) AS r",
+   "type": "string",
+   "text": "0.666666666666667"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 2.0/3.0) AS r",
+   "type": "string",
+   "text": "0.666666666666667"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 2.0/3.0) AS r",
+   "type": "string",
+   "text": "0.66666666666666663"
+  },
+  {
+   "sql": "SELECT quote(2.0/3.0) AS r",
+   "type": "string",
+   "text": "6.66666666666666629e-01"
+  },
+  {
+   "sql": "SELECT json(2.0/3.0) AS r",
+   "type": "string",
+   "text": "0.666666666666667"
+  },
+  {
+   "sql": "SELECT (2.0/3.0) || '' AS r",
+   "type": "string",
+   "text": "0.666666666666667"
+  },
+  {
+   "sql": "SELECT typeof(2.0/3.0) AS r",
+   "type": "string",
+   "text": "real"
+  },
+  {
+   "sql": "SELECT json_object('v', 0) AS r",
+   "type": "string",
+   "text": "{\"v\":0}"
+  },
+  {
+   "sql": "SELECT json_array(0) AS r",
+   "type": "string",
+   "text": "[0]"
+  },
+  {
+   "sql": "SELECT CAST(0 AS TEXT) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT printf('%s', 0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 0) AS r",
+   "type": "string",
+   "text": "0.0"
+  },
+  {
+   "sql": "SELECT quote(0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT json(0) AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT (0) || '' AS r",
+   "type": "string",
+   "text": "0"
+  },
+  {
+   "sql": "SELECT typeof(0) AS r",
+   "type": "string",
+   "text": "integer"
+  },
+  {
+   "sql": "SELECT json_object('v', -1) AS r",
+   "type": "string",
+   "text": "{\"v\":-1}"
+  },
+  {
+   "sql": "SELECT json_array(-1) AS r",
+   "type": "string",
+   "text": "[-1]"
+  },
+  {
+   "sql": "SELECT CAST(-1 AS TEXT) AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT printf('%s', -1) AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT printf('%.15g', -1) AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', -1) AS r",
+   "type": "string",
+   "text": "-1.0"
+  },
+  {
+   "sql": "SELECT quote(-1) AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT json(-1) AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT (-1) || '' AS r",
+   "type": "string",
+   "text": "-1"
+  },
+  {
+   "sql": "SELECT typeof(-1) AS r",
+   "type": "string",
+   "text": "integer"
+  },
+  {
+   "sql": "SELECT json_object('v', 9007199254740993) AS r",
+   "type": "string",
+   "text": "{\"v\":9007199254740993}"
+  },
+  {
+   "sql": "SELECT json_array(9007199254740993) AS r",
+   "type": "string",
+   "text": "[9007199254740993]"
+  },
+  {
+   "sql": "SELECT CAST(9007199254740993 AS TEXT) AS r",
+   "type": "string",
+   "text": "9007199254740993"
+  },
+  {
+   "sql": "SELECT printf('%s', 9007199254740993) AS r",
+   "type": "string",
+   "text": "9007199254740993"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 9007199254740993) AS r",
+   "type": "string",
+   "text": "9.00719925474099e+15"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 9007199254740993) AS r",
+   "type": "string",
+   "text": "9007199254740992.0"
+  },
+  {
+   "sql": "SELECT quote(9007199254740993) AS r",
+   "type": "string",
+   "text": "9007199254740993"
+  },
+  {
+   "sql": "SELECT json(9007199254740993) AS r",
+   "type": "string",
+   "text": "9007199254740993"
+  },
+  {
+   "sql": "SELECT (9007199254740993) || '' AS r",
+   "type": "string",
+   "text": "9007199254740993"
+  },
+  {
+   "sql": "SELECT typeof(9007199254740993) AS r",
+   "type": "string",
+   "text": "integer"
+  },
+  {
+   "sql": "SELECT json_object('v', 9223372036854775807) AS r",
+   "type": "string",
+   "text": "{\"v\":9223372036854775807}"
+  },
+  {
+   "sql": "SELECT json_array(9223372036854775807) AS r",
+   "type": "string",
+   "text": "[9223372036854775807]"
+  },
+  {
+   "sql": "SELECT CAST(9223372036854775807 AS TEXT) AS r",
+   "type": "string",
+   "text": "9223372036854775807"
+  },
+  {
+   "sql": "SELECT printf('%s', 9223372036854775807) AS r",
+   "type": "string",
+   "text": "9223372036854775807"
+  },
+  {
+   "sql": "SELECT printf('%.15g', 9223372036854775807) AS r",
+   "type": "string",
+   "text": "9.22337203685478e+18"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', 9223372036854775807) AS r",
+   "type": "string",
+   "text": "9.2233720368547758e+18"
+  },
+  {
+   "sql": "SELECT quote(9223372036854775807) AS r",
+   "type": "string",
+   "text": "9223372036854775807"
+  },
+  {
+   "sql": "SELECT json(9223372036854775807) AS r",
+   "type": "string",
+   "text": "9223372036854775807"
+  },
+  {
+   "sql": "SELECT (9223372036854775807) || '' AS r",
+   "type": "string",
+   "text": "9223372036854775807"
+  },
+  {
+   "sql": "SELECT typeof(9223372036854775807) AS r",
+   "type": "string",
+   "text": "integer"
+  },
+  {
+   "sql": "SELECT json_object('v', -9223372036854775808) AS r",
+   "type": "string",
+   "text": "{\"v\":-9223372036854775808}"
+  },
+  {
+   "sql": "SELECT json_array(-9223372036854775808) AS r",
+   "type": "string",
+   "text": "[-9223372036854775808]"
+  },
+  {
+   "sql": "SELECT CAST(-9223372036854775808 AS TEXT) AS r",
+   "type": "string",
+   "text": "-9223372036854775808"
+  },
+  {
+   "sql": "SELECT printf('%s', -9223372036854775808) AS r",
+   "type": "string",
+   "text": "-9223372036854775808"
+  },
+  {
+   "sql": "SELECT printf('%.15g', -9223372036854775808) AS r",
+   "type": "string",
+   "text": "-9.22337203685478e+18"
+  },
+  {
+   "sql": "SELECT printf('%!.17g', -9223372036854775808) AS r",
+   "type": "string",
+   "text": "-9.2233720368547758e+18"
+  },
+  {
+   "sql": "SELECT quote(-9223372036854775808) AS r",
+   "type": "string",
+   "text": "-9223372036854775808"
+  },
+  {
+   "sql": "SELECT json(-9223372036854775808) AS r",
+   "type": "string",
+   "text": "-9223372036854775808"
+  },
+  {
+   "sql": "SELECT (-9223372036854775808) || '' AS r",
+   "type": "string",
+   "text": "-9223372036854775808"
+  },
+  {
+   "sql": "SELECT typeof(-9223372036854775808) AS r",
+   "type": "string",
+   "text": "integer"
+  },
+  {
+   "sql": "SELECT json_object('t', 'plain') AS r",
+   "type": "string",
+   "text": "{\"t\":\"plain\"}"
+  },
+  {
+   "sql": "SELECT json_quote('plain') AS r",
+   "type": "string",
+   "text": "\"plain\""
+  },
+  {
+   "sql": "SELECT quote('plain') AS r",
+   "type": "string",
+   "text": "'plain'"
+  },
+  {
+   "sql": "SELECT json_object('t', 'quote\"back\\slash') AS r",
+   "type": "string",
+   "text": "{\"t\":\"quote\\\"back\\\\slash\"}"
+  },
+  {
+   "sql": "SELECT json_quote('quote\"back\\slash') AS r",
+   "type": "string",
+   "text": "\"quote\\\"back\\\\slash\""
+  },
+  {
+   "sql": "SELECT quote('quote\"back\\slash') AS r",
+   "type": "string",
+   "text": "'quote\"back\\slash'"
+  },
+  {
+   "sql": "SELECT json_object('t', 'tab\tnl\n') AS r",
+   "type": "string",
+   "text": "{\"t\":\"tab\\tnl\\n\"}"
+  },
+  {
+   "sql": "SELECT json_quote('tab\tnl\n') AS r",
+   "type": "string",
+   "text": "\"tab\\tnl\\n\""
+  },
+  {
+   "sql": "SELECT quote('tab\tnl\n') AS r",
+   "type": "string",
+   "text": "'tab\tnl\n'"
+  },
+  {
+   "sql": "SELECT json_object('t', char(0x2028)) AS r",
+   "type": "string",
+   "text": "{\"t\":\" \"}"
+  },
+  {
+   "sql": "SELECT json_quote(char(0x2028)) AS r",
+   "type": "string",
+   "text": "\" \""
+  },
+  {
+   "sql": "SELECT quote(char(0x2028)) AS r",
+   "type": "string",
+   "text": "' '"
+  },
+  {
+   "sql": "SELECT json_object('t', char(0x1f331)) AS r",
+   "type": "string",
+   "text": "{\"t\":\"🌱\"}"
+  },
+  {
+   "sql": "SELECT json_quote(char(0x1f331)) AS r",
+   "type": "string",
+   "text": "\"🌱\""
+  },
+  {
+   "sql": "SELECT quote(char(0x1f331)) AS r",
+   "type": "string",
+   "text": "'🌱'"
+  },
+  {
+   "sql": "SELECT json_object('t', '<&>') AS r",
+   "type": "string",
+   "text": "{\"t\":\"<&>\"}"
+  },
+  {
+   "sql": "SELECT json_quote('<&>') AS r",
+   "type": "string",
+   "text": "\"<&>\""
+  },
+  {
+   "sql": "SELECT quote('<&>') AS r",
+   "type": "string",
+   "text": "'<&>'"
+  },
+  {
+   "sql": "SELECT json_object('t', '') AS r",
+   "type": "string",
+   "text": "{\"t\":\"\"}"
+  },
+  {
+   "sql": "SELECT json_quote('') AS r",
+   "type": "string",
+   "text": "\"\""
+  },
+  {
+   "sql": "SELECT quote('') AS r",
+   "type": "string",
+   "text": "''"
+  },
+  {
+   "sql": "SELECT json_object('t', char(0xe9)) AS r",
+   "type": "string",
+   "text": "{\"t\":\"é\"}"
+  },
+  {
+   "sql": "SELECT json_quote(char(0xe9)) AS r",
+   "type": "string",
+   "text": "\"é\""
+  },
+  {
+   "sql": "SELECT quote(char(0xe9)) AS r",
+   "type": "string",
+   "text": "'é'"
+  },
+  {
+   "sql": "SELECT json_object('a', json('{\"b\":1,\"a\":[1.0,2.50,-0.0]}')) AS r",
+   "type": "string",
+   "text": "{\"a\":{\"b\":1,\"a\":[1.0,2.50,-0.0]}}"
+  },
+  {
+   "sql": "SELECT json('{\"x\":1e21,\"y\":1.0}') AS r",
+   "type": "string",
+   "text": "{\"x\":1e21,\"y\":1.0}"
+  },
+  {
+   "sql": "SELECT json_extract('{\"x\":1.5}', '$.x') AS r",
+   "type": "number",
+   "text": "1.5",
+   "jsNumberBits": "3ff8000000000000"
+  },
+  {
+   "sql": "SELECT json_set('{\"a\":1}', '$.b', 2.0) AS r",
+   "type": "string",
+   "text": "{\"a\":1,\"b\":2.0}"
+  },
+  {
+   "sql": "SELECT json_group_array(x) FROM (SELECT 1.0 AS x UNION ALL SELECT 2.5)",
+   "type": "string",
+   "text": "[1.0,2.5]"
+  },
+  {
+   "sql": "SELECT json_object('n', NULL, 't', 1=1) AS r",
+   "type": "string",
+   "text": "{\"n\":null,\"t\":1}"
+  },
+  {
+   "sql": "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', '2026-11-23 17:03:41.6449') AS r",
+   "type": "string",
+   "text": "2026-11-23T17:03:41.645Z"
+  },
+  {
+   "sql": "SELECT datetime('2026-11-23T19:03:41+02:00') AS r",
+   "type": "string",
+   "text": "2026-11-23 17:03:41"
+  },
+  {
+   "sql": "SELECT julianday('2026-11-23') AS r",
+   "type": "number",
+   "text": "2461367.5",
+   "jsNumberBits": "4142c75bc0000000"
+  },
+  {
+   "sql": "SELECT round(2.5) AS r",
+   "type": "number",
+   "text": "3",
+   "jsNumberBits": "4008000000000000"
+  },
+  {
+   "sql": "SELECT round(-2.5) AS r",
+   "type": "number",
+   "text": "-3",
+   "jsNumberBits": "c008000000000000"
+  },
+  {
+   "sql": "SELECT round(0.5) AS r",
+   "type": "number",
+   "text": "1",
+   "jsNumberBits": "3ff0000000000000"
+  },
+  {
+   "sql": "SELECT round(1.005, 2) AS r",
+   "type": "number",
+   "text": "1",
+   "jsNumberBits": "3ff0000000000000"
+  },
+  {
+   "sql": "SELECT CAST('1e3' AS INTEGER) AS r",
+   "type": "number",
+   "text": "1",
+   "jsNumberBits": "3ff0000000000000"
+  },
+  {
+   "sql": "SELECT CAST(' 12 ' AS REAL) AS r",
+   "type": "number",
+   "text": "12",
+   "jsNumberBits": "4028000000000000"
+  },
+  {
+   "sql": "SELECT 1/0 AS r",
+   "type": "null",
+   "text": null
+  },
+  {
+   "sql": "SELECT 5 % 3.0 AS r",
+   "type": "number",
+   "text": "2",
+   "jsNumberBits": "4000000000000000"
+  },
+  {
+   "sql": "SELECT abs(-0.0) AS r",
+   "type": "number",
+   "text": "0",
+   "jsNumberBits": "8000000000000000"
+  },
+  {
+   "sql": "SELECT lower('ÄÉ') AS r",
+   "type": "string",
+   "text": "ÄÉ"
+  },
+  {
+   "sql": "SELECT upper('straße') AS r",
+   "type": "string",
+   "text": "STRAßE"
+  },
+  {
+   "sql": "SELECT length(char(0x1f331)) AS r",
+   "type": "number",
+   "text": "1",
+   "jsNumberBits": "3ff0000000000000"
+  },
+  {
+   "sql": "SELECT hex(char(0x1f331)) AS r",
+   "type": "string",
+   "text": "F09F8CB1"
+  }
+ ]
+}

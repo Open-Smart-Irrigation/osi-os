@@ -1,0 +1,229 @@
+#!/bin/sh /etc/rc.common
+# OSI edge backend (Go). Runs only when /etc/osi-backend says "edge" and no
+# Node-RED process exists: both use the same database, port and MQTT client
+# ids. Switch with `osi-backend use edge|node-red`.
+START=99
+STOP=10
+USE_PROCD=1
+PROG=/usr/bin/osi-edge
+EXTRA_COMMANDS="tls_check"
+EXTRA_HELP="	tls_check	Cloud broker TLS verification with the edge verifier (osi-backend runs it before a switch)"
+
+[ -f /usr/libexec/osi-gateway-identity.sh ] && . /usr/libexec/osi-gateway-identity.sh
+
+# Node-RED's sources for the ChirpStack ids, copied from node-red.init
+# (load_chirpstack_env_value, resolve_chirpstack_value): UCI first, then
+# /srv/node-red/.chirpstack.env. Keys node-red.init does not export reach
+# Node-RED through settings.js; osi-edge reads them from the same file at
+# start (cmd/osi-edge/node_red_env.go).
+CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
+
+load_chirpstack_env_value() {
+    local key="$1"
+    [ -f "$CHIRPSTACK_ENV_FILE" ] || return 0
+    awk -v wanted="$key" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]*/, "", line)
+            split(line, parts, "=")
+            env_key=parts[1]
+            sub(/[[:space:]]*$/, "", env_key)
+            if (env_key == wanted) {
+                sub(/^[^=]*=/, "", line)
+                gsub(/^[[:space:]]*/, "", line)
+                gsub(/[[:space:]]*$/, "", line)
+                gsub(/^["'\'']|["'\'']$/, "", line)
+                print line
+                exit
+            }
+        }
+    ' "$CHIRPSTACK_ENV_FILE"
+}
+
+resolve_chirpstack_value() {
+    local uci_key="$1"
+    local env_key="$2"
+    local value
+    value="$(uci -q get "$uci_key" 2>/dev/null || echo "")"
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+        logger -t osi-edge "chirpstack config $env_key source=uci"
+        return 0
+    fi
+    value="$(load_chirpstack_env_value "$env_key" 2>/dev/null || echo "")"
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+        logger -t osi-edge "chirpstack config $env_key source=env-fallback"
+        return 0
+    fi
+    logger -t osi-edge "chirpstack config $env_key source=missing"
+    return 0
+}
+
+edge_cloud_broker_url() {
+    local url host
+    url="$(uci -q get osi-server.cloud.mqtt_broker_url 2>/dev/null || true)"
+    case "$url" in
+        *[[:space:]]*) ;;
+        wss://?*|ws://?*|mqtts://?*|mqtt://?*) printf '%s' "$url"; return ;;
+    esac
+    host="$(uci -q get osi-server.cloud.server_host 2>/dev/null || true)"
+    case "$host" in
+        ""|*[!]A-Za-z0-9.:[-]*|[!A-Za-z0-9[]*) ;;
+        *) printf 'wss://%s/mqtt' "$host"; return ;;
+    esac
+    printf '%s' 'wss://server.opensmartirrigation.org/mqtt'
+}
+
+edge_runtime_eui() {
+    if command -v normalize_gateway_eui >/dev/null 2>&1; then
+        normalize_gateway_eui "$1" 2>/dev/null || true
+        return
+    fi
+    local raw
+    raw="$(printf '%s' "$1" | tr -cd '0-9A-Fa-f' | tr 'abcdef' 'ABCDEF')"
+    case "${#raw}" in
+        16) [ "$raw" = "0101010101010101" ] || printf '%s\n' "$raw" ;;
+        12) printf '%sFFFE%s\n' "${raw%??????}" "${raw#??????}" ;;
+    esac
+}
+
+# The same broker URL and database the service uses.
+tls_check() {
+    OSI_EDGE_DB=/data/db/farming.db OSI_CLOUD_BROKER_URL="$(edge_cloud_broker_url)" "$PROG" tls-check
+}
+
+run_boot_init() (
+    flock -n 8 || {
+        logger -t osi-edge-boot "boot runner lock is busy. Go startup blocked."
+        return 1
+    }
+    [ "$(head -n1 /etc/osi-backend 2>/dev/null)" = edge ] || return 1
+    local timeout_seconds output status=0 reason
+    local failure_marker=/var/run/osi-edge-boot.failed
+    timeout_seconds="$(uci -q get osi-server.cloud.edge_boot_timeout_seconds 2>/dev/null || true)"
+    # Accept positive decimal seconds. Bound the length for BusyBox's parser.
+    case "$timeout_seconds" in
+        ""|0*|*[!0-9]*|??????*) timeout_seconds=30 ;;
+    esac
+
+    # BusyBox timeout forwards the command status. KILL keeps the deadline
+    # effective even if Node cannot handle a signal while doing storage work.
+    output="$(OSI_BOOT_DB=/data/db/farming.db DEVICE_EUI="$1" \
+        OSI_BOOT_NODE_RED_DIR=/srv/node-red \
+        timeout -s KILL "$timeout_seconds" node /usr/libexec/osi-boot/run-sync-init.js 2>&1)" ||
+        status=$?
+    if [ -n "$output" ]; then
+        printf '%s\n' "$output" | logger -t osi-edge-boot
+    fi
+
+    case "$status" in
+        0|1) rm -f "$failure_marker" || true; return 0 ;;
+        2) reason="runner refused (exit 2)" ;;
+        124|137) reason="runner timed out or was killed (${timeout_seconds}s limit)" ;;
+        127) reason="runner could not launch (node or timeout missing)" ;;
+        *) reason="runner failed (exit $status)" ;;
+    esac
+    reason="$reason. Go startup blocked."
+    logger -t osi-edge-boot "$reason"
+    if ! printf '%s runner_exit=%s reason=boot-runner previous=edge detail=%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$status" "$reason" > "$failure_marker"; then
+        logger -t osi-edge-boot "could not write $failure_marker; fallback cannot be scheduled"
+        return 1
+    fi
+    if ! command -v setsid >/dev/null 2>&1; then
+        logger -t osi-edge-boot "setsid is missing; automatic Node-RED fallback could not be scheduled"
+        return 1
+    fi
+    # Wait for rc.common to finish before stopping its service. Drop inherited
+    # locks and streams so this worker cannot keep the start invocation alive.
+    setsid /bin/sh -c '
+        for entry in /proc/$$/fd/*; do
+            fd=${entry##*/}
+            case "$fd" in
+                0|1|2|""|*[!0-9]*) ;;
+                *) eval "exec $fd>&-" ;;
+            esac
+        done
+        while kill -0 "$1" 2>/dev/null; do sleep 1; done
+        /usr/sbin/osi-backend use node-red --reason boot-runner ||
+            logger -t osi-edge-boot "automatic Node-RED fallback failed"
+    ' osi-edge-fallback "$$" </dev/null >/dev/null 2>&1 8>&- 9>&- &
+    return 1
+) 8>/var/lock/osi-edge-boot.lock
+
+start_service() {
+    [ "$(head -n1 /etc/osi-backend 2>/dev/null)" = edge ] || { logger -t osi-edge "not selected (/etc/osi-backend); not started"; return 0; }
+    if pgrep -x node-red >/dev/null 2>&1 ||
+        pgrep -f '/usr/lib/node/node-red/red.js' >/dev/null 2>&1; then
+        logger -t osi-edge "Node-RED is running; not started (one backend at a time)"
+        return 1
+    fi
+    # The same recovery holds Node-RED honours (node-red.init start_service).
+    for suffix in .osi-recovery .legacy-device-fk-repair.lock .legacy-device-fk-writer-hold; do
+        if [ -e "/data/db/farming.db$suffix" ] || [ -L "/data/db/farming.db$suffix" ]; then
+            logger -t osi-edge "HELD: database recovery is incomplete ($suffix); not started"
+            return 1
+        fi
+    done
+    local device_eui="" link_eui="" mqtt_password=""
+    if ! command -v gateway_identity_heal >/dev/null 2>&1 || ! gateway_identity_heal; then
+        if command -v gateway_identity_resolve >/dev/null 2>&1; then gateway_identity_resolve || true; fi
+    fi
+    device_eui="${GATEWAY_IDENTITY_DEVICE_EUI:-$(uci -q get osi-server.cloud.device_eui 2>/dev/null || echo "")}"
+    link_eui="$(uci -q get osi-server.cloud.link_gateway_device_eui 2>/dev/null || echo "")"
+    device_eui="$(edge_runtime_eui "$device_eui")"
+    run_boot_init "$device_eui" || return 1
+    # The operator may have changed the selection while the runner was busy.
+    [ "$(head -n1 /etc/osi-backend 2>/dev/null)" = edge ] || return 1
+    link_eui="$(edge_runtime_eui "$link_eui")"
+    mqtt_password="$(uci -q get osi-server.cloud.mqtt_password 2>/dev/null || echo "")"
+    local weather_provider_default
+    weather_provider_default="$(uci -q get osi-server.cloud.weather_provider_default 2>/dev/null || echo "open_meteo")"
+    case "$weather_provider_default" in open_meteo|meteoswiss) ;; *) weather_provider_default="open_meteo" ;; esac
+    local cs_app_sensors cs_app_actuators cs_app_field_tester cs_profile_kiwi cs_profile_sdi12 cs_profile_strega
+    local cs_profile_lsn50 cs_profile_clover cs_profile_rak10701 cs_profile_s2120
+    cs_app_sensors=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_sensors CHIRPSTACK_APP_SENSORS)
+    cs_app_actuators=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_actuators CHIRPSTACK_APP_ACTUATORS)
+    cs_app_field_tester=$(resolve_chirpstack_value osi-server.cloud.chirpstack_app_field_tester CHIRPSTACK_APP_FIELD_TESTER)
+    cs_profile_kiwi=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_kiwi CHIRPSTACK_PROFILE_KIWI)
+    cs_profile_sdi12=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_sdi12 CHIRPSTACK_PROFILE_SDI12)
+    cs_profile_strega=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_strega CHIRPSTACK_PROFILE_STREGA)
+    cs_profile_lsn50=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_lsn50 CHIRPSTACK_PROFILE_LSN50)
+    cs_profile_clover=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_clover CHIRPSTACK_PROFILE_CLOVER)
+    cs_profile_rak10701=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_rak10701 CHIRPSTACK_PROFILE_RAK10701)
+    cs_profile_s2120=$(resolve_chirpstack_value osi-server.cloud.chirpstack_profile_s2120 CHIRPSTACK_PROFILE_S2120)
+    # No TZ: node-red.init exports none, so both backends take the zone from
+    # /etc/TZ (OpenWrt's musl reads it when TZ is unset). See
+    # cmd/osi-edge/process_zone.go.
+    procd_open_instance
+    procd_set_param command "$PROG"
+    procd_set_param env \
+        OSI_EDGE_DB=/data/db/farming.db \
+        OSI_EDGE_HTTP_ADDR=0.0.0.0:1880 \
+        OSI_EDGE_MQTT_URL=tcp://127.0.0.1:1883 \
+        DEVICE_EUI="$device_eui" \
+        LINK_GATEWAY_DEVICE_EUI="$link_eui" \
+        DEVICE_MQTT_PASSWORD="$mqtt_password" \
+        OSI_CLOUD_BROKER_URL="$(edge_cloud_broker_url)" \
+        OSI_SCOPED_ACCESS="$(uci -q get osi-server.cloud.scoped_access_enabled 2>/dev/null || echo 0)" \
+        OSI_WEATHER_PROVIDER_DEFAULT="$weather_provider_default" \
+        CHIRPSTACK_APP_SENSORS="$cs_app_sensors" \
+        CHIRPSTACK_APP_ACTUATORS="$cs_app_actuators" \
+        CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester" \
+        CHIRPSTACK_PROFILE_KIWI="$cs_profile_kiwi" \
+        CHIRPSTACK_PROFILE_SDI12="$cs_profile_sdi12" \
+        CHIRPSTACK_PROFILE_STREGA="$cs_profile_strega" \
+        CHIRPSTACK_PROFILE_LSN50="$cs_profile_lsn50" \
+        CHIRPSTACK_PROFILE_CLOVER="$cs_profile_clover" \
+        CHIRPSTACK_PROFILE_RAK10701="$cs_profile_rak10701" \
+        CHIRPSTACK_PROFILE_S2120="$cs_profile_s2120"
+    # A crash restarts the service (council rule: recover-and-log at goroutine
+    # boundaries, procd restarts the rest).
+    procd_set_param respawn 3600 5 -1
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
