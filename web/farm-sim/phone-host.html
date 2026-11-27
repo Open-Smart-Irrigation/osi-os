@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OSI Farm Sim</title>
+  </head>
+  <body>
+    <main>
+      <div class="host-controls">
+        <button id="phone-toggle" type="button" aria-controls="phone-slot" aria-expanded="false">Raise phone</button>
+        <button id="advance" type="button">Advance 3 seconds</button>
+        <span id="drip-status">Drip line idle</span>
+      </div>
+      <div id="phone-slot" hidden></div>
+    </main>
+    <script type="module" src="./src/phone-host-main.ts"></script>
+  </body>
+</html>

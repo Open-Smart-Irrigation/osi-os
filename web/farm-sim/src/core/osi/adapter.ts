@@ -8,10 +8,16 @@ import {checkWrite} from './allow-list';
 import {PhoneBridge, type PhoneDispatcher, type PhoneTraffic} from './bridge';
 import {buildFarm, PROBE_EUI} from './farm-builder';
 import {createReadingSource} from './reading-source';
-import {advanceOsi, drainNow} from './stepping';
+import {advanceOsi, drainNow, sleepBoundaries} from './stepping';
 import type {DemoResponse} from './types';
 import {WaterTap} from './water-tap';
 import {createWeatherSource} from './weather-source';
+
+function* arrayContents(values: readonly unknown[], size: number): Generator<string> {
+  for (let i = 0; i < values.length; i += size) {
+    yield (i ? ',' : '') + JSON.stringify(values.slice(i, i + size)).slice(1, -1);
+  }
+}
 
 interface AdapterOptions {
   dispatcher: PhoneDispatcher;
@@ -50,6 +56,11 @@ export class FarmOsiAdapter implements OsiAdapter {
   advance(simMs: number): void {
     const {sim, world, water} = this.built;
     advanceOsi(sim, world, water, simMs);
+  }
+
+  sleepBoundaries(target: number): Generator<void> {
+    const {sim, world, water} = this.built;
+    return sleepBoundaries(sim, world, water, target);
   }
 
   drainNow(): void {
@@ -106,13 +117,38 @@ export class FarmOsiAdapter implements OsiAdapter {
    */
   simulatorDigestInputs() {
     const {sim} = this.built;
+    return this.digestFields(sim.devices.map(device => [device.deveui, sim.readings.forDevice(device.deveui)] as const));
+  }
+
+  private digestFields<T>(readings: T) {
+    const {sim} = this.built;
     return {
       zones: sim.zones, devices: sim.devices, outcomes: sim.outcomes,
-      triggerEvaluations: sim.state.triggerEvaluations,
-      readings: sim.devices.map(device => [device.deveui, sim.readings.forDevice(device.deveui)] as const),
+      triggerEvaluations: sim.state.triggerEvaluations, readings,
       environmentRecords: [...sim.state.environmentRecords], schedules: [...sim.state.schedules],
       valveSettings: [...sim.state.valveSettings], activeCommands: [...sim.state.activeCommands], clockIds: sim.clock.ids(),
     };
+  }
+
+  /** The same JSON property order as simulatorDigestInputs. Read one device at a time and
+   * encode up to 16 samples per hash update, including readings merged at a valve event. */
+  *digestJson(): Generator<string> {
+    const {sim} = this.built;
+    let separator = '{';
+    for (const [key, value] of Object.entries(this.digestFields([]))) {
+      yield separator + JSON.stringify(key) + ':[';
+      separator = ',';
+      if (key === 'readings') {
+        for (const [index, device] of sim.devices.entries()) {
+          yield (index ? ',' : '') + '[' + JSON.stringify(device.deveui) + ',[';
+          const samples = sim.readings.forDevice(device.deveui);
+          yield* arrayContents(samples, 16);
+          yield ']]';
+        }
+      } else yield* arrayContents(value, 4);
+      yield ']';
+    }
+    yield '}';
   }
 
   /** Live, read-only zones (each with its trigger schedule), for per-tick readers that need no detached copy. */

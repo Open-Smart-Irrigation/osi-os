@@ -10,7 +10,7 @@ import {palette, type PaletteKey} from '../art/palette';
 import {playerClips, playerDirections, playerSprites} from '../art/sprites/player';
 import {shadowSprites} from '../art/sprites/shadows';
 import {iconSprites, uiSprites} from '../art/sprites/ui';
-import {deviceSprites, dripShapes, effectSprites, structureSprites, waterSprites} from '../art/sprites/world';
+import {deviceSprites, dripMasks, effectSprites, structureSprites, waterSprites} from '../art/sprites/world';
 
 export const generatedDirectory = new URL('../public/generated/', import.meta.url);
 
@@ -122,7 +122,7 @@ export function bakeAtlas() {
   const atlas = {
     version: 1, format: 'rgba8', provenance: 'original',
     image: `atlas-${hash}.png`, width: bitmap.width, height: bitmap.height, hash, frames,
-    autotiles: {terrainCorners, wetnessBands, hedgeNeighbors, hedgeTileForMask, dripShapes},
+    autotiles: {terrainCorners, wetnessBands, hedgeNeighbors, hedgeTileForMask, dripMasks},
     clips: {
       player: Object.fromEntries(playerDirections.map(direction =>
         [direction, Object.fromEntries(Object.entries(playerClips).map(([clip, count]) =>

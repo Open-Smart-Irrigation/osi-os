@@ -1,13 +1,15 @@
 import {derive, Pixels, sprite, type Pixel, type Point, type Sprite} from '../core';
 
-export const dripShapes = {straight: 10, corner: 3, tee: 11, end: 8} as const;
+// The farm's hose supports one to three arms. Bake each mask so the top and shadow
+// stay on the same side across seams, including turns in the header.
+export const dripMasks = Array.from({length: 14}, (_, index) => index + 1);
 const dripSegments = [[8, 0], [15, 8], [8, 15], [0, 8]] as const;
 
-function dripLine(shape: keyof typeof dripShapes, wet: boolean): Sprite {
+export function dripRows(mask: number, wet: boolean): string[] {
   const pixels = new Pixels([16, 16]);
   // A two-pixel hose: a grey top that catches the sky over a dark underside, so it reads
   // on dark wet soil. Emitters sit 2 and 6 px from the centre, as dripEmitters expects.
-  const arms = dripSegments.filter((_, i) => dripShapes[shape] & (1 << i));
+  const arms = dripSegments.filter((_, i) => mask & (1 << i));
   arms.forEach(([x, y]) => {
     const dx = Math.sign(x - 8);
     const dy = Math.sign(y - 8);
@@ -26,7 +28,12 @@ function dripLine(shape: keyof typeof dripShapes, wet: boolean): Sprite {
       if (wet) pixels.put(bumpX + Math.abs(dy), bumpY + Math.abs(dx), 'v');
     }
   });
-  return sprite({id: `water.drip.${shape}.${wet ? 'wet' : 'dry'}`, size: pixels.size, rows: pixels.rows()});
+  return pixels.rows();
+}
+
+function dripLine(mask: number, wet: boolean): Sprite {
+  return sprite({id: `water.drip.${mask}.${wet ? 'wet' : 'dry'}`, size: [16, 16],
+    rows: dripRows(mask, wet)});
 }
 
 function tank(level: number): Sprite {
@@ -125,7 +132,7 @@ const handPump = sprite({
 });
 
 export const waterSprites = [
-  ...Object.keys(dripShapes).flatMap(shape => [false, true].map(wet => dripLine(shape as keyof typeof dripShapes, wet))),
+  ...dripMasks.flatMap(mask => [false, true].map(wet => dripLine(mask, wet))),
   ...Array.from({length: 4}, (_, level) => tank(level)),
   handPump, well(false, 0), ...Array.from({length: 4}, (_, phase) => well(true, phase)),
 ];

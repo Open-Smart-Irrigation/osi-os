@@ -28,7 +28,8 @@ permissions:
 jobs:
   farm-sim:
     runs-on: ubuntu-latest
-    # A ceiling for a hung step; the core steps (install, typecheck, bake, test, verify) take a few minutes.
+    # A ceiling for a hung step: the run is estimated at about 15 minutes, and 30 still covers the
+    # perf spec in test:e2e running to its own 15-minute test timeout.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,16 @@ jobs:
         working-directory: web/farm-sim
       - run: npm test
         working-directory: web/farm-sim
+      - run: npm run build:game
+        working-directory: web/farm-sim
+      - run: npm run build:phone
+        working-directory: web/farm-sim
+      - run: npx playwright install --with-deps chromium
+        working-directory: web/farm-sim
+      - run: npm run test:e2e
+        working-directory: web/farm-sim
+        env:
+          FARM_SIM_PERF_REPORT_ONLY: '1'
       - run: npm run verify
         working-directory: web/farm-sim
         env:

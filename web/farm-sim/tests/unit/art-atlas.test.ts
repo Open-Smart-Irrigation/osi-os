@@ -5,7 +5,30 @@ import {derive, sprite, type Remap, type SpriteSource, validateSprite} from '../
 import {fontSprites} from '../../art/font';
 import {hedgeTileForMask, terrainSprites} from '../../art/generators/terrain';
 import {isPaletteKey, palette, ramps} from '../../art/palette';
+import {dripMasks} from '../../art/sprites/world';
 import {bakeAtlas, spriteFamilies} from '../../scripts/bake-atlas';
+import {decodeBakedBitmap, sampleScene} from '../../scripts/render-art-review';
+
+test('the art review scene connects both sides of the first drip tee and its vertical main', () => {
+  const {atlas, png} = bakeAtlas();
+  const {width, rgba} = sampleScene(atlas, decodeBakedBitmap(png, atlas.image));
+  const pixel = (x: number, y: number) => {
+    const offset = (y * width + x) * 4;
+    return '#' + rgba.subarray(offset, offset + 3).toString('hex');
+  };
+  for (const seam of [9 * 16, 10 * 16]) {
+    for (const x of [seam - 1, seam]) {
+      assert.equal(pixel(x, 7 * 16 + 8), palette.R, `hose top at x=${x}`);
+      assert.equal(pixel(x, 7 * 16 + 9), palette.k, `hose underside at x=${x}`);
+    }
+  }
+  for (const seam of [8, 9, 10, 11].map(y => y * 16)) {
+    for (const y of [seam - 1, seam]) {
+      assert.equal(pixel(9 * 16 + 8, y), palette.R, `hose top at y=${y}`);
+      assert.equal(pixel(9 * 16 + 9, y), palette.k, `hose underside at y=${y}`);
+    }
+  }
+});
 
 test('sprite grammar validates every frame and rejects invalid dimensions, anchors, keys and budgets', () => {
   const colors = Object.values(palette);
@@ -42,7 +65,7 @@ test('atlas and font bytes reproduce locally and the atlas layout and pixels mat
   assert.deepEqual(first.fontPng, second.fontPng);
   assert.equal(JSON.stringify(first.atlas), JSON.stringify(second.atlas));
   assert.equal(JSON.stringify(first.font), JSON.stringify(second.font));
-  assert.equal(first.atlas.hash, 'po4fWnnTLNywMCgtMW3I_5NBKoGg3vu8hevBfxR_jgQ');
+  assert.equal(first.atlas.hash, 'OXyTeFnfcA76XjRmNfarpBrgaN1fbSRaCuOKFO-Utho');
   assert.equal(first.atlas.image, `atlas-${first.atlas.hash}.png`);
   assert.deepEqual([first.png.readUInt32BE(16), first.png.readUInt32BE(20)], [2048, 2048]);
   assert.deepEqual([first.png[24], first.png[25]], [8, 6]);
@@ -63,8 +86,8 @@ test('each M1 asset is addressable in the atlas and both font sizes cover printa
     ...ids('terrain.laterite', 8),
     ...bands.flatMap(band => ids(`terrain.tilled.${band}`, 16)),
     ...ids('terrain.grass', 16), ...ids('terrain.path', 16), ...ids('terrain.crack', 4),
-    ...['straight', 'corner', 'tee', 'end'].flatMap(shape => [
-      `water.drip.${shape}.dry`, `water.drip.${shape}.wet`,
+    ...dripMasks.flatMap(mask => [
+      `water.drip.${mask}.dry`, `water.drip.${mask}.wet`,
     ]),
     ...ids('water.tank', 4), 'water.hand-pump', 'water.well.hand-dug', ...ids('water.well.shared', 4),
     'structure.farmhouse', 'structure.farmhouse.lit', 'nature.acacia',
